@@ -35,6 +35,7 @@ import org.apache.flink.configuration.Configuration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -86,7 +87,8 @@ public interface MongoVersionStrategy {
             return null;
         }
         SchemaAcquisitionMode mode =
-                SchemaAcquisitionMode.valueOf(mongodbConfig.get(START_MODE).toUpperCase());
+                SchemaAcquisitionMode.valueOf(
+                        mongodbConfig.get(START_MODE).toUpperCase(Locale.ROOT));
         ObjectNode objectNode =
                 JsonSerdeUtil.asSpecificNodeType(jsonNode.asText(), ObjectNode.class);
         JsonNode idNode = objectNode.get(ID_FIELD);

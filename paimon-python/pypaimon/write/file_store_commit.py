@@ -25,17 +25,15 @@ from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-from pypaimon.manifest.manifest_file_merger import ManifestFileMerger
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 
-from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
-from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
@@ -55,13 +53,51 @@ from pypaimon.write.commit_message import CommitMessage
 logger = logging.getLogger(__name__)
 
 
+def _row_id_check_from_messages(messages: List[CommitMessage]) -> Optional[int]:
+    """Check conflicts from the earliest baseline, matching the native committer."""
+    check_from_snapshot = None
+    for message in messages:
+        snapshot = message.check_from_snapshot
+        if snapshot is None:
+            continue
+        if snapshot < 0:
+            raise ValueError('Invalid row-id check snapshot: %s' % snapshot)
+        check_from_snapshot = (snapshot if check_from_snapshot is None
+                               else min(check_from_snapshot, snapshot))
+    if check_from_snapshot is not None:
+        for message in messages:
+            if message.check_from_snapshot is not None:
+                continue
+            if any(file.first_row_id is not None
+                   for file in message.new_files + message.deleted_files):
+                raise ValueError(
+                    'A row-id commit message is missing its check-from snapshot.')
+    return check_from_snapshot
+
+
+def _reject_compact_increment(messages: List[CommitMessage]):
+    # Java commits this increment as a separate COMPACT snapshot.
+    for message in messages:
+        if (message.compact_before or message.compact_after or
+                message.compact_changelog_files or
+                message.compact_index_adds or message.compact_index_deletes):
+            raise NotImplementedError(
+                'Committing a compact increment requires a separate COMPACT snapshot.')
+
+
 def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
     """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
-        for file in list(message.new_files) + list(message.changelog_files):
+        for file in (list(message.new_files) + list(message.changelog_files)
+                     + list(message.compact_after)
+                     + list(message.compact_changelog_files)):
             path = None
             try:
                 path = file.external_path or file.file_path
+                if not path:
+                    bucket_path = table.path_factory().bucket_path(
+                        tuple(message.partition), message.bucket)
+                    path = '%s/%s' % (bucket_path.rstrip('/'), file.file_name)
                 if path:
                     table.file_io.delete_quietly(str(path))
             except Exception as error:
@@ -70,7 +106,7 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                     path,
                     error,
                 )
-        for entry in message.index_adds:
+        for entry in message.index_adds + message.compact_index_adds:
             file_name = None
             try:
                 index_file = entry.index_file
@@ -109,82 +145,17 @@ class SuccessResult(CommitResult):
         return True
 
 
-def _manifest_file_key(manifest: ManifestFileMeta):
-    stats = manifest.partition_stats
-    return (
-        manifest.file_name,
-        manifest.file_size,
-        manifest.num_added_files,
-        manifest.num_deleted_files,
-        GenericRowSerializer.to_bytes(stats.min_values),
-        GenericRowSerializer.to_bytes(stats.max_values),
-        tuple(stats.null_counts) if stats.null_counts is not None else None,
-        manifest.schema_id,
-        manifest.min_bucket,
-        manifest.max_bucket,
-        manifest.min_level,
-        manifest.max_level,
-        manifest.min_row_id,
-        manifest.max_row_id,
-        manifest.total_buckets,
-        tuple(manifest.extra_files) if manifest.extra_files is not None else None,
-    )
-
-
-def _try_replace_manifest_files(current, replaced, replacement):
-    """Replace the first contiguous occurrence while preserving list order."""
-    current = list(current)
-    replaced = list(replaced)
-    replacement = list(replacement)
-    if not replaced:
-        return replacement if not current else None
-
-    current_keys = [_manifest_file_key(manifest) for manifest in current]
-    replaced_keys = [_manifest_file_key(manifest) for manifest in replaced]
-    for start in range(len(current) - len(replaced) + 1):
-        if current_keys[start:start + len(replaced)] == replaced_keys:
-            return (
-                current[:start]
-                + replacement
-                + current[start + len(replaced):]
-            )
-    return None
-
-
-class ManifestMergeResult:
-    """Manifest merge input and output retained for a deterministic retry."""
-
-    def __init__(self, merge_before_manifests, merge_after_manifests):
-        self.merge_before_manifests = tuple(merge_before_manifests)
-        self.merge_after_manifests = tuple(merge_after_manifests)
-
-
-def _try_reuse_manifest_merge_result(retry_result, current_manifests):
-    if (not isinstance(retry_result, CommitFailRetryResult)
-            or retry_result.commit_result_may_be_uncertain
-            or retry_result.manifest_merge_result is None):
-        return None
-    previous = retry_result.manifest_merge_result
-    return _try_replace_manifest_files(
-        current_manifests,
-        previous.merge_before_manifests,
-        previous.merge_after_manifests,
-    )
-
-
 class RetryResult(CommitResult):
 
     def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
                  base_data_files: Optional[List[ManifestEntry]] = None,
-                 commit_result_may_be_uncertain: bool = False,
-                 manifest_merge_result: Optional[ManifestMergeResult] = None):
+                 commit_result_may_be_uncertain: bool = False):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
         self.commit_result_may_be_uncertain = commit_result_may_be_uncertain
         # Base entries as of latest_snapshot, carried so the next attempt reuses
         # them and reads only the incremental changes.
         self.base_data_files = base_data_files
-        self.manifest_merge_result = manifest_merge_result
 
     def is_success(self) -> bool:
         return False
@@ -232,14 +203,6 @@ class FileStoreCommit:
         self.manifest_list_manager = ManifestListManager(table)
 
         self.manifest_target_size = table.options.manifest_target_size()
-        self.skip_manifest_merge_on_write_only = (
-            table.options.write_only() and table.options.manifest_merge_skip_on_write_only())
-        self.manifest_merge_min_count = table.options.manifest_merge_min_count()
-        self.manifest_file_merger = ManifestFileMerger(
-            self.manifest_file_manager,
-            self.manifest_target_size,
-            self.manifest_merge_min_count,
-        )
 
         self.commit_max_retries = table.options.commit_max_retries()
         self.commit_timeout = table.options.commit_timeout()
@@ -272,11 +235,10 @@ class FileStoreCommit:
         if not commit_messages and ignore_empty_commit:
             return
 
-        # Extract the minimum check_from_snapshot from commit messages
-        valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
-                           if msg.check_from_snapshot != -1]
-        if valid_snapshots:
-            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
+        _reject_compact_increment(commit_messages)
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        # A committer can be reused; an untagged commit clears the prior baseline.
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
@@ -294,10 +256,6 @@ class FileStoreCommit:
         for msg in commit_messages:
             index_deletes.extend(msg.index_deletes)
             index_adds.extend(msg.index_adds)
-        hash_index_base_snapshot = self._hash_index_base_snapshot(
-            commit_messages
-        )
-
         if not index_deletes:
             from pypaimon.write.global_index_update_checker import (
                 apply_global_index_update_action,
@@ -305,7 +263,7 @@ class FileStoreCommit:
             updated_cols = set()
             written_partitions = set()
             for msg in commit_messages:
-                if msg.check_from_snapshot == -1:
+                if msg.check_from_snapshot is None:
                     continue
                 for f in msg.new_files:
                     write_cols = self.table.table_schema.partial_file_write_cols(
@@ -351,7 +309,6 @@ class FileStoreCommit:
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
                          index_adds=index_adds,
-                         hash_index_base_snapshot=hash_index_base_snapshot,
                          snapshot_properties=snapshot_properties,
                          allow_empty_commit=not ignore_empty_commit)
 
@@ -362,6 +319,9 @@ class FileStoreCommit:
             commit_identifier: int,
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
+        _reject_compact_increment(commit_messages)
+        self.conflict_detection._row_id_check_from_snapshot = (
+            _row_id_check_from_messages(commit_messages))
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
@@ -380,17 +340,12 @@ class FileStoreCommit:
         else:
             partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
 
-        changelog_entries = self._collect_changelog_entries(commit_messages)
         index_adds = [
             entry for message in commit_messages for entry in message.index_adds
         ]
         index_deletes = [
             entry for message in commit_messages for entry in message.index_deletes
         ]
-        hash_index_base_snapshot = self._hash_index_base_snapshot(
-            commit_messages
-        )
-
         if not skip_overwrite:
             index_deletes = self._overwrite_hash_index_deletes(
                 partition_filter, index_deletes
@@ -400,28 +355,15 @@ class FileStoreCommit:
                 commit_kind="OVERWRITE",
                 commit_identifier=commit_identifier,
                 commit_entries_plan=provider.provide,
-                changelog_entries=changelog_entries,
+                changelog_entries=[],
                 detect_conflicts=True,
                 allow_rollback=False,
                 index_deletes=index_deletes,
                 index_adds=index_adds,
-                hash_index_base_snapshot=hash_index_base_snapshot,
                 snapshot_properties=snapshot_properties,
+                # Java records static/table overwrite even when no files match.
+                allow_empty_commit=True,
             )
-
-    @staticmethod
-    def _hash_index_base_snapshot(
-        commit_messages: List[CommitMessage],
-    ) -> Optional[int]:
-        # Include data-only dynamic-bucket upserts. Their existing mappings
-        # are stable across append commits, but a concurrent overwrite may
-        # rebuild the HASH index and move a key to another bucket.
-        base_snapshots = [
-            getattr(message, "hash_index_base_snapshot", None)
-            for message in commit_messages
-            if getattr(message, "hash_index_base_snapshot", None) is not None
-        ]
-        return min(base_snapshots) if base_snapshots else None
 
     def _overwrite_hash_index_deletes(self, partition_filter, deletes):
         """Delete HASH indexes for every partition replaced by overwrite."""
@@ -512,7 +454,6 @@ class FileStoreCommit:
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
-                    hash_index_base_snapshot=None,
                     snapshot_properties: Optional[Dict[str, str]] = None,
                     allow_empty_commit=False):
 
@@ -537,8 +478,7 @@ class FileStoreCommit:
                 else commit_entries_plan(latest_snapshot)
             )
 
-            # Append can explicitly publish an empty snapshot for tagging.
-            # No-op overwrite/drop operations retain their existing behavior.
+            # Callers opt in when the operation records an empty snapshot.
             if (not allow_empty_commit and not commit_entries
                     and not index_deletes and not index_adds):
                 break
@@ -554,7 +494,6 @@ class FileStoreCommit:
                 allow_rollback=allow_rollback,
                 index_deletes=index_deletes,
                 index_adds=index_adds,
-                hash_index_base_snapshot=hash_index_base_snapshot,
                 commit_result_may_be_uncertain=commit_result_may_be_uncertain,
                 snapshot_properties=snapshot_properties,
             )
@@ -634,7 +573,6 @@ class FileStoreCommit:
                          allow_rollback: bool = False,
                          index_deletes=None,
                          index_adds=None,
-                         hash_index_base_snapshot=None,
                          commit_result_may_be_uncertain: bool = False,
                          snapshot_properties: Optional[Dict[str, str]] = None
                          ) -> CommitResult:
@@ -646,18 +584,6 @@ class FileStoreCommit:
                 commit_kind,
                 notify_callbacks=True):
             return SuccessResult()
-
-        latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
-        if (
-            hash_index_base_snapshot is not None
-            and latest_snapshot_id != hash_index_base_snapshot
-        ):
-            raise RuntimeError(
-                "HASH index assignment conflict detected: assigned from "
-                "snapshot {}, but the latest snapshot is {}.".format(
-                    hash_index_base_snapshot, latest_snapshot_id
-                )
-            )
 
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
@@ -747,10 +673,6 @@ class FileStoreCommit:
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
         changelog_record_count = None
-        merge_before_manifests = []
-        merge_after_manifests = []
-        merge_new_files = []
-        skip_manifest_merge = False
         try:
             new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
@@ -770,38 +692,17 @@ class FileStoreCommit:
                 changelog_record_count = sum(
                     entry.file.row_count for entry in changelog_entries if entry.kind == 0)
 
-            # process existing_manifest
+            # Manifest compaction is handled by external maintenance.
+            existing_manifests = []
             total_record_count = 0
             if latest_snapshot:
-                merge_before_manifests = self.manifest_list_manager.read_all(
+                existing_manifests = self.manifest_list_manager.read_all(
                     latest_snapshot)
                 previous_record_count = latest_snapshot.total_record_count
                 if previous_record_count:
                     total_record_count += previous_record_count
 
-            reused_manifests = (
-                _try_reuse_manifest_merge_result(retry_result, merge_before_manifests)
-                if not self.skip_manifest_merge_on_write_only else None)
-            skip_manifest_merge = (
-                self.skip_manifest_merge_on_write_only
-                or (reused_manifests is None and retry_result is not None))
-            if reused_manifests is not None:
-                merge_after_manifests = reused_manifests
-                old_names = {
-                    manifest.file_name for manifest in merge_before_manifests
-                }
-                merge_new_files = [
-                    manifest for manifest in merge_after_manifests
-                    if manifest.file_name not in old_names
-                ]
-            elif skip_manifest_merge:
-                merge_after_manifests = merge_before_manifests
-            else:
-                merge_after_manifests, merge_new_files = (
-                    self.manifest_file_merger.merge(
-                        merge_before_manifests))
-            self.manifest_list_manager.write(
-                base_manifest_list, merge_after_manifests)
+            self.manifest_list_manager.write(base_manifest_list, existing_manifests)
 
             delta_record_count = 0
             for entry in commit_entries:
@@ -848,10 +749,9 @@ class FileStoreCommit:
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
             try:
-                self._clean_up_reuse_tmp_manifests(
-                    delta_manifest_list, changelog_manifest_list_name, new_index_manifest)
-                self._clean_up_no_reuse_tmp_manifests(
-                    base_manifest_list, merge_new_files)
+                self._clean_up_tmp_manifests(
+                    base_manifest_list, delta_manifest_list,
+                    changelog_manifest_list_name, new_index_manifest)
             except Exception as cleanup_err:
                 logger.warning(f"Failed to clean up temporary files: {cleanup_err}",
                                exc_info=True)
@@ -877,19 +777,10 @@ class FileStoreCommit:
                         commit_kind,
                         commit_time_s,
                     )
-                    manifest_merge_result = (
-                        None
-                        if skip_manifest_merge
-                        else ManifestMergeResult(
-                            merge_before_manifests,
-                            merge_after_manifests,
-                        )
-                    )
                     return CommitFailRetryResult(
                         latest_snapshot,
                         None,
                         base_data_files=base_data_files,
-                        manifest_merge_result=manifest_merge_result,
                     )
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
@@ -899,7 +790,6 @@ class FileStoreCommit:
                 e,
                 base_data_files=base_data_files,
                 commit_result_may_be_uncertain=True,
-                manifest_merge_result=None,
             )
 
         logger.info(
@@ -1140,16 +1030,16 @@ class FileStoreCommit:
                 ))
         return commit_entries
 
-    def _clean_up_reuse_tmp_manifests(
+    def _clean_up_tmp_manifests(
             self,
+            base_manifest_list: Optional[str],
             delta_manifest_list: Optional[str],
             changelog_manifest_list: Optional[str],
             index_manifest: Optional[str] = None):
-        """Clean up delta/changelog manifests and index manifest.
-
-        Mirrors Java CommitCleaner.cleanUpReuseTmpManifests.
-        """
+        """Delete files created while preparing a snapshot, preserving base manifests."""
         manifest_path = self.manifest_list_manager.manifest_path
+        if base_manifest_list:
+            self.table.file_io.delete_quietly(f"{manifest_path}/{base_manifest_list}")
         for ml_name in (delta_manifest_list, changelog_manifest_list):
             if ml_name:
                 try:
@@ -1161,21 +1051,6 @@ class FileStoreCommit:
                 self.table.file_io.delete_quietly(f"{manifest_path}/{ml_name}")
         if index_manifest:
             self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
-
-    def _clean_up_no_reuse_tmp_manifests(
-            self,
-            base_manifest_list: Optional[str],
-            merge_new_files: List[ManifestFileMeta]):
-        """Clean up base manifest list and newly created merge manifests.
-
-        Mirrors Java CommitCleaner.cleanUpNoReuseTmpManifests.
-        """
-        manifest_path = self.manifest_list_manager.manifest_path
-        if base_manifest_list:
-            self.table.file_io.delete_quietly(f"{manifest_path}/{base_manifest_list}")
-        for meta in merge_new_files:
-            self.table.file_io.delete_quietly(
-                f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""

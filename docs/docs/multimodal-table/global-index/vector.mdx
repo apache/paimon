@@ -73,7 +73,7 @@ The build and search examples below use its three-dimensional `embedding` column
 For this small dataset, use `ivf-flat` with one cluster; production workloads should
 choose an index type and cluster count for their own data.
 
-For Python, install `pypaimon[vindex]` (or its matching `paimon-vindex==0.4.0`
+For Python, install `pypaimon[vindex]` (or its matching `paimon-vindex==0.5.0`
 dependency) before building or querying native vector indexes.
 
 <Tabs groupId="vector-build">
@@ -133,6 +133,35 @@ print(added_files)
 For `ARRAY<FLOAT>` columns, specify the dimension with `<index-type>.dimension`.
 For `VECTOR<FLOAT, n>` columns, Paimon uses the dimension from the column type.
 Every query vector must have that same dimension.
+
+### Python Tables with Deletion Vectors
+
+Python can build the native vector indexes listed above on data-evolution tables
+with deletion vectors enabled, including tables created with the multimodal API's
+default options:
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+connection = pm.connect(options={"warehouse": "/tmp/paimon-warehouse"})
+table = connection.create_table(
+    "vectors",
+    schema=pa.schema([("id", pa.int64()), ("embedding", pa.list_(pa.float32(), 2))]),
+    options={"file.format": "parquet"},
+)
+table.add([{"id": 1, "embedding": [0.0, 1.0]}, {"id": 2, "embedding": [1.0, 1.0]}])
+table.create_index("embedding", "ivf-flat", options={
+    "ivf-flat.nlist": "1", "ivf-flat.distance.metric": "l2",
+})
+table.delete("id = 1")
+print(table.search([0.0, 1.0]).select(["id"]).limit(1).to_list())  # [{"id": 2}]
+```
+
+Index builds preserve physical row IDs, including rows already marked as deleted.
+Search applies the deletion vectors from its query snapshot before selecting
+top-K results, so logical deletes do not require rebuilding the index. Logical
+deletion does not physically remove vectors from existing index files.
 
 ## Vector Search
 
@@ -285,6 +314,13 @@ The scalar filter is evaluated with matching scalar global indexes before vector
 BTree index for frequently used metadata filters, such as `category`, `tenant_id`, or `event_time`,
 so vector search can restrict the candidate row ids before running ANN search.
 
+An index answer that is only a candidate set — `contains`, ends-with or `LIKE` on a BTree index,
+or a conjunction with a member no index can evaluate — is never ranked as if it matched, because
+a non-matching but closer row would take a top-k slot from a matching one. By default such
+candidates are excluded and a warning is logged, so the result may hold fewer than `limit` rows;
+set `global-index.filter.refine-from-data=true` to verify them by reading their filter columns
+instead. That read runs on the caller and can cover every candidate row.
+
 </TabItem>
 
 </Tabs>
@@ -328,14 +364,42 @@ Supported paimon-vindex options:
 |---|---|---|
 | `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT, n>` columns. |
 | `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
+| `<index-type>.ivf.coarse-assignment` | `auto` | Build-time list assignment for all IVF types. `auto` uses Vamana when `dimension × nlist ≥ 1,000,000` and exact assignment otherwise; `exact` always uses exact assignment. |
+| `<index-type>.ivf.train.max-points-per-centroid` | `256` | Positive coarse K-means training limit for all IVF types: at most `nlist × value` vectors. |
 | `<index-type>.train.sample-ratio` | `1.0` | Ratio of vectors sampled for native index training. Must be greater than `0` and less than or equal to `1`. Lower values reduce training memory and build cost, but may reduce index quality. |
 | `<index-type>.nlist` | Automatic | Number of clusters for the four IVF types. When omitted, paimon-vindex resolves it from the shard's non-null vector count. |
 | `<index-type>.pq.code-ratio` | `0.0625` | Relative PQ-code budget for `ivf-pq` and `diskann`. |
 | `<index-type>.pq.m` | Automatic | Expert override for the PQ sub-vector count used by `ivf-pq` and `diskann`. |
+| `ivf-pq.ivf.pq-encoding` | `auto` | IVF-PQ build-time encoding. `auto` selects an accelerated backend when supported; `canonical` uses the canonical encoder. |
+| `<index-type>.pq.train.max-points-per-centroid` | `256` | Positive PQ training limit for `ivf-pq` and `diskann`: at most `2^pq.bits × value` vectors per subquantizer. |
 | `ivf-pq.pq.use-opq` | Automatic | Explicitly enables or disables OPQ. Without an explicit value, a `target-recall` of at least `0.9` enables it. |
 | `ivf-rq.rq.bits` | `4` | Persisted IVF-RQ residual width. Supported values are `1` through `8`; changing it requires rebuilding the index. |
 | `<index-type>.target-recall` | Not set | Build-policy hint used by `ivf-pq` and `diskann`. Validate the resulting recall on held-out queries. |
 | `<index-type>.max-bytes-per-vector` | Not set | Storage objective and conservative preflight bound for `ivf-pq`, `ivf-rq`, and `diskann`. |
+
+Use the index-prefixed keys in table properties, SQL procedure options, and Python
+build options. For example, the following IVF-PQ build selects the non-default
+exact and canonical paths and lowers both training limits from `256` to `128`:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.model_embeddings',
+    index_column => 'embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.ivf.coarse-assignment=exact,ivf-pq.ivf.pq-encoding=canonical,ivf-pq.ivf.train.max-points-per-centroid=128,ivf-pq.pq.train.max-points-per-centroid=128'
+);
+```
+
+Omit these options to retain the defaults in the table above. The native names
+`ivf.coarse-assignment`, `ivf.pq-encoding`,
+`ivf.train.max-points-per-centroid`, and `pq.train.max-points-per-centroid` are
+also accepted directly; prefer index-prefixed names in table properties to avoid
+sharing a setting across index types. Use `fields.<field-name>.<option>` to
+override a table property for one vector column. Explicit procedure or Python
+options override table properties; within either source, field-prefixed options
+override index-prefixed options, which override bare native names. An
+inapplicable stored table property is ignored, while an explicitly supplied
+option that does not apply to the selected index type is rejected.
 
 Additional paimon-vindex DiskANN build options:
 

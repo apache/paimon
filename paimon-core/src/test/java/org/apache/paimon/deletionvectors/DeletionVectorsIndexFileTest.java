@@ -34,6 +34,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -46,6 +47,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DeletionVectorsIndexFile}. */
 public class DeletionVectorsIndexFileTest {
@@ -348,6 +350,42 @@ public class DeletionVectorsIndexFileTest {
         assertThat(dv.isDeleted(1)).isTrue();
         assertThat(dv.isDeleted(10)).isTrue();
         assertThat(dv.isDeleted(100)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRejectCorruptedDeletionVectorFromIndexFile(boolean bitmap64)
+            throws IOException {
+        IndexPathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, bitmap64);
+
+        DeletionVector deletionVector = createEmptyDV(bitmap64);
+        deletionVector.delete(1);
+        IndexFileMeta indexFileMeta =
+                deletionVectorsIndexFile
+                        .writeWithRolling(Collections.singletonMap("file.parquet", deletionVector))
+                        .get(0);
+        DeletionVectorMeta deletionVectorMeta = indexFileMeta.dvRanges().get("file.parquet");
+        Path indexPath = pathFactory.toPath(indexFileMeta);
+        java.nio.file.Path localIndexPath = java.nio.file.Paths.get(indexPath.toUri());
+        byte[] bytes = Files.readAllBytes(localIndexPath);
+        int checksumEnd =
+                deletionVectorMeta.offset()
+                        + deletionVectorMeta.length()
+                        + (bitmap64 ? 0 : Integer.BYTES * 2);
+        bytes[checksumEnd - 1] ^= 1;
+        Files.write(localIndexPath, bytes);
+
+        DeletionFile deletionFile =
+                new DeletionFile(
+                        indexPath.toString(),
+                        deletionVectorMeta.offset(),
+                        deletionVectorMeta.length(),
+                        deletionVectorMeta.cardinality());
+        assertThatThrownBy(() -> DeletionVector.read(LocalFileIO.create(), deletionFile))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Invalid deletion vector checksum");
     }
 
     @Test

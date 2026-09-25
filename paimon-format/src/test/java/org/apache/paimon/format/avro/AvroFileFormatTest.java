@@ -156,8 +156,10 @@ public class AvroFileFormatTest {
     }
 
     @ParameterizedTest
-    @ValueSource(longs = {2147483648L, 4294968320L, Long.MAX_VALUE})
-    void testFileBlockSizeOverflow(long blockSize) throws IOException {
+    @ValueSource(longs = {1L, 6L, 31L, 1073741825L, 2147483648L, 4294968320L, Long.MAX_VALUE})
+    void testFileBlockSizeOutOfAvroRange(long blockSize) throws IOException {
+        // Avro accepts a sync interval of 32 bytes to 1 GiB; anything else must be rejected up
+        // front with the option name, not deep inside the writer with Avro's own message.
         Options options = new Options();
         options.setString("file.block-size", Long.toString(blockSize));
         FileFormat format = FileFormat.fromIdentifier("avro", options);
@@ -173,8 +175,27 @@ public class AvroFileFormatTest {
                                     writer.addElement(GenericRow.of(0));
                                 }
                             })
-                    .isInstanceOf(ArithmeticException.class)
-                    .hasMessage("integer overflow");
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("file.block-size")
+                    .hasMessageContaining(Long.toString(blockSize))
+                    .hasMessageContaining("32 bytes")
+                    .hasMessageContaining("1 gb");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {32L, 33L, 1073741824L})
+    void testFileBlockSizeAtAvroRangeBounds(long blockSize) throws IOException {
+        Options options = new Options();
+        options.setString("file.block-size", Long.toString(blockSize));
+        FileFormat format = FileFormat.fromIdentifier("avro", options);
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer = format.createWriterFactory(rowType).create(out, "null")) {
+            writer.addElement(GenericRow.of(0));
         }
     }
 
@@ -738,13 +759,13 @@ public class AvroFileFormatTest {
         try (PositionOutputStream out = localFileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
             ThreadLocalRandom random = ThreadLocalRandom.current();
-            // magic number tested by hand
             for (int i = 0; i < 100000; i++) {
                 writer.addElement(GenericRow.of(random.nextInt()));
             }
             writer.close();
         }
 
+        long failurePosition = localFileIO.getFileSize(file) / 2;
         FileIO failingFileIO =
                 new LocalFileIO() {
 
@@ -755,11 +776,8 @@ public class AvroFileFormatTest {
 
                     class FailingInputStream extends LocalFileIO.LocalSeekableInputStream {
 
-                        private int cnt;
-
                         public FailingInputStream(File file) throws FileNotFoundException {
                             super(file);
-                            cnt = 0;
                         }
 
                         @Override
@@ -775,15 +793,13 @@ public class AvroFileFormatTest {
                         }
 
                         private void checkException() throws IOException {
-                            cnt++;
-                            // magic number tested by hand
-                            if (cnt == 200) {
+                            if (getPos() >= failurePosition) {
                                 throw new IOException("Artificial exception");
                             }
                         }
                     }
                 };
-        RecordReader<InternalRow> reader =
+        try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
@@ -791,10 +807,11 @@ public class AvroFileFormatTest {
                                         file,
                                         failingFileIO.getFileSize(file),
                                         null,
-                                        null));
-        assertThatThrownBy(() -> reader.forEachRemaining(row -> {}))
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("Artificial exception");
+                                        null))) {
+            assertThatThrownBy(() -> reader.forEachRemaining(row -> {}))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("Artificial exception");
+        }
     }
 
     @Test

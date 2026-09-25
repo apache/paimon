@@ -78,10 +78,13 @@ class TestTableCommit(unittest.TestCase):
         commit = cls.__new__(cls)
         commit.table = Mock()
         commit.table.identifier = 'default.test_table'
+        commit.table.options.native_commit_enabled.return_value = False
         commit.commit_user = 'test_user'
         commit.overwrite_partition = overwrite_partition
         commit.file_store_commit = Mock()
         commit.batch_committed = False
+        commit._commit_callbacks = []
+        commit._native_commit = None
         return commit, commit.file_store_commit
 
     # -- Overwrite mode: should always call overwrite(), even with empty messages --
@@ -163,18 +166,9 @@ class TestTableCommit(unittest.TestCase):
             snapshot_properties={"source": "capture"},
         )
 
-    # -- StreamTableCommit overwrite should also reach overwrite() with empty messages --
-
-    def test_stream_commit_overwrite_empty_messages(self):
-        commit, mock_fsc = self._create_commit(StreamTableCommit, overwrite_partition={'dt': '2024-01-15'})
-
-        commit.commit([], commit_identifier=42)
-
-        mock_fsc.overwrite.assert_called_once_with(
-            overwrite_partition={'dt': '2024-01-15'},
-            commit_messages=[],
-            commit_identifier=42,
-        )
+    def test_stream_commit_does_not_accept_overwrite_configuration(self):
+        with self.assertRaises(TypeError):
+            StreamTableCommit(Mock(), 'job', {'dt': '2024-01-15'})
 
     def test_stream_commit_forwards_snapshot_properties(self):
         commit, mock_fsc = self._create_commit(

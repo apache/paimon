@@ -231,9 +231,12 @@ USING source
 ON <merge condition>
 WHEN MATCHED [AND <condition>] THEN { UPDATE SET ... | DELETE }
 WHEN NOT MATCHED [AND <condition>] THEN INSERT ...
+WHEN NOT MATCHED BY SOURCE [AND <condition>] THEN { UPDATE SET ... | DELETE }
 ```
 
 Each `WHEN` clause can be repeated; clauses are evaluated in order, and the first matching one wins for a given row.
+
+`WHEN NOT MATCHED BY SOURCE` requires Spark 3.4 or later.
 
 ### Examples
 

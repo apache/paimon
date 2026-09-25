@@ -48,32 +48,9 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     static Map<String, String> nativeOptions(
             DataType fieldType, Options tableOptions, String identifier, String fieldName) {
         Map<String, String> nativeOptions = new LinkedHashMap<>();
-        String optionPrefix = identifier + ".";
-        String fieldPrefix = "fields." + fieldName + ".";
-        Map<String, String> tableOptionsMap = tableOptions.toMap();
-
-        // First collect index-type level options, e.g. <index-type>.xxx.
-        for (Map.Entry<String, String> entry : tableOptionsMap.entrySet()) {
-            String optionKey = entry.getKey();
-            if (optionKey.startsWith(optionPrefix)) {
-                String nativeKey = nativeOptionKey(optionKey.substring(optionPrefix.length()));
-                if (nativeKey != null) {
-                    nativeOptions.put(nativeKey, entry.getValue());
-                }
-            }
-        }
-
-        // Then collect field level options, e.g. fields.<field-name>.xxx, which take precedence
-        // over the index-type level options for this field.
-        for (Map.Entry<String, String> entry : tableOptionsMap.entrySet()) {
-            String optionKey = entry.getKey();
-            if (optionKey.startsWith(fieldPrefix)) {
-                String nativeKey = nativeOptionKey(optionKey.substring(fieldPrefix.length()));
-                if (nativeKey != null) {
-                    nativeOptions.put(nativeKey, entry.getValue());
-                }
-            }
-        }
+        collectNativeOptions(nativeOptions, tableOptions.toMap(), identifier, fieldName, false);
+        collectNativeOptions(
+                nativeOptions, tableOptions.dynamicOptions(), identifier, fieldName, true);
 
         nativeOptions.put("index.type", identifier.replace('-', '_'));
         nativeOptions.put(
@@ -83,14 +60,19 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     }
 
     static double trainSampleRatio(Options tableOptions, String identifier, String fieldName) {
-        Map<String, String> tableOptionsMap = tableOptions.toMap();
+        Map<String, String> source = tableOptions.dynamicOptions();
         String key =
-                resolveFieldOverriddenKey(
-                        tableOptionsMap, identifier, fieldName, TRAIN_SAMPLE_RATIO_OPTION);
+                resolveFieldOverriddenKey(source, identifier, fieldName, TRAIN_SAMPLE_RATIO_OPTION);
+        if (key == null) {
+            source = tableOptions.toMap();
+            key =
+                    resolveFieldOverriddenKey(
+                            source, identifier, fieldName, TRAIN_SAMPLE_RATIO_OPTION);
+        }
         if (key == null) {
             return DEFAULT_TRAIN_SAMPLE_RATIO;
         }
-        String value = tableOptionsMap.get(key);
+        String value = source.get(key);
 
         try {
             double parsed = Double.parseDouble(value.trim());
@@ -138,6 +120,54 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         return null;
     }
 
+    private static void collectNativeOptions(
+            Map<String, String> nativeOptions,
+            Map<String, String> options,
+            String identifier,
+            String fieldName,
+            boolean validate) {
+        String optionPrefix = identifier + ".";
+        String fieldPrefix = "fields." + fieldName + ".";
+
+        // Native names have the lowest precedence within each option source.
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            String nativeKey = nativeOptionKey(entry.getKey());
+            if (entry.getKey().equals(nativeKey) && is050BuildOption(nativeKey)) {
+                putNativeOption(
+                        nativeOptions,
+                        entry.getKey(),
+                        entry.getKey(),
+                        entry.getValue(),
+                        identifier,
+                        validate);
+            }
+        }
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            String optionKey = entry.getKey();
+            if (optionKey.startsWith(optionPrefix)) {
+                putNativeOption(
+                        nativeOptions,
+                        optionKey,
+                        optionKey.substring(optionPrefix.length()),
+                        entry.getValue(),
+                        identifier,
+                        validate);
+            }
+        }
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            String optionKey = entry.getKey();
+            if (optionKey.startsWith(fieldPrefix)) {
+                putNativeOption(
+                        nativeOptions,
+                        optionKey,
+                        optionKey.substring(fieldPrefix.length()),
+                        entry.getValue(),
+                        identifier,
+                        validate);
+            }
+        }
+    }
+
     private static String nativeOptionKey(String optionKey) {
         switch (optionKey) {
             case "index.dimension":
@@ -148,6 +178,10 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                 return "metric";
             case "nlist":
             case "expected-vector-count":
+            case "ivf.coarse-assignment":
+            case "ivf.pq-encoding":
+            case "ivf.train.max-points-per-centroid":
+            case "pq.train.max-points-per-centroid":
             case "pq.m":
             case "pq.code-ratio":
             case "pq.bits":
@@ -189,6 +223,49 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             default:
                 return null;
         }
+    }
+
+    private static void putNativeOption(
+            Map<String, String> nativeOptions,
+            String optionKey,
+            String optionSuffix,
+            String value,
+            String identifier,
+            boolean validate) {
+        String nativeKey = nativeOptionKey(optionSuffix);
+        if (nativeKey == null) {
+            return;
+        }
+        if (is050BuildOption(nativeKey) && !isAllowed050BuildOption(nativeKey, identifier)) {
+            if (validate) {
+                throw new IllegalArgumentException(
+                        "Option '"
+                                + optionKey
+                                + "' is not supported for index type '"
+                                + identifier
+                                + "'.");
+            }
+            return;
+        }
+        nativeOptions.put(nativeKey, value);
+    }
+
+    private static boolean is050BuildOption(String key) {
+        return "ivf.coarse-assignment".equals(key)
+                || "ivf.pq-encoding".equals(key)
+                || "ivf.train.max-points-per-centroid".equals(key)
+                || "pq.train.max-points-per-centroid".equals(key);
+    }
+
+    private static boolean isAllowed050BuildOption(String key, String identifier) {
+        if ("ivf.pq-encoding".equals(key)) {
+            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
+        }
+        if ("pq.train.max-points-per-centroid".equals(key)) {
+            return IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier)
+                    || DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
+        }
+        return !DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier);
     }
 
     private static int dimension(

@@ -32,6 +32,7 @@ from pyarrow import RecordBatch
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.filesystem.pyarrow_file_io import _pyarrow_lt_7
 from pypaimon.data.map_shared_shredding import (
     assemble_normal_map_selected_keys,
     assemble_shared_shredding_map,
@@ -241,7 +242,7 @@ def _estimate_file_format_dataset_size(dataset, file_format: str) -> Optional[in
 
 
 def _estimate_file_format_cache_entry_size(
-        key: Tuple[Any, str, str],
+        key: Tuple[Any, ...],
         dataset,
         file_format: str) -> Optional[int]:
     metadata_size = _estimate_file_format_dataset_size(dataset, file_format)
@@ -255,9 +256,7 @@ def _estimate_file_format_cache_entry_size(
     visible_size = (
         metadata_size
         + sys.getsizeof(key)
-        + sys.getsizeof(key[0])
-        + sys.getsizeof(key[1])
-        + sys.getsizeof(key[2])
+        + sum(sys.getsizeof(part) for part in key)
         + sys.getsizeof(dataset)
         + sys.getsizeof((dataset, metadata_size))
         + _FILE_FORMAT_METADATA_CACHE_CONTAINER_OVERHEAD
@@ -274,15 +273,47 @@ def _file_format_metadata_cache_max_size(file_io: FileIO) -> int:
 
 
 def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
-                         cache_max_size: int):
+                         cache_max_size: int,
+                         file_size: Optional[int] = None):
     file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
     filesystem = file_io.filesystem
+    known_size = file_size if file_size is not None and file_size > 0 else None
+
+    # PyArrow's Python FileSystemHandler API opens files by path, so its
+    # FileInfo overload cannot forward file_size to handlers such as Jindo.
+    # Let capable handlers consume the size from Paimon's immutable file
+    # metadata before PyArrow opens the file.
+    handler = getattr(filesystem, "handler", None)
+    register_file_size = getattr(handler, "register_file_size", None)
+    if known_size is not None and register_file_size is not None:
+        register_file_size(file_path_for_pyarrow, known_size)
 
     def load():
+        if file_format == 'parquet':
+            parquet_format = ds.ParquetFileFormat()
+            fragment_options = {}
+            if known_size is not None and not _pyarrow_lt_7():
+                fragment_options["file_size"] = known_size
+            try:
+                fragment = parquet_format.make_fragment(
+                    file_path_for_pyarrow, filesystem=filesystem,
+                    **fragment_options)
+            except TypeError as error:
+                # PyArrow 7-12 expose make_fragment but do not accept the
+                # file_size hint. The handler already received the size.
+                if not fragment_options or 'file_size' not in str(error):
+                    raise
+                fragment = parquet_format.make_fragment(
+                    file_path_for_pyarrow, filesystem=filesystem)
+            # Reuse this fragment's footer for schema discovery and scanning.
+            return ds.FileSystemDataset(
+                [fragment], fragment.physical_schema, parquet_format, filesystem)
         return ds.dataset(
             file_path_for_pyarrow, format=file_format, filesystem=filesystem)
 
-    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
+    key = (
+        _FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow,
+        known_size)
     if cache_max_size <= 0:
         _reset_file_format_dataset_cache()
         return load()
@@ -340,7 +371,8 @@ class FormatPyArrowReader(RecordBatchReader):
                  predicate_field_names: Optional[Set[str]] = None,
                  row_indices: Optional[List[int]] = None,
                  row_ranges: Optional[List[Tuple[int, int]]] = None,
-                 row_group_cache: Optional[_DecodedRowGroupCache] = None):
+                 row_group_cache: Optional[_DecodedRowGroupCache] = None,
+                 file_size: Optional[int] = None):
         from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
         if isinstance(file_io, ResolvingFileIO):
             file_io = file_io._get_fileio(file_path)
@@ -352,7 +384,7 @@ class FormatPyArrowReader(RecordBatchReader):
         self._row_group_cache_path = file_path_for_pyarrow
         cache_max_size = _file_format_metadata_cache_max_size(file_io)
         self.dataset = _file_format_dataset(
-            file_io, file_format, file_path, cache_max_size)
+            file_io, file_format, file_path, cache_max_size, file_size)
         self._range_slicer = None
         self._selected_parquet_row_groups = None
         self._exhausted = False
@@ -518,6 +550,8 @@ class FormatPyArrowReader(RecordBatchReader):
 
         # Read projected VARIANT columns in bounded batches.
         self._parquet_file = None
+        self._parquet_source = None
+        self._page_index_reader = None
         self._orc_file = None
         self._orc_source = None
         if (self._bounded_variant_read
@@ -526,8 +560,24 @@ class FormatPyArrowReader(RecordBatchReader):
                     and self._selected_shared_map_paths)):
             import pyarrow.parquet as pq
             # ParquetFile(filesystem=...) is unavailable in PyArrow 6.
-            self._parquet_file = pq.ParquetFile(
-                file_io.filesystem.open_input_file(file_path_for_pyarrow))
+            self._parquet_source = file_io.filesystem.open_input_file(
+                file_path_for_pyarrow)
+            try:
+                self._parquet_file = pq.ParquetFile(self._parquet_source)
+                if (self._selected_parquet_row_groups is not None
+                        and options is not None
+                        and options.parquet_column_index_enabled()
+                        and self._row_group_cache is None):
+                    from pypaimon.read.reader.parquet_page_index_reader import (
+                        ParquetPageIndexReader,
+                    )
+                    self._page_index_reader = ParquetPageIndexReader.create(
+                        self._parquet_source, self._parquet_file,
+                        self._row_group_read_columns(),
+                        self._selected_parquet_row_groups, batch_size)
+            except BaseException:
+                self._parquet_source.close()
+                raise
         if file_format == 'orc' and self._selected_shared_map_paths:
             import pyarrow.orc as orc
             self._orc_source = file_io.filesystem.open_input_file(
@@ -535,6 +585,11 @@ class FormatPyArrowReader(RecordBatchReader):
             self._orc_file = orc.ORCFile(self._orc_source)
         if self._exhausted:
             self._raw_batches = iter(())
+        elif self._page_index_reader is not None:
+            # Page selection already preserves original row positions. Slice
+            # fallback row groups here too, before mixing the two streams.
+            self._range_slicer = None
+            self._raw_batches = self._iter_page_index_batches(selected_infos, runs)
         elif self._parquet_file is not None:
             self._raw_batches = self._iter_row_group_batches()
         elif self._orc_file is not None:
@@ -610,6 +665,37 @@ class FormatPyArrowReader(RecordBatchReader):
                 for out in table.to_batches():
                     if out.num_rows:
                         yield out
+
+    def _iter_page_index_batches(self, selected_infos, runs):
+        select = self._select_nested_fields if self._has_nested_path else self._select_existing_fields
+        run_index = 0
+        for group, (offset, count) in zip(
+                self._selected_parquet_row_groups, selected_infos):
+            while run_index < len(runs) and runs[run_index][1] < offset:
+                run_index += 1
+            local_runs = []
+            position = run_index
+            while position < len(runs) and runs[position][0] < offset + count:
+                lower, upper = runs[position]
+                local_runs.append((max(0, lower - offset),
+                                   min(count - 1, upper - offset)))
+                position += 1
+            batches = self._page_index_reader.read_row_group(group, local_runs)
+            if batches is None:
+                raw = self._read_parquet_row_group_batches(
+                    group, self._row_group_read_columns())
+                slicer = _RowRunSlicer([(0, count)], local_runs)
+                while True:
+                    batch = slicer.next_batch(raw)
+                    if batch is None:
+                        break
+                    yield select(batch)
+            else:
+                try:
+                    for batch in batches:
+                        yield select(batch)
+                finally:
+                    batches.close()
 
     def _read_parquet_row_group_batches(self, row_group, columns):
         return self._parquet_file.iter_batches(
@@ -852,12 +938,19 @@ class FormatPyArrowReader(RecordBatchReader):
         return batch
 
     def close(self):
+        close_batches = getattr(self._raw_batches, 'close', None)
+        if close_batches is not None:
+            close_batches()
         self._raw_batches = None
         if self._parquet_file is not None:
             close = getattr(self._parquet_file, 'close', None)
             if close is not None:
                 close()
             self._parquet_file = None
+        if self._parquet_source is not None:
+            self._parquet_source.close()
+            self._parquet_source = None
+            self._page_index_reader = None
         if self._orc_source is not None:
             self._orc_source.close()
             self._orc_source = None

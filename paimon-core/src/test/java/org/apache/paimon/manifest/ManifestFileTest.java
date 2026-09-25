@@ -624,7 +624,7 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testLegacyAvroReaderSkipsColumnSequenceNumbers() throws Exception {
+    void testLegacyAvroReaderSkipsWriteColsSequences() throws Exception {
         ManifestEntry expected = gen.next();
         ManifestEntry source =
                 ManifestEntry.create(
@@ -632,7 +632,7 @@ public class ManifestFileTest {
                         expected.partition(),
                         expected.bucket(),
                         expected.totalBuckets(),
-                        expected.file().withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+                        expected.file().withWriteColsSequences(new long[] {3L, 42L}));
         List<DataField> legacyManifestFields =
                 ManifestEntry.MANIFEST_ROW_TYPE.getFields().stream()
                         .map(
@@ -664,7 +664,7 @@ public class ManifestFileTest {
         }
 
         assertThat(actual).isEqualTo(expected);
-        assertThat(actual.file().columnMaxSequenceNumbers()).isNull();
+        assertThat(actual.file().writeColsSequences()).isNull();
     }
 
     @ParameterizedTest
@@ -1082,6 +1082,50 @@ public class ManifestFileTest {
                     .containsExactly(expected.get(i).embeddedIndex());
             assertThat(actual.get(i).fileSource()).isEqualTo(expected.get(i).fileSource());
         }
+    }
+
+    @Test
+    void testReadExpireFileEntriesPushesFiltersIntoStreamingScan() {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+
+        int[] exactFilterCalls = {0};
+        List<ExpireFileEntry> bucketRejected =
+                manifestFile.readExpireFileEntries(
+                        manifest.fileName(),
+                        new BucketFilter(false, null, bucket -> false, null),
+                        entry -> {
+                            exactFilterCalls[0]++;
+                            return true;
+                        });
+        assertThat(bucketRejected).isEmpty();
+        assertThat(exactFilterCalls[0]).isZero();
+
+        String selectedFile = entries.get(1).fileName();
+        ProjectedManifestEntry[] reusableView = {null};
+        List<ExpireFileEntry> selected =
+                manifestFile.readExpireFileEntries(
+                        manifest.fileName(),
+                        null,
+                        entry -> {
+                            if (reusableView[0] == null) {
+                                reusableView[0] = entry;
+                            } else {
+                                assertThat(entry).isSameAs(reusableView[0]);
+                            }
+                            exactFilterCalls[0]++;
+                            return entry.fileName().equals(selectedFile);
+                        });
+
+        assertThat(exactFilterCalls[0]).isEqualTo(entries.size());
+        assertThat(selected)
+                .containsExactly(
+                        ExpireFileEntry.from(
+                                entries.stream()
+                                        .filter(entry -> entry.fileName().equals(selectedFile))
+                                        .findFirst()
+                                        .orElseThrow(AssertionError::new)));
     }
 
     @Test

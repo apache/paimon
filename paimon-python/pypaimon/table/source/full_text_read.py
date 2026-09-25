@@ -39,6 +39,7 @@ from pypaimon.table.source.full_text_search_split import (
 )
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
 from pypaimon.utils.range import Range
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 class FullTextRead(ABC):
@@ -62,6 +63,7 @@ class DataEvolutionFullTextRead(FullTextRead):
         text_column,
         query: str,
         partition_filter=None,
+        filter_=None,
     ):
         self._table = table
         self._limit = limit
@@ -72,6 +74,7 @@ class DataEvolutionFullTextRead(FullTextRead):
                 % self._text_columns)
         self._query = query
         self._partition_filter = partition_filter
+        self._filter = filter_
 
     def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
         reader = copy(self)
@@ -88,9 +91,25 @@ class DataEvolutionFullTextRead(FullTextRead):
             splits_by_column.setdefault(split.column_name, []).append(split)
         live_rows = global_index_live_row_filter.live_rows(
             self._table, self._partition_filter)
+        if self._filter is not None:
+            from pypaimon.table.source.global_index_row_filter import matching_rows
+
+            candidates = RoaringBitmap64()
+            for split in index_splits:
+                candidates.add_range(split.row_range_start, split.row_range_end)
+            for row_range in _raw_row_ranges(raw_splits):
+                candidates.add_range(row_range.from_, row_range.to)
+            # Scalar indexes may prune this read, but incomplete scalar coverage
+            # must not exclude rows covered by the full-text search plan.
+            table = self._table.copy({"scalar-index.search-mode": "full"})
+            matched = matching_rows(table, self._filter, candidates, self._partition_filter)
+            live_rows = matched if live_rows is None else RoaringBitmap64.and_(live_rows, matched)
         indexed_result = self._eval_column_query(splits_by_column, live_rows)
-        raw_result = self._read_raw_search(
-            _raw_row_ranges(raw_splits), _index_type(index_splits))
+        raw_ranges = _raw_row_ranges(raw_splits)
+        if self._filter is None:
+            raw_result = self._read_raw_search(raw_ranges, _index_type(index_splits))
+        else:
+            raw_result = self._read_raw_search(raw_ranges, _index_type(index_splits), live_rows)
         return indexed_result.or_(raw_result).top_k(self._limit)
 
     def _eval_column_query(
@@ -162,11 +181,15 @@ class DataEvolutionFullTextRead(FullTextRead):
             full_text_search = full_text_search.with_include_row_ids(include_row_ids)
 
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-        future = offset_reader.visit_full_text_search(full_text_search)
+        try:
+            future = offset_reader.visit_full_text_search(full_text_search)
+        except BaseException:
+            reader.close()
+            raise
         future.add_done_callback(lambda _: reader.close())
         return future
 
-    def _read_raw_search(self, raw_row_ranges, index_type):
+    def _read_raw_search(self, raw_row_ranges, index_type, include_row_ids=None):
         raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
         if not raw_row_ranges:
             return DictBasedScoredIndexResult({})
@@ -175,6 +198,15 @@ class DataEvolutionFullTextRead(FullTextRead):
 
         row_range_start = raw_row_ranges[0].from_
         row_range_end = raw_row_ranges[-1].to
+        search_kwargs = {}
+        if include_row_ids is not None:
+            raw_rows = GlobalIndexResult.from_ranges(raw_row_ranges).results()
+            include_row_ids = RoaringBitmap64.and_(include_row_ids, raw_rows)
+            if include_row_ids.is_empty():
+                return DictBasedScoredIndexResult({})
+            search_kwargs["include_row_ids"] = include_row_ids
+        # Build the same corpus as an unfiltered query so BM25 statistics stay
+        # unchanged. Filter row IDs in the native search, before selecting hits.
         table = self._read_raw_rows(raw_row_ranges)
         if table is None or table.num_rows == 0:
             return DictBasedScoredIndexResult({})
@@ -192,6 +224,7 @@ class DataEvolutionFullTextRead(FullTextRead):
             row_range_start,
             self._query,
             _candidate_limit(row_range_start, row_range_end),
+            **search_kwargs,
         ).top_k(self._limit)
 
     def _read_raw_rows(self, raw_row_ranges):
@@ -296,7 +329,7 @@ def _index_type(index_splits):
     return None
 
 
-def _search_raw_full_text(index_bytes, row_range_start, query, limit):
+def _search_raw_full_text(index_bytes, row_range_start, query, limit, include_row_ids=None):
     from paimon_ftindex import FullTextIndexReader
     from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
         PaimonFullTextInput,
@@ -304,7 +337,11 @@ def _search_raw_full_text(index_bytes, row_range_start, query, limit):
 
     reader = FullTextIndexReader(PaimonFullTextInput(BytesIO(index_bytes)))
     try:
-        row_ids, scores = reader.search(query, limit=limit)
+        search_kwargs = {}
+        if include_row_ids is not None:
+            relative_ids = GlobalIndexResult.create(include_row_ids).offset(-row_range_start).results()
+            search_kwargs["filter_bytes"] = relative_ids.serialize()
+        row_ids, scores = reader.search(query, limit=limit, **search_kwargs)
         return DictBasedScoredIndexResult(
             {
                 row_range_start + row_id: score

@@ -126,7 +126,7 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
             maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
         }
         List<Split> splits = new ArrayList<>(globalIndexSplitResult.splits());
-        return new PlanImpl(null, globalIndexSplitResult.snapshotId(), splits);
+        return new PlanImpl(null, globalIndexSplitResult.snapshotId(), null, splits);
     }
 
     @Override
@@ -199,6 +199,7 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
         return new PlanImpl(
                 snapshotPlan.watermark(),
                 snapshotPlan.snapshotId(),
+                snapshotPlan.snapshot(),
                 new ArrayList<>(result.splits()));
     }
 }

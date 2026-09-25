@@ -33,6 +33,7 @@ import pyarrow as pa
 
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.data_vector_writer import DataVectorWriter
+from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
@@ -456,6 +457,8 @@ class FlushFailureTest(unittest.TestCase):
             self.vector_writer = None
             self._normal_buffer = WriteBuffer(self._merge_data)
             self.committed_files = []
+            self._committed_files_to_delete_on_abort = []
+            self._pending_normal_meta = None
             self.written = []
             self.fail_next = True
 
@@ -528,6 +531,9 @@ class _StubSidecarWriter:
                 _StubMeta(self._row_count, self._file_name))
         return self.committed_files.copy()
 
+    def _release_prepared_files(self):
+        return DataWriter._release_prepared_files(self)
+
     def delete_file_upon_abort(self):
         return self._delete_on_abort
 
@@ -563,6 +569,8 @@ class CompositeFlushResumeTest(unittest.TestCase):
             self._normal_buffer = WriteBuffer(self._merge_data)
             self._buffer = WriteBuffer(self._merge_data)
             self.committed_files = []
+            self._committed_files_to_delete_on_abort = []
+            self._pending_normal_meta = None
             self.committed_changelog_files = []
             self.file_io = _RecordingFileIO()
             self.written = []
@@ -586,7 +594,9 @@ class CompositeFlushResumeTest(unittest.TestCase):
             self._normal_buffer = WriteBuffer(self._merge_normal_data)
             self._buffer = WriteBuffer(self._merge_normal_data)
             self.committed_files = []
+            self.committed_changelog_files = []
             self._committed_files_to_delete_on_abort = []
+            self._pending_normal_meta = None
             self.file_io = _RecordingFileIO()
             self.written = []
             self._video_group_policy = None
@@ -703,9 +713,14 @@ class CompositeFlushResumeTest(unittest.TestCase):
 
     def test_dedicated_writer_keeps_the_documented_meta_order(self):
         blob = _StubSidecarWriter(3, 'blob-0')
-        vector = _StubSidecarWriter(3, 'vector-0')
+        vector = _StubSidecarWriter(3, 'vector-0', fail_times=1)
         writer = self._DedicatedHarness({'payload': blob}, vector)
         writer._normal_buffer.append(_table(0, 3))
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+        self.assertEqual(writer.committed_files, [])
+        self.assertEqual([m.file_name for m in blob.committed_files], ['blob-0'])
+
         writer._close_current_writers()
         self.assertEqual([m.file_name for m in writer.committed_files],
                          ['data-1', 'blob-0', 'vector-0'])

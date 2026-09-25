@@ -25,6 +25,7 @@ from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import (
@@ -312,6 +313,7 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         return self
 
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
+        reject_search_under_query_auth(self._table)
         self._validate_search()
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
         execution = copy(self)
@@ -361,13 +363,6 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
             raise ValueError("Routes cannot be empty")
         if self._limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self._limit)
-        if self._filter is not None:
-            for route in self._routes:
-                if route.is_full_text():
-                    raise ValueError(
-                        "Hybrid search with full-text routes does not support "
-                        "non-partition filters because full-text indexes cannot "
-                        "apply row-id pre-filters before top-k ranking.")
 
     def _new_vector_search_builder(self, route):
         builder = (
@@ -391,6 +386,8 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         )
         if self._partition_filter is not None:
             builder.with_partition_filter(self._partition_filter)
+        if self._filter is not None:
+            builder.with_filter(self._filter)
         return builder
 
     def _rrf(self, route_results):

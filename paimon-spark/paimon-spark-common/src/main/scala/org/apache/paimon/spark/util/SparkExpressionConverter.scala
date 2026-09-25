@@ -22,12 +22,12 @@ import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
 import org.apache.paimon.predicate._
 import org.apache.paimon.spark.{PaimonImplicits, SparkTypeUtils}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
-import org.apache.paimon.types.{DecimalType, RowType}
+import org.apache.paimon.types.{DataTypeChecks, DataTypeFamily, DecimalType, RowType}
 import org.apache.paimon.types.DataTypeRoot._
 
 import org.apache.spark.sql.catalyst.util.{ArrayData, DateTimeUtils}
 import org.apache.spark.sql.connector.expressions.{Cast, Expression, Extract, GeneralScalarExpression, Literal, NamedReference}
-import org.apache.spark.sql.types.{ArrayType => SparkArrayType, DataType => SparkDataType}
+import org.apache.spark.sql.types.{ArrayType => SparkArrayType, BooleanType, ByteType, DataType => SparkDataType, DoubleType, FloatType, IntegerType, LongType, ShortType, StringType}
 
 import scala.collection.JavaConverters._
 
@@ -130,7 +130,7 @@ object SparkExpressionConverter {
     }
 
     exp match {
-      case n: NamedReference => Some(new FieldTransform(toPaimonFieldRef(n, rowType)))
+      case n: NamedReference => toPaimonFieldTransform(n, rowType)
       case s: GeneralScalarExpression =>
         s.name() match {
           case CONCAT => convertChildren(s.children()).map(i => new ConcatTransform(i))
@@ -163,9 +163,7 @@ object SparkExpressionConverter {
       case c: Cast =>
         c.expression() match {
           case n: NamedReference =>
-            CastTransform.tryCreate(
-              toPaimonFieldRef(n, rowType),
-              SparkTypeUtils.toPaimonType(c.dataType()))
+            toPaimonCast(toPaimonFieldRef(n, rowType), c.dataType())
           case _ => None
         }
       // The connector `Extract` expression was added in Spark 3.4 and does not exist on
@@ -205,6 +203,38 @@ object SparkExpressionConverter {
           case _ => None
         }
       case _ => None
+    }
+  }
+
+  private def toPaimonCast(field: FieldRef, target: SparkDataType): Option[Transform] = {
+    val source = SparkTypeUtils.fromPaimonType(field.`type`())
+    val losesTimestampPrecision = field.`type`().is(DataTypeFamily.TIMESTAMP) &&
+      DataTypeChecks.getPrecision(field.`type`()) > 6
+    if (target == FloatType || target == DoubleType || losesTimestampPrecision) {
+      // Spark equates signed zeros while the storage predicates distinguish them. Also,
+      // Spark exposes timestamps in microseconds, so a high-precision field is not an identity.
+      None
+    } else if (source == target) {
+      Some(new FieldTransform(field))
+    } else if (!field.`type`().equalsIgnoreNullable(SparkTypeUtils.toPaimonType(source))) {
+      // Some storage types have a different Spark representation (for example TIME -> INT).
+      // Their storage casts cannot be inferred from the exposed Spark source type.
+      None
+    } else {
+      // Storage casts do not carry Spark's ANSI mode or session time zone. Only accept
+      // conversions whose values and failure behavior agree independently of those settings.
+      // In particular, numeric narrowing, string parsing, decimal casts and temporal casts
+      // must remain in Spark rather than removing rows or suppressing an ANSI error.
+      val safe = (source, target) match {
+        case (ByteType, ShortType | IntegerType | LongType | StringType) =>
+          true
+        case (ShortType, IntegerType | LongType | StringType) => true
+        case (IntegerType, LongType | StringType) => true
+        case (LongType, StringType) => true
+        case (BooleanType, StringType) => true
+        case _ => false
+      }
+      if (safe) CastTransform.tryCreate(field, SparkTypeUtils.toPaimonType(target)) else None
     }
   }
 
@@ -266,6 +296,43 @@ object SparkExpressionConverter {
         throw new UnsupportedOperationException(
           s"Convert value: $value to datatype: $dataType is unsupported.")
     }
+  }
+
+  /**
+   * A reference is either a top-level column or a path down into row-typed ones. Anything the path
+   * cannot descend - a field inside an array or a map, a name the schema does not hold - yields
+   * None, leaving the predicate for Spark to evaluate after the scan.
+   */
+  private def toPaimonFieldTransform(ref: NamedReference, rowType: RowType): Option[Transform] = {
+    val parts = ref.fieldNames()
+    val index = rowType.getFieldIndex(parts.head)
+    if (index == -1) {
+      return None
+    }
+    val root = rowType.getField(parts.head)
+    val rootRef = new FieldRef(index, root.name(), root.`type`())
+    if (parts.length == 1) {
+      return Some(new FieldTransform(rootRef))
+    }
+
+    // Keep the components Spark gave us: they are the transform's identity, and joining them
+    // would lose the boundaries of a name that itself contains a dot.
+    val path = new java.util.ArrayList[String](parts.length - 1)
+    var current = root.`type`()
+    parts.tail.foreach {
+      part =>
+        current match {
+          case nested: RowType =>
+            val position = nested.getFieldIndex(part)
+            if (position == -1) {
+              return None
+            }
+            path.add(part)
+            current = nested.getTypeAt(position)
+          case _ => return None
+        }
+    }
+    Some(new NestedFieldTransform(rootRef, path))
   }
 
   private def toPaimonFieldRef(ref: NamedReference, rowType: RowType): FieldRef = {

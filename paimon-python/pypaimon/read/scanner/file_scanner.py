@@ -355,6 +355,7 @@ class FileScanner:
                     self._deletion_files_map(entries),
                     seed=seed,
                     chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
                 )
             else:
                 split_generator = AppendChunkShuffleSplitGenerator(
@@ -364,6 +365,7 @@ class FileScanner:
                     self._deletion_files_map(entries),
                     seed=seed,
                     chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
                 )
         elif self.table.is_primary_key_table:
             entries = self.plan_files()
@@ -371,7 +373,8 @@ class FileScanner:
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
         elif self.data_evolution:
             entries, split_generator = self._create_data_evolution_split_generator()
@@ -381,7 +384,8 @@ class FileScanner:
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
 
         if not entries:
@@ -400,7 +404,6 @@ class FileScanner:
                 while callable(getattr(split, 'data_split', None)):
                     split = split.data_split()
                 split.is_streaming = True
-                split.snapshot_id = self._scanned_snapshot_id
 
         if self.data_evolution and self.scan_stats is not None:
             # Data-evolution stats pruning happens on complete row-id groups
@@ -496,6 +499,7 @@ class FileScanner:
                 row_ranges,
                 score_getter,
                 None,
+                snapshot_id=self._scanned_snapshot_id,
             )
 
         # Position selection counts the complete candidate row-id space. Early
@@ -534,6 +538,7 @@ class FileScanner:
             row_ranges,
             score_getter,
             group_stats_filter,
+            snapshot_id=self._scanned_snapshot_id,
         )
 
     def plan_files(self) -> List[ManifestEntry]:

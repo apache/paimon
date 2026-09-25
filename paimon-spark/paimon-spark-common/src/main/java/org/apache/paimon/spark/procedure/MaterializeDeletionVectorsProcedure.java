@@ -26,6 +26,9 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.StringUtils;
 
@@ -169,7 +172,21 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                 taskPlanner,
                 javaSparkContext,
                 sparkSession,
-                commit -> commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id()));
+                new DataEvolutionRewriteExecutor.CommitConfigurer() {
+                    @Override
+                    public void configure(TableCommitImpl commit) {
+                        commit.materializeDvRowIdCheck();
+                    }
+
+                    @Override
+                    public void prepareMessages(
+                            Snapshot planningSnapshot, List<CommitMessage> messages) {
+                        messages.replaceAll(
+                                message ->
+                                        ((CommitMessageImpl) message)
+                                                .withCheckFromSnapshot(planningSnapshot.id()));
+                    }
+                });
     }
 
     private boolean blank(InternalRow args, int index) {

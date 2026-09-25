@@ -15,13 +15,107 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""PyTorch DataLoader helpers for descriptor-backed video frame rows."""
+"""Helpers for descriptor-backed video frame rows."""
 
+import io
 import os
 from collections import OrderedDict
 from collections.abc import Mapping
+from fractions import Fraction
+from itertools import chain
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+
+
+def _encode_images_to_video(
+        images,
+        output_path,
+        *,
+        fps,
+        codec,
+        pixel_format,
+        gop_size,
+        codec_options=None):
+    if isinstance(fps, bool) or not isinstance(fps, int) or fps <= 0:
+        raise ValueError("fps must be a positive int.")
+    if not isinstance(codec, str) or not codec:
+        raise ValueError("codec must be a non-empty string.")
+    if not isinstance(pixel_format, str) or not pixel_format:
+        raise ValueError("pixel_format must be a non-empty string.")
+    if isinstance(gop_size, bool) \
+            or not isinstance(gop_size, int) or gop_size <= 0:
+        raise ValueError("gop_size must be a positive int.")
+    if codec_options is not None and not isinstance(codec_options, Mapping):
+        raise ValueError("codec_options must be a mapping or None.")
+
+    try:
+        import av
+        from PIL import Image
+    except ImportError as error:
+        raise ImportError(
+            "Image-to-video encoding requires PyAV and Pillow; install "
+            "pypaimon[video]."
+        ) from error
+
+    iterator = iter(images)
+    try:
+        first = next(iterator)
+    except StopIteration as error:
+        raise ValueError("images must contain at least one frame.") from error
+
+    def open_image(value):
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            image = Image.open(io.BytesIO(bytes(value)))
+        elif isinstance(value, Image.Image):
+            image = value
+        else:
+            raise TypeError(
+                "images must contain encoded image bytes or Pillow images."
+            )
+        image.load()
+        return image.convert("RGB")
+
+    first = open_image(first)
+    width, height = first.size
+    time_base = Fraction(1, fps)
+    count = 0
+    try:
+        with av.open(output_path, mode="w", format="mp4") as container:
+            stream = container.add_stream(
+                codec,
+                rate=fps,
+                options={
+                    str(key): str(value)
+                    for key, value in (codec_options or {}).items()
+                },
+            )
+            stream.width = width
+            stream.height = height
+            stream.pix_fmt = pixel_format
+            stream.gop_size = gop_size
+            stream.time_base = time_base
+            decoded = chain(
+                (first,), (open_image(value) for value in iterator)
+            )
+            for count, image in enumerate(decoded, start=1):
+                if image.size != (width, height):
+                    raise ValueError(
+                        "All images must have the same dimensions."
+                    )
+                frame = av.VideoFrame.from_image(image)
+                frame.pts = count - 1
+                frame.time_base = time_base
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+    except BaseException:
+        try:
+            os.remove(output_path)
+        except FileNotFoundError:
+            pass
+        raise
+    return count
 
 
 class VideoFrameCollator:

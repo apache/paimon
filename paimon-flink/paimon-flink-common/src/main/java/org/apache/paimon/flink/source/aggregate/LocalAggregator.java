@@ -35,6 +35,7 @@ import org.apache.paimon.utils.ProjectedRow;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /** Local aggregator based on split statistics. */
@@ -229,7 +230,7 @@ class LocalAggregator {
         }
 
         private String resultName() {
-            return kind.name().toLowerCase();
+            return kind.name().toLowerCase(Locale.ROOT);
         }
     }
 

@@ -91,6 +91,8 @@ public class CsvOptions {
     public CsvOptions(Options options) {
         this.fieldDelimiter = singleCharacter(options, FIELD_DELIMITER);
         this.lineDelimiter = options.get(LINE_DELIMITER);
+        Preconditions.checkArgument(
+                !lineDelimiter.isEmpty(), "'%s' must not be empty.", LINE_DELIMITER.key());
         this.nullLiteral = options.get(NULL_LITERAL);
         this.includeHeader = options.get(INCLUDE_HEADER);
         this.quoteCharacter = singleCharacter(options, QUOTE_CHARACTER);

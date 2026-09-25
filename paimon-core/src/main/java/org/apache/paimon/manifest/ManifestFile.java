@@ -48,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * This file includes several {@link ManifestEntry}s, representing the additional changes since last
@@ -303,17 +304,41 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     }
 
     public List<ExpireFileEntry> readExpireFileEntries(String fileName) {
+        return readExpireFileEntries(fileName, null, entry -> true);
+    }
+
+    /**
+     * Reads only expiring entries accepted by the supplied filters.
+     *
+     * <p>The bucket filter is evaluated by the Avro reader before nested data-file metadata is
+     * decoded. The entry filter then runs on a reusable projected view, before an {@link
+     * ExpireFileEntry} is materialized. The entry filter must not retain its argument.
+     */
+    public List<ExpireFileEntry> readExpireFileEntries(
+            String fileName,
+            @Nullable BucketFilter bucketFilter,
+            Predicate<ProjectedManifestEntry> entryFilter) {
         List<ExpireFileEntry> result = new ArrayList<>();
-        try (CloseableIterator<ProjectedManifestEntry> entries =
-                scan(fileName, EXPIRE_FILE_PROJECTION)) {
-            while (entries.hasNext()) {
-                result.add(ExpireFileEntry.from(entries.next()));
+        ProjectedManifestEntry entry = EXPIRE_FILE_PROJECTION.createEntry();
+        try (ManifestAvroReader reader = scanAvroBlocks(fileName, null)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next()
+                                .toRows(EXPIRE_FILE_PROJECTION.projectedType(), null, bucketFilter);
+                while (rows.hasNext()) {
+                    entry.replace(rows.next());
+                    if (entryFilter.test(entry)) {
+                        result.add(ExpireFileEntry.from(entry));
+                    }
+                }
             }
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format(
                             "Failed to scan expiring entries from manifest file '%s'.", fileName),
                     e);
+        } finally {
+            entry.clear();
         }
         return result;
     }

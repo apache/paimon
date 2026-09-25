@@ -76,7 +76,7 @@ public class SortedGlobalIndexWriter implements Serializable {
         this.rowType = this.table.rowType();
         this.options = options;
         this.recordsPerRange =
-                (long) (options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE) * FLOATING);
+                (long) (options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE) * FLOATING);
     }
 
     public SortedGlobalIndexWriter withIndexField(String indexField) {

@@ -43,7 +43,7 @@ public class FormatTableRead implements TableRead {
     private final RowType tableRowType;
     private final Predicate predicate;
     private final FormatReadBuilder read;
-    private final Integer limit;
+    private final Long limit;
 
     private boolean executeFilter = false;
     @Nullable private ReadBatchSizer readBatchSizer;
@@ -53,7 +53,7 @@ public class FormatTableRead implements TableRead {
             RowType tableRowType,
             FormatReadBuilder read,
             Predicate predicate,
-            Integer limit) {
+            Long limit) {
         this.tableRowType = tableRowType;
         this.readType = readType == null ? tableRowType : readType;
         this.read = read;

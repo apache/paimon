@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
@@ -54,6 +53,9 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -75,6 +77,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Base implementation for vector reads. */
 public abstract class AbstractDataEvolutionVectorRead implements Serializable {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(AbstractDataEvolutionVectorRead.class);
 
     private static final long serialVersionUID = 1L;
 
@@ -212,9 +217,14 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     /**
-     * Row ids the scalar index reports as matching {@link #filter}, or {@code null} when the index
-     * cannot evaluate the predicate (no scalar index files, or a function the reader does not
-     * support). {@code null} means "cannot decide", never "no rows match".
+     * Rows of the indexed splits that satisfy {@link #filter} according to the scalar global
+     * indexes, or {@code null} when no index can evaluate the predicate (no scalar index files, or
+     * a function the reader does not support); {@code null} means "cannot decide", never "no rows
+     * match". The set is exact: an index answer that may be a superset (see {@link
+     * FilteredRowIdReader#isExact}) is refined from the data when {@code
+     * global-index.filter.refine-from-data} allows it and excluded otherwise, because a superset
+     * ranked by the ANN would push matching rows out of the top-k where the engine-side filter
+     * cannot bring them back.
      */
     @Nullable
     private RoaringNavigableMap64 scalarMatchedRows(List<IndexVectorSearchSplit> splits) {
@@ -224,8 +234,10 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
+        RoaringNavigableMap64 splitRows = new RoaringNavigableMap64();
         for (IndexVectorSearchSplit split : splits) {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
+            splitRows.addRange(new Range(split.rowRangeStart(), split.rowRangeEnd()));
         }
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
@@ -236,11 +248,21 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexResult> result = scanner.scan(filter);
-            if (!result.isPresent()) {
+            Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanner.scanWithCoverage(filter);
+            if (!evaluation.isPresent()) {
                 return null;
             }
-            return result.get().results();
+            RoaringNavigableMap64 matched = evaluation.get().result().results();
+            if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
+                return matched;
+            }
+            if (!table.coreOptions().globalIndexFilterRefineFromData()) {
+                FilteredRowIdReader.warnCandidatesExcluded(LOG, table, filter);
+                return new RoaringNavigableMap64();
+            }
+            RoaringNavigableMap64 candidates = RoaringNavigableMap64.and(matched, splitRows);
+            return new FilteredRowIdReader(table, planSnapshot, partitionFilter, filter)
+                    .matchingRowIds(candidates);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -311,6 +333,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         indexFileReader,
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
+                        null,
                         executor);
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
@@ -344,6 +367,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         indexFileReader,
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
+                        null,
                         executor);
         BatchVectorSearch batchVectorSearch =
                 new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)

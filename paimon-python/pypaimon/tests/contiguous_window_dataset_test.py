@@ -24,6 +24,7 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 import torch
 
 import pypaimon.multimodal as pmm
@@ -438,6 +439,58 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         self.assertEqual([b"scalar-0", b"scalar-1"], mixed["payload"])
         self.assertEqual(map_only["attachments"], mixed["attachments"])
 
+    def test_reads_array_blob_payloads_in_single_and_batched_windows(self):
+        pages = [[b"first", None, b"", b"first"], None, [], [b"last"]]
+        schema = pa.schema([
+            ("episode", pa.string()), ("step", pa.int32()),
+            ("pages", pa.list_(pa.large_binary())),
+            ("payload", pa.large_binary()),
+            ("attachments", pa.map_(pa.string(), pa.large_binary())),
+        ])
+        table = self.conn.create_table(
+            "array_blobs", schema=schema, options=_TABLE_OPTIONS)
+        table.add(pa.Table.from_pydict({
+            "episode": ["episode-a"] * 4, "step": [0, 1, 2, 3],
+            "pages": pages, "payload": [b"cover"] * 4,
+            "attachments": [[("thumb", b"thumbnail")]] * 4,
+        }, schema=schema))
+
+        for columns in (["pages"], ["pages", "payload", "attachments"]):
+            with self.subTest(columns=columns):
+                dataset = table.scan().to_contiguous_window_dataset(
+                    window_size=4, columns=columns,
+                    group_key="episode", order_key="step")
+                self.assertEqual(pages, dataset[0]["pages"])
+                self.assertEqual([pages, pages], [
+                    row["pages"] for row in dataset.__getitems__([0, 0])])
+                if "payload" in columns:
+                    self.assertEqual([b"cover"] * 4, dataset[0]["payload"])
+                    self.assertEqual(
+                        [[("thumb", b"thumbnail")]] * 4,
+                        dataset[0]["attachments"])
+
+        # Reordered/repeated offsets and endpoint padding retain cell structure.
+        dataset = table.scan().to_contiguous_window_dataset(
+            columns=["pages", "payload"], group_key="episode", order_key="step",
+            frame_offsets={"pages": [-1, 0, 2, 0]}, boundary="pad")
+        samples = dataset.__getitems__([3, 0, 3])
+        self.assertEqual([
+            [pages[2], pages[3], pages[3], pages[3]],
+            [pages[0], pages[0], pages[2], pages[0]],
+            [pages[2], pages[3], pages[3], pages[3]],
+        ], [sample["pages"] for sample in samples])
+        self.assertEqual([False, False, True, False],
+                         samples[0]["pages_is_pad"].tolist())
+        samples[0]["pages"][1].append(b"changed")
+        self.assertEqual([b"last"], samples[2]["pages"][1])
+
+        # Constant padding must not turn an empty ARRAY into a null cell.
+        padded = table.scan().to_contiguous_window_dataset(
+            columns=["pages"], group_key="episode", order_key="step",
+            frame_offsets={"pages": [-1, 0]}, boundary="pad",
+            pad_values={"pages": []})
+        self.assertEqual([[], pages[0]], padded[0]["pages"])
+
     def test_anchor_columns_read_only_the_window_anchor(self):
         table = self._table()
         with patch(
@@ -780,6 +833,7 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"masks \['episode'\]"):
             self._dataset(table)
 
+    @pytest.mark.python_read
     def test_reads_only_the_files_and_row_ranges_a_window_touches(self):
         table = self.conn.create_table(
             "many_files", schema=self._schema(), options=_TABLE_OPTIONS)

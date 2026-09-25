@@ -556,7 +556,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>data-evolution.reassign.skip-contiguous-row-count</h5></td>
-            <td style="word-wrap: break-word;">1000000000</td>
+            <td style="word-wrap: break-word;">20000000000</td>
             <td>Long</td>
             <td>Strictly contiguous same-partition logical row-id runs containing more than this number of rows are excluded from row-id reassignment. Set to 0 to disable this filtering.</td>
         </tr>
@@ -690,7 +690,7 @@ under the License.
             <td><h5>dynamic-bucket.max-buckets</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
-            <td>Max buckets for a partition in dynamic bucket mode, It should either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).</td>
+            <td>Max buckets for a partition in dynamic bucket mode, It should either be equal to -1 (unlimited), or it must be between 1 and 32768 (fixed upper bound).</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>
@@ -871,6 +871,18 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.filter.refine-from-data</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether a vector, hybrid or full-text search may read the filter columns of candidate rows to verify a row filter that the scalar global index can only answer with a superset, such as contains, ends-with or like on a BTree index or a conjunction with a member no index can evaluate. When false, such candidates are excluded from the search, which never returns a non-matching row but may return fewer than the requested top-k. When true, the read runs on the caller and may cover every candidate row.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.query-in-reader.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Query supported scalar global indexes per data split in readers instead of materializing index results during scan planning.</td>
         </tr>
         <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>

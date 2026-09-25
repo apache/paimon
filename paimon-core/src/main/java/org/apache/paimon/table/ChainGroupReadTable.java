@@ -39,6 +39,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
@@ -225,7 +226,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private final ChainGroupReadTable chainGroupReadTable;
         private final RecordComparator chainPartitionComparator;
         private final ChainPartitionProjector partitionProjector;
-        private Predicate dataPredicate;
+        private Predicate keyPredicate;
         private Filter<Integer> bucketFilter;
         protected boolean preloadTargetSnapshot = true;
 
@@ -267,15 +268,28 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         public ChainTableBatchScan withFilter(Predicate predicate) {
             super.withFilter(predicate);
             if (predicate == null) {
-                dataPredicate = null;
+                keyPredicate = null;
             } else {
                 Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
                         PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
                                 predicate,
                                 tableSchema.logicalRowType(),
                                 tableSchema.partitionKeys());
-                dataPredicate =
-                        pair.getRight().isEmpty() ? null : PredicateBuilder.and(pair.getRight());
+                List<String> fieldNames = tableSchema.fieldNames();
+                List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
+                int[] keyMapping = new int[fieldNames.size()];
+                for (int i = 0; i < keyMapping.length; i++) {
+                    keyMapping[i] = primaryKeys.contains(fieldNames.get(i)) ? i : -1;
+                }
+                // Branch scans are incomplete merge inputs. A value filter could remove an
+                // update or delete needed to suppress an older matching row in another branch.
+                // Keep only an inclusive key predicate, retaining the original row indices.
+                keyPredicate =
+                        pair.getRight().isEmpty()
+                                ? null
+                                : PredicateBuilder.transformFieldMapping(
+                                                PredicateBuilder.and(pair.getRight()), keyMapping)
+                                        .orElse(null);
             }
             return this;
         }
@@ -540,8 +554,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                     ? chainGroupReadTable.newSnapshotScan(scanCreator)
                                     : chainGroupReadTable.newDeltaScan(scanCreator))
                             .withoutAuthPartitionPushdown();
-            if (dataPredicate != null) {
-                scan.withFilter(dataPredicate);
+            if (keyPredicate != null) {
+                scan.withFilter(keyPredicate);
             }
             if (bucketFilter != null) {
                 scan.withBucketFilter(bucketFilter);
@@ -610,7 +624,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             // fallbackRead unwraps and applies the rules itself, so it gets the wrapper untouched.
-            Split inner = QueryAuthSplit.unwrap(split);
+            Split inner = Splits.underlying(split);
             if (inner instanceof ChainSplit || inner instanceof DataSplit) {
                 return fallbackRead.createReader(split);
             }
@@ -640,7 +654,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             "Branch scans of the same chain table returned different authorization rules.");
                     authResult = next;
                 }
-                dataSplits.add((DataSplit) QueryAuthSplit.unwrap(split));
+                dataSplits.add((DataSplit) Splits.underlying(split));
             }
             return dataSplits;
         }

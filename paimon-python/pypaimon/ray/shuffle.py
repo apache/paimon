@@ -198,27 +198,7 @@ def _sort_by_partition_bucket_primary_key(
 
 
 def _identity_batch(batch: pa.Table) -> pa.Table:
-    # Some Ray versions promote ``string`` to ``large_string`` (and
-    # ``binary`` to ``large_binary``) while materialising blocks for
-    # ``groupby().map_groups``. Paimon's writer compares schemas with a
-    # strict ``!=`` and rejects the large variants, so coerce them back
-    # to the regular types here. Other Arrow types pass through.
-    return _coerce_large_string_types(batch)
-
-
-def _coerce_large_string_types(batch: pa.Table) -> pa.Table:
-    needs_cast = False
-    fields = []
-    for field in batch.schema:
-        if pa.types.is_large_string(field.type):
-            fields.append(field.with_type(pa.string()))
-            needs_cast = True
-        elif pa.types.is_large_binary(field.type):
-            fields.append(field.with_type(pa.binary()))
-            needs_cast = True
-        else:
-            fields.append(field)
-    return batch.cast(pa.schema(fields)) if needs_cast else batch
+    return batch
 
 
 def _make_bucket_udf(extractor, bucket_col):

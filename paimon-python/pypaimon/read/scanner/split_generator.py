@@ -26,6 +26,7 @@ from pypaimon.read.split import Split
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 
 
 class AbstractSplitGenerator(ABC):
@@ -41,12 +42,14 @@ class AbstractSplitGenerator(ABC):
         table,
         target_split_size: int,
         open_file_cost: int,
-        deletion_files_map: Optional[Dict] = None
+        deletion_files_map: Optional[Dict] = None,
+        snapshot_id: Optional[int] = None,
     ):
         self.table = table
         self.target_split_size = target_split_size
         self.open_file_cost = open_file_cost
         self.deletion_files_map = deletion_files_map or {}
+        self.snapshot_id = snapshot_id
         self.default_part_value = table.options.options.get(
             CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
         
@@ -92,6 +95,15 @@ class AbstractSplitGenerator(ABC):
         Build splits from packed files.
         """
         splits = []
+        if not packed_files or not file_entries:
+            return splits
+        partition = tuple(file_entries[0].partition.values)
+        escaped_partition = False
+        if partition:
+            path_factory = self.table.path_factory()
+            escaped_partition = (path_factory.bucket_path(
+                partition, file_entries[0].bucket, canonical_partition=True)
+                != path_factory.bucket_path(partition, file_entries[0].bucket))
         for file_group in packed_files:
             if use_optimized_path:
                 raw_convertible = True
@@ -105,8 +117,15 @@ class AbstractSplitGenerator(ABC):
                     self.table.table_path,
                     file_entries[0].partition,
                     file_entries[0].bucket,
-                    self.default_part_value
+                    self.default_part_value,
+                    self.table.options.data_file_path_directory()
                 )
+                if escaped_partition and not data_file.external_path:
+                    canonical_path = canonical_data_file_path(
+                        self.table, partition, file_entries[0].bucket,
+                        data_file.file_name)
+                    if self.table.file_io.exists(canonical_path):
+                        data_file.file_path = canonical_path
 
             if file_group:
                 # Get deletion files for this split
@@ -123,7 +142,8 @@ class AbstractSplitGenerator(ABC):
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
                     raw_convertible=raw_convertible,
-                    data_deletion_files=data_deletion_files
+                    data_deletion_files=data_deletion_files,
+                    snapshot_id=self.snapshot_id,
                 )
                 splits.append(split)
         return splits

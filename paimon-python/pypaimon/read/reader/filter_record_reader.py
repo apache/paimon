@@ -31,11 +31,13 @@ class FilterRecordReader(RecordReader[InternalRow]):
     def __init__(self, reader: RecordReader[InternalRow], predicate: Predicate):
         self.reader = reader
         self.predicate = predicate
+        self._adopt_blob_metadata(reader)
 
     def read_batch(self) -> Optional[RecordIterator[InternalRow]]:
         iterator = self.reader.read_batch()
         if iterator is None:
             return None
+        self._refresh_blob_view_lookup(self.reader)
         return FilterRecordIterator(iterator, self.predicate)
 
     def close(self) -> None:

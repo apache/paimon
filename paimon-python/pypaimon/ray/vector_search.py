@@ -32,13 +32,7 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 def _execute_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     """Execute the builder of an already snapshot-pinned ``VectorQuery``."""
-    concurrency = 4 if concurrency is None else concurrency
-    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
-        raise ValueError("concurrency must be a positive integer.")
-    remote_args = dict(ray_remote_args or {})
-    if "num_returns" in remote_args:
-        raise ValueError("Vector search manages num_returns; omit it from ray_remote_args.")
-
+    concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
     reader = builder.new_vector_search_read()
     if (type(reader) is not DataEvolutionVectorRead
             or not reader._table.options.data_evolution_enabled()):
@@ -46,15 +40,28 @@ def _execute_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     if not all(math.isfinite(float(value)) for value in reader._query_vector):
         raise ValueError("Ray vector search requires a finite query vector.")
 
+    _require_ray()
+    plan = builder.new_vector_search_scan().scan()
+    return _RayVectorSearchRead(reader, concurrency, remote_args).read_plan(plan)
+
+
+def _execution_options(concurrency, ray_remote_args):
+    concurrency = 4 if concurrency is None else concurrency
+    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+        raise ValueError("concurrency must be a positive integer.")
+    remote_args = dict(ray_remote_args or {})
+    if "num_returns" in remote_args:
+        raise ValueError("Vector search manages num_returns; omit it from ray_remote_args.")
+    return concurrency, remote_args
+
+
+def _require_ray():
     try:
         import ray  # noqa: F401
     except ModuleNotFoundError as error:
         if error.name != "ray":
             raise
         raise ImportError("Ray vector search requires pypaimon[ray].") from error
-
-    plan = builder.new_vector_search_scan().scan()
-    return _RayVectorSearchRead(reader, concurrency, remote_args).read_plan(plan)
 
 
 class _RayVectorSearchRead(DataEvolutionVectorRead):
@@ -73,16 +80,15 @@ class _RayVectorSearchRead(DataEvolutionVectorRead):
         items = [(split, None if not pre_filters or pre_filters[i] is None
                   else pre_filters[i].serialize()) for i, split in enumerate(splits)]
         context = (self._table, self._vector_column, query, search_limit, self._options)
-        results = [None] * len(splits)
         with closing(_map_tasks(
-                _search_index_split, context, items, self._concurrency, self._remote_args)) as tasks:
-            for i, (metric, scores) in tasks:
+                _search_index_split, context, items, self._concurrency, self._remote_args, True)) as tasks:
+            for _, (metric, scores) in tasks:
                 if metric is not None:
                     self._set_index_metric(metric)
                 # Keep plan order, including duplicate-row precedence, regardless
                 # of worker completion order. Do not refine or truncate per worker.
-                results[i] = DictBasedScoredIndexResult(scores)
-        return results
+                yield DictBasedScoredIndexResult(scores)
+                del scores
 
     def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector,
                          index_type=None, include_filter=True,
@@ -142,8 +148,8 @@ def _scores(result):
     return scores
 
 
-def _map_tasks(worker, context, items, concurrency, remote_args):
-    """Yield completed tasks with their plan ordinal, bounding in-flight work."""
+def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False):
+    """Bound in-flight work and, optionally, completed results awaiting plan order."""
     import ray
 
     if not items:
@@ -153,9 +159,11 @@ def _map_tasks(worker, context, items, concurrency, remote_args):
     remote = ray.remote(worker).options(**remote_args)
     remaining = iter(enumerate(items))
     pending = {}
+    buffered = {}
+    next_ordinal = 0
     try:
         while True:
-            while len(pending) < concurrency:
+            while len(pending) + len(buffered) < concurrency:
                 item = next(remaining, None)
                 if item is None:
                     break
@@ -166,7 +174,16 @@ def _map_tasks(worker, context, items, concurrency, remote_args):
             ready, _ = ray.wait(list(pending), num_returns=1)
             ref = ready[0]
             result = ray.get(ref)
-            yield pending.pop(ref), result
+            ordinal = pending.pop(ref)
+            if ordered:
+                buffered[ordinal] = result
+                del result
+                while next_ordinal in buffered:
+                    yield next_ordinal, buffered.pop(next_ordinal)
+                    next_ordinal += 1
+            else:
+                yield ordinal, result
+                del result
     finally:
         for ref in pending:
             try:

@@ -622,7 +622,8 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   test("Paimon deletionVector: select with format filter push down") {
     val format = Random.shuffle(Seq("parquet", "orc", "avro")).head
-    val blockSize = Random.nextInt(10240) + 1
+    // Avro rejects a block size below 32 bytes.
+    val blockSize = Random.nextInt(10240) + 32
     spark.sql(s"""
                  |CREATE TABLE T (id INT, name STRING)
                  |TBLPROPERTIES (

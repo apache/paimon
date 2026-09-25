@@ -35,7 +35,7 @@ jobs:
   test:
     name: Tests / Python ${{ matrix.python-version }}
     env:
-      # Real native planning is covered by the Rust main job below.
+      # Native planning, reading, writing and REST commits run in Native CI.
       PYTEST_ADDOPTS: "-m 'not native_plan'"
     timeout-minutes: 90
     runs-on: ubuntu-latest
@@ -140,14 +140,14 @@ jobs:
             else
               python -m pip install pyarrow==16.0.0 numpy==1.24.3 pandas==2.0.3 flake8==4.0.1
             fi
-            python -m pip install 'h5py>=3,<4'
+            python -m pip install 'h5py>=3,<4' Pillow
             python -c "import h5py; print('h5py', h5py.__version__)"
             if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"; then
               python -m pip install './paimon-python[rosbag]'
               python -c "import rosbags; print('rosbags installed')"
             fi
             if [[ "${{ matrix.python-version }}" == "3.10" ]]; then
-              python -m pip install './paimon-python[lerobot]'
+              python -m pip install './paimon-python[lerobot,video]'
               python -c "import datasets, lerobot; print('datasets', datasets.__version__, 'lerobot', lerobot.__version__)"
             fi
 
@@ -177,7 +177,7 @@ jobs:
           ./paimon-python/dev/lint-python.sh -e pytest_torch
 
   rust-plan:
-    name: Rust Plan
+    name: Native CI
     timeout-minutes: 90
     runs-on: ubuntu-latest
     container: "python:3.11-slim"
@@ -196,10 +196,10 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust main
+      - name: Build paimon-rust with REST native commit support
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@main#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@aa60a6ac7cbe9299aca19effd9ba8301c1bc55da#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
@@ -209,33 +209,31 @@ jobs:
             ray==2.54.0 fastavro==1.11.1 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 \
             pylance==0.39.0 'pytest~=7.0' py4j==0.10.9.9 parameterized==0.9.0 \
             'daft>=0.7.6' datasketches pyarrow==18.1.0 numpy==1.24.3 pandas==2.0.3 \
-            'h5py>=3,<4' 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' \
+            'h5py>=3,<4' Pillow 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' \
             vortex-data==0.70.0 'paimon-mosaic>=0.1.0'
           python -m pip check
 
-      - name: Verify upstream native planning APIs
+      - name: Verify native wheel provenance
         run: |
           python - <<'PY'
           import importlib.metadata as metadata
           import json
 
-          from pypaimon_rust.datafusion import PaimonCatalog, ReadBuilder, Split
+          import pypaimon_rust.datafusion
 
           distribution = metadata.distribution('pypaimon-rust')
           source = json.loads(distribution.read_text('direct_url.json'))
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
-          assert hasattr(PaimonCatalog, 'get_table'), 'Missing PaimonCatalog.get_table'
-          assert hasattr(Split, 'serialize'), 'Missing Split.serialize'
-          assert hasattr(Split, 'is_streaming'), 'Missing stream-aware Split.is_streaming'
-          assert hasattr(ReadBuilder, 'new_incremental_scan'), 'Missing ReadBuilder.new_incremental_scan'
-          assert hasattr(ReadBuilder, 'with_row_ranges'), 'Missing ReadBuilder.with_row_ranges'
           PY
 
-      - name: Run Python tests with Rust planning
+      - name: Run Python tests with native planning, reading, writing and committing
         shell: bash
         env:
           PYPAIMON_TEST_NATIVE_PLAN: '1'
+          PYPAIMON_TEST_NATIVE_READ: '1'
+          PYPAIMON_TEST_NATIVE_WRITE: '1'
+          PYPAIMON_TEST_NATIVE_COMMIT: '1'
         run: |
           bash paimon-python/dev/lint-python.sh -i pytest
 
@@ -382,6 +380,7 @@ jobs:
             python -c "import ray; print(f'Ray version: {ray.__version__}')"
             python -c "from packaging.version import parse; import ray; assert parse(ray.__version__) == parse('$ray_version'), f'Expected Ray $ray_version, got {ray.__version__}'"
             tests="pypaimon/tests/ray_data_test.py::RayDataTest pypaimon/tests/ray_range_join_test.py::RayRangeJoinTest pypaimon/tests/ray_vector_search_test.py::test_raw_search_matches_exact_top_k"
+            tests="$tests pypaimon/tests/ray_batch_vector_search_test.py::test_raw_batch_shares_split_tasks"
             if [ "$ray_version" = "2.50.1" ]; then
               tests="$tests pypaimon/tests/ray_update_by_row_id_test.py::RayUpdateByRowIdTest::test_empty_dataset_after_transform_is_noop"
             fi

@@ -28,6 +28,7 @@ import pyarrow.compute as pc
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.btree.btree_index_writer import (
     BTREE_IDENTIFIER,
     BTreeIndexWriter,
@@ -103,7 +104,7 @@ _SORTED_INDEX_IDENTIFIERS = (BTREE_IDENTIFIER, BITMAP_IDENTIFIER)
 _GENERIC_INDEX_IDENTIFIERS = tuple(VINDEX_IDENTIFIERS) + (
     FULL_TEXT_IDENTIFIER,
 )
-_SORTED_INDEX_RECORDS_PER_RANGE_FLOATING = 1.2
+_SORTED_INDEX_RECORDS_PER_FILE_FLOATING = 1.2
 
 
 class GlobalIndexBuilder:
@@ -123,6 +124,7 @@ class GlobalIndexBuilder:
         self._index_type = index_type.lower().strip()
         self._partition_filter = partition_filter
         self._partitions = partitions
+        self._user_options = dict(options or {})
         self._options = _merged_options(table, options)
         self._core_options = CoreOptions(self._options)
 
@@ -159,7 +161,7 @@ class GlobalIndexBuilder:
 
     def build(self) -> List[CommitMessage]:
         read_builder = self._table.new_read_builder()
-        partition_filter = self._resolve_partition_filter(read_builder)
+        partition_filter = self._resolve_partition_filter()
         if partition_filter is not None:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
@@ -218,10 +220,10 @@ class GlobalIndexBuilder:
         configured_records_per_range = (
             self._core_options.sorted_index_records_per_range())
         if configured_records_per_range <= 0:
-            raise ValueError("sorted-index.records-per-range must be positive.")
+            raise ValueError("sorted-index.records-per-file must be positive.")
         records_per_range = int(
             configured_records_per_range
-            * _SORTED_INDEX_RECORDS_PER_RANGE_FLOATING
+            * _SORTED_INDEX_RECORDS_PER_FILE_FLOATING
         )
 
         messages = []
@@ -464,8 +466,9 @@ class GlobalIndexBuilder:
                 index_path,
                 index_field.type,
                 self._index_type,
-                self._options.to_map(),
+                self._table.options.options.to_map(),
                 index_field.name,
+                self._user_options,
             )
         if self._index_type == FULL_TEXT_IDENTIFIER:
             return NativeFullTextIndexWriter(
@@ -484,15 +487,16 @@ class GlobalIndexBuilder:
                 "(bucket = -1), but table '%s' has bucket = %s."
                 % (self._table.identifier, bucket)
             )
-        if self._core_options.deletion_vectors_enabled():
+        if (self._core_options.deletion_vectors_enabled()
+                and not (self._index_type in VINDEX_IDENTIFIERS
+                         and self._table.options.data_evolution_enabled())):
             raise ValueError(
-                "Generic global index does not support tables with deletion "
-                "vectors enabled. Table '%s' has "
-                "'deletion-vectors.enabled' = true."
-                % self._table.identifier
+                "Global index build with deletion vectors requires a native "
+                "vector index on a data-evolution table. Table '%s', index type '%s'."
+                % (self._table.identifier, self._index_type)
             )
 
-    def _resolve_partition_filter(self, read_builder) -> Optional[Predicate]:
+    def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:
             return self._partition_filter
         if self._partitions is None:
@@ -502,7 +506,7 @@ class GlobalIndexBuilder:
         if isinstance(partitions, dict):
             partitions = [partitions]
 
-        predicate_builder = read_builder.new_predicate_builder()
+        predicate_builder = PredicateBuilder(self._table.partition_keys_fields)
         partition_predicates = []
         for partition in partitions:
             sub_predicates = []

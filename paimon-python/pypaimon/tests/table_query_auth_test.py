@@ -161,7 +161,7 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
 
     def test_blank_filter_no_extra_fields(self):
         result = TableQueryAuthResult([""], None)
-        extra = result.get_extra_fields_for_filter(
+        extra = result.get_extra_fields(
             [_FakeField("a")], [_FakeField("a"), _FakeField("b")])
         self.assertEqual(extra, [])
 
@@ -247,7 +247,7 @@ class TestTableQueryAuthResultExtraFields(unittest.TestCase):
             _FakeField("dept"),
         ]
         result = TableQueryAuthResult([_simple_filter_json("dept")], None)
-        extra = result.get_extra_fields_for_filter(read_fields, table_fields)
+        extra = result.get_extra_fields(read_fields, table_fields)
         self.assertEqual(len(extra), 1)
         self.assertEqual(extra[0].name, "dept")
 
@@ -255,12 +255,12 @@ class TestTableQueryAuthResultExtraFields(unittest.TestCase):
         read_fields = [_FakeField("name"), _FakeField("dept")]
         table_fields = read_fields + [_FakeField("age")]
         result = TableQueryAuthResult([_simple_filter_json("dept")], None)
-        extra = result.get_extra_fields_for_filter(read_fields, table_fields)
+        extra = result.get_extra_fields(read_fields, table_fields)
         self.assertEqual(len(extra), 0)
 
     def test_no_extra_when_no_filter(self):
         result = TableQueryAuthResult(None, None)
-        extra = result.get_extra_fields_for_filter(
+        extra = result.get_extra_fields(
             [_FakeField("a")], [_FakeField("a"), _FakeField("b")]
         )
         self.assertEqual(len(extra), 0)
@@ -271,7 +271,7 @@ class TestTableQueryAuthResultExtraFields(unittest.TestCase):
         read_fields = [_FakeField("name")]
         table_fields = [_FakeField("name"), _FakeField("dept")]
         result = TableQueryAuthResult([f1, f2], None)
-        extra = result.get_extra_fields_for_filter(read_fields, table_fields)
+        extra = result.get_extra_fields(read_fields, table_fields)
         self.assertEqual(len(extra), 1)
 
 

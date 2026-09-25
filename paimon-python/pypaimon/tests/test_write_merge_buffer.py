@@ -31,6 +31,8 @@ from unittest.mock import Mock
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
 from pypaimon.read.reader.partial_update_merge_function import \
@@ -83,6 +85,7 @@ class _Harness(KeyValueDataWriter):
     """
 
     def __init__(self, merge_function, target_file_size: int = 10 ** 12):
+        self.options = CoreOptions(Options({}))
         self.trimmed_primary_keys = ['id']
         self._merge_function = merge_function
         # Large enough that ``_check_and_roll_if_needed`` does not

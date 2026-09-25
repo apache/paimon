@@ -1741,6 +1741,8 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    public static final int MAX_DYNAMIC_BUCKETS = Short.MAX_VALUE + 1;
+
     @Immutable
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_INITIAL_BUCKETS =
             key("dynamic-bucket.initial-buckets")
@@ -1755,7 +1757,9 @@ public class CoreOptions implements Serializable {
                     .defaultValue(-1)
                     .withDescription(
                             "Max buckets for a partition in dynamic bucket mode, It should "
-                                    + "either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).");
+                                    + "either be equal to -1 (unlimited), or it must be between 1 and "
+                                    + MAX_DYNAMIC_BUCKETS
+                                    + " (fixed upper bound).");
 
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")
@@ -2614,7 +2618,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
             key("data-evolution.reassign.skip-contiguous-row-count")
                     .longType()
-                    .defaultValue(1_000_000_000L)
+                    .defaultValue(20_000_000_000L)
                     .withDescription(
                             "Strictly contiguous same-partition logical row-id runs containing "
                                     + "more than this number of rows are excluded from row-id "
@@ -2989,6 +2993,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The max parallelism of Flink/Spark for building global index.");
 
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_QUERY_IN_READER_ENABLED =
+            key("global-index.query-in-reader.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Query supported scalar global indexes per data split in readers "
+                                    + "instead of materializing index results during scan planning.");
+
     public static final ConfigOption<Boolean> GLOBAL_INDEX_ENABLED =
             key("global-index.enabled")
                     .booleanType()
@@ -3018,6 +3030,21 @@ public class CoreOptions implements Serializable {
                     .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for full-text index queries.");
+
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_FILTER_REFINE_FROM_DATA =
+            key("global-index.filter.refine-from-data")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether a vector, hybrid or full-text search may read the filter "
+                                    + "columns of candidate rows to verify a row filter that the "
+                                    + "scalar global index can only answer with a superset, such "
+                                    + "as contains, ends-with or like on a BTree index or a "
+                                    + "conjunction with a member no index can evaluate. When "
+                                    + "false, such candidates are excluded from the search, which "
+                                    + "never returns a non-matching row but may return fewer than "
+                                    + "the requested top-k. When true, the read runs on the caller "
+                                    + "and may cover every candidate row.");
 
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
@@ -3311,7 +3338,7 @@ public class CoreOptions implements Serializable {
     }
 
     public static String normalizeFileFormat(String fileFormat) {
-        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase();
+        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase(Locale.ROOT);
     }
 
     public String dataFilePrefix() {
@@ -4290,7 +4317,10 @@ public class CoreOptions implements Serializable {
 
     public Set<PartitionMarkDoneAction> partitionMarkDoneActions() {
         return Arrays.stream(options.get(PARTITION_MARK_DONE_ACTION).split(","))
-                .map(x -> PartitionMarkDoneAction.valueOf(x.replace('-', '_').toUpperCase()))
+                .map(
+                        x ->
+                                PartitionMarkDoneAction.valueOf(
+                                        x.replace('-', '_').toUpperCase(Locale.ROOT)))
                 .collect(Collectors.toCollection(HashSet::new));
     }
 
@@ -4810,6 +4840,10 @@ public class CoreOptions implements Serializable {
         return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
     }
 
+    public boolean globalIndexFilterRefineFromData() {
+        return options.get(GLOBAL_INDEX_FILTER_REFINE_FROM_DATA);
+    }
+
     public GlobalIndexSearchMode vectorIndexSearchMode() {
         return indexSearchMode(VECTOR_INDEX_SEARCH_MODE);
     }
@@ -4989,6 +5023,7 @@ public class CoreOptions implements Serializable {
     private Options primaryKeySortedIndexOptions(
             String column, String optionFamily, String algorithmPrefix) {
         Options resolved = new Options(toConfiguration().toMap());
+        resolved.remove("sorted-index.records-per-file");
         resolved.remove("sorted-index.records-per-range");
         String optionKey = "fields." + column + "." + optionFamily + ".index.options";
         String serialized = options.get(optionKey);

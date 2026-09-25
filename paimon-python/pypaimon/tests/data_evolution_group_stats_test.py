@@ -392,6 +392,9 @@ class DataEvolutionGroupStatsPlanningTest(unittest.TestCase):
         class _Options:
             options = {}
 
+            def data_file_path_directory(self, default=None):
+                return default
+
         class _Table:
             table_path = '/tmp/table'
             options = _Options()

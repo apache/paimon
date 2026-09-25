@@ -61,7 +61,7 @@ Use these mappings when defining a `pyarrow.Schema` for a Paimon table. See [Cat
 ## VARIANT Type
 
 `VARIANT` stores semi-structured, schema-flexible data (JSON objects, arrays, and primitives)
-in the [Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding).
+in the [Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding.md).
 
 pypaimon exposes VARIANT columns as Arrow `struct<value: binary NOT NULL, metadata: binary NOT NULL>` and
 provides `GenericVariant` for encoding and decoding.

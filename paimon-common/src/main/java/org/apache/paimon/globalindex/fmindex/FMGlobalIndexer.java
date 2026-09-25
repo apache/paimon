@@ -29,6 +29,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -103,6 +104,7 @@ public class FMGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         checkArgument(totalRowCount >= 0, "FM index total row count must be non-negative.");
         if (files.isEmpty()) {

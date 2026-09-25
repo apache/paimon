@@ -60,8 +60,27 @@ has exactly one text column. To target a specific text column, pass `column`.
 
 Use `pre_filter` to prune search candidates before ranking. Use `where()` to
 filter the rows read from the search result. Both `pre_filter` and `where()`
-accept SQL-like predicate strings. For full-text search, `pre_filter` must only
-reference partition columns.
+accept SQL-like predicate strings. On data-evolution tables, full-text
+`pre_filter` supports ordinary data columns as well as partition columns.
+For primary-key full-text search, only partition predicates are supported.
+
+Full-text data predicates are evaluated before Top-K selection. PyPaimon reads
+the predicate's columns and row IDs at the search snapshot, then passes the
+matching row IDs to the full-text index. Scalar indexes can prune this read,
+but partial scalar-index coverage does not exclude matching rows covered by
+the full-text search plan. This filter read can scan all candidate rows;
+partition-only predicates keep the existing partition-pruning path. For
+unindexed data in `full-text-index.search-mode=full`, filtering preserves the
+unfiltered corpus used to calculate BM25 statistics.
+
+For data-evolution vector search, a scalar index may return candidates rather than exact
+matches, for example for BTree string-prefix or substring predicates, or when
+part of a conjunction is unsupported. Such index candidates are excluded with
+a warning by default, so the result can contain fewer than the requested rows.
+Set the table option `global-index.filter.refine-from-data=true` to verify those
+candidates before vector top-k selection. This reads the filter columns at the
+search snapshot and may scan every candidate row; exact index matches need no
+extra read. This applies to single and batch vector queries, locally and on Ray.
 
 Each execution of `search`, `search_vectors`, or `search_hybrid` reads one
 snapshot across candidate search, filtering, reranking, and result lookup.
@@ -83,7 +102,7 @@ neighbors = (
 )
 
 matches = (
-    docs.search("paimon vector", column="content")
+    docs.search("paimon vector", column="content", pre_filter="category = 'lake'")
     .limit(10)
     .to_pandas()
 )
@@ -100,11 +119,62 @@ matches = (
 )
 ```
 
+## Scores and Result Ordering
+
+On data-evolution tables, use `with_score()` to append a `float64` relevance
+column and `order_by_score()` to sort by descending score, with ascending
+`_ROW_ID` for ties. Both methods are optional: `with_score()` alone preserves
+the existing result order, and `order_by_score()` does not require projecting
+scores. Without either method, result behavior is unchanged.
+
+```python
+neighbors = (
+    docs.search([0.1, 0.2, 0.3], column="embedding")
+    .select(["id", "content"])
+    .with_score("relevance")
+    .order_by_score()
+    .limit(10)
+    .to_arrow()
+)
+```
+
+The default score column is `_score`. A custom name must not conflict with a
+table column or a system field. Scores use the search engine's existing
+higher-is-better convention: L2 uses `1 / (1 + squared_distance)`, cosine uses
+cosine similarity, and inner product uses the dot product. Full-text results
+expose BM25 scores; hybrid results expose the selected ranker's fusion scores.
+Scores from different metrics or rankers are not directly comparable.
+
+These methods also work with full-text, hybrid, and batch vector queries, and
+with local or Ray vector execution. Batch output retains input-query order and
+each row receives its score for that query. `where()` still filters selected
+rows during lookup, so it can return fewer than the requested number of hits.
+
+When only row IDs and scores are needed, explicitly project `_ROW_ID`:
+
+```python
+hits = (
+    docs.search([0.1, 0.2, 0.3], column="embedding")
+    .select(["_ROW_ID"])
+    .with_score()
+    .order_by_score()
+    .limit(10)
+    .to_arrow()
+)
+```
+
+Use `select([]).with_score()` for scores alone. When either score method is
+enabled and the explicit projection contains only `_ROW_ID` or is empty, the
+query skips final row lookup if there is no `where()` and query authorization
+is disabled. Raw search, prefiltering, and vector refinement can still read
+data. Historical snapshot and deletion semantics remain the same. Plain
+`select([])` without either method retains its existing behavior.
+
 ## Distributed Vector Search
 
-Use `execution="ray"` to execute a single vector query across Ray workers and
-return an Arrow table to the driver. This supports data-evolution tables;
-primary-key tables, batch vector queries, and hybrid queries are not supported
+Use `execution="ray"` to execute vector queries across Ray workers and return
+Arrow results to the driver. This supports single and batch vector queries on
+data-evolution tables; primary-key tables and hybrid queries are not supported
 by this execution mode.
 
 Install the same PyPaimon and index dependencies on the driver and workers:
@@ -138,12 +208,39 @@ neighbors = (
 the number of in-flight Ray tasks, with a default of 4. `ray_remote_args` supplies
 Ray task options, including resources and retry settings; `num_returns` is
 managed by PyPaimon. These two arguments require `execution="ray"`.
-Query vectors must contain finite values. If stored vectors produce NaN scores,
-Ray execution fails because NaN cannot be ranked consistently across tasks.
+
+For single and batch vector queries, `to_pandas()` and `to_list()` accept the
+same `execution`, `concurrency`, and `ray_remote_args` arguments as `to_arrow()`.
+For example, use `query.to_pandas(execution="ray", concurrency=4)` to return a
+DataFrame, or one DataFrame per query for a batch. Result conversion runs on the
+driver after the search and lookup complete.
+Single-vector Ray queries require finite query values and fail if stored
+vectors produce NaN scores.
+
+Batch queries use the same execution options and return one Arrow table per
+input vector, in input order:
+
+```python
+batch_neighbors = (
+    docs.search_vectors([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], column="embedding")
+    .select(["id", "content"])
+    .limit(10)
+    .to_arrow(execution="ray", concurrency=4)
+)
+```
+
+Each batch task handles all query vectors for one split: index workers reuse
+an open shard across bounded query blocks, and raw workers stream each data
+split once with a separate top-k for each query. For refinement, the driver
+selects each query's global candidates, then workers stream their union once per
+read split, scoring each row only for the queries that selected it. Shared final
+row lookup runs on the driver. The entire batch uses one read snapshot.
+Candidate traffic and result memory grow with the number of query vectors;
+split large query collections into smaller batches when necessary.
 
 The driver fixes one read snapshot and plans the query. Workers search individual
 index shards and, when required by the table's search mode, scan unindexed data.
-They return candidate row IDs and scores. For single-vector queries with
+They return candidate row IDs and scores. For vector queries with
 refinement enabled, the driver first selects the global candidate set, then
 workers read and score those candidate vectors using the index's persisted
 metric. The driver merges their results and retains the local rules for
@@ -161,12 +258,18 @@ All workers must be able to access the table's storage. Local filesystem paths
 are suitable for a local Ray cluster; multiple nodes require shared storage.
 Each index task searches one shard, while its native index I/O settings still
 apply. Raw-scan parallelism is limited by the number of planned read splits,
-controlled by the table's `source.split.target-size` option. Single-vector
-refinement also uses planned read splits; workers return scores for merging.
+controlled by the table's `source.split.target-size` option. Refinement also
+uses planned read splits; workers return scores for merging.
 Final row lookup runs on the driver. Candidate traffic grows
 with the number of index shards and the configured refinement budget, so Ray
 execution is most useful when shard search or raw scanning outweighs scheduling
 and transfer costs. Small queries can be faster locally.
+
+Local and Ray index searches merge shard results incrementally in plan order.
+The concurrency limit bounds running tasks plus completed results waiting for
+earlier shards, so a slow shard can delay further submissions. Global top-k
+selection still uses all merged candidate scores, whose storage grows with the
+number of unique candidate rows per query.
 
 ## Search Hybrid
 
@@ -179,8 +282,11 @@ text column when the table has exactly one text column. To target a specific
 text column, pass `column` to `pm.text_route`.
 
 `pre_filter` is applied before ranking. It accepts a SQL-like predicate string.
-When a hybrid query has a full-text route, `pre_filter` must only reference
-partition columns.
+On data-evolution tables, ordinary data predicates are applied to both vector
+and full-text routes before each route selects its candidates. The vector
+route retains the `global-index.filter.refine-from-data` behavior described
+above, while the full-text route verifies data predicates through a filter-column
+read. Partition-only predicates prune both routes without that extra read.
 
 ```python
 # This example assumes the table is partitioned by dt.

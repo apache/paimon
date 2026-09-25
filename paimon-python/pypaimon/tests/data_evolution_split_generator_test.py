@@ -120,6 +120,9 @@ class SplitOrderTest(unittest.TestCase):
     class _Options:
         options = {}
 
+        def data_file_path_directory(self, default=None):
+            return default
+
     class _Table:
         table_path = '/table'
         options = None
@@ -161,9 +164,11 @@ class SplitOrderTest(unittest.TestCase):
             self._entry('c.parquet', 2),
         ]
         splits = DataEvolutionSplitGenerator(
-            self._Table(), target_split_size=1024, open_file_cost=0
+            self._Table(), target_split_size=1024, open_file_cost=0,
+            snapshot_id=7,
         ).create_splits(entries)
 
+        self.assertEqual(7, splits[0].snapshot_id)
         self.assertEqual(
             ['a.parquet', 'b.parquet', 'c.parquet'],
             [file.file_name for file in splits[0].files],

@@ -172,7 +172,8 @@ class _RowIdUpdateFileWriter:
                     file_writer = SingleFileWriter(
                         writer.file_io, file_path, batch.schema, writer.file_format,
                         writer.compression, writer.zstd_level,
-                        fields, writer._get_column_stats)
+                        fields, writer._get_column_stats,
+                        parquet_options=writer.parquet_writer_options)
                 file_writer.write(batch, row_group_size=batch.num_rows)
                 del batch
             if file_writer is None:

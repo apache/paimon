@@ -197,6 +197,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         for file_meta in all_files:
             self.assertEqual([], self._row_sidecar_files(file_meta))
 
+    @pytest.mark.python_read
     def test_row_sidecar_serves_sparse_row_id_read(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -494,7 +495,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
             {'a': [1, 2, 3, 4], 'b': ['x', 'y', 'z', 'w'],
              'c': [0.1, 0.2, 0.3, 0.4]},
             schema=pa_schema)
-        self.assertEqual(actual, expect)
+        # Table scans are unordered; native planning may emit merged groups
+        # before raw groups.
+        self.assertEqual(actual.sort_by('a'), expect.sort_by('a'))
 
     # ------------------------------------------------------------------
     # Blob-format data evolution

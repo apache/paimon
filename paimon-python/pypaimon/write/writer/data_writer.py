@@ -31,6 +31,7 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
+from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
@@ -82,6 +83,13 @@ class DataWriter(ABC):
             self.options.changelog_file_format()
             or self.file_format
         )
+        self.parquet_writer_options = (
+            create_parquet_writer_options(self.options)
+            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET
+            or (changelog_producer == ChangelogProducer.INPUT
+                and self.changelog_file_format == CoreOptions.FILE_FORMAT_PARQUET)
+            else {}
+        )
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
 
@@ -113,10 +121,6 @@ class DataWriter(ABC):
             if self.changelog_producer == ChangelogProducer.INPUT else None,
         )
 
-    # Set by the composite writers when a flush landed its normal data file but a
-    # later phase of the same flush failed; see their ``_close_current_writers``.
-    _pending_normal_meta: Optional[DataFileMeta] = None
-
     @property
     def pending_row_count(self) -> int:
         """Rows held for the file being written, not yet in a finished file.
@@ -126,20 +130,6 @@ class DataWriter(ABC):
         ``_buffer`` stays empty for them.
         """
         return self._buffer.num_rows
-
-    def _require_finished_flush(self):
-        """Refuse to buffer more rows while a flush is only half done.
-
-        A composite flush writes the normal data file first and the sidecars
-        after. Once that file is on disk it covers exactly the rows flushed so
-        far, so rows appended before the retry finishes would belong to no file
-        the resumed flush writes.
-        """
-        if self._pending_normal_meta is not None:
-            raise RuntimeError(
-                "Cannot write: a previous flush left a data file that no commit "
-                "has taken yet. Retry prepare_commit() to finish that flush, or "
-                "abort() this writer.")
 
     def write(self, data: pa.RecordBatch):
         try:
@@ -161,6 +151,19 @@ class DataWriter(ABC):
             self._buffer.reset()
 
         return self.committed_files.copy()
+
+    def _release_prepared_files(self) -> List[DataFileMeta]:
+        """Clear metadata accepted by the parent and return files it must delete on abort.
+
+        Call only after all sidecars are prepared and validated. Until then, this
+        writer retains its metadata for retry and its responsibility for cleanup.
+        """
+        owned_files = self.committed_files.copy() if self.delete_file_upon_abort() else []
+        self.committed_files.clear()
+        return owned_files
+
+    def delete_file_upon_abort(self) -> bool:
+        return True
 
     def prepare_changelog_commit(self) -> List[DataFileMeta]:
         return self.committed_changelog_files.copy()
@@ -185,10 +188,6 @@ class DataWriter(ABC):
         during writing. It deletes any files that were written and cleans up resources.
         """
         to_delete = self.committed_files + self.committed_changelog_files
-        if self._pending_normal_meta is not None:
-            # No list tracks this one: it landed but its flush never published it.
-            to_delete.append(self._pending_normal_meta)
-            self._pending_normal_meta = None
         self._delete_committed_files(to_delete)
 
         # Clean up resources
@@ -254,6 +253,28 @@ class DataWriter(ABC):
             self._write_data_to_file(pending.slice(0, split_row))
             self._buffer.reset(pending.slice(split_row))
 
+    def _write_file(self, file_path: str, data: pa.Table, file_format: str) -> Dict:
+        """Write contents without publishing metadata; return shredding statistics."""
+        if file_format == CoreOptions.FILE_FORMAT_PARQUET:
+            return self._write_parquet_data(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_ORC:
+            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+        elif file_format == CoreOptions.FILE_FORMAT_AVRO:
+            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+        elif file_format == CoreOptions.FILE_FORMAT_BLOB:
+            self.file_io.write_blob(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_LANCE:
+            self.file_io.write_lance(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
+            self.file_io.write_vortex(file_path, data)
+        elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+            self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
+        elif file_format == CoreOptions.FILE_FORMAT_ROW:
+            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
+        else:
+            raise ValueError(f"Unsupported file format: {file_format}")
+        return {}
+
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
             return
@@ -278,24 +299,7 @@ class DataWriter(ABC):
         # exists would make the retry write a second copy of rows the first meta
         # already covers.
         try:
-            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-                shared_shredding_stats = self._write_parquet_data(file_path, data)
-            elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-                self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-            elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-                self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-            elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
-                self.file_io.write_blob(file_path, data)
-            elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
-                self.file_io.write_lance(file_path, data)
-            elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
-                self.file_io.write_vortex(file_path, data)
-            elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
-                self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
-            elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
-                self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
-            else:
-                raise ValueError(f"Unsupported file format: {self.file_format}")
+            shared_shredding_stats = self._write_file(file_path, data, self.file_format)
 
             if self._should_write_row_sidecar():
                 row_sidecar_name = f"{file_name}{self.ROW_SIDECAR_SUFFIX}"
@@ -385,7 +389,9 @@ class DataWriter(ABC):
         if self._map_shared_shredding.is_active():
             return self._map_shared_shredding.write_parquet(
                 self.file_io, path, data, self.compression, self.zstd_level)
-        self.file_io.write_parquet(path, data, compression=self.compression, zstd_level=self.zstd_level)
+        self.file_io.write_parquet(
+            path, data, compression=self.compression, zstd_level=self.zstd_level,
+            **self.parquet_writer_options)
         return {}
 
     def _create_data_file_meta(self, file_name, file_path, row_count,
@@ -451,17 +457,12 @@ class DataWriter(ABC):
         changelog_external_path = changelog_file_path if is_external else None
 
         try:
-            if cl_fmt == CoreOptions.FILE_FORMAT_PARQUET:
-                self._write_parquet_data(changelog_file_path, data)
-            elif cl_fmt == CoreOptions.FILE_FORMAT_ORC:
-                self.file_io.write_orc(changelog_file_path, data, compression=self.compression,
-                                       zstd_level=self.zstd_level)
-            elif cl_fmt == CoreOptions.FILE_FORMAT_AVRO:
-                self.file_io.write_avro(changelog_file_path, data, compression=self.compression,
-                                        zstd_level=self.zstd_level)
-            else:
+            if cl_fmt not in (CoreOptions.FILE_FORMAT_PARQUET,
+                              CoreOptions.FILE_FORMAT_ORC,
+                              CoreOptions.FILE_FORMAT_AVRO):
                 raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
                                  f"Supported formats: parquet, orc, avro.")
+            self._write_file(changelog_file_path, data, cl_fmt)
 
             return DataFileMeta.create(
                 file_name=changelog_file_name,

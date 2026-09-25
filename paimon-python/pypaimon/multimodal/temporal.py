@@ -591,11 +591,11 @@ class _WindowJoinRight(_AsOfJoinRight):
                 metadata=source.metadata))
         return fields
 
-    def match(self, anchor_row):
+    def _match_range(self, anchor_row):
         key = tuple(anchor_row[name] for name in self.by)
         bounds = self._index.get(key)
         if bounds is None:
-            return []
+            return 0, 0
         target = anchor_row[_TIME_KEY]
         start, end = bounds
         left = target - self._preceding_key
@@ -616,7 +616,7 @@ class _WindowJoinRight(_AsOfJoinRight):
             first_key = max(first_key, _python_scalar(self._time_keys[start]))
             last_key = min(last_key, _python_scalar(self._time_keys[end - 1]))
             if first_key > last_key:
-                return []
+                return 0, 0
             first = bisect_left(
                 self._time_keys, first_key, start, end)
             last = bisect_right(
@@ -632,21 +632,29 @@ class _WindowJoinRight(_AsOfJoinRight):
                 if self.closed in ("both", "right")
                 else bisect_left(self._time_keys, right, first, end)
             )
-        return [self._row_ids[index].as_py()
-                for index in range(first, last)]
+        return first, last
 
     def build_arrays(self, anchor_rows, fetcher):
-        matches = [self.match(row) for row in anchor_rows]
-        unique_ids = list(dict.fromkeys(
-            row_id for match in matches for row_id in match))
+        ranges = [self._match_range(row) for row in anchor_rows]
+        slices = [(0, 0)] * len(ranges)
+        unique_ids = []
+        covered_end = 0
+        offset = 0
+        # Ranges refer to sorted metadata positions, not contiguous row IDs.
+        # Fetch their union in that order so each window becomes an Arrow slice.
+        for index, (start, end) in sorted(
+                enumerate(ranges), key=lambda item: item[1]):
+            if start == end:
+                continue
+            if start >= covered_end:
+                offset = len(unique_ids) - start
+            unread_start = max(start, covered_end)
+            if end > unread_start:
+                unique_ids.extend(
+                    self._row_ids.slice(unread_start, end - unread_start).to_pylist())
+                covered_end = end
+            slices[index] = (start + offset, end - start)
         values = fetcher.fetch(unique_ids)
-        positions = {
-            row_id: index for index, row_id in enumerate(unique_ids)
-        }
-        indices = [
-            [positions[row_id] for row_id in match]
-            for match in matches
-        ]
         aggregations_by_source = {}
         for index, (_, source_name, aggregation) in enumerate(self.aggregations):
             aggregations_by_source.setdefault(source_name, []).append(
@@ -661,11 +669,8 @@ class _WindowJoinRight(_AsOfJoinRight):
             ]
             source_values = values[source_name]
             results = [[] for _ in aggregations]
-            for row_indices in indices:
-                selected = (
-                    pc.take(source_values, pa.array(row_indices, type=pa.int64()))
-                    if row_indices else source_values.slice(0, 0)
-                )
+            for start, length in slices:
+                selected = source_values.slice(start, length)
                 for (_, aggregation), result in zip(aggregations, results):
                     result.append(_aggregate_values(selected, aggregation))
                 del selected
@@ -750,10 +755,23 @@ def _aggregate_values(selected, aggregation):
         return pc.min(selected).as_py()
     if aggregation == "max":
         return pc.max(selected).as_py()
-    items = selected.to_pylist()
-    if aggregation == "first":
-        return next((item for item in items if item is not None), None)
-    return next((item for item in reversed(items) if item is not None), None)
+    chunks = selected.chunks if isinstance(selected, pa.ChunkedArray) else (selected,)
+    if aggregation == "last":
+        chunks = reversed(chunks)
+    for chunk in chunks:
+        if chunk.null_count == len(chunk):
+            continue
+        indices = range(len(chunk))
+        if aggregation == "last":
+            indices = reversed(indices)
+        for index in indices:
+            scalar = chunk[index]
+            if scalar.is_valid:
+                value = scalar.as_py()
+                # A valid dictionary index can still reference a null value.
+                if value is not None:
+                    return value
+    return None
 
 
 def _window_bound_key(name, value, data_type):
@@ -1223,11 +1241,7 @@ class _RowIdFetcher:
             allowed = Range.and_(wanted, self._split_ranges[split_index])
             if not allowed:
                 continue
-            indexed = IndexedSplit(
-                split,
-                allowed,
-                exact_merged_row_count=sum(r.count() for r in allowed),
-            )
+            indexed = IndexedSplit(split, allowed)
             if auth_result is not None:
                 indexed = QueryAuthSplit(indexed, auth_result)
             selected_splits.append(indexed)
