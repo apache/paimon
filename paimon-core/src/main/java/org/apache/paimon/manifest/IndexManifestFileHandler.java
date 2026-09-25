@@ -254,13 +254,15 @@ public class IndexManifestFileHandler {
                                     && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
                                             addedMeta.sourceMeta()))
                             || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
-                            || (Arrays.equals(
-                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
-                                    && !Range.intersect(
-                                            retainedMeta.rowRangeStart(),
-                                            retainedMeta.rowRangeEnd(),
-                                            addedMeta.rowRangeStart(),
-                                            addedMeta.rowRangeEnd()))) {
+                            // different definitions over the same index field coexist;
+                            // only the same definition conflicts, and only on overlap
+                            || !Arrays.equals(
+                                    retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
+                            || !Range.intersect(
+                                    retainedMeta.rowRangeStart(),
+                                    retainedMeta.rowRangeEnd(),
+                                    addedMeta.rowRangeStart(),
+                                    addedMeta.rowRangeEnd())) {
                         continue;
                     }
 

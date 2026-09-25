@@ -35,8 +35,10 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 
@@ -83,6 +85,86 @@ public class IndexManifestFileHandlerTest {
         assertThat(entries.contains(entry1)).isFalse();
         assertThat(entries.contains(entry2)).isFalse();
         assertThat(entries.contains(entry3)).isTrue();
+    }
+
+    @Test
+    public void testDataEvolutionDifferentDefinitionsDoNotConflict() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+
+        IndexManifestFile indexManifestFile =
+                new IndexManifestFile.Factory(
+                                fileStore.fileIO(),
+                                FileFormat.manifestFormat(fileStore.options()),
+                                "zstd",
+                                fileStore.pathFactory(),
+                                null)
+                        .create();
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        // INDEX ON (a) covering rows [0, 100]
+        IndexManifestEntry firstDefinition =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        globalIndexFile("def-a", 0, 100, 1, null));
+        String manifest1 = handler.write(null, Collections.singletonList(firstDefinition));
+
+        // INDEX ON (a, b) covering rows [200, 300]: a different definition of the same
+        // index field with a disjoint row range must coexist, not conflict
+        IndexManifestEntry secondDefinition =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        globalIndexFile("def-ab", 200, 300, 1, new int[] {2}));
+        String manifest2 = handler.write(manifest1, Collections.singletonList(secondDefinition));
+        assertThat(indexManifestFile.read(manifest2))
+                .containsExactlyInAnyOrder(firstDefinition, secondDefinition);
+
+        // the same definition still conflicts on overlapping row ranges
+        IndexManifestEntry overlappingSameDefinition =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        globalIndexFile("def-a-overlap", 50, 150, 1, null));
+        assertThatThrownBy(
+                        () ->
+                                handler.write(
+                                        manifest2,
+                                        Collections.singletonList(overlappingSameDefinition)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("overlapping row range");
+    }
+
+    private static IndexFileMeta globalIndexFile(
+            String fileName,
+            long rowRangeStart,
+            long rowRangeEnd,
+            int indexFieldId,
+            int[] extraFieldIds)
+            throws IOException {
+        // a data-evolution source meta is recognized by its magic number
+        org.apache.paimon.io.DataOutputSerializer out =
+                new org.apache.paimon.io.DataOutputSerializer(4);
+        out.writeInt(0x44454958);
+        return new IndexFileMeta(
+                "test_global",
+                fileName,
+                0,
+                0,
+                null,
+                null,
+                new GlobalIndexMeta(
+                        rowRangeStart,
+                        rowRangeEnd,
+                        indexFieldId,
+                        extraFieldIds,
+                        null,
+                        out.getCopyOfBuffer()));
     }
 
     @Test
