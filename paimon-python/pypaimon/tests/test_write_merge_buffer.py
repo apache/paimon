@@ -85,6 +85,12 @@ class _Harness(KeyValueDataWriter):
     def __init__(self, merge_function, target_file_size: int = 10 ** 12):
         self.trimmed_primary_keys = ['id']
         self._merge_function = merge_function
+        # No user ``sequence.field`` in these buffer-mechanics tests, so the
+        # fold sorts by (key, _SEQUENCE_NUMBER) exactly as before. Set the
+        # attributes ``_sort_by_primary_key`` reads (normally populated by
+        # ``DataWriter.__init__``, which this harness bypasses).
+        self._sequence_fields = []
+        self._sequence_field_ascending = True
         # Large enough that ``_check_and_roll_if_needed`` does not
         # trigger on its own in tests that don't care about rolling.
         self.target_file_size = target_file_size

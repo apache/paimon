@@ -23,6 +23,7 @@ import pyarrow.compute as pc
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
+from pypaimon.read.reader.sort_merge_reader import is_comparable_seq_field
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.write.writer.data_writer import DataWriter
@@ -49,6 +50,25 @@ class KeyValueDataWriter(DataWriter):
         # paths that don't go through FileStoreWrite) don't accidentally
         # skip the merge step entirely.
         self._merge_function = merge_function or DeduplicateMergeFunction()
+        # Buffer-fold order must match the read-side SortMergeReader, or a
+        # raw-convertible split (which skips the merge reader) would read a
+        # file folded in the wrong order. The read heap orders on
+        # ``sequence.field`` (honoring ``sequence.field.sort-order``) between
+        # the user key and the file-level _SEQUENCE_NUMBER; reuse the very
+        # same option accessors ``split_read`` feeds ``builtin_seq_comparator``
+        # so the two orderings stay consistent by construction. Only atomic,
+        # orderable sequence fields are kept: a complex / VARIANT
+        # sequence.field cannot be sorted by pyarrow (and the read path
+        # rejects it with a clear NotImplementedError up front, so such a
+        # table is unreadable and its buffer fold order is moot) -- drop it
+        # here rather than crash the write with an obscure Arrow error.
+        self._sequence_field_ascending = \
+            self.options.sequence_field_sort_order_is_ascending()
+        self._sequence_fields = [
+            name for name in self.options.sequence_field()
+            if self.table.field_dict.get(name) is not None
+            and is_comparable_seq_field(self.table.field_dict[name])
+        ]
 
     def _process_data(self, data: pa.RecordBatch) -> pa.Table:
         # No sort here: sorting once at flush is strictly cheaper than
@@ -286,11 +306,30 @@ class KeyValueDataWriter(DataWriter):
         # Table, so this serves both the per-batch entry path (legacy)
         # and the buffer-wide sort path (used by ``_flush_all``).
         sort_keys = [(key, 'ascending') for key in self.trimmed_primary_keys]
+        # Insert the ``sequence.field`` columns between the key and the
+        # file-level _SEQUENCE_NUMBER, so a same-key run folds in the order
+        # the read heap (SortMergeReaderWithMinHeap.HeapEntry.__lt__) would
+        # merge it: user key -> sequence.field (with sort-order) -> file
+        # sequence number. Without this the buffer folds order-sensitive
+        # merges (aggregation last_value/first_value, partial-update,
+        # dedupe) in arrival order, which silently disagrees with the read
+        # for any ``sequence.field`` table. Skipped entirely when unset, so
+        # the common no-sequence.field path is byte-for-byte unchanged.
+        if self._sequence_fields:
+            seq_dir = ('ascending' if self._sequence_field_ascending
+                       else 'descending')
+            schema_names = set(data.schema.names)
+            for seq_field in self._sequence_fields:
+                if seq_field in schema_names:
+                    sort_keys.append((seq_field, seq_dir))
         if '_SEQUENCE_NUMBER' in data.schema.names:
             sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 
         # Java MergeTree comparators order null keys first. Keep Python-written files in the same
         # order so their key ranges and sorted-run invariants are interoperable with Java readers.
+        # ``builtin_seq_comparator`` also sorts nulls first regardless of
+        # sort-order (Java ``nullIsLast=false``), which 'at_start' matches for
+        # the ascending and descending sequence.field cases alike.
         sorted_indices = pc.sort_indices(
             data, sort_keys=sort_keys, null_placement='at_start')
         return data.take(sorted_indices)

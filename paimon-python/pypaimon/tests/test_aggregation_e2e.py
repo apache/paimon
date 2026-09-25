@@ -296,6 +296,31 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'total': 100, 'max_score': 9, 'label': 'hi'}],
         )
 
+    def test_sequence_field_honored_within_one_batch(self):
+        # Regression: both same-key rows arrive in a SINGLE write_arrow
+        # with the highest-``total`` (sequence) row written FIRST, so
+        # arrival order (_SEQUENCE_NUMBER) and sequence.field order
+        # disagree. The write buffer folds the run before it hits disk, so
+        # it must fold in sequence.field order -- ``last_value`` keeps the
+        # total=100 row, matching what the read heap does for the same rows
+        # spread across files (see test_sequence_field_supported).
+        #
+        # Pre-fix the buffer sorted only by (key, _SEQUENCE_NUMBER) and
+        # folded in arrival order, wrongly collapsing to total=50/'lo'.
+        table = self._create_pk_table(
+            'agg_sequence_field_one_batch',
+            field_aggs={'max_score': 'last_value', 'label': 'last_value'},
+            extra_options={'sequence.field': 'total'},
+        )
+        self._write(table, [
+            {'id': 1, 'total': 100, 'max_score': 9, 'label': 'hi'},
+            {'id': 1, 'total': 50, 'max_score': 1, 'label': 'lo'},
+        ])
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'total': 100, 'max_score': 9, 'label': 'hi'}],
+        )
+
     def test_aggregate_function_on_sequence_field_rejected(self):
         # An explicit aggregator on the sequence column is invalid: Java
         # rejects fields.<seq>.aggregate-function in

@@ -308,6 +308,11 @@ class FileStoreWrite:
             # partially aggregated instead of silently deduped
             # (latest-row-wins). Read and compaction re-aggregate across
             # files, so this mirrors Java's per-buffer partial aggregation.
+            # The buffer folds each same-key run in sequence.field order
+            # (KeyValueDataWriter._sort_by_primary_key reuses the read's
+            # sequence.field / sort-order accessors), so order-sensitive
+            # aggregators (last_value/first_value) pick the same row the
+            # read heap would -- not the arrival-order row.
             from pypaimon.read.reader.aggregation_merge_function import (
                 AggregateMergeFunction, build_field_aggregators)
             agg_value_fields = self.table.table_schema.fields
