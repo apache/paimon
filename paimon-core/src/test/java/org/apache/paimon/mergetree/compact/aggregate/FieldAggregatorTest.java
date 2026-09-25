@@ -40,6 +40,7 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFa
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapWithKeyTimeAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
@@ -2870,6 +2871,46 @@ public class FieldAggregatorTest {
 
         byte[] result4 = (byte[]) agg.agg(acc2, inputVal);
         assertThat(result4).isEqualTo(acc2);
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggRejectsNonStringTsField() {
+        // the merge reads the ts field as a string and compares lexicographically; a
+        // TIMESTAMP (or any non-string) ts field would be read as raw string bits and
+        // silently retain the wrong entry, so the factory must fail fast
+        MapType timestampTs =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "ts", DataTypes.TIMESTAMP())));
+
+        FieldMergeMapWithKeyTimeAggFactory factory = new FieldMergeMapWithKeyTimeAggFactory();
+        assertThatThrownBy(
+                        () ->
+                                factory.create(
+                                        timestampTs, CoreOptions.fromMap(new HashMap<>()), "f"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Timestamp field 'ts' for field 'f' must be STRING but was 'TIMESTAMP(6)'.");
+
+        // explicitly-named ts field is validated too
+        MapType namedTs =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "ts", DataTypes.INT())));
+        assertThatThrownBy(
+                        () ->
+                                factory.create(
+                                        namedTs,
+                                        CoreOptions.fromMap(
+                                                Collections.singletonMap(
+                                                        "fields.f.ts-field", "ts")),
+                                        "f"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Timestamp field 'ts' for field 'f' must be STRING but was 'INT'.");
     }
 
     @Test
