@@ -638,9 +638,18 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         DataEvolutionBatchScan scan =
                 (DataEvolutionBatchScan) table.newScan(ignored -> snapshotReader);
         scan.withFilter(new PredicateBuilder(table.rowType()).startsWith(1, str("a")));
-        assertThatThrownBy(scan::plan)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Tag changed after data planning");
+        List<Split> plannedSplits = scan.plan().splits();
+        assertThat(plannedSplits)
+                .allMatch(
+                        split ->
+                                split instanceof IndexQuerySplit
+                                        && ((IndexQuerySplit) split).dataSplit().snapshotId()
+                                                == snapshotId);
+        assertThat(read(read, plannedSplits))
+                .containsExactlyElementsOf(
+                        java.util.stream.IntStream.range(0, 100)
+                                .boxed()
+                                .collect(Collectors.toList()));
     }
 
     @ParameterizedTest

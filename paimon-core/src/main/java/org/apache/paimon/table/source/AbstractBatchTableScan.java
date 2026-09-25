@@ -162,14 +162,6 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         return startingScanner.scanPartitions(snapshotReader);
     }
 
-    /** The scanner used for snapshot selection, also shared with deferred index planning. */
-    public StartingScanner getStartingScanner() {
-        if (startingScanner == null) {
-            startingScanner = createStartingScanner(false);
-        }
-        return startingScanner;
-    }
-
     @Override
     public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
         return PartitionTopNUtils.topNFileStorePartitions(

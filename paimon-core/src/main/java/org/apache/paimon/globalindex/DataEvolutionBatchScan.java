@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
@@ -42,13 +43,6 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
-import org.apache.paimon.table.source.snapshot.FullStartingScanner;
-import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
@@ -60,7 +54,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -347,7 +340,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 || pushedRowRangeIndex != null
                 || globalIndexResult != null
                 || !table.coreOptions().globalIndexEnabled()
-                || !isFullSnapshotScanner(batchScan.getStartingScanner())) {
+                || !supportsIndexQuery(table.coreOptions())) {
             return planEager();
         }
         Predicate indexFilter = rowIdSafeResidualFilter(filter);
@@ -361,9 +354,17 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (splits.isEmpty()) {
             return dataPlan;
         }
-        // Auth wrapping may replace the plan, but preserves the snapshot ID in each data split.
+        // Use the exact snapshot that produced the data splits, including explicit tag reads.
         long snapshotId = dataSplit(splits.get(0)).snapshotId();
-        Snapshot snapshot = snapshotForIndexQuery(snapshotId);
+        Snapshot snapshot =
+                Preconditions.checkNotNull(
+                        batchScan.snapshotReader().plannedSnapshot(),
+                        "No snapshot found for index query planning");
+        Preconditions.checkState(
+                snapshot.id() == snapshotId,
+                "Planned snapshot %s differs from data split snapshot %s",
+                snapshot.id(),
+                snapshotId);
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         List<IndexFileMeta> indexFiles =
@@ -429,31 +430,30 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return batchScan.readProtectionTagName();
     }
 
-    private Snapshot snapshotForIndexQuery(long snapshotId) {
-        try {
-            return table.snapshotManager().tryGetSnapshot(snapshotId);
-        } catch (FileNotFoundException e) {
-            StartingScanner scanner = batchScan.getStartingScanner();
-            if (scanner instanceof StaticFromTagStartingScanner) {
-                Snapshot snapshot = ((StaticFromTagStartingScanner) scanner).getSnapshot();
-                Preconditions.checkState(
-                        snapshot.id() == snapshotId,
-                        "Tag changed after data planning: expected snapshot %s, found %s",
-                        snapshotId,
-                        snapshot.id());
-                return snapshot;
-            }
-            throw new RuntimeException("Snapshot " + snapshotId + " is no longer available", e);
+    private static boolean supportsIndexQuery(CoreOptions options) {
+        CoreOptions.StreamScanMode streamMode =
+                options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
+        if (streamMode == CoreOptions.StreamScanMode.FILE_MONITOR) {
+            return true;
         }
-    }
-
-    private static boolean isFullSnapshotScanner(StartingScanner scanner) {
-        return scanner instanceof FullCompactedStartingScanner
-                || scanner instanceof FullStartingScanner
-                || scanner instanceof StaticFromSnapshotStartingScanner
-                || scanner instanceof StaticFromTagStartingScanner
-                || scanner instanceof StaticFromTimestampStartingScanner
-                || scanner instanceof StaticFromWatermarkStartingScanner;
+        if (streamMode != CoreOptions.StreamScanMode.NONE) {
+            return false;
+        }
+        switch (options.startupMode()) {
+            case LATEST:
+            case LATEST_FULL:
+            case FROM_SNAPSHOT:
+            case FROM_SNAPSHOT_FULL:
+            case FROM_TIMESTAMP:
+                return true;
+            case COMPACTED_FULL:
+                return options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
+                        || options.toConfiguration()
+                                .contains(CoreOptions.FULL_COMPACTION_DELTA_COMMITS);
+            default:
+                // Creation-time scans may filter files instead of reading a complete snapshot.
+                return false;
+        }
     }
 
     private Plan planEagerIndex(
