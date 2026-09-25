@@ -637,7 +637,8 @@ public class FMGlobalIndexTest {
                 new org.apache.paimon.utils.RoaringNavigableMap64();
         candidates.add(4L);
         CountingDirectExecutor executor = new CountingDirectExecutor();
-        try (GlobalIndexReader reader = indexer.createReader(fileReader, files, 5, executor)) {
+        try (GlobalIndexReader reader =
+                indexer.createReader(fileReader, files, 5, null, executor)) {
             org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader refining =
                     (org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader) reader;
             assertRows(
@@ -750,7 +751,7 @@ public class FMGlobalIndexTest {
     }
 
     private GlobalIndexReader createReader(List<GlobalIndexIOMeta> files, long totalRows) {
-        return indexer.createReader(fileReader, files, totalRows, newDirectExecutorService());
+        return indexer.createReader(fileReader, files, totalRows, null, newDirectExecutorService());
     }
 
     private static final class CountingDirectExecutor extends AbstractExecutorService {

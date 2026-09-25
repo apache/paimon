@@ -148,11 +148,11 @@ class GlobalIndexQueryPlan {
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return create(predicate, rowType, groups, options);
+        return createPredicatePlan(predicate, rowType, groups, options);
     }
 
     @Nullable
-    private static GlobalIndexQueryPlan create(
+    private static GlobalIndexQueryPlan createPredicatePlan(
             Predicate predicate,
             RowType rowType,
             Map<Integer, List<IndexGroup>> groups,
@@ -229,7 +229,7 @@ class GlobalIndexQueryPlan {
                     LeafPredicate lower = GlobalIndexEvaluator.isLowerBound(first) ? first : second;
                     LeafPredicate upper = GlobalIndexEvaluator.isLowerBound(first) ? second : first;
                     GlobalIndexQueryPlan between =
-                            create(
+                            createPredicatePlan(
                                     new PredicateBuilder(rowType)
                                             .between(
                                                     lower.fieldRefOptional().get().index(),
@@ -261,7 +261,7 @@ class GlobalIndexQueryPlan {
                 }
             }
             if (plan == null) {
-                plan = create(child, rowType, groups, options);
+                plan = createPredicatePlan(child, rowType, groups, options);
             }
             if (plan == null) {
                 if (union) {
@@ -345,10 +345,10 @@ class GlobalIndexQueryPlan {
             throws IOException {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
-        return evaluate(fileIO, options, ranges, executor);
+        return evaluateWithExecutor(fileIO, options, ranges, executor);
     }
 
-    private GlobalIndexResult evaluate(
+    private GlobalIndexResult evaluateWithExecutor(
             FileIO fileIO, Options options, List<Range> ranges, ExecutorService executor)
             throws IOException {
         GlobalIndexQueryPlan leaf = this;
@@ -389,7 +389,8 @@ class GlobalIndexQueryPlan {
         if (predicate == null && query == null) {
             GlobalIndexResult result = null;
             for (GlobalIndexQueryPlan child : children) {
-                GlobalIndexResult matches = child.evaluate(fileIO, options, ranges, executor);
+                GlobalIndexResult matches =
+                        child.evaluateWithExecutor(fileIO, options, ranges, executor);
                 result =
                         result == null ? matches : union ? result.or(matches) : result.and(matches);
             }

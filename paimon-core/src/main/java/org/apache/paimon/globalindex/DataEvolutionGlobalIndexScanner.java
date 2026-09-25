@@ -402,7 +402,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     public GlobalIndexResult unindexedRowsForContributingFields(
             Collection<Integer> contributingFieldIds) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        for (Range range : coverage.unindexedRanges(contributingFieldIds)) {
+        for (Range range : coverage.unindexedRanges(contributingFieldIds, null)) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);
@@ -446,6 +446,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                         indexFileReadWrite,
                                                         globalMetas,
                                                         range.count(),
+                                                        null,
                                                         executor),
                                                 range.from,
                                                 range.to),

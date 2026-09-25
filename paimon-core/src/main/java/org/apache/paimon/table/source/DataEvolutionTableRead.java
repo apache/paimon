@@ -47,16 +47,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
     private final CoreOptions options;
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
-    @Nullable private final FileIO fileIO;
-
-    public DataEvolutionTableRead(
-            List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
-            TableSchema schema,
-            CoreOptions options,
-            @Nullable CatalogContext catalogContext,
-            @Nullable Supplier<InnerTableRead> readFactory) {
-        this(providerFactories, schema, options, catalogContext, readFactory, null);
-    }
+    private final FileIO fileIO;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -64,7 +55,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
             CoreOptions options,
             @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory,
-            @Nullable FileIO fileIO) {
+            FileIO fileIO) {
         super(providerFactories, schema);
         this.options = options;
         this.catalogContext = catalogContext;
@@ -78,9 +69,6 @@ public class DataEvolutionTableRead extends AppendTableRead {
         final Split dataSplit;
         boolean filterOnRead = executeFilter;
         if (queryAuthContext.split() instanceof IndexQuerySplit) {
-            if (fileIO == null) {
-                throw new IllegalStateException("FileIO is required for index query evaluation.");
-            }
             IndexQuerySplit indexQuerySplit = (IndexQuerySplit) queryAuthContext.split();
             Split selectedSplit;
             try {

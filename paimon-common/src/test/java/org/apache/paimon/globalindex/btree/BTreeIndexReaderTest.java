@@ -60,6 +60,7 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                 fileReader,
                 Collections.singletonList(written),
                 dataNum,
+                null,
                 newDirectExecutorService());
     }
 
@@ -78,6 +79,7 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                                 fileReader,
                                 Collections.singletonList(written),
                                 dataNum,
+                                null,
                                 newDirectExecutorService());
                 GlobalIndexReader local =
                         globalIndexer.createReader(
@@ -257,6 +259,7 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                         fileReader,
                         Collections.singletonList(written),
                         dataNum,
+                        null,
                         newDirectExecutorService())) {
             assertResult(
                     reader.visitEqual(ref, literal).join().get(),
