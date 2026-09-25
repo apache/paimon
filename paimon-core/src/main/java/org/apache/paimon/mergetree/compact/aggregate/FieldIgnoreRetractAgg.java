@@ -36,6 +36,14 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     }
 
     @Override
+    public Object aggReversed(Object accumulator, Object inputField) {
+        // delegate instead of inheriting the swapped default: FieldCollectAgg's
+        // aggReversed is not equivalent to a swapped agg (accumulator-first merge relies
+        // on the accumulator already being distinct)
+        return aggregator.aggReversed(accumulator, inputField);
+    }
+
+    @Override
     public void reset() {
         aggregator.reset();
     }

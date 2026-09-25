@@ -2872,6 +2872,38 @@ public class FieldAggregatorTest {
         assertThat(result4).isEqualTo(acc2);
     }
 
+    /**
+     * {@link FieldIgnoreRetractAgg#aggReversed} must forward to the wrapped aggregator instead of
+     * inheriting {@link FieldAggregator}'s swapped default: {@link FieldCollectAgg#aggReversed}
+     * keeps the already-distinct accumulator first and de-duplicates only the raw input, so a
+     * swapped call would dump the input array into the result unscanned and let its duplicate
+     * elements survive a distinct collect.
+     */
+    @Test
+    public void testFieldIgnoreRetractDelegatesAggReversed() {
+        FieldCollectAgg collect =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+        FieldIgnoreRetractAgg wrapper = new FieldIgnoreRetractAgg(collect);
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        wrapper.aggReversed(
+                                new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                new GenericArray(
+                                        new Object[] {new byte[] {3, 4}, new byte[] {3, 4}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactlyInAnyOrder(new byte[] {1, 2}, new byte[] {3, 4});
+    }
+
     @Test
     public void testCustomAgg() throws IOException {
         FieldAggregator fieldAggregator =
