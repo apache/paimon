@@ -27,6 +27,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.net.URI;
 import java.util.Locale;
 import java.util.Map;
@@ -35,6 +37,7 @@ import java.util.function.Supplier;
 /**
  * An OSS {@link CredentialsProvider} that asks a supplier from {@link CredentialsSupplierRegistry}
  * for credentials on every request, so streams that are already open also pick up refreshed ones.
+ * It holds the supplier for as long as the OSS client that uses it is alive.
  */
 public class RegisteredCredentialsProvider implements CredentialsProvider {
 
@@ -45,12 +48,14 @@ public class RegisteredCredentialsProvider implements CredentialsProvider {
     static final String SECURITY_TOKEN = "fs.oss.securityToken";
 
     private final String supplierId;
+    @Nullable private final Supplier<Map<String, String>> supplier;
 
     // The last options from the supplier and the credentials built from them, swapped together.
     private volatile Resolved last;
 
     public RegisteredCredentialsProvider(URI uri, Configuration conf) {
         this.supplierId = conf.get(CredentialsSupplierRegistry.SUPPLIER_ID);
+        this.supplier = supplierId == null ? null : CredentialsSupplierRegistry.get(supplierId);
         String accessKeyId = conf.get(ACCESS_KEY_ID);
         String accessKeySecret = conf.get(ACCESS_KEY_SECRET);
         if (accessKeyId != null && accessKeySecret != null) {
@@ -70,8 +75,6 @@ public class RegisteredCredentialsProvider implements CredentialsProvider {
     @Override
     public Credentials getCredentials() {
         Resolved resolved = last;
-        Supplier<Map<String, String>> supplier =
-                supplierId == null ? null : CredentialsSupplierRegistry.get(supplierId);
         if (supplier != null) {
             try {
                 return resolve(supplier.get(), resolved);

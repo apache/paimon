@@ -139,6 +139,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private boolean allowCache = true;
     @Nullable private String credentialsSupplierId;
 
+    // Keeps the supplier alive until the file systems created here have picked it up.
+    @Nullable private transient Supplier<Map<String, String>> credentialsSupplier;
+
     @Override
     public boolean isObjectStore() {
         return true;
@@ -146,7 +149,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     @Override
     public void configure(CatalogContext context) {
-        credentialsSupplierId = context.options().get(CredentialsSupplierRegistry.SUPPLIER_ID);
+        String supplierId = context.options().get(CredentialsSupplierRegistry.SUPPLIER_ID);
+        credentialsSupplier =
+                supplierId == null ? null : CredentialsSupplierRegistry.get(supplierId);
+        credentialsSupplierId = credentialsSupplier == null ? null : supplierId;
         // The file system is bound to the supplier, so it must not be shared through the cache.
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE) && credentialsSupplierId == null;
         hadoopOptions = new Options();
