@@ -19,7 +19,7 @@ import json
 import sys
 import unittest
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
@@ -874,13 +874,79 @@ class NativePlanTest(unittest.TestCase):
         with patch.dict(sys.modules, {'pypaimon_rust': fake_module,
                                       'pypaimon_rust.datafusion': fake_df}), \
                 patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved):
-            self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
+            for _ in range(3):
+                self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
         fake_df.PaimonCatalog.assert_not_called()
         fake_df.Table.from_rest_response.assert_called_once_with(
             response, database='db', table='t$branch_dev',
             rest_options=_catalog_options(table))
-        native_table.copy_with_resolved_schema.assert_called_once_with(resolved, branch='dev')
-        native_table.new_read_builder.assert_called_once_with()
+        self.assertEqual(native_table.copy_with_resolved_schema.call_args_list,
+                         [call(resolved, branch='dev')] * 3)
+        self.assertEqual(native_table.new_read_builder.call_count, 3)
+
+    def test_native_rest_cache_invalidation_and_serialization(self):
+        import pickle
+        from pypaimon.read.native_plan import _NativeRestTableCache
+
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response.side_effect = lambda *args, **kwargs: object()
+        cache = _NativeRestTableCache()
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}):
+            original = cache.get('response', 'db', 't', {'token': 'first'})
+            self.assertIs(cache.get('response', 'db', 't', {'token': 'first'}), original)
+            for response, db, table, options in [
+                    ('response', 'db', 't', {'token': 'second'}),
+                    ('new-response', 'db', 't', {'token': 'second'}),
+                    ('new-response', 'db', 't$branch_dev', {'token': 'second'}),
+                    ('new-response', 'other', 't$branch_dev', {'token': 'second'})]:
+                replacement = cache.get(response, db, table, options)
+                self.assertIsNot(replacement, original)
+                original = replacement
+            restored = pickle.loads(pickle.dumps(cache))
+            self.assertIsNone(restored.entry)
+            self.assertIsNot(restored.get(response, db, table, options), original)
+            cache.pid = -1
+            self.assertIsNot(cache.get(response, db, table, options), original)
+
+    def test_native_rest_cache_lifetime_and_concurrent_access(self):
+        import gc
+        import weakref
+        from concurrent.futures import ThreadPoolExecutor
+        from pypaimon.read.native_plan import _NativeRestTableCache
+
+        class NativeTable:
+            pass
+
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response.side_effect = lambda *args, **kwargs: NativeTable()
+        cache = _NativeRestTableCache()
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}):
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                tables = list(pool.map(lambda _: cache.get('response', 'db', 't', {}), range(8)))
+            self.assertTrue(all(table is tables[0] for table in tables))
+            fake_df.Table.from_rest_response.assert_called_once()
+            reference = weakref.ref(tables[0])
+            del tables
+            gc.collect()
+            self.assertIsNotNone(reference())
+            del cache
+            gc.collect()
+            self.assertIsNone(reference())
+
+    def test_native_rest_cache_retries_failed_construction(self):
+        from pypaimon.read.native_plan import _NativeRestTableCache
+
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        native_table = object()
+        fake_df.Table.from_rest_response.side_effect = [RuntimeError('unavailable'), native_table]
+        cache = _NativeRestTableCache()
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}):
+            with self.assertRaisesRegex(RuntimeError, 'unavailable'):
+                cache.get('response', 'db', 't', {})
+            self.assertIs(cache.get('response', 'db', 't', {}), native_table)
 
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the

@@ -23,6 +23,8 @@ still applies them while reading, so pushdown remains an optimization.
 """
 
 import json
+import os
+from threading import Lock
 from typing import List, Optional, Tuple
 
 from packaging.version import InvalidVersion, Version
@@ -277,17 +279,46 @@ def _resolved_rest_table_response(table):
     return response
 
 
+class _NativeRestTableCache:
+    """One native environment per Python environment, never sent to workers."""
+
+    def __init__(self):
+        self.pid = os.getpid()
+        self.lock = Lock()
+        self.entry = None
+
+    def __getstate__(self):
+        return {}
+
+    def __setstate__(self, state):
+        self.__init__()
+
+    def get(self, response, database, table, options):
+        from pypaimon_rust.datafusion import Table
+
+        if self.pid != os.getpid():
+            self.__init__()
+        key = (response, database, table, tuple(sorted(options.items())))
+        with self.lock:
+            if self.entry is None or self.entry[0] != key:
+                native_table = Table.from_rest_response(
+                    response, database=database, table=table, rest_options=options)
+                self.entry = (key, native_table)
+            return self.entry[1]
+
+
 def _native_read_builder(table):
-    """Reconstruct the Rust table and return a builder for the same schema."""
+    """Return a fresh builder with the current schema and shared REST FileIO."""
     rest_response = _resolved_rest_table_response(table)
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
-        from pypaimon_rust.datafusion import Table
-        rt = Table.from_rest_response(
+        cache = table.catalog_environment.__dict__.setdefault(
+            '_native_rest_table_cache', _NativeRestTableCache())
+        rt = cache.get(
             rest_response,
             database=table.identifier.get_database_name(),
             table=table.identifier.get_object_name(),
-            rest_options=_catalog_options(table))
+            options=_catalog_options(table))
         rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
