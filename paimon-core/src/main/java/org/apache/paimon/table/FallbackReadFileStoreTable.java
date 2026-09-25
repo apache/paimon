@@ -202,24 +202,34 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         String scanSnapshotId = options.get(scanSnapshotIdOptionKey);
         String scanVersionOptionKey = CoreOptions.SCAN_VERSION.key();
         String scanVersion = options.get(scanVersionOptionKey);
+        boolean fromVersion = false;
         if (scanSnapshotId == null
                 && scanVersion != null
                 && scanVersion.chars().allMatch(Character::isDigit)
                 && !wrapped.tagManager().tagExists(scanVersion)) {
             scanSnapshotId = scanVersion;
-            result.remove(scanVersionOptionKey);
+            fromVersion = true;
         }
         if (scanSnapshotId != null) {
             long id = Long.parseLong(scanSnapshotId);
-            long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
-            Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
-            long otherId;
-            if (otherSnapshot == null) {
-                otherId = Snapshot.FIRST_SNAPSHOT_ID;
-            } else {
-                otherId = otherSnapshot.id();
+            if (wrapped.snapshotManager().snapshotExists(id)) {
+                long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
+                Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
+                long otherId;
+                if (otherSnapshot == null) {
+                    otherId = Snapshot.FIRST_SNAPSHOT_ID;
+                } else {
+                    otherId = otherSnapshot.id();
+                }
+                result.put(scanSnapshotIdOptionKey, String.valueOf(otherId));
+                if (fromVersion) {
+                    result.remove(scanVersionOptionKey);
+                }
             }
-            result.put(scanSnapshotIdOptionKey, String.valueOf(otherId));
+            // A snapshot id that does not exist on the main branch is left unconverted.
+            // Option merging (including copyWithoutTimeTravel) must not resolve time
+            // travel eagerly — a plain table also defers it — so the scan of whichever
+            // branch serves the read reports the missing snapshot with its own context.
         }
 
         // bucket number of main branch and other branch are very likely different,

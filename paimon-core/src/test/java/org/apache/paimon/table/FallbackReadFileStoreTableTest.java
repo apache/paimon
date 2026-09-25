@@ -190,6 +190,65 @@ public class FallbackReadFileStoreTableTest {
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
     }
 
+    @Test
+    public void testCopyWithMissingSnapshotIdDefersResolutionToScan() throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+
+        // merging dynamic options must not resolve time travel: a snapshot id that does
+        // not exist on the main branch is not eagerly resolved here — a plain table also
+        // defers it to the scan — and a numeric version is not silently dropped
+        FileStoreTable copied =
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "99"));
+        assertThat(copied).isNotNull();
+
+        FileStoreTable copiedWithoutTimeTravel =
+                table.copyWithoutTimeTravel(
+                        Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "99"));
+        assertThat(copiedWithoutTimeTravel).isNotNull();
+
+        FileStoreTable versioned =
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "99"));
+        // the numeric version is normalized to a snapshot id, which must be kept as-is
+        // instead of being eagerly resolved or silently dropped — also on the rewritten
+        // fallback-branch options, which is where the drop would happen
+        assertThat(versioned.options()).containsEntry(CoreOptions.SCAN_SNAPSHOT_ID.key(), "99");
+        assertThat(((FallbackReadFileStoreTable) versioned).other().options())
+                .containsEntry(CoreOptions.SCAN_SNAPSHOT_ID.key(), "99");
+    }
+
+    @Test
+    public void testCopyWithValidSnapshotIdConvertsForFallbackBranch() throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        long mainMillis = mainTable.snapshotManager().latestSnapshot().timeMillis();
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        // ensure the branch write lands in a strictly later millisecond, so the converted
+        // id deterministically resolves to the branch's first snapshot
+        while (System.currentTimeMillis() <= mainMillis) {
+            Thread.yield();
+        }
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+
+        // a snapshot id that exists on the main branch is still eagerly converted to the
+        // fallback branch's id by millis; main's snapshot 1 predates the branch's writes,
+        // so the converted id stays the branch's first snapshot (1)
+        FileStoreTable copied =
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+        assertThat(((FallbackReadFileStoreTable) copied).other().options())
+                .containsEntry(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+    }
+
     private DataTableScan queryAuthScan(DataTableScan delegate, TableQueryAuthResult authResult) {
         DataTableScan scan =
                 Mockito.mock(DataTableScan.class, AdditionalAnswers.delegatesTo(delegate));
