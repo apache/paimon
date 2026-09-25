@@ -262,6 +262,8 @@ JDBC planning uses the resolved table location and storage properties without
 opening another database connection.
 REST tables use `Table.copy_with_resolved_schema()` to preserve the same schema
 and option semantics, including branches whose schemas are catalog-managed.
+Matching REST tables retain the native environment across scans and read-option
+copies, preserving FileIO caches. Worker deserialization creates a fresh environment.
 The native table retains REST credentials, token refresh and catalog snapshot
 resolution. Database and table names containing dots are passed as separate
 identifier components. REST snapshot results (including empty results) take precedence over
