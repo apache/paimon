@@ -717,10 +717,16 @@ under the License.
             <td>Default aggregate function of all fields for partial-update and aggregate merge function.</td>
         </tr>
         <tr>
+            <td><h5>file-index.format.version</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.</td>
+        </tr>
+        <tr>
             <td><h5>file-index.in-manifest-threshold</h5></td>
             <td style="word-wrap: break-word;">500 bytes</td>
             <td>MemorySize</td>
-            <td>The threshold to store file index bytes in manifest.</td>
+            <td>The threshold to store file index bytes in manifest. Valid range: 0 to 2,147,483,647 bytes.</td>
         </tr>
         <tr>
             <td><h5>file-index.read.enabled</h5></td>

@@ -354,6 +354,24 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testFileIndexInManifestThreshold() {
+        Options conf = new Options();
+        conf.set(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("0 bytes"));
+        assertThat(new CoreOptions(conf).fileIndexInManifestThreshold()).isZero();
+
+        conf.set(
+                CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("2147483647 bytes"));
+        assertThat(new CoreOptions(conf).fileIndexInManifestThreshold())
+                .isEqualTo(Integer.MAX_VALUE);
+
+        conf.set(
+                CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("2147483648 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).fileIndexInManifestThreshold())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key());
+    }
+
+    @Test
     public void testFormatTableCommitCleanupThreadNumDefaultsTo64AndAcceptsBounds() {
         Options conf = new Options();
         assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);

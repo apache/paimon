@@ -433,7 +433,15 @@ public class CoreOptions implements Serializable {
             key("file-index.in-manifest-threshold")
                     .memoryType()
                     .defaultValue(MemorySize.parse("500 B"))
-                    .withDescription("The threshold to store file index bytes in manifest.");
+                    .withDescription(
+                            "The threshold to store file index bytes in manifest. Valid range: 0 to 2,147,483,647 bytes.");
+
+    public static final ConfigOption<Integer> FILE_INDEX_FORMAT_VERSION =
+            key("file-index.format.version")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.");
 
     public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
             key("file-index.read.enabled")
@@ -4530,8 +4538,23 @@ public class CoreOptions implements Serializable {
         return new FileIndexOptions(this);
     }
 
-    public long fileIndexInManifestThreshold() {
-        return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+    public int fileIndexFormatVersion() {
+        int version = options.get(FILE_INDEX_FORMAT_VERSION);
+        if (version != 1 && version != 2) {
+            throw new IllegalArgumentException("file-index.format.version must be 1 or 2");
+        }
+        return version;
+    }
+
+    public int fileIndexInManifestThreshold() {
+        long bytes = options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+        checkArgument(
+                bytes >= 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 0 and %s bytes, but was %s bytes.",
+                FILE_INDEX_IN_MANIFEST_THRESHOLD.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
     }
 
     public boolean fileIndexReadEnabled() {

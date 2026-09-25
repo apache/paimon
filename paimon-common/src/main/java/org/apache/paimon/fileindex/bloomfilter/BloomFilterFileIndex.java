@@ -71,14 +71,28 @@ public class BloomFilterFileIndex implements FileIndexer {
 
     @Override
     public FileIndexReader createReader(SeekableInputStream inputStream, int start, int length) {
+        return createReader(inputStream, (long) start, (long) length);
+    }
+
+    @Override
+    public FileIndexReader createReader(SeekableInputStream inputStream, long start, long length) {
+        int payloadLength = checkedPayloadLength(length);
         try {
             inputStream.seek(start);
-            byte[] serializedBytes = new byte[length];
+            byte[] serializedBytes = new byte[payloadLength];
             IOUtils.readFully(inputStream, serializedBytes);
             return new Reader(dataType, serializedBytes);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static int checkedPayloadLength(long length) {
+        if (length > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "bloom-filter file index payload length exceeds int32: " + length);
+        }
+        return (int) length;
     }
 
     private static class Writer extends FileIndexWriter {
