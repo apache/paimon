@@ -445,6 +445,7 @@ These table options affect global index build and read behavior:
 | Option | Default | Description |
 |---|---|---|
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
+| `scan.index-distributed-query.enabled` | `false` | Evaluate supported scalar global indexes in readers. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
 | `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, Multivalue, and FM queries. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |

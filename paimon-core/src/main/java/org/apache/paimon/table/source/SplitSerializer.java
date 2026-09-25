@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.LazyIndexedSplit;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
@@ -47,6 +48,7 @@ public class SplitSerializer {
     private static final int QUERY_AUTH_SPLIT = 5;
     private static final int FALLBACK_DATA_SPLIT = 6;
     private static final int FALLBACK_SPLIT = 7;
+    private static final int LAZY_INDEXED_SPLIT = 8;
 
     private SplitSerializer() {}
 
@@ -69,6 +71,9 @@ public class SplitSerializer {
         } else if (split instanceof FallbackReadFileStoreTable.FallbackSplitImpl) {
             out.writeInt(FALLBACK_SPLIT);
             ((FallbackReadFileStoreTable.FallbackSplitImpl) split).serialize(out);
+        } else if (split instanceof LazyIndexedSplit) {
+            out.writeInt(LAZY_INDEXED_SPLIT);
+            ((LazyIndexedSplit) split).serialize(out);
         } else if (split instanceof IndexedSplit) {
             out.writeInt(INDEXED_SPLIT);
             ((IndexedSplit) split).serialize(out);
@@ -109,6 +114,8 @@ public class SplitSerializer {
                 return IncrementalSplit.deserialize(in);
             case INDEXED_SPLIT:
                 return IndexedSplit.deserialize(in);
+            case LAZY_INDEXED_SPLIT:
+                return LazyIndexedSplit.deserialize(in);
             case CHAIN_SPLIT:
                 return ChainSplit.deserialize(in);
             case QUERY_AUTH_SPLIT:

@@ -96,6 +96,33 @@ public class BTreePostingListTest {
     }
 
     @Test
+    public void testFilteredRowIdsForAllEncodings() throws Exception {
+        assertFiltered(rowIds(42), 42, 43);
+        assertFiltered(contiguous(0, 128), 17, 129);
+
+        LongArrayList sparse = new LongArrayList(256);
+        for (int i = 0; i < 256; i++) {
+            sparse.add(i * 100L);
+        }
+        assertFiltered(sparse, 1700, 1701);
+    }
+
+    private static void assertFiltered(LongArrayList rows, long selected, long excluded)
+            throws Exception {
+        RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+        filter.add(selected);
+        RoaringNavigableMap64 matches = new RoaringNavigableMap64();
+        BTreePostingList.addTo(MemorySlice.wrap(BTreePostingList.serialize(rows)), matches, filter);
+        assertThat(matches).containsExactly(selected);
+
+        filter.clear();
+        filter.add(excluded);
+        matches = new RoaringNavigableMap64();
+        BTreePostingList.addTo(MemorySlice.wrap(BTreePostingList.serialize(rows)), matches, filter);
+        assertThat(matches).isEmpty();
+    }
+
+    @Test
     public void testRejectsUnsortedRows() {
         assertThatThrownBy(() -> BTreePostingList.serialize(rowIds(1, 3, 2)))
                 .isInstanceOf(IllegalArgumentException.class)

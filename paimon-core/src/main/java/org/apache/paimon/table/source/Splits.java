@@ -19,6 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.LazyIndexedSplit;
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplit;
 
 import javax.annotation.Nullable;
@@ -46,6 +48,10 @@ public class Splits {
                 current = ((QueryAuthSplit) current).split();
             } else if (current instanceof FallbackSplit) {
                 current = ((FallbackSplit) current).wrapped();
+            } else if (current instanceof LazyIndexedSplit) {
+                current = ((LazyIndexedSplit) current).dataSplit();
+            } else if (current instanceof IndexedSplit) {
+                current = ((IndexedSplit) current).dataSplit();
             } else {
                 return current;
             }
