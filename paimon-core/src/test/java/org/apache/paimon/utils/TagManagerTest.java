@@ -33,6 +33,7 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.RowType;
 
@@ -44,6 +45,7 @@ import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -193,6 +195,62 @@ public class TagManagerTest {
                 Assertions.assertThrows(
                         IllegalArgumentException.class, () -> tagManager.renameTag("tag1", "tag2"));
         Assertions.assertTrue(exception.getMessage().contains("Tag 'tag2' already exists."));
+    }
+
+    @Test
+    public void testDeleteAllTagsOfOneSnapshotNotifiesCallbacks() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
+        tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        List<KeyValue> kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 0, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        Snapshot snapshot = snapshotManager.snapshot(1);
+        tagManager.createTag(
+                snapshot,
+                "tagA",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+        tagManager.createTag(
+                snapshot,
+                "tagB",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+
+        List<String> notifiedDeletions = new ArrayList<>();
+        TagCallback callback =
+                new TagCallback() {
+                    @Override
+                    public void notifyCreation(String tagName) {}
+
+                    @Override
+                    public void notifyDeletion(String tagName) {
+                        notifiedDeletions.add(tagName);
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+
+        // snapshot 1 still exists, so the early path runs: tag files are deleted but
+        // data files are kept; both tags must still be reported to the callback
+        tagManager.deleteAllTagsOfOneSnapshot(
+                Arrays.asList("tagA", "tagB"),
+                store.newTagDeletion(),
+                snapshotManager,
+                Collections.singletonList(callback));
+
+        assertThat(tagManager.tagExists("tagA")).isFalse();
+        assertThat(tagManager.tagExists("tagB")).isFalse();
+        assertThat(notifiedDeletions).containsExactlyInAnyOrder("tagA", "tagB");
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)

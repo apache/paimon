@@ -212,18 +212,21 @@ public class TagManager {
 
     /** Make sure the tagNames are ALL tags of one snapshot. */
     public void deleteAllTagsOfOneSnapshot(
-            List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
+            List<String> tagNames,
+            TagDeletion tagDeletion,
+            SnapshotManager snapshotManager,
+            List<TagCallback> callbacks) {
         Snapshot taggedSnapshot = getOrThrow(tagNames.get(0)).trimToSnapshot();
         List<Snapshot> taggedSnapshots;
 
         // skip file deletion if snapshot exists
         if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
-            tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
+            deleteTagMetaFiles(tagNames, callbacks);
             return;
         } else {
             // FileIO discovers tags by tag file, so we should read all tags before we delete tag
             taggedSnapshots = taggedSnapshots();
-            tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
+            deleteTagMetaFiles(tagNames, callbacks);
         }
 
         doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
@@ -267,6 +270,20 @@ public class TagManager {
         fileIO.deleteQuietly(tagPath(tagName));
         try {
             callbacks.forEach(callback -> callback.notifyDeletion(tagName));
+        } finally {
+            for (TagCallback tagCallback : callbacks) {
+                IOUtils.closeQuietly(tagCallback);
+            }
+        }
+    }
+
+    private void deleteTagMetaFiles(Collection<String> tagNames, List<TagCallback> callbacks) {
+        try {
+            tagNames.forEach(
+                    tagName -> {
+                        fileIO.deleteQuietly(tagPath(tagName));
+                        callbacks.forEach(callback -> callback.notifyDeletion(tagName));
+                    });
         } finally {
             for (TagCallback tagCallback : callbacks) {
                 IOUtils.closeQuietly(tagCallback);

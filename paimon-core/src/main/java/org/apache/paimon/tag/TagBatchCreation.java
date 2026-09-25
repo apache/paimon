@@ -109,7 +109,10 @@ public class TagBatchCreation {
                 for (List<String> tagNames : tagManager.tags().values()) {
                     if (tagCount - tagNames.size() > tagNumRetainedMax) {
                         tagManager.deleteAllTagsOfOneSnapshot(
-                                tagNames, tagDeletion, snapshotManager);
+                                tagNames,
+                                tagDeletion,
+                                snapshotManager,
+                                table.store().createTagCallbacks(table));
                         tagCount = tagCount - tagNames.size();
                     } else {
                         List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
