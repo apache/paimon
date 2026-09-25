@@ -502,3 +502,58 @@ class Like(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return True
+
+
+class ArrayContains(Tester):
+    name = "arrayContains"
+
+    def test_by_value(self, val, literals) -> bool:
+        # ``val`` is the array column's value (a list). Mirrors Java
+        # ArrayContains: null array or null element -> false, else the
+        # element must appear in the array.
+        if val is None or not literals or literals[0] is None:
+            return False
+        return literals[0] in val
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        # Array element stats are not tracked; never prune a file.
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        # Not arrow-pushable (see push_down_utils); row-level test is used.
+        return True
+
+
+class ArraysOverlap(Tester):
+    name = "arraysOverlap"
+
+    def test_by_value(self, val, literals) -> bool:
+        # True when the array shares at least one (non-null) element with
+        # the literals. Mirrors Java ArraysOverlap.
+        if val is None or not literals:
+            return False
+        return any(literal in val for literal in literals if literal is not None)
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
+
+
+class ArrayContainsAll(Tester):
+    name = "arrayContainsAll"
+
+    def test_by_value(self, val, literals) -> bool:
+        # True when every literal appears in the array; a null literal makes
+        # it false. Mirrors Java ArrayContainsAll (an empty literal list is
+        # vacuously true for a non-null array).
+        if val is None:
+            return False
+        return all(literal is not None and literal in val for literal in literals)
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
