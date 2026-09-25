@@ -21,6 +21,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import pyarrow as pa
 
@@ -83,6 +84,38 @@ class DataFilePathDirectoryTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         splits = read_builder.new_scan().plan().splits()
         result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(sorted(result.column("id").to_pylist()), [1, 2, 3])
+
+    def test_native_plan_falls_back_when_directory_configured(self):
+        # ``data-file.path-directory`` only resolves under Python planning;
+        # the native planner still looks under the bucket root and would 404.
+        # Even with scan.native-plan.enabled the scan must refuse native
+        # planning and fall back to Python, so the relocated files are still
+        # found. Regression for the Python/Rust Plan divergence raised in
+        # review (native read failed with NotFound before the guard).
+        self.catalog.create_table(
+            "db.t_native",
+            Schema(fields=Schema.from_pyarrow_schema(pa.schema([
+                ("id", pa.int32()), ("v", pa.string())])).fields,
+                options={"data-file.path-directory": "data",
+                         "scan.native-plan.enabled": "true"}),
+            False,
+        )
+        table = self._write("db.t_native")
+
+        scan = table.new_read_builder().new_scan()
+        # Force the runtime probe to succeed so the assertion isolates the
+        # directory guard (not merely a missing pypaimon-rust): the gate must
+        # still refuse native planning because the directory is configured.
+        with mock.patch(
+                "pypaimon.read.native_plan.native_runtime_available",
+                return_value=True):
+            self.assertFalse(scan._native_plan_supported())
+
+        # End-to-end: a native-requested scan returns the rows through the
+        # Python fallback rather than failing to locate the relocated files.
+        splits = scan.plan().splits()
+        result = table.new_read_builder().new_read().to_arrow(splits)
         self.assertEqual(sorted(result.column("id").to_pylist()), [1, 2, 3])
 
     def test_default_keeps_data_files_at_bucket_root(self):
