@@ -315,7 +315,8 @@ class KeyValueDataWriter(DataWriter):
     @staticmethod
     def _floating_sequence_sort_key(column):
         """Unsigned keys in Java Float/Double.compare order, preserving nulls."""
-        values = column.to_numpy(zero_copy_only=False)
+        # The NumPy protocol supports Array and older ChunkedArray APIs alike.
+        values = np.asarray(column)
         bits = values.view(np.dtype('uint{}'.format(column.type.bit_width)))
         sign_bit = np.array(1 << (column.type.bit_width - 1), dtype=bits.dtype)
         # Invert negative IEEE bits, flip the sign bit for nonnegative values.
@@ -323,4 +324,4 @@ class KeyValueDataWriter(DataWriter):
         keys = np.where(bits & sign_bit, ~bits, bits ^ sign_bit)
         # All NaN signs/payloads compare equal, above positive infinity.
         keys[np.isnan(values)] = np.iinfo(bits.dtype).max
-        return pa.array(keys, mask=column.is_null().to_numpy(zero_copy_only=False))
+        return pa.array(keys, mask=np.asarray(column.is_null()))
