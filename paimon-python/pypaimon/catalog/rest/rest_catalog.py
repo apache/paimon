@@ -363,6 +363,27 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+        except NotImplementedException:
+            # The server does not implement the partition-listing endpoint.
+            # Mirror Java RESTCatalog#listPartitionsPaged and fall back to
+            # computing partitions from the table's own metadata.
+            #
+            # Scope: this Python fallback reads Paimon manifests, so it only
+            # supports data tables (FileStoreTable). Java re-raises solely for
+            # catalog-managed-partition tables (a FormatTable whose
+            # partitionManager is set) and otherwise scans the table's file
+            # system, including an unmanaged format table's directory layout
+            # (CatalogUtils.listPartitionsFromFileSystem). PyPaimon does not
+            # scan format/object tables here yet, so those still surface the
+            # server's NotImplemented error rather than being listed.
+            from pypaimon.catalog.catalog_utils import (
+                list_partitions_from_file_system)
+
+            table = self.get_table(identifier)
+            if not isinstance(table, FileStoreTable):
+                raise
+            return list_partitions_from_file_system(
+                table, max_results, page_token, partition_name_pattern)
 
     def alter_table(
         self,
