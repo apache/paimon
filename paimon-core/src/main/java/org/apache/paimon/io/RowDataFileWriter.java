@@ -73,36 +73,56 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             @Nullable FileFormat rowSidecarFormat,
             @Nullable Path rowSidecarPath) {
         super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
-        if ((rowSidecarFormat == null) != (rowSidecarPath == null)) {
-            throw new IllegalArgumentException(
-                    "Row sidecar format and path should be both null or both non-null.");
-        }
-        this.schemaId = schemaId;
-        this.isExternalPath = isExternalPath;
-        this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
         List<DataFileAuxiliaryWriter> auxiliaryFileWriters = new ArrayList<>();
-        Path fileIndexPath = dataFileToFileIndexPath(path);
-        DataFileIndexWriter dataFileIndexWriter =
-                DataFileIndexWriter.create(fileIO, fileIndexPath, writeSchema, fileIndexOptions);
-        if (dataFileIndexWriter != null) {
-            auxiliaryFileWriters.add(
-                    new DataFileIndexAuxiliaryWriter(dataFileIndexWriter, fileIO, fileIndexPath));
+        try {
+            if ((rowSidecarFormat == null) != (rowSidecarPath == null)) {
+                throw new IllegalArgumentException(
+                        "Row sidecar format and path should be both null or both non-null.");
+            }
+            this.schemaId = schemaId;
+            this.isExternalPath = isExternalPath;
+            this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
+            Path fileIndexPath = dataFileToFileIndexPath(path);
+            DataFileIndexWriter dataFileIndexWriter =
+                    DataFileIndexWriter.create(
+                            fileIO, fileIndexPath, writeSchema, fileIndexOptions);
+            if (dataFileIndexWriter != null) {
+                auxiliaryFileWriters.add(
+                        new DataFileIndexAuxiliaryWriter(
+                                dataFileIndexWriter, fileIO, fileIndexPath));
+            }
+            if (rowSidecarFormat != null) {
+                auxiliaryFileWriters.add(
+                        new RowSidecarAuxiliaryWriter(
+                                fileIO,
+                                rowSidecarFormat.createWriterFactory(writeSchema),
+                                rowSidecarPath,
+                                context.compression(),
+                                asyncFileWrite));
+            }
+            this.auxiliaryFileWriters = Collections.unmodifiableList(auxiliaryFileWriters);
+            this.fileSource = fileSource;
+            this.writeCols = writeCols;
+            this.sequenceNumberTracker =
+                    new RowDataFileSequenceNumberTracker(
+                            writeSchema, seqNumCounterSupplier, super::recordCount);
+        } catch (Throwable failure) {
+            // the super constructor has already opened the data-file stream: without this
+            // cleanup a failure here leaks the stream and leaves an orphan file behind
+            for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
+                try {
+                    auxiliaryFileWriter.abort();
+                } catch (Throwable cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            try {
+                super.abort();
+            } catch (Throwable cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
         }
-        if (rowSidecarFormat != null) {
-            auxiliaryFileWriters.add(
-                    new RowSidecarAuxiliaryWriter(
-                            fileIO,
-                            rowSidecarFormat.createWriterFactory(writeSchema),
-                            rowSidecarPath,
-                            context.compression(),
-                            asyncFileWrite));
-        }
-        this.auxiliaryFileWriters = Collections.unmodifiableList(auxiliaryFileWriters);
-        this.fileSource = fileSource;
-        this.writeCols = writeCols;
-        this.sequenceNumberTracker =
-                new RowDataFileSequenceNumberTracker(
-                        writeSchema, seqNumCounterSupplier, super::recordCount);
     }
 
     @Override
@@ -149,6 +169,10 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     @Override
     public Optional<FileWriterAbortExecutor> abortExecutor() {
         Optional<FileWriterAbortExecutor> mainAbortExecutor = super.abortExecutor();
+        if (auxiliaryFileWriters == null) {
+            // constructor-failure cleanup: only the main file exists so far
+            return mainAbortExecutor;
+        }
         if (auxiliaryFileWriters.isEmpty()) {
             return mainAbortExecutor;
         }

@@ -189,6 +189,33 @@ class RowDataFileWriterTest {
     }
 
     @Test
+    void testConstructorFailureAbortsOpenedDataFile() throws Exception {
+        FileIO fileIO = fileIO();
+        TestingBundleFormatWriter formatWriter = new TestingBundleFormatWriter();
+        // malformed index option: the DDL does not validate option values, so this reaches
+        // the writer constructor after the data-file stream is already open
+        Options options = new Options();
+        options.set("file-index.bloom-filter.columns", "id");
+        options.set("file-index.bloom-filter.id.items", "1O00");
+        FileIndexOptions fileIndexOptions = new FileIndexOptions(new CoreOptions(options));
+
+        assertThatThrownBy(
+                        () ->
+                                createWriter(
+                                        fileIO,
+                                        ROW_TYPE,
+                                        formatWriter,
+                                        SimpleStatsProducer.disabledProducer(),
+                                        new LongCounter(),
+                                        fileIndexOptions))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // the half-constructed writer must close the stream and delete the orphan file
+        assertThat(formatWriter.closeCalls).isEqualTo(1);
+        verify(fileIO).deleteQuietly(PATH);
+    }
+
+    @Test
     void testBundleWriteFailureCleansUpWithoutAdvancingMetadata() throws Exception {
         FileIO fileIO = fileIO();
         IOException failure = new IOException("bundle write failed");
