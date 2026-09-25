@@ -111,6 +111,20 @@ public class PartitionMarkDoneListener implements CommitListener {
                         options.get(PARTITION_MARK_DONE_MODE)));
     }
 
+    /** Reject coordinator recovery without durable per-partition watermarks. */
+    public static void checkCoordinatorRestoreSupported(
+            boolean isStreaming, boolean isRestored, FileStoreTable table) {
+        Options options = table.coreOptions().toConfiguration();
+        if (isRestored
+                && !disablePartitionMarkDone(isStreaming, table, options)
+                && options.get(PARTITION_MARK_DONE_MODE) == PartitionMarkDoneActionMode.WATERMARK) {
+            throw new UnsupportedOperationException(
+                    "Coordinator-commit does not support checkpoint/savepoint recovery with "
+                            + "watermark partition mark-done enabled: per-partition watermarks "
+                            + "are not persisted. This also applies when end-input-to-done=true.");
+        }
+    }
+
     private static boolean disablePartitionMarkDone(
             boolean isStreaming, FileStoreTable table, Options options) {
         boolean partitionMarkDoneWhenEndInput = options.get(PARTITION_MARK_DONE_WHEN_END_INPUT);
@@ -180,6 +194,10 @@ public class PartitionMarkDoneListener implements CommitListener {
         Optional<Long> latestWatermark = partitionWatermarks.values().stream().max(Long::compareTo);
 
         if (!latestWatermark.isPresent()) {
+            if (trigger.shouldMarkDoneOnEndInput(endInput)) {
+                markDone(trigger.donePartitions(true), actions);
+                return;
+            }
             LOG.warn("No watermark found in this batch of committables, skip partition mark done.");
             return;
         }
