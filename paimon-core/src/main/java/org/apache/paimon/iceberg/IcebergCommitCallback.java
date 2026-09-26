@@ -67,9 +67,12 @@ import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeDefaultVisitor;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
@@ -85,10 +88,12 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -96,6 +101,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -202,6 +208,312 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         this.indexFileHandler = table.store().newIndexFileHandler();
         this.needAddDvToIceberg = needAddDvToIceberg();
+    }
+
+    /**
+     * Rejects a schema the Iceberg mirror could not represent. A no-op when compatibility is off.
+     */
+    public static void checkSchemaMirrorable(Options options, RowType rowType) {
+        if (options.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        // these have their own rules upstream; the gates here reach paths those do not, and the
+        // conversion below accepts precisions the publication refuses
+        CoreOptions coreOptions = new CoreOptions(options.toMap());
+        SchemaValidation.validateIcebergGeospatialTypes(rowType, coreOptions);
+        SchemaValidation.validateIcebergTimestampPrecisions(rowType, coreOptions);
+        SchemaValidation.validateIcebergTimePrecisions(rowType, coreOptions);
+        int formatVersion = options.get(IcebergOptions.FORMAT_VERSION);
+        checkSupportedFormatVersion(formatVersion);
+        Preconditions.checkArgument(
+                formatVersion < IcebergMetadata.FORMAT_VERSION_V3
+                        || !options.get(IcebergOptions.MANIFEST_LEGACY_VERSION),
+                "'%s' cannot be used with Iceberg format version 3: the legacy manifest "
+                        + "schema cannot carry the first_row_id field required by v3 row lineage.",
+                IcebergOptions.MANIFEST_LEGACY_VERSION.key());
+        checkFormatVersionSupportsSchema(formatVersion, rowType);
+        // the version rules say what is accepted; the conversion is the authority on what can be
+        // expressed at all (precisions out of range, blobs, vectors)
+        for (DataField field : rowType.getFields()) {
+            new IcebergDataField(field);
+        }
+    }
+
+    /**
+     * Rejects a schema change the Iceberg mirror cannot represent before it is persisted. Only what
+     * the change introduces is judged here; the history the mirror publishes with it is judged by
+     * the caller, which holds it.
+     */
+    public static void checkSchemaChangeMirrorable(TableSchema oldSchema, TableSchema newSchema) {
+        checkSchemaChangeMirrorable(
+                Options.fromMap(oldSchema.options()),
+                oldSchema.fields(),
+                Options.fromMap(newSchema.options()),
+                newSchema.fields());
+    }
+
+    /** As above, for callers that hold the parts rather than a persisted {@link TableSchema}. */
+    public static void checkSchemaChangeMirrorable(
+            Options oldOptions,
+            List<DataField> oldSchemaFields,
+            Options newOptions,
+            List<DataField> newSchemaFields) {
+        if (newOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        if (oldOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            // switching mirroring on starts mirroring every field, not only what changed
+            checkSchemaMirrorable(newOptions, new RowType(newSchemaFields));
+            return;
+        }
+        int formatVersion = newOptions.get(IcebergOptions.FORMAT_VERSION);
+        if (!Objects.equals(
+                        oldOptions.get(IcebergOptions.FORMAT_VERSION),
+                        newOptions.get(IcebergOptions.FORMAT_VERSION))
+                || !Objects.equals(
+                        oldOptions.get(IcebergOptions.MANIFEST_LEGACY_VERSION),
+                        newOptions.get(IcebergOptions.MANIFEST_LEGACY_VERSION))) {
+            checkSupportedFormatVersion(formatVersion);
+            Preconditions.checkArgument(
+                    formatVersion >= oldOptions.get(IcebergOptions.FORMAT_VERSION),
+                    "Iceberg format version cannot be lowered from %s to %s: metadata already "
+                            + "written at the higher version cannot be extended by a lower one.",
+                    oldOptions.get(IcebergOptions.FORMAT_VERSION),
+                    formatVersion);
+            Preconditions.checkArgument(
+                    formatVersion < IcebergMetadata.FORMAT_VERSION_V3
+                            || !newOptions.get(IcebergOptions.MANIFEST_LEGACY_VERSION),
+                    "'%s' cannot be used with Iceberg format version 3: the legacy manifest "
+                            + "schema cannot carry the first_row_id field required by v3 row lineage.",
+                    IcebergOptions.MANIFEST_LEGACY_VERSION.key());
+        }
+        Map<Integer, DataType> oldFields = new HashMap<>();
+        for (DataField field : oldSchemaFields) {
+            oldFields.put(field.id(), field.type());
+        }
+        List<DataField> introduced = new ArrayList<>();
+        for (DataField field : newSchemaFields) {
+            collectIntroduced(
+                    oldFields.get(field.id()), field.type(), field.name(), field.id(), introduced);
+        }
+        if (introduced.isEmpty()) {
+            return;
+        }
+        checkFormatVersionSupportsSchema(formatVersion, new RowType(introduced));
+        for (DataField field : introduced) {
+            new IcebergDataField(field);
+        }
+    }
+
+    /**
+     * The part of {@code updated} this change actually introduces, or null when it carries nothing
+     * new. Nested types are compared by field id, so adding a supported field next to an
+     * unsupported sibling does not drag the sibling back into validation.
+     */
+    /** As above, collecting into {@code introduced} rather than returning. */
+    private static void collectIntroduced(
+            @Nullable DataType existing,
+            DataType updated,
+            String path,
+            int id,
+            List<DataField> introduced) {
+        if (existing == null) {
+            introduced.add(new DataField(id, path, updated));
+            return;
+        }
+        if (existing.equals(updated)) {
+            return;
+        }
+        if (existing instanceof RowType && updated instanceof RowType) {
+            Map<Integer, DataType> existingFields = new HashMap<>();
+            for (DataField field : ((RowType) existing).getFields()) {
+                existingFields.put(field.id(), field.type());
+            }
+            for (DataField field : ((RowType) updated).getFields()) {
+                collectIntroduced(
+                        existingFields.get(field.id()),
+                        field.type(),
+                        path + "." + field.name(),
+                        field.id(),
+                        introduced);
+            }
+            return;
+        }
+        if (existing instanceof ArrayType && updated instanceof ArrayType) {
+            collectIntroduced(
+                    ((ArrayType) existing).getElementType(),
+                    ((ArrayType) updated).getElementType(),
+                    path + ".element",
+                    id,
+                    introduced);
+            return;
+        }
+        if (existing instanceof MultisetType && updated instanceof MultisetType) {
+            collectIntroduced(
+                    ((MultisetType) existing).getElementType(),
+                    ((MultisetType) updated).getElementType(),
+                    path + ".element",
+                    id,
+                    introduced);
+            return;
+        }
+        if (existing instanceof MapType && updated instanceof MapType) {
+            collectIntroduced(
+                    ((MapType) existing).getKeyType(),
+                    ((MapType) updated).getKeyType(),
+                    path + ".key",
+                    id,
+                    introduced);
+            collectIntroduced(
+                    ((MapType) existing).getValueType(),
+                    ((MapType) updated).getValueType(),
+                    path + ".value",
+                    id,
+                    introduced);
+            return;
+        }
+        introduced.add(new DataField(id, path, updated));
+    }
+
+    /**
+     * Refuses re-enabling mirroring at a format version below one this table already published: the
+     * metadata written back then cannot be extended by a lower version.
+     */
+    public static void checkNoFormatVersionRegression(
+            Options newOptions, List<TableSchema> history) {
+        if (newOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkNoFormatVersionRegressionOnRestore(newOptions, history);
+    }
+
+    /**
+     * The same rule, applied even when the schema being installed disables mirroring: fast-forward
+     * and rollback delete the history that records what was published, so the evidence has to be
+     * checked before it is gone.
+     */
+    public static void checkNoFormatVersionRegressionOnRestore(
+            Options newOptions, List<TableSchema> history) {
+        int formatVersion = newOptions.get(IcebergOptions.FORMAT_VERSION);
+        for (TableSchema past : history) {
+            Options pastOptions = Options.fromMap(past.options());
+            if (pastOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                    == IcebergOptions.StorageType.DISABLED) {
+                continue;
+            }
+            Preconditions.checkArgument(
+                    formatVersion >= pastOptions.get(IcebergOptions.FORMAT_VERSION),
+                    "Iceberg format version cannot be lowered from %s to %s: metadata already "
+                            + "written at the higher version cannot be extended by a lower one.",
+                    pastOptions.get(IcebergOptions.FORMAT_VERSION),
+                    formatVersion);
+        }
+    }
+
+    static void checkSupportedFormatVersion(int formatVersion) {
+        Preconditions.checkArgument(
+                formatVersion == IcebergMetadata.FORMAT_VERSION_V2
+                        || formatVersion == IcebergMetadata.FORMAT_VERSION_V3,
+                "Unsupported iceberg format version! Only version 2 or version 3 is valid, but current version is %s.",
+                formatVersion);
+    }
+
+    static void checkFormatVersionSupportsSchema(int formatVersion, RowType rowType) {
+        RestrictedTypeCollector collector = new RestrictedTypeCollector();
+        rowType.accept(collector);
+        throwOnV3OnlyTypes(collector.v3OnlyTypes, formatVersion);
+    }
+
+    private static void throwOnV3OnlyTypes(Collection<String> v3OnlyTypes, int formatVersion) {
+        Preconditions.checkArgument(
+                formatVersion >= IcebergMetadata.FORMAT_VERSION_V3 || v3OnlyTypes.isEmpty(),
+                "Data types %s are not supported by Iceberg compatibility: they need Iceberg "
+                        + "format version 3 (format version %s in use).",
+                v3OnlyTypes,
+                formatVersion);
+    }
+
+    // Iceberg's identity transform (the only transform Paimon partition values use) rejects
+    // VARIANT outright, so a VARIANT partition key can never be represented in Iceberg metadata
+    static void checkNoVariantPartitionKeys(
+            List<String> partitionKeys, IcebergSchema icebergSchema) {
+        Set<String> variantPartitionKeys = new LinkedHashSet<>();
+        for (IcebergDataField field : icebergSchema.fields()) {
+            if (partitionKeys.contains(field.name()) && field.dataType() instanceof VariantType) {
+                variantPartitionKeys.add(field.name());
+            }
+        }
+        Preconditions.checkArgument(
+                variantPartitionKeys.isEmpty(),
+                "Partition keys %s have type VARIANT, which Iceberg does not support as a "
+                        + "partition key.",
+                variantPartitionKeys);
+    }
+
+    /**
+     * Collects the types the Iceberg mirror cannot emit, with the path of each offending field.
+     * Leaf types not named here are representable, or rejected later by the type conversion itself
+     * ({@link IcebergDataField#toTypeString}).
+     */
+    private static class RestrictedTypeCollector extends DataTypeDefaultVisitor<Void> {
+
+        private final Collection<String> v3OnlyTypes = new LinkedHashSet<>();
+        private final Deque<String> path = new ArrayDeque<>();
+
+        private Void descend(String name, DataType type) {
+            path.addLast(name);
+            type.accept(this);
+            path.removeLast();
+            return null;
+        }
+
+        private String currentPath(DataType type) {
+            return String.join(".", path) + ": " + type.asSQLString();
+        }
+
+        @Override
+        public Void visit(VariantType variantType) {
+            v3OnlyTypes.add(currentPath(variantType));
+            return null;
+        }
+
+        @Override
+        public Void visit(ArrayType arrayType) {
+            return descend("element", arrayType.getElementType());
+        }
+
+        @Override
+        public Void visit(MultisetType multisetType) {
+            return descend("element", multisetType.getElementType());
+        }
+
+        @Override
+        public Void visit(VectorType vectorType) {
+            return descend("element", vectorType.getElementType());
+        }
+
+        @Override
+        public Void visit(MapType mapType) {
+            descend("key", mapType.getKeyType());
+            return descend("value", mapType.getValueType());
+        }
+
+        @Override
+        public Void visit(RowType rowType) {
+            for (DataField field : rowType.getFields()) {
+                descend(field.name(), field.type());
+            }
+            return null;
+        }
+
+        @Override
+        protected Void defaultMethod(DataType dataType) {
+            return null;
+        }
     }
 
     public static Path catalogTableMetadataPath(FileStoreTable table) {
