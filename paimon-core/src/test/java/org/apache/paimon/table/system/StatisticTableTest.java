@@ -69,6 +69,25 @@ class StatisticTableTest extends TableTestBase {
     }
 
     @Test
+    void testReadStatisticsWithoutMergedCounts() throws Exception {
+        // statistics written without merged record count/size must surface as NULL
+        // columns instead of killing the query
+        long snapshotId = table.snapshotManager().latestSnapshot().id();
+        long schemaId = table.snapshotManager().latestSnapshot().schemaId();
+        Statistics stats = new Statistics(snapshotId, schemaId, null, null);
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            commit.updateStatistics(stats);
+        }
+
+        List<InternalRow> rows = read(statisticTable);
+        assertThat(rows).hasSize(1);
+        InternalRow row = rows.get(0);
+        assertThat(row.getLong(0)).isEqualTo(snapshotId);
+        assertThat(row.isNullAt(2)).isTrue();
+        assertThat(row.isNullAt(3)).isTrue();
+    }
+
+    @Test
     void testReadStatistics() throws Exception {
         long writtenSnapshotId = commitStatistics(10L, 1000L);
 

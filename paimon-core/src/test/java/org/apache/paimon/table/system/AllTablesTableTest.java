@@ -21,13 +21,17 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.rest.responses.AuditRESTResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.ReadonlyTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,6 +74,33 @@ public class AllTablesTableTest extends TableTestBase {
         assertThat(result)
                 .containsOnly(
                         "+I(default,T,table,true,true,null,null,null,null,null,null,null,null,null)");
+    }
+
+    @Test
+    void testAllTablesTableWithNonNumericAuditOption() throws Exception {
+        // created-at/updated-at are ordinary table options: a non-numeric value must
+        // surface as NULL instead of failing the whole ALL_TABLES listing
+        Identifier identifier = identifier("T2");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .primaryKey("pk")
+                        .option(AuditRESTResponse.FIELD_CREATED_AT, "not-a-number")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+
+        // the listing is computed when the table object is fetched, so build it from the
+        // tables that exist now (the fetched handle is cached with the old listing)
+        List<Pair<Table, TableSnapshot>> tables = new java.util.ArrayList<>();
+        for (String tn : catalog.listTables(database)) {
+            if (tn.equals("T2")) {
+                tables.add(Pair.of(catalog.getTable(identifier(tn)), null));
+            }
+        }
+        AllTablesTable listing = AllTablesTable.fromTables(tables);
+        List<String> result =
+                read(listing).stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result).anyMatch(r -> r.contains("T2") && r.contains("null,null"));
     }
 
     @Test
