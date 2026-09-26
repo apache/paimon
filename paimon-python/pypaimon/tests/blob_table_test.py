@@ -5240,9 +5240,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         wb.new_commit().commit(w.prepare_commit())
         w.close()
 
-        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-
         table = self.catalog.get_table(table_name)
         rb = table.new_read_builder()
         rb = rb.with_projection(['name', '_ROW_ID'])
@@ -5253,11 +5250,10 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             '_ROW_ID': source.column('_ROW_ID'),
             'name': pa.array(['updated', 'updated'], type=pa.string()),
         })
-        updater = TableUpdateByRowId(
-            table, '_test_', BATCH_COMMIT_IDENTIFIER,
-        )
+        update_builder = table.new_batch_write_builder()
+        updater = update_builder.new_update().new_update_by_row_id()
         msgs = updater.update_columns(update_data, ['name'])
-        table.new_batch_write_builder().new_commit().commit(msgs)
+        update_builder.new_commit().commit(msgs)
 
         table = self.catalog.get_table(table_name)
         rb = table.new_read_builder()
@@ -5267,8 +5263,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_blob_table_partial_update_non_blob_column_with_rolling_files(self):
         from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -5322,9 +5316,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             '_ROW_ID': source.column('_ROW_ID'),
             'name': pa.array(['updated'] * source.num_rows, type=pa.string()),
         })
-        updater = TableUpdateByRowId(
-            table, '_test_', BATCH_COMMIT_IDENTIFIER,
-        )
+        update_builder = table.new_batch_write_builder()
+        updater = update_builder.new_update().new_update_by_row_id()
         msgs = updater.update_columns(update_data, ['name'])
         update_normal_files = [
             f for msg in msgs for f in msg.new_files
@@ -5335,7 +5328,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         for file in update_normal_files:
             self.assertEqual(file.min_sequence_number, 0)
             self.assertEqual(file.max_sequence_number, file.row_count - 1)
-        table.new_batch_write_builder().new_commit().commit(msgs)
+        update_builder.new_commit().commit(msgs)
 
         table = self.catalog.get_table(table_name)
         rb = table.new_read_builder().with_projection(['id', 'name'])

@@ -17,7 +17,6 @@
 
 import bisect
 import uuid
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
@@ -26,11 +25,7 @@ import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.data_evolution_split_generator import (
-    DataEvolutionSplitGenerator,
-)
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import (
@@ -46,6 +41,7 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.row_utils import (
     require_columns,
     row_to_named_values,
@@ -59,21 +55,6 @@ from pypaimon.write.writer.write_buffer import WriteBuffer
 _ARROW_MAJOR = int(pa.__version__.split('.')[0])
 # Keep aligned with org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BLOCK_SIZE.
 _DEFAULT_PARQUET_BLOCK_SIZE = 128 * 1024 * 1024
-
-
-@dataclass(frozen=True)
-class _FilesInfo:
-    """Snapshot view of target data files keyed by first_row_id.
-
-    Built once per merge by the driver and broadcast to workers so each task
-    avoids re-scanning the manifest.
-    """
-    snapshot_id: int
-    first_row_ids: List[int]
-    first_row_id_index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = (
-        field(default_factory=dict)
-    )
-    valid_row_id_ranges: List[Range] = field(default_factory=list)
 
 
 class _RowIdUpdateFileWriter:
@@ -223,7 +204,7 @@ class TableUpdateByRowId:
 
     def __init__(
             self, table, commit_user: str, commit_identifier: int,
-            _precomputed_files_info: Optional[_FilesInfo] = None,
+            _precomputed_files_info: Optional[RowIdFileIndex] = None,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -240,101 +221,24 @@ class TableUpdateByRowId:
         self.commit_messages: List[CommitMessage] = []
         self._updated_first_row_ids_by_column: Dict[str, Set[int]] = {}
 
-    def _snapshot_files_info(self) -> _FilesInfo:
+    def _snapshot_files_info(self) -> RowIdFileIndex:
         """Return the already loaded snapshot file index for broadcast."""
-        return _FilesInfo(
+        return RowIdFileIndex(
             snapshot_id=self.snapshot_id,
             first_row_ids=self.first_row_ids,
             first_row_id_index=self._first_row_id_index,
             valid_row_id_ranges=self.valid_row_id_ranges,
         )
 
-    def _load_existing_files_info(self) -> _FilesInfo:
+    def _load_existing_files_info(self) -> RowIdFileIndex:
         """Scan the latest snapshot once and index files by ``first_row_id``.
 
-        Returns a :class:`_FilesInfo` whose ``first_row_id_index`` maps each
+        Returns a :class:`RowIdFileIndex` whose ``first_row_id_index`` maps each
         ``first_row_id`` to the owning split and the list of files with that
         id (a single id may belong to multiple files when data evolution has
         split a logical row range).
         """
-        scan = self.table.new_read_builder().new_scan()
-        plan = scan.plan_for_write()
-        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
-        return self._files_info_from_splits(snapshot_id, plan.splits())
-
-    @classmethod
-    def _files_info_from_entries(
-            cls,
-            table,
-            snapshot_id: int,
-            entries: List[ManifestEntry],
-    ) -> _FilesInfo:
-        """Build a file index from an already resolved snapshot entry set."""
-        splits = DataEvolutionSplitGenerator(
-            table,
-            table.options.source_split_target_size(),
-            table.options.source_split_open_file_cost(),
-        ).create_splits(entries)
-        return cls._files_info_from_splits(snapshot_id, splits)
-
-    @classmethod
-    def _files_info_from_splits(
-            cls, snapshot_id: int, splits: List[DataSplit]) -> _FilesInfo:
-        index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
-        row_id_ranges: List[Range] = []
-        for split in splits:
-            files_with_row_id = [
-                file for file in split.files if file.first_row_id is not None
-            ]
-            data_files = [
-                file for file in files_with_row_id
-                if not DataFileMeta.is_blob_file(file.file_name)
-            ]
-            for file in split.files:
-                if (
-                        file.first_row_id is None
-                        or DataFileMeta.is_blob_file(file.file_name)
-                ):
-                    continue
-                row_id_ranges.append(file.row_id_range())
-            for file in data_files:
-                target_files = [
-                    target_file
-                    for target_file in files_with_row_id
-                    if cls._overlaps(
-                        file.row_id_range(), target_file.row_id_range()
-                    )
-                ]
-
-                entry = index.get(file.first_row_id)
-                if entry is None:
-                    index[file.first_row_id] = (split, target_files)
-                else:
-                    existing_files = entry[1]
-                    existing_names = {
-                        existing.file_name for existing in existing_files
-                    }
-                    existing_files.extend(
-                        target_file
-                        for target_file in target_files
-                        if target_file.file_name not in existing_names
-                    )
-
-        if row_id_ranges:
-            merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
-        else:
-            merged = []
-
-        return _FilesInfo(
-            snapshot_id=snapshot_id,
-            first_row_ids=sorted(index.keys()),
-            first_row_id_index=index,
-            valid_row_id_ranges=merged,
-        )
-
-    @staticmethod
-    def _overlaps(left: Range, right: Range) -> bool:
-        return left.from_ <= right.to and right.from_ <= left.to
+        return RowIdFileIndex.from_table(self.table)
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """

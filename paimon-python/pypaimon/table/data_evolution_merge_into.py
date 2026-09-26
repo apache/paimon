@@ -55,7 +55,6 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
 from pypaimon.write.table_delete import TableDeleteByRowId
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 __all__ = [
     "merge_into",
@@ -594,11 +593,10 @@ def _prepare_commit_messages(
         update_snapshot_table = _copy_at_snapshot(
             table, base_snapshot.id if base_snapshot is not None else None
         )
-        updater = TableUpdateByRowId(
-            update_snapshot_table,
-            commit_user,
-            commit_identifier,
-        )
+        from pypaimon.write.write_builder import _new_update_by_row_id
+
+        updater = _new_update_by_row_id(
+            update_snapshot_table, commit_user, commit_identifier)
         update_msgs = updater.update_columns(
             update_table, list(update_cols_union)
         )

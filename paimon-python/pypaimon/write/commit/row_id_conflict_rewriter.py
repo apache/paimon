@@ -27,7 +27,7 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.write.row_id_file_index import RowIdFileIndex
 
 
 @dataclass
@@ -103,7 +103,7 @@ class RowIdConflictRewriter:
 
         new_messages = []
         try:
-            files_info = TableUpdateByRowId._files_info_from_entries(
+            files_info = RowIdFileIndex.from_entries(
                 self.table,
                 latest_snapshot.id,
                 base_entries,
@@ -126,12 +126,11 @@ class RowIdConflictRewriter:
                         "overlapping staged files for columns {}.".format(
                             column_names)
                     )
-                updater = TableUpdateByRowId(
-                    self.table,
-                    self.commit_user,
-                    self.commit_identifier,
-                    _precomputed_files_info=files_info,
-                )
+                from pypaimon.write.write_builder import _new_update_by_row_id
+
+                updater = _new_update_by_row_id(
+                    self.table, self.commit_user, self.commit_identifier,
+                    _precomputed_files_info=files_info)
                 try:
                     new_messages.extend(
                         updater.update_columns(update_data, column_names)

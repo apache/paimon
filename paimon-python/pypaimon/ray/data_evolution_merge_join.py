@@ -345,9 +345,8 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
 def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
-    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.write.file_store_commit import _abort_commit_messages
-    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+    from pypaimon.write.row_id_file_index import RowIdFileIndex
 
     table_read = TableRead(
         context.scan_table,
@@ -387,16 +386,11 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
         if collect_row_ids else []
     )
 
-    import uuid
-    files_info = TableUpdateByRowId._files_info_from_splits(
+    files_info = RowIdFileIndex.from_splits(
         context.snapshot_id, [file_group],
     )
-    updater = TableUpdateByRowId(
-        context.table,
-        "_self_merge_group_" + uuid.uuid4().hex[:8],
-        BATCH_COMMIT_IDENTIFIER,
-        _precomputed_files_info=files_info,
-    )
+    updater = context.table.new_batch_write_builder().new_update().new_update_by_row_id(
+        _precomputed_files_info=files_info)
     try:
         messages = updater.update_columns(updates, context.update_cols)
     except Exception:
@@ -698,14 +692,11 @@ def distributed_update_apply(
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
-    import uuid
 
     import pyarrow.compute as pc
     import ray
 
-    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
     row_id_name = SpecialFields.ROW_ID.name
     cols = list(write_update_cols)
@@ -724,11 +715,7 @@ def distributed_update_apply(
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
-    planner = TableUpdateByRowId(
-        scan_table,
-        "_merge_into_planner_" + uuid.uuid4().hex[:8],
-        BATCH_COMMIT_IDENTIFIER,
-    )
+    planner = scan_table.new_batch_write_builder().new_update().new_update_by_row_id()
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
@@ -843,12 +830,9 @@ def distributed_update_apply(
             for_update.column(row_id_name).to_pylist()
             if collect_row_ids else []
         )
-        worker = TableUpdateByRowId(
-            captured_table,
-            "_merge_into_shard_" + uuid.uuid4().hex[:8],
-            BATCH_COMMIT_IDENTIFIER,
-            _precomputed_files_info=ray.get(precomputed_info_ref),
-        )
+        update = captured_table.new_batch_write_builder().new_update()
+        worker = update.new_update_by_row_id(
+            _precomputed_files_info=ray.get(precomputed_info_ref))
         msgs = worker.update_columns(for_update, list(captured_cols))
         return pa.Table.from_pydict({
             "msgs_blob": [pickle.dumps(msgs)],
@@ -915,16 +899,13 @@ def distributed_read_by_row_id(
     is empty. Read-side mirror of ``distributed_update_apply``.
     """
     import numpy as np
-    import uuid
 
     import ray
 
     from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.read.split import DataSplit
-    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.special_fields import SpecialFields
     from pypaimon.utils.range import Range
-    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
     row_id_name = SpecialFields.ROW_ID.name
     read_cols = list(projection)
@@ -935,11 +916,7 @@ def distributed_read_by_row_id(
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
     # The caller pinned the resolved snapshot, including any retained tag metadata.
-    planner = TableUpdateByRowId(
-        table,
-        "_read_by_row_id_planner_" + uuid.uuid4().hex[:8],
-        BATCH_COMMIT_IDENTIFIER,
-    )
+    planner = table.new_batch_write_builder().new_update().new_update_by_row_id()
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return None
