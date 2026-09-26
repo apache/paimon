@@ -93,6 +93,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyMap;
 
 /** Test for {@link LocalOrphanFilesClean}. */
 public class LocalOrphanFilesCleanTest {
@@ -136,6 +137,55 @@ public class LocalOrphanFilesCleanTest {
         write.close();
         commit.close();
         TestPojo.reset();
+    }
+
+    @Test
+    public void testExecuteDatabaseOrphanFilesShutsDownExecutorOnFailure() throws Exception {
+        // a real table, but its file IO fails listing: the submitted clean task dies and
+        // the executor must still be shut down instead of leaking its threads
+        FileStoreTable real = createFileStoreTable(rowType, new Options());
+        FileStoreTable stub =
+                org.mockito.Mockito.mock(
+                        FileStoreTable.class, org.mockito.AdditionalAnswers.delegatesTo(real));
+        org.mockito.Mockito.doReturn(stub).when(stub).copy(anyMap());
+        // the clean task dies on the very first step: listing the table's branches
+        org.mockito.Mockito.doThrow(new RuntimeException("listing failed"))
+                .when(stub)
+                .branchManager();
+
+        org.apache.paimon.catalog.FileSystemCatalog catalog =
+                new org.apache.paimon.catalog.FileSystemCatalog(
+                        org.apache.paimon.fs.local.LocalFileIO.create(),
+                        new Path(tempDir.getParent().toString())) {
+                    @Override
+                    public org.apache.paimon.table.Table getTable(
+                            org.apache.paimon.catalog.Identifier identifier)
+                            throws org.apache.paimon.catalog.Catalog.TableNotExistException {
+                        return stub;
+                    }
+
+                    @Override
+                    public List<String> listTables(String databaseName)
+                            throws org.apache.paimon.catalog.Catalog.DatabaseNotExistException {
+                        return Collections.singletonList("t");
+                    }
+                };
+
+        int baseline = threadCount();
+        Assertions.assertThatThrownBy(
+                        () ->
+                                LocalOrphanFilesClean.executeDatabaseOrphanFiles(
+                                        catalog, "db", null, 0L, 1, true))
+                .hasMessageContaining("listing failed");
+        // the pool threads terminate once shutdownNow runs; poll briefly for it
+        for (int i = 0; i < 100 && threadCount() > baseline; i++) {
+            Thread.sleep(50);
+        }
+        Assertions.assertThat(threadCount()).isLessThanOrEqualTo(baseline);
+    }
+
+    private static int threadCount() {
+        return Thread.getAllStackTraces().keySet().size();
     }
 
     @Test

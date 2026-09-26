@@ -327,19 +327,22 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
         long deletedFileCount = 0;
         long deletedFileTotalLenInBytes = 0;
-        for (Future<CleanOrphanFilesResult> task : tasks) {
-            try {
-                deletedFileCount += task.get().getDeletedFileCount();
-                deletedFileTotalLenInBytes += task.get().getDeletedFileTotalLenInBytes();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            } catch (ExecutionException e) {
-                throw new RuntimeException(e);
+        try {
+            for (Future<CleanOrphanFilesResult> task : tasks) {
+                try {
+                    deletedFileCount += task.get().getDeletedFileCount();
+                    deletedFileTotalLenInBytes += task.get().getDeletedFileTotalLenInBytes();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                } catch (ExecutionException e) {
+                    throw new RuntimeException(e);
+                }
             }
+        } finally {
+            // a failing task must not leak the executor's threads
+            executorService.shutdownNow();
         }
-
-        executorService.shutdownNow();
         return new CleanOrphanFilesResult(deletedFileCount, deletedFileTotalLenInBytes);
     }
 }
