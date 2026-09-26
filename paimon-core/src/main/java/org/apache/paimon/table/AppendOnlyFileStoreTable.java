@@ -121,12 +121,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                     config ->
                             new DataEvolutionSplitReadProvider(
                                     () -> store().newDataEvolutionRead(), config));
-        } else {
-            providerFactories.add(
-                    config ->
-                            new AppendTableRawFileSplitReadProvider(
-                                    () -> store().newRead(), config));
         }
+        // Also the fallback for splits of a data-evolution table whose files have no first row id
+        // yet (written before row tracking was enabled on the table).
+        providerFactories.add(
+                config -> new AppendTableRawFileSplitReadProvider(() -> store().newRead(), config));
         return coreOptions().dataEvolutionEnabled()
                 ? new DataEvolutionTableRead(
                         providerFactories,

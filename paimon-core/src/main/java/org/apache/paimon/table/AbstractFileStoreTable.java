@@ -610,8 +610,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
-        IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
+        try {
+            checkRollbackKeepsRowTracking(snapshotManager.tryGetSnapshot(snapshotId));
+        } catch (FileNotFoundException ignored) {
+            // the snapshot may be reachable through a tag only; the tag path checks again
+        }
+        IcebergCommitCallback.markRetirePendingForRollback(this);
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
         } catch (UnsupportedOperationException e) {
@@ -636,6 +641,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
+        checkRollbackKeepsRowTracking(tagManager().getOrThrow(tagName).trimToSnapshot());
         IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
@@ -646,6 +652,31 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             rollbackHelper.cleanLargerThan(taggedSnapshot);
             rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
         }
+    }
+
+    /**
+     * A snapshot committed before {@code sys.enable_data_evolution} converted the table holds files
+     * without a first row id. Making such a snapshot the latest again while the schema still has
+     * row tracking enabled would leave the table unreadable as a data-evolution table, so refuse
+     * it; roll the schema back first if the conversion really has to be undone.
+     */
+    private void checkRollbackKeepsRowTracking(Snapshot target) {
+        // Decide by the latest persisted schema, not by the options of this object: a table loaded
+        // before row tracking was enabled still reports it as disabled.
+        Optional<TableSchema> latestSchema = schemaManager().latest();
+        if (!latestSchema.isPresent()
+                || !CoreOptions.fromMap(latestSchema.get().options()).rowTrackingEnabled()) {
+            return;
+        }
+        TableSchema targetSchema = schemaManager().schema(target.schemaId());
+        if (CoreOptions.fromMap(targetSchema.options()).rowTrackingEnabled()) {
+            return;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Cannot roll back table %s to snapshot %d: it was committed with schema %d, "
+                                + "before row tracking was enabled, so its files have no row ids.",
+                        name(), target.id(), target.schemaId()));
     }
 
     @Override

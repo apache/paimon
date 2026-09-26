@@ -48,9 +48,12 @@ read work until compaction consolidates them.
 ## Create a Table
 
 Set both `row-tracking.enabled` and `data-evolution.enabled` when creating the
-table. These options are immutable. Data Evolution requires an append table
-with no primary key and `bucket = -1` (the default for an append table).
-`clustering.incremental` cannot be enabled with Data Evolution.
+table. These options cannot be changed with `ALTER TABLE`; an existing append
+table is converted with the `enable_data_evolution` procedure, see
+[Enable on an Existing Append Table](#enable-on-an-existing-append-table).
+Data Evolution requires an append table with no primary key and `bucket = -1`
+(the default for an append table). `clustering.incremental` cannot be enabled
+with Data Evolution.
 
 The following examples assume a configured Paimon catalog and the `default`
 database. Deletion vectors are enabled so the same table can also run the
@@ -142,6 +145,67 @@ declarations and storage options. Dedicated BLOB/vector storage needs normal
 columns alongside it. A partial-column file containing ordinary columns is
 still a **normal file**; “dedicated” refers to the storage format, not to
 whether the file was created by an update.
+
+## Enable on an Existing Append Table
+
+An append table that already holds data can be converted in place. The
+`enable_data_evolution` procedure assigns a row ID range to every existing data
+file by rewriting the manifests of the latest snapshot, then switches on
+`row-tracking.enabled` and `data-evolution.enabled` in a new schema, and
+finally commits an empty snapshot that fences off writers which checked the
+previous schema. No data file is rewritten. The table must be an append table
+without primary key, with `bucket = -1` and without `clustering.incremental`;
+REST catalog tables are not supported yet. The procedure is the only way to
+switch the two options on for an existing table, even an empty one: `ALTER
+TABLE` refuses it, because it cannot fence off a writer that is committing at
+the same time.
+
+<Tabs groupId="data-evolution-enable">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+-- report what would change without changing anything
+CALL sys.enable_data_evolution(table => 'default.target_table', dry_run => true);
+
+CALL sys.enable_data_evolution(table => 'default.target_table');
+```
+
+</TabItem>
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CALL sys.enable_data_evolution(`table` => 'default.target_table', dry_run => true);
+
+CALL sys.enable_data_evolution('default.target_table');
+```
+
+</TabItem>
+
+</Tabs>
+
+The procedure is idempotent: calling it again reports that the table already
+has Data Evolution enabled. Row IDs are assigned contiguously per partition, in
+commit order, so a converted table needs no `reassign_row_id` afterwards. New
+writes continue after the assigned range.
+
+What to expect around the conversion:
+
+- Stop writers that run an older Paimon version before the conversion. They
+  do not refuse to commit after the schema change, so files they commit
+  afterwards would have no row ID.
+- A writer that loaded the table before the conversion cannot commit anymore:
+  its commit is refused with a message asking to restart it, because a file it
+  commits would have no row ID. Restart such jobs after the conversion; they
+  pick up the new schema and assign row IDs as usual.
+- Snapshots and tags from before the conversion stay readable. Their files
+  have no row ID, so `_ROW_ID` reads as `NULL` for them, and they cannot be the
+  target of a partial-column update or of Data Evolution compaction.
+- The table cannot be rolled back to a snapshot from before the conversion
+  while the schema has row tracking enabled.
+- `data-evolution.nested-field.enabled` can be switched on afterwards with
+  `ALTER TABLE` as for any Data Evolution table.
 
 ## File Group Spec
 

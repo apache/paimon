@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.dataevolution.DataEvolutionEnabler;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -150,6 +151,9 @@ final class SchemaManagerUtils {
                 // create no snapshots, so the snapshot check would not catch them
                 if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
+                }
+                if (!unchanged && !hasSnapshots.get()) {
+                    checkNotEnablingRowTracking(setOption.key(), newValue);
                 }
                 if (hasSnapshots.get() && !unchanged) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
@@ -436,6 +440,14 @@ final class SchemaManagerUtils {
                             "Cannot drop primary keys on a non-empty table.");
                 }
                 newPrimaryKeys = Collections.emptyList();
+            } else if (change instanceof DataEvolutionEnabler.EnableDataEvolution) {
+                // Deliberately not subject to checkAlterTableOption: the two options are
+                // immutable for ALTER TABLE. Only DataEvolutionEnabler can create this change: it
+                // assigns a first row id to every existing data file before, and fences off and
+                // repairs writers on the previous schema after. The constraints of a row-tracking
+                // table (no primary key, bucket -1, ...) are enforced by validateTableSchema below.
+                newOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+                newOptions.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
             } else {
                 throw new UnsupportedOperationException("Unsupported change: " + change.getClass());
             }
@@ -1038,6 +1050,26 @@ final class SchemaManagerUtils {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Row tracking cannot be switched on by an ALTER TABLE, not even before the first snapshot: a
+     * writer that loaded the table without it may be committing that snapshot at the same time,
+     * with files that get no row id. Once the table has snapshots, {@link #checkAlterTableOption}
+     * refuses both options as immutable.
+     */
+    private static void checkNotEnablingRowTracking(String key, String newValue) {
+        if ((CoreOptions.ROW_TRACKING_ENABLED.key().equals(key)
+                        || CoreOptions.DATA_EVOLUTION_ENABLED.key().equals(key))
+                && Boolean.parseBoolean(newValue)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot enable '%s' on an existing table. Set it when creating the "
+                                    + "table, or call the sys.enable_data_evolution procedure, "
+                                    + "which also fences off writers that loaded the table "
+                                    + "before.",
+                            key));
+        }
     }
 
     static void checkAlterTableOption(

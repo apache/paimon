@@ -2195,6 +2195,40 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: merge after a schema-only change writes files with the current schema") {
+    withTable("t", "s") {
+      sql("""
+            |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x'))")
+
+      // Neither change creates a snapshot: the latest snapshot still references schema 0.
+      sql("ALTER TABLE t SET TBLPROPERTIES ('data-evolution.nested-field.enabled' = 'true')")
+      sql("ALTER TABLE t ADD COLUMN c INT")
+      val schemaId = loadTable("t").schema().id()
+      assert(schemaId == 2L)
+
+      Seq((0L, 100, 7)).toDF("rid", "newa", "newc").createOrReplaceTempView("s")
+      sql("""
+            |MERGE INTO t USING s ON t._ROW_ID = s.rid
+            |WHEN MATCHED THEN UPDATE SET t.nest.a = s.newa, t.c = s.newc
+            |""".stripMargin)
+
+      // the sub-field file is decoded through the schema it was written with, which must be the
+      // one where sub-field evolution is enabled
+      checkAnswer(sql("SELECT id, nest.a, nest.b, c FROM t"), Seq(Row(1, 100, "x", 7)))
+      checkAnswer(
+        sql(
+          "SELECT write_cols, schema_id FROM `t$files` ORDER BY max_sequence_number DESC LIMIT 1"),
+        Seq(Row(Seq("nest.a", "c"), schemaId)))
+
+      sql("UPDATE t SET c = 8 WHERE id = 1")
+      checkAnswer(sql("SELECT id, nest.a, c FROM t"), Seq(Row(1, 100, 8)))
+    }
+  }
+
   test("Data Evolution: V1 update with user-specified snapshot uses self-merge shortcut") {
     withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
       withTable("t") {
