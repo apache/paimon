@@ -88,7 +88,6 @@ class MetadataStatsModeUnitTest(unittest.TestCase):
             ("a", "z", 7))
 
 
-# placeholder-e2e
 @pytest.mark.python_write
 class MetadataStatsModeE2ETest(unittest.TestCase):
     """End to end: metadata.stats-mode must control the value stats pypaimon
@@ -190,6 +189,51 @@ class MetadataStatsModeE2ETest(unittest.TestCase):
         self.assertEqual(mn, [10, "app"])
         self.assertEqual(mx, [30, "bao"])
         self.assertEqual(null_counts, [0, 1])
+
+
+class NativeRouteStatsModeTest(unittest.TestCase):
+    """The native (Rust) writer omits value stats for primary-key files, so a
+    PK table under a mode that records value stats must fall to the Python
+    writer. Append tables are never blocked (Rust records full stats, a safe
+    superset)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create(
+            {"warehouse": os.path.join(cls.tempdir, "warehouse")})
+        cls.catalog.create_database("default", True)
+        cls.pa_schema = pa.schema([("id", pa.int32(), False), ("name", pa.string())])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def _table(self, name, mode, primary_keys=None):
+        options = {} if mode is None else {"metadata.stats-mode": mode}
+        if primary_keys:
+            options["bucket"] = "1"
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, primary_keys=primary_keys, options=options)
+        self.catalog.create_table("default." + name, schema, False)
+        return self.catalog.get_table("default." + name)
+
+    def test_pk_value_stats_needs_python(self):
+        from pypaimon.write.native_write import _pk_value_stats_needs_python
+
+        # PK + none (and unset, which defaults to none) matches Rust's output.
+        self.assertFalse(_pk_value_stats_needs_python(
+            self._table("pk_none", "none", ["id"])))
+        self.assertFalse(_pk_value_stats_needs_python(
+            self._table("pk_default", None, ["id"])))
+        # PK + any value-stats mode cannot be honored by Rust -> use Python.
+        for mode in ("counts", "truncate(8)", "full"):
+            name = "pk_" + mode.replace("(", "_").replace(")", "")
+            table = self._table(name, mode, ["id"])
+            self.assertTrue(_pk_value_stats_needs_python(table), mode)
+        # Append tables are never blocked here.
+        self.assertFalse(_pk_value_stats_needs_python(
+            self._table("ap_counts", "counts")))
 
 
 if __name__ == "__main__":

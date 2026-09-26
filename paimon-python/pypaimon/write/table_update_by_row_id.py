@@ -167,7 +167,7 @@ class _RowIdUpdateFileWriter:
                 if not batch.num_rows:
                     continue
                 if file_writer is None:
-                    if writer.options.metadata_stats_enabled():
+                    if writer._value_stats_on:
                         fields = PyarrowFieldParser.to_paimon_schema(batch.schema)
                     file_writer = SingleFileWriter(
                         writer.file_io, file_path, batch.schema, writer.file_format,
@@ -186,7 +186,9 @@ class _RowIdUpdateFileWriter:
                 min_key=GenericRow([], []), max_key=GenericRow([], []),
                 key_stats=SimpleStats.empty_stats(),
                 value_stats=writer._collect_value_stats(
-                    None, fields, file_writer.column_stats),
+                    None, fields,
+                    writer._converted_value_column_stats(
+                        fields, file_writer.column_stats)),
                 min_sequence_number=0, max_sequence_number=0,
             )
             writer._finish_data_file(meta)
