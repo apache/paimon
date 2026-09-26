@@ -610,6 +610,7 @@ final class SchemaManagerUtils {
 
         Map<String, String> renameMappings =
                 Streams.stream(renameColumns)
+                        .filter(rename -> rename.fieldNames().length == 1)
                         .collect(
                                 Collectors.toMap(
                                         // currently only non-nested columns are supported
@@ -618,10 +619,14 @@ final class SchemaManagerUtils {
 
         // case 1: the option key is fixed and only value may contain field names
 
-        // bucket key rename
+        // bucket key rename; canonical readers trim the csv entries, so the rewrite must
+        // trim too or a spaced entry never matches the rename
         String bucketKeysStr = options.get(BUCKET_KEY.key());
         if (!StringUtils.isNullOrWhitespaceOnly(bucketKeysStr)) {
-            List<String> bucketColumns = Arrays.asList(bucketKeysStr.split(","));
+            List<String> bucketColumns =
+                    Arrays.stream(bucketKeysStr.split(","))
+                            .map(String::trim)
+                            .collect(Collectors.toList());
             List<String> newBucketColumns =
                     applyNotNestedColumnRename(bucketColumns, renameMappings);
             newOptions.put(BUCKET_KEY.key(), String.join(",", newBucketColumns));
@@ -630,10 +635,25 @@ final class SchemaManagerUtils {
         // sequence field rename
         String sequenceFieldsStr = options.get(SEQUENCE_FIELD.key());
         if (!StringUtils.isNullOrWhitespaceOnly(sequenceFieldsStr)) {
-            List<String> sequenceFields = Arrays.asList(sequenceFieldsStr.split(","));
+            List<String> sequenceFields =
+                    Arrays.stream(sequenceFieldsStr.split(","))
+                            .map(String::trim)
+                            .collect(Collectors.toList());
             List<String> newSequenceFields =
                     applyNotNestedColumnRename(sequenceFields, renameMappings);
             newOptions.put(SEQUENCE_FIELD.key(), String.join(",", newSequenceFields));
+        }
+
+        // clustering columns rename
+        String clusteringColumnsStr = options.get(CLUSTERING_COLUMNS.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(clusteringColumnsStr)) {
+            List<String> clusteringColumns =
+                    Arrays.stream(clusteringColumnsStr.split(","))
+                            .map(String::trim)
+                            .collect(Collectors.toList());
+            List<String> newClusteringColumns =
+                    applyNotNestedColumnRename(clusteringColumns, renameMappings);
+            newOptions.put(CLUSTERING_COLUMNS.key(), String.join(",", newClusteringColumns));
         }
 
         // case 2: the option key is composed of certain fixed prefixes, suffixes, and the field
@@ -661,6 +681,10 @@ final class SchemaManagerUtils {
                                         + MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY);
 
         for (RenameColumn rename : renameColumns) {
+            if (rename.fieldNames().length > 1) {
+                // nested renames have no field-scoped option keys
+                continue;
+            }
             String fieldName = rename.fieldNames()[0];
             String newFieldName = rename.newName();
 
@@ -691,12 +715,18 @@ final class SchemaManagerUtils {
                             key.substring(
                                     FIELDS_PREFIX.length() + 1,
                                     key.length() - matchedSuffix.length() - 1);
-                    List<String> keyFields = Arrays.asList(keyFieldsStr.split(","));
+                    List<String> keyFields =
+                            Arrays.stream(keyFieldsStr.split(","))
+                                    .map(String::trim)
+                                    .collect(Collectors.toList());
                     List<String> newKeyFields =
                             applyNotNestedColumnRename(keyFields, renameMappings);
 
                     String valueFieldsStr = newOptions.remove(key);
-                    List<String> valueFields = Arrays.asList(valueFieldsStr.split(","));
+                    List<String> valueFields =
+                            Arrays.stream(valueFieldsStr.split(","))
+                                    .map(String::trim)
+                                    .collect(Collectors.toList());
                     List<String> newValueFields =
                             applyNotNestedColumnRename(valueFields, renameMappings);
                     newOptions.put(
