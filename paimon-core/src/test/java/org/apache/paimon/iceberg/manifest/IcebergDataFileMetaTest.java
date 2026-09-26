@@ -89,6 +89,7 @@ class IcebergDataFileMetaTest {
                         100,
                         icebergSchema,
                         new SimpleStats(values, values, nullCounts),
+                        null,
                         null);
 
         assertThat(meta.nullValueCounts().size()).isEqualTo(1);
@@ -128,6 +129,7 @@ class IcebergDataFileMetaTest {
                         100,
                         icebergSchema,
                         new SimpleStats(values, values, nullCounts),
+                        null,
                         null);
 
         assertThat(meta.nullValueCounts().size()).isEqualTo(1);
@@ -167,7 +169,8 @@ class IcebergDataFileMetaTest {
                         100,
                         icebergSchema,
                         new SimpleStats(values, values, nullCounts),
-                        Arrays.asList("b"));
+                        Arrays.asList("b"),
+                        null);
 
         assertThat(meta.nullValueCounts().size()).isEqualTo(1);
         assertThat(((GenericMap) meta.nullValueCounts()).get(2)).isEqualTo(2L);
@@ -219,6 +222,7 @@ class IcebergDataFileMetaTest {
                         100,
                         icebergSchema,
                         new SimpleStats(minValues, maxValues, nullCounts),
+                        null,
                         null);
 
         assertThat(meta.lowerBounds().size()).isEqualTo(1);
@@ -267,6 +271,7 @@ class IcebergDataFileMetaTest {
                         100,
                         icebergSchema,
                         new SimpleStats(values, values, nullCounts),
+                        null,
                         null);
 
         assertThat(meta.nullValueCounts().size()).isEqualTo(2);
@@ -274,5 +279,101 @@ class IcebergDataFileMetaTest {
         assertThat(((GenericMap) meta.nullValueCounts()).get(2)).isEqualTo(2L);
         assertThat(meta.lowerBounds().size()).isZero();
         assertThat(meta.upperBounds().size()).isZero();
+    }
+
+    @Test
+    @DisplayName("Null stats columns of a partial write align by the write columns")
+    void testNullStatsColumnsWithWriteColsAlignByWriteSchema() {
+        IcebergSchema icebergSchema =
+                new IcebergSchema(
+                        0,
+                        Arrays.asList(
+                                new IcebergDataField(1, "k", false, "int", null),
+                                new IcebergDataField(2, "a", false, "int", null),
+                                new IcebergDataField(3, "b", false, "int", null)));
+
+        // partial write of (b, k) in SET-clause order: the stats row follows the
+        // write-column order, so slot 0 is b and slot 1 is k, and the bounds must not
+        // drift onto a
+        BinaryRow values = new BinaryRow(2);
+        BinaryRowWriter rowWriter = new BinaryRowWriter(values);
+        rowWriter.writeInt(0, 100);
+        rowWriter.writeInt(1, 1);
+        rowWriter.complete();
+
+        BinaryArray nullCounts = new BinaryArray();
+        BinaryArrayWriter arrayWriter = new BinaryArrayWriter(nullCounts, 2, 8);
+        arrayWriter.writeLong(0, 0L);
+        arrayWriter.writeLong(1, 0L);
+        arrayWriter.complete();
+
+        IcebergDataFileMeta meta =
+                IcebergDataFileMeta.create(
+                        IcebergDataFileMeta.Content.DATA,
+                        "path",
+                        "parquet",
+                        BinaryRow.EMPTY_ROW,
+                        10,
+                        100,
+                        icebergSchema,
+                        new SimpleStats(values, values, nullCounts),
+                        null,
+                        Arrays.asList("b", "k"));
+
+        assertThat(meta.lowerBounds().size()).isEqualTo(2);
+        byte[] int1 = {1, 0, 0, 0};
+        byte[] int100 = {100, 0, 0, 0};
+        assertThat((byte[]) ((GenericMap) meta.lowerBounds()).get(3)).isEqualTo(int100);
+        assertThat((byte[]) ((GenericMap) meta.lowerBounds()).get(1)).isEqualTo(int1);
+        assertThat((byte[]) ((GenericMap) meta.upperBounds()).get(1)).isEqualTo(int1);
+        assertThat(((GenericMap) meta.lowerBounds()).get(2)).isNull();
+        assertThat(((GenericMap) meta.nullValueCounts()).get(2)).isNull();
+    }
+
+    @Test
+    @DisplayName("Null stats columns of a nested partial write map leaf paths to the field")
+    void testNullStatsColumnsWithNestedWriteColsMapToTopLevel() {
+        IcebergSchema icebergSchema =
+                new IcebergSchema(
+                        0,
+                        Arrays.asList(
+                                new IcebergDataField(1, "k", false, "int", null),
+                                // primitive here: the leaf-path mapping under test does
+                                // not depend on the field's type
+                                new IcebergDataField(2, "nest", false, "int", null)));
+
+        // partial write of (nest.x, k) in SET-clause order: the write schema holds the
+        // top-level nest field and k, and the stats follow that order
+        BinaryRow values = new BinaryRow(2);
+        BinaryRowWriter rowWriter = new BinaryRowWriter(values);
+        rowWriter.setNullAt(0);
+        rowWriter.writeInt(1, 7);
+        rowWriter.complete();
+
+        BinaryArray nullCounts = new BinaryArray();
+        BinaryArrayWriter arrayWriter = new BinaryArrayWriter(nullCounts, 2, 8);
+        arrayWriter.writeLong(0, 3L);
+        arrayWriter.writeLong(1, 0L);
+        arrayWriter.complete();
+
+        IcebergDataFileMeta meta =
+                IcebergDataFileMeta.create(
+                        IcebergDataFileMeta.Content.DATA,
+                        "path",
+                        "parquet",
+                        BinaryRow.EMPTY_ROW,
+                        10,
+                        100,
+                        icebergSchema,
+                        new SimpleStats(values, values, nullCounts),
+                        null,
+                        Arrays.asList("nest.x", "k"));
+
+        // the leaf path maps to the top-level field: nest's stats land on field 2, not k
+        assertThat(meta.lowerBounds().size()).isEqualTo(1);
+        assertThat((byte[]) ((GenericMap) meta.lowerBounds()).get(1))
+                .isEqualTo(new byte[] {7, 0, 0, 0});
+        assertThat(((GenericMap) meta.nullValueCounts()).get(2)).isEqualTo(3L);
+        assertThat(((GenericMap) meta.nullValueCounts()).get(1)).isEqualTo(0L);
     }
 }

@@ -34,9 +34,11 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Iceberg data file meta.
@@ -154,8 +156,31 @@ public class IcebergDataFileMeta {
             long fileSizeInBytes,
             IcebergSchema icebergSchema,
             SimpleStats stats,
-            @Nullable List<String> statsColumns) {
+            @Nullable List<String> statsColumns,
+            @Nullable List<String> writeCols) {
         int numFields = icebergSchema.fields().size();
+        if (statsColumns == null && writeCols != null) {
+            // null stats columns mean the stats cover the whole WRITE schema: the stats row
+            // follows the write-column order (which may differ from the table schema order,
+            // for example for a MERGE INTO whose SET clause lists columns differently), and
+            // nested writes record leaf paths that map to their top-level field
+            Set<String> icebergNames = new HashSet<>();
+            for (IcebergDataField field : icebergSchema.fields()) {
+                icebergNames.add(field.name());
+            }
+            statsColumns = new ArrayList<>();
+            for (String writeCol : writeCols) {
+                // try the exact name first so a column whose own name contains a dot is
+                // not split
+                String topLevel =
+                        icebergNames.contains(writeCol)
+                                ? writeCol
+                                : writeCol.substring(0, Math.max(writeCol.indexOf('.'), 0));
+                if (icebergNames.contains(topLevel) && !statsColumns.contains(topLevel)) {
+                    statsColumns.add(topLevel);
+                }
+            }
+        }
         Map<String, Integer> indexMap = new HashMap<>();
         if (statsColumns == null) {
             for (int i = 0; i < numFields; i++) {

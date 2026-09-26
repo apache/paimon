@@ -674,7 +674,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             rawFile.fileSize(),
                             schemaCache.get(paimonFileMeta.schemaId()),
                             paimonFileMeta.valueStats(),
-                            paimonFileMeta.valueStatsCols());
+                            paimonFileMeta.valueStatsCols(),
+                            paimonFileMeta.writeCols());
             dataFileEntries.add(
                     new IcebergManifestEntry(
                             IcebergManifestEntry.Status.ADDED,
@@ -1370,7 +1371,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                                     paimonFileMeta.fileSize(),
                                                     schemaCache.get(paimonFileMeta.schemaId()),
                                                     paimonFileMeta.valueStats(),
-                                                    paimonFileMeta.valueStatsCols());
+                                                    paimonFileMeta.valueStatsCols(),
+                                                    paimonFileMeta.writeCols());
                                     return new IcebergManifestEntry(
                                             IcebergManifestEntry.Status.ADDED,
                                             currentSnapshotId,
