@@ -60,7 +60,9 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public Optional<WriteSelector> newWriteSelector() {
-        return table.newBatchWriteBuilder().newWriteSelector();
+        // format tables have no bucket/partition write selection; delegating back to the
+        // table's builder would recurse forever
+        return Optional.empty();
     }
 
     @Override

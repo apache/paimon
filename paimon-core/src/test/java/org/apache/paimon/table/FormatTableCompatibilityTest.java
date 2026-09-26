@@ -148,6 +148,15 @@ class FormatTableCompatibilityTest {
         assertThat(FormatTable.class.getMethod("partitionManager").isDefault()).isTrue();
     }
 
+    @Test
+    void testNewWriteSelectorIsEmptyInsteadOfRecursing() {
+        FormatTable table = formatTable("true");
+
+        // the builder used to delegate back to the table's builder, which returned the
+        // same builder again: an unbounded recursion and a StackOverflowError
+        assertThat(table.newBatchWriteBuilder().newWriteSelector()).isEmpty();
+    }
+
     private static FormatTable formatTable(String partitionedInMetastore) {
         return formatTable(
                 Collections.singletonMap(METASTORE_PARTITIONED_TABLE.key(), partitionedInMetastore),
