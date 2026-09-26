@@ -55,6 +55,29 @@ public class FullCompactedStartingScannerTest extends ScannerTestBase {
     }
 
     @Test
+    public void testZeroDeltaCommitsClampedToOne() throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < 3; i++) {
+            write.write(rowData(1, 10, 102L));
+            write.compact(binaryRow(1), 0, true);
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // 'full-compaction.delta-commits' = 0 is accepted by DDL and clamped to 1 by the
+        // write path; constructing the scanner must not divide by zero
+        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(snapshotManager, 0);
+        StartingScanner.ScannedResult result =
+                (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
+        assertThat(result.currentSnapshotId()).isEqualTo(6);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(snapshotManager, 3);

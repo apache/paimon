@@ -41,7 +41,10 @@ public class FullCompactedStartingScanner extends ReadPlanStartingScanner {
 
     public FullCompactedStartingScanner(SnapshotManager snapshotManager, int deltaCommits) {
         super(snapshotManager);
-        this.deltaCommits = deltaCommits;
+        // 'full-compaction.delta-commits' = 0 means "no periodic full compaction" and is
+        // accepted by DDL; the write path clamps it to 1 (StoreSinkWrite), so the read
+        // side must clamp too instead of dividing by zero when picking the identifier
+        this.deltaCommits = Math.max(deltaCommits, 1);
         this.startingSnapshotId = pick();
     }
 

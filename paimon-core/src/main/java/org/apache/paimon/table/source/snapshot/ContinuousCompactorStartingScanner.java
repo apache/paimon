@@ -26,6 +26,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
+
 /** {@link StartingScanner} used internally for stand-alone streaming compact job sources. */
 public class ContinuousCompactorStartingScanner extends AbstractStartingScanner {
 
@@ -57,7 +59,13 @@ public class ContinuousCompactorStartingScanner extends AbstractStartingScanner 
         }
 
         for (long id = latestSnapshotId; id >= earliestSnapshotId; id--) {
-            Snapshot snapshot = snapshotManager.snapshot(id);
+            Snapshot snapshot;
+            try {
+                snapshot = snapshotManager.tryGetSnapshot(id);
+            } catch (FileNotFoundException e) {
+                // expired concurrently by another job — skip like pickOrLatest does
+                continue;
+            }
             if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                 LOG.debug("Found latest compact snapshot {}, reading from the next snapshot.", id);
                 return new NextSnapshot(id + 1);
