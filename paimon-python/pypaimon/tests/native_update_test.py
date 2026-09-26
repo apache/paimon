@@ -26,7 +26,8 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.write.native_update import create_native_delete, create_native_update
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.read.table_read import TableRead
-from pypaimon.write.table_update import BatchTableUpdate
+from pypaimon.write.table_update import BatchTableUpdate, StreamTableUpdate
+from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
@@ -72,7 +73,7 @@ def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
             pa.array([11], type=pa.int32()),
         ], names=['_ROW_ID', 'name', 'age']),
     ])
-    with patch.object(BatchTableUpdate, '_update_by_arrow_with_row_id',
+    with patch.object(TableUpdateByRowId, 'update_columns',
                       side_effect=AssertionError('Python update was selected')):
         messages = update.update_by_arrow_with_row_id(changed)
     assert messages
@@ -136,6 +137,119 @@ def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
     read_builder = table.new_read_builder()
     actual = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
     assert actual.num_rows == 0
+
+
+@pytest.mark.native_plan
+def test_stream_update_and_delete_use_native_writers(tmp_path):
+    from pypaimon_rust.datafusion import BatchWriteBuilder
+
+    if not hasattr(BatchWriteBuilder, 'new_update'):
+        pytest.skip('installed Rust binding does not expose native updates')
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('age', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+        'deletion-vectors.enabled': 'true',
+        'write.native.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    initial = table.new_batch_write_builder()
+    writer = initial.new_write()
+    writer.write_arrow(pa.Table.from_pydict({
+        'id': [1, 2, 3, 4], 'age': [10, 20, 30, 40],
+    }, schema=schema))
+    initial.new_commit().commit(writer.prepare_commit())
+    writer.close()
+
+    stream = table.new_stream_write_builder()
+    committer = stream.new_commit()
+    update = stream.new_update()
+    with patch.object(TableUpdateByRowId, 'update_columns',
+                      side_effect=AssertionError('Python row-ID update selected')):
+        messages = update.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [11]}), 10)
+    committer.commit(messages, 10)
+
+    predicate = table.new_read_builder().new_predicate_builder()
+    with patch.object(StreamTableUpdate, '_build_predicate_update_table',
+                      side_effect=AssertionError('Python assignments selected')), \
+            patch.object(TableRead, 'to_arrow',
+                         side_effect=AssertionError('Python predicate read selected')):
+        messages = update.update_by_predicate(
+            predicate.equal('id', 2), {'age': 22}, 20)
+    committer.commit(messages, 20)
+
+    with patch.object(TableDeleteByRowId, 'delete',
+                      side_effect=AssertionError('Python row-ID delete selected')):
+        messages = update.delete_by_row_id([2], 30)
+        committer.commit(messages, 30)
+        with patch.object(TableRead, 'to_arrow',
+                          side_effect=AssertionError('Python predicate read selected')):
+            messages = update.delete_by_predicate(predicate.equal('id', 4), 40)
+        committer.commit(messages, 40)
+    committer.close()
+
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert actual.select(['id', 'age']).to_pydict() == {
+        'id': [1, 2], 'age': [11, 22],
+    }
+    assert table.snapshot_manager().get_latest_snapshot().commit_identifier == 40
+
+
+@pytest.mark.native_plan
+def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+
+    if not hasattr(RustUpdate, 'add_matched_group'):
+        pytest.skip('installed Rust binding lacks grouped updates')
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('age', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+        'write.native.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    for ids in ([1, 2], [3, 4]):
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': ids, 'age': [value * 10 for value in ids],
+        }, schema=schema))
+        builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+    first = pa.Table.from_batches([
+        pa.record_batch([pa.array([0], type=pa.int64()), pa.array([11])],
+                        names=['_ROW_ID', 'age']),
+        pa.record_batch([pa.array([1], type=pa.int64()), pa.array([22])],
+                        names=['_ROW_ID', 'age']),
+    ])
+    with patch.object(BatchTableUpdate, '_update_by_arrow_batches_with_row_id',
+                      side_effect=AssertionError('Python batch update selected')):
+        with pytest.raises(ValueError, match='overlapping first_row_ids.*0'):
+            table.new_batch_write_builder().new_update().with_update_type(
+                ['age']).update_by_arrow_batches_with_row_id(iter([
+                    first.slice(0, 1),
+                    pa.Table.from_pydict({'_ROW_ID': [1], 'age': [23]}),
+                ]))
+
+        builder = table.new_batch_write_builder()
+        messages = builder.new_update().with_update_type(
+            ['age']).update_by_arrow_batches_with_row_id(iter([
+                first,
+                pa.Table.from_pydict({'_ROW_ID': [2], 'age': [33]}),
+            ]))
+    builder.new_commit().commit(messages)
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert actual.select(['id', 'age']).to_pydict() == {
+        'id': [1, 2, 3, 4], 'age': [11, 22, 33, 40],
+    }
 
 
 @pytest.mark.native_plan

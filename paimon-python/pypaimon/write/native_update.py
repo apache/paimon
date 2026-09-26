@@ -149,6 +149,23 @@ class NativeBatchTableUpdate:
         finally:
             self.writer.close()
 
+    def update_by_arrow_batches_with_row_id(self, tables, columns):
+        try:
+            for table in tables:
+                if '_ROW_ID' not in table.column_names:
+                    raise ValueError('Input data must contain _ROW_ID column')
+                for column in columns:
+                    if column not in table.column_names:
+                        raise ValueError(f'Column {column} not found in input data')
+                self.writer.add_matched_group(table.to_batches())
+            try:
+                messages = self.writer.prepare_commit()
+            except ValueError as error:
+                _raise_native_row_id_error(error)
+            return from_native_commit_messages(self.table, messages)
+        finally:
+            self.writer.close()
+
 
 class NativePredicateTableUpdate:
     """Rust reads predicate matches and evaluates per-group assignments."""
