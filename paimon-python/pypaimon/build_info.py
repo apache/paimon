@@ -84,3 +84,15 @@ _FULL_VERSION = _load_full_version()
 def full_version():
     """Return ``<pypaimon-version>-<commit-id>`` for snapshot provenance."""
     return _FULL_VERSION
+
+
+def sdk_version():
+    """Return the SDK version embedded in the build metadata."""
+    try:
+        full = full_version()
+        if not full.startswith("python-"):
+            return "unknown"
+        version, separator, _ = full[len("python-"):].rpartition("-")
+        return version if separator and version else "unknown"
+    except Exception:
+        return "unknown"

@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+import platform
 from typing import Callable, Dict, List, Optional, Union
 
 import re
@@ -50,6 +51,7 @@ from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
+from pypaimon import build_info
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
@@ -60,6 +62,7 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 class RESTApi:
     HEADER_PREFIX = "header."
+    USER_AGENT_HEADER = "User-Agent"
     READ_VIA_HEADER = "X-Paimon-Read-Via"
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
@@ -87,7 +90,9 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(uri)
         auth_provider = AuthProviderFactory.create_auth_provider(options)
+        client_user_agent = self._configured_user_agent(options.to_map())
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
+        self._set_user_agent(base_headers, client_user_agent)
 
         if config_required:
             warehouse = options.get(CatalogOptions.WAREHOUSE)
@@ -108,10 +113,40 @@ class RESTApi:
             base_headers.update(
                 RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
             )
+            override_user_agent = self._configured_user_agent(
+                config_response.overrides or {})
+            default_user_agent = self._configured_user_agent(
+                config_response.defaults or {})
+            if override_user_agent is not None:
+                user_agent = override_user_agent
+            elif client_user_agent is not None:
+                user_agent = client_user_agent
+            else:
+                user_agent = default_user_agent
+            self._set_user_agent(base_headers, user_agent)
 
         self.rest_auth_function = RESTAuthFunction(base_headers, auth_provider)
         self.options = options
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
+
+    @classmethod
+    def _configured_user_agent(cls, options: Dict[str, str]) -> Optional[str]:
+        user_agent = None
+        for key, value in options.items():
+            if key.lower() == (cls.HEADER_PREFIX + cls.USER_AGENT_HEADER).lower() and value is not None:
+                user_agent = str(value)
+        return user_agent
+
+    @classmethod
+    def _set_user_agent(cls, headers: Dict[str, str], user_agent: Optional[str]) -> None:
+        for key in list(headers):
+            if key.lower() == cls.USER_AGENT_HEADER.lower():
+                del headers[key]
+        headers[cls.USER_AGENT_HEADER] = (
+            user_agent if user_agent is not None
+            else "PyPaimon/{} Python/{}".format(
+                build_info.sdk_version(), platform.python_version())
+        )
 
     def __build_paged_query_params(
             self,
