@@ -22,6 +22,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.types.DataType;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 import static org.apache.paimon.data.Decimal.fromBigDecimal;
 
@@ -170,7 +171,11 @@ public class FieldProductAgg extends FieldAggregator {
                             : "Inconsistent precision of aggregate Decimal!";
                     BigDecimal bigDecimal = mergeFieldDD.toBigDecimal();
                     BigDecimal bigDecimal1 = inFieldDD.toBigDecimal();
-                    BigDecimal div = bigDecimal.divide(bigDecimal1);
+                    // divide at the column scale like fromBigDecimal's rounding below;
+                    // a bare divide throws on non-terminating quotients (e.g. 1 / 3)
+                    BigDecimal div =
+                            bigDecimal.divide(
+                                    bigDecimal1, mergeFieldDD.scale(), RoundingMode.HALF_UP);
                     product = fromBigDecimal(div, mergeFieldDD.precision(), mergeFieldDD.scale());
                     break;
                 case TINYINT:

@@ -956,6 +956,15 @@ public class FieldAggregatorTest {
         assertThat(fieldProductAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldProductAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(2));
         assertThat(fieldProductAgg.retract(null, toDecimal(5))).isNull();
+
+        // a non-terminating quotient used to throw ArithmeticException: Non-terminating
+        // decimal expansion; it must round at the column scale like every other decimal
+        // conversion instead of killing the write
+        FieldProductAgg scaled = new FieldProductAggFactory().create(DataTypes.DECIMAL(10, 4));
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal(1), 10, 4);
+        Decimal three = Decimal.fromBigDecimal(new BigDecimal(3), 10, 4);
+        assertThat(scaled.retract(one, three))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("0.3333"), 10, 4));
     }
 
     @Test
