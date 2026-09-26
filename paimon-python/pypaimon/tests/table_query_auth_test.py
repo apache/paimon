@@ -149,39 +149,30 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
         result = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
         self.assertTrue(result.has_restrictions)
 
-    def test_blank_filter_entries_are_skipped(self):
-        result = TableQueryAuthResult(["", None], None)
-        self.assertFalse(result.filter)
+    def test_blank_filter_entry_is_rejected(self):
+        # Skipping it would read every row.
+        for rules in (["", _simple_filter_json()], [None]):
+            with self.assertRaisesRegex(ValueError, "Row filter cannot be empty"):
+                TableQueryAuthResult(rules, None)
 
-    def test_mixed_blank_and_valid_filter_entries(self):
-        valid = _simple_filter_json()
-        result = TableQueryAuthResult(["", valid], None)
-        self.assertEqual(len(result.filter), 1)
-        self.assertEqual(result.filter[0], valid)
+    def test_blank_column_masking_transform_is_rejected(self):
+        # Skipping it would return the column unmasked.
+        with self.assertRaisesRegex(ValueError, "Column masking on 'col' cannot be empty"):
+            TableQueryAuthResult(None, {"col": "", "col3": '{"name":"NULL"}'})
 
-    def test_blank_filter_no_extra_fields(self):
-        result = TableQueryAuthResult([""], None)
-        extra = result.get_extra_fields(
-            [_FakeField("a")], [_FakeField("a"), _FakeField("b")])
-        self.assertEqual(extra, [])
+    def test_blank_column_masking_target_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Column masking target cannot be empty"):
+            TableQueryAuthResult(None, {"": '{"name":"NULL"}'})
 
-    def test_blank_filter_no_row_filter(self):
-        result = TableQueryAuthResult(["", None], None)
-        self.assertIsNone(result.extract_row_filter())
+    def test_malformed_filter_is_rejected(self):
+        for rules in ({}, "", 0, False, {"a": "b"}):
+            with self.assertRaisesRegex(ValueError, "Row filter must be a list"):
+                TableQueryAuthResult(rules, None)
 
-    def test_blank_column_masking_values_stripped(self):
-        result = TableQueryAuthResult(None, {"col": "", "col3": '{"name":"NULL"}'})
-        self.assertEqual(list(result.column_masking.keys()), ["col3"])
-
-    def test_blank_column_masking_keys_stripped(self):
-        result = TableQueryAuthResult(None, {"": '{"name":"NULL"}'})
-        self.assertEqual(result.column_masking, {})
-
-    def test_blank_masking_returns_original_plan(self):
-        result = TableQueryAuthResult(None, {"col": ""})
-        plan = _FakePlan([_FakeSplit()])
-        converted = result.convert_plan(plan)
-        self.assertIs(converted, plan)
+    def test_malformed_column_masking_is_rejected(self):
+        for masking in ([], "", 0, False, ['{"name":"NULL"}']):
+            with self.assertRaisesRegex(ValueError, "Column masking must be a map"):
+                TableQueryAuthResult(None, masking)
 
     def test_wraps_splits_with_filter(self):
         result = TableQueryAuthResult([_simple_filter_json()], None)
@@ -420,10 +411,11 @@ class TestResolveAuthResult(unittest.TestCase):
         fn = lambda select: TableQueryAuthResult([], {})
         self.assertIsNone(resolve_auth_result(fn, None))
 
-    def test_blank_filter_stripped_returns_none(self):
+    def test_blank_filter_fails_resolution(self):
         from pypaimon.read.query_auth_split import resolve_auth_result
         fn = lambda select: TableQueryAuthResult(["", None], None)
-        self.assertIsNone(resolve_auth_result(fn, None))
+        with self.assertRaisesRegex(ValueError, "Row filter cannot be empty"):
+            resolve_auth_result(fn, None)
 
     def test_with_filter_returns_result(self):
         from pypaimon.read.query_auth_split import resolve_auth_result
