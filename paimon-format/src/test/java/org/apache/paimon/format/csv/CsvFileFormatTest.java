@@ -39,6 +39,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
@@ -713,6 +714,26 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 .isNull();
         assertThat(parser.parseField("128", DataTypes.TINYINT()).getValue()).isNull();
         assertThat(parser.parseField("32768", DataTypes.SMALLINT()).getValue()).isNull();
+    }
+
+    @Test
+    public void testCsvParserParseBoolean() {
+        RowType rowType = DataTypes.ROW(DataTypes.BOOLEAN());
+        CsvParser parser = new CsvParser(rowType, new int[] {0}, new CsvOptions(new Options()));
+
+        // Recognized boolean literals parse (case-insensitive), matching the writer output.
+        assertThat(parser.parseField("true", DataTypes.BOOLEAN()).getValue()).isEqualTo(true);
+        assertThat(parser.parseField("TRUE", DataTypes.BOOLEAN()).getValue()).isEqualTo(true);
+        assertThat(parser.parseField("false", DataTypes.BOOLEAN()).getValue()).isEqualTo(false);
+        assertThat(parser.parseField("False", DataTypes.BOOLEAN()).getValue()).isEqualTo(false);
+
+        // Unrecognized values are malformed, not silently false, so csv.mode can
+        // null/drop/fail them the same way it does for a malformed number.
+        for (String invalid : new String[] {"1", "0", "t", "yes", "abc"}) {
+            Pair<Boolean, Object> parsed = parser.parseField(invalid, DataTypes.BOOLEAN());
+            assertThat(parsed.getLeft()).as(invalid).isFalse();
+            assertThat(parsed.getValue()).as(invalid).isNull();
+        }
     }
 
     private List<InternalRow> read(
