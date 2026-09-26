@@ -47,4 +47,34 @@ class RollbackToAsLatestProcedureTest extends PaimonSparkTestBase {
       Row(4L, 3L, 5L) :: Nil)
     checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
   }
+
+  test("Paimon Procedure: rollback cleanup detects the commit after an interleaved snapshot") {
+    spark.sql("CREATE TABLE T (id INT, name STRING)")
+    spark.sql("INSERT INTO T VALUES (1, 'a')")
+    spark.sql("INSERT INTO T VALUES (2, 'b')")
+    spark.sql("INSERT INTO T VALUES (3, 'c')")
+
+    // Each rollback commits under its own unique commit user, so snapshots 4 and 5
+    // carry distinct users -- the shape the failure-path cleanup must handle when
+    // another writer commits between the procedure's snapshot read and the rollback.
+    spark.sql("CALL paimon.sys.rollback_to_as_latest(table => 'test.T', snapshot_id => 1)")
+    spark.sql("CALL paimon.sys.rollback_to_as_latest(table => 'test.T', snapshot_id => 3)")
+
+    val snapshotManager = loadTable("T").snapshotManager
+    val user4 = snapshotManager.snapshot(4).commitUser
+    val user5 = snapshotManager.snapshot(5).commitUser
+    assert(user4 != user5)
+
+    // The rollback that committed snapshot 5 began when 3 was the latest, but snapshot 4
+    // (a different user) landed first. Cleanup must still find the rollback at 5 rather
+    // than probing the stale id 4 and wrongly concluding it "did not commit" -- which
+    // previously deleted the protection tag and let expiration drop the restored files.
+    assert(RollbackToAsLatestProcedure.rollbackSnapshotCommitted(snapshotManager, 3L, user5))
+    assert(RollbackToAsLatestProcedure.rollbackSnapshotCommitted(snapshotManager, 4L, user5))
+    // A rollback that never committed (no snapshot after 3 authored by it) is reported as
+    // such, so a genuine cleanup still removes its leftover helper tag.
+    assert(
+      !RollbackToAsLatestProcedure
+        .rollbackSnapshotCommitted(snapshotManager, 3L, "never-committed"))
+  }
 }

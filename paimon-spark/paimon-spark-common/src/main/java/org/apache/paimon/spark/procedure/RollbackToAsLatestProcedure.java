@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.tag.Tag;
@@ -145,7 +146,7 @@ public class RollbackToAsLatestProcedure extends BaseProcedure {
                                     store,
                                     tagManager,
                                     createdRollbackTag,
-                                    latestSnapshot.id() + 1,
+                                    latestSnapshot.id(),
                                     commitUser);
                         } catch (Exception cleanupException) {
                             e.addSuppressed(cleanupException);
@@ -177,11 +178,27 @@ public class RollbackToAsLatestProcedure extends BaseProcedure {
             FileStore<?> store,
             TagManager tagManager,
             String createdRollbackTag,
-            long rollbackSnapshotId,
+            long previousLatestSnapshotId,
             String commitUser) {
-        if (createdRollbackTag == null
-                || rollbackSnapshotCommitted(
-                        store.snapshotManager(), rollbackSnapshotId, commitUser)) {
+        if (createdRollbackTag == null) {
+            return;
+        }
+
+        // Determine the real commit outcome instead of assuming the rollback landed at
+        // previousLatestSnapshotId + 1: FileStoreCommitImpl.rollbackToAsLatest re-reads the latest
+        // snapshot, so another writer committing between our read and the rollback pushes the
+        // rollback snapshot to a higher id. Only delete the protection tag when we positively
+        // confirm the rollback did not commit; if it committed (or the outcome is uncertain), keep
+        // the tag so snapshot expiration cannot drop the file group the rollback restored.
+        boolean committed;
+        try {
+            committed =
+                    rollbackSnapshotCommitted(
+                            store.snapshotManager(), previousLatestSnapshotId, commitUser);
+        } catch (Exception e) {
+            return;
+        }
+        if (committed) {
             return;
         }
 
@@ -192,10 +209,23 @@ public class RollbackToAsLatestProcedure extends BaseProcedure {
                 Collections.emptyList());
     }
 
-    private boolean rollbackSnapshotCommitted(
-            SnapshotManager snapshotManager, long rollbackSnapshotId, String commitUser) {
-        return snapshotManager.snapshotExists(rollbackSnapshotId)
-                && commitUser.equals(snapshotManager.snapshot(rollbackSnapshotId).commitUser());
+    @VisibleForTesting
+    static boolean rollbackSnapshotCommitted(
+            SnapshotManager snapshotManager, long previousLatestSnapshotId, String commitUser) {
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        if (latestSnapshotId == null) {
+            return false;
+        }
+        // The rollback snapshot is authored by our unique commitUser. Scan every snapshot committed
+        // after our initial read (there may be several if other writers interleaved) for one it
+        // authored rather than probing a single, possibly-stale id.
+        for (long id = latestSnapshotId; id > previousLatestSnapshotId; id--) {
+            if (snapshotManager.snapshotExists(id)
+                    && commitUser.equals(snapshotManager.snapshot(id).commitUser())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Snapshot findSnapshot(FileStore<?> store, TagManager tagManager, long snapshotId) {
