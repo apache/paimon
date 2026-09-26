@@ -20,7 +20,7 @@ from importlib import import_module
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions, MergeEngine
+from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
@@ -47,6 +47,18 @@ def _native_partition_types_supported(schema, partition_keys):
         for data_type in (schema.field(name).type for name in partition_keys))
 
 
+def _native_map_layouts_supported(table, schema):
+    options = table.options.options.to_map()
+    for field in schema:
+        if table.options.map_storage_layout(field.name) != 'default':
+            return False
+        # Python rejects even an explicit default layout on a non-MAP field.
+        if (not pa.types.is_map(field.type)
+                and 'fields.{}.map.storage-layout'.format(field.name) in options):
+            return False
+    return True
+
+
 def create_native_write(table, commit_user, static_partition=None, stream=False):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
@@ -58,23 +70,19 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
                 or any(pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
             return None
     if (not native_write_available()
-            or table.options.data_evolution_enabled()
+            # Rust does not produce the optional random-access .row sidecars.
+            or (table.options.data_evolution_enabled()
+                and table.options.data_evolution_row_sidecar_enabled())
             or table.options.data_file_external_paths()
             or table.bucket_mode() not in (BucketMode.HASH_FIXED,
                                            BucketMode.BUCKET_UNAWARE)
-            or table.options.merge_engine() in (MergeEngine.FIRST_ROW,
-                                                MergeEngine.PARTIAL_UPDATE,
-                                                MergeEngine.AGGREGATE)
-            # Rust currently omits value stats for primary-key files.
-            or (table.is_primary_key_table and table.options.metadata_stats_enabled())
-            or table.options.target_file_row_num()
-            != CoreOptions.TARGET_FILE_ROW_NUM.default_value()
+            or (table.options.deletion_vectors_enabled()
+                and table.options.merge_engine() in (MergeEngine.PARTIAL_UPDATE,
+                                                     MergeEngine.AGGREGATE))
             or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
-            # Rust validates nested Arrow child names strictly; PyPaimon accepts
-            # equivalent layouts such as list<item> and list<element>.
-            or any(pa.types.is_nested(field.type)
-                   or pa.types.is_fixed_size_binary(field.type) for field in schema)
+            # The native writer does not implement MAP shared-shredding layouts.
+            or not _native_map_layouts_supported(table, schema)
             # Rust cannot encode these partition keys yet.
             or not _native_partition_types_supported(schema, table.partition_keys)
             or any(is_blob_file_field(field) for field in table.table_schema.fields)):
@@ -149,8 +157,6 @@ class NativeTableWrite:
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
                 "Write cols is: None")
-        if any(pa.types.is_fixed_size_binary(field.type) for field in data.schema):
-            return self._switch_to_python().write_arrow_batch(data)
         data = normalize_arrow_strings(data)
         if data.num_rows:
             # A failed native write may already have produced files. Never

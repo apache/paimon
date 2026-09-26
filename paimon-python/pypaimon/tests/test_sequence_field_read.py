@@ -35,6 +35,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 
@@ -367,6 +368,7 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             table.new_read_builder().new_read()
         self.assertIn('fields.ts.aggregate-function', str(ctx.exception))
 
+    @pytest.mark.python_write
     def test_sequence_group_still_rejected(self):
         """Top-level sequence.field is supported, but per-field
         sequence-group is not -- it must still be rejected. The shared
@@ -409,6 +411,7 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'high'}],
         )
 
+    @pytest.mark.python_read
     def test_complex_type_sequence_field_rejected(self):
         """A complex (non-atomic) sequence field is valid in Java (handled
         via RecordComparator) but unimplemented in pypaimon's atomic-only

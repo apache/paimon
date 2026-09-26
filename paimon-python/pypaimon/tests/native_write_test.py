@@ -314,12 +314,7 @@ def test_external_data_paths_fall_back_before_native_write(tmp_path):
 
 @pytest.mark.parametrize('options', [
     {'bucket': '-1'},
-    {'merge-engine': 'first-row'},
-    {'merge-engine': 'partial-update'},
-    {'merge-engine': 'aggregation'},
-    {'target-file-row-num': '5'},
     {'changelog-file.format': 'orc'},
-    {'metadata.stats-mode': 'full'},
 ])
 def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(
         tmp_path, options):
@@ -351,6 +346,18 @@ def test_native_write_validates_input_schema_before_writing(tmp_path):
 def test_deletion_vectors_with_merge_engine_fall_back(tmp_path, engine):
     table = _table(tmp_path).copy({
         'deletion-vectors.enabled': 'true', 'merge-engine': engine})
+    with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
+            patch('pypaimon.write.native_write.create_native_write_table',
+                  side_effect=AssertionError('must not reconstruct')):
+        writer = table.new_batch_write_builder().new_write()
+    assert not isinstance(writer, NativeTableWrite)
+    writer.close()
+
+
+def test_data_evolution_row_sidecar_falls_back_before_native_write(tmp_path):
+    table = _table(tmp_path).copy({
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'data-evolution.row-sidecar.enabled': 'true'})
     with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
             patch('pypaimon.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):
