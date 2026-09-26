@@ -80,6 +80,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -398,7 +399,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         // validate schema with new options
         SchemaValidation.validateTableSchema(
-                withoutIcebergMirror(newTableSchema), dynamicOptions.keySet());
+                withoutIcebergMirror(newTableSchema, dynamicOptions.keySet()),
+                dynamicOptions.keySet());
         if (new CoreOptions(tableSchema.options())
                         .toConfiguration()
                         .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
@@ -424,15 +426,24 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
             mergedOptions.putAll(tableSchema.options());
             TableSchema newTableSchema = latestSchema.copy(mergedOptions);
-            SchemaValidation.validateTableSchema(withoutIcebergMirror(newTableSchema));
+            SchemaValidation.validateTableSchema(
+                    withoutIcebergMirror(newTableSchema, Collections.emptySet()));
             return copy(newTableSchema);
         } else {
             return this;
         }
     }
 
-    /** Tables the mirror cannot publish must still load; every commit still checks them. */
-    private static TableSchema withoutIcebergMirror(TableSchema schema) {
+    /**
+     * Tables the mirror cannot publish must still load; every commit still checks them. A mirror
+     * set up through dynamic options is judged as given.
+     */
+    private static TableSchema withoutIcebergMirror(
+            TableSchema schema, Set<String> dynamicOptionKeys) {
+        if (dynamicOptionKeys.contains(IcebergOptions.METADATA_ICEBERG_STORAGE.key())
+                || dynamicOptionKeys.contains(IcebergOptions.FORMAT_VERSION.key())) {
+            return schema;
+        }
         Map<String, String> options = new HashMap<>(schema.options());
         options.remove(IcebergOptions.METADATA_ICEBERG_STORAGE.key());
         return schema.copy(options);
