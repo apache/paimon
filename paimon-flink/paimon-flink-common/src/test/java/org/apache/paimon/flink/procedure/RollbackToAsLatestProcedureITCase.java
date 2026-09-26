@@ -19,16 +19,22 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -36,6 +42,8 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -43,8 +51,14 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** IT cases for rollback_to_as_latest procedure. */
 public class RollbackToAsLatestProcedureITCase extends CatalogITCaseBase {
@@ -230,6 +244,110 @@ public class RollbackToAsLatestProcedureITCase extends CatalogITCaseBase {
         assertTrue(table.fileIO().exists(icebergMetadata));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRollbackKeepsProtectionTagAfterCallbackFailure(boolean concurrentCommit)
+            throws Exception {
+        sql(
+                "CREATE TABLE T (id INT, name STRING) WITH ('commit.callbacks' = '%s')",
+                FailingRollbackCallback.class.getName());
+        FileStoreTable table = paimonTable("T");
+        commitRow(table, 1, "original");
+        // The restored file must not also belong to the snapshots retained before the rollback.
+        BatchWriteBuilder overwrite = table.newBatchWriteBuilder().withOverwrite();
+        try (BatchTableWrite write = overwrite.newWrite();
+                BatchTableCommit commit = overwrite.newCommit()) {
+            write.write(GenericRow.of(2, BinaryString.fromString("replacement")));
+            commit.commit(write.prepareCommit());
+        }
+        commitRow(table, 3, "retained");
+
+        FailingRollbackCallback.concurrentCommit = concurrentCommit;
+        FailingRollbackCallback.fail = true;
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    sql(
+                                            "CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 1)"))
+                    .hasStackTraceContaining("Injected post-commit callback failure");
+        } finally {
+            FailingRollbackCallback.fail = false;
+            FailingRollbackCallback.concurrentCommit = false;
+        }
+
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        assertThat(latest.id()).isEqualTo(concurrentCommit ? 5L : 4L);
+        assertThat(latest.commitUser()).startsWith("rollback-to-as-latest-");
+        assertThat(tagsOfSnapshot(table.tagManager(), 1)).hasSize(1);
+        assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "original"));
+        ((ExpireSnapshotsImpl) table.newExpireSnapshots()).expireUntil(1, latest.id());
+        assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "original"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRollbackDeletesProtectionTagWhenNotCommitted(boolean commitCreated)
+            throws Exception {
+        sql("CREATE TABLE T (id INT, name STRING)");
+        FileStoreTable table = paimonTable("T");
+        commitRow(table, 1, "original");
+        FileStoreTable failingTable = mock(FileStoreTable.class);
+        doReturn(table.store()).when(failingTable).store();
+        if (commitCreated) {
+            TableCommitImpl commit = mock(TableCommitImpl.class);
+            when(commit.rollbackToAsLatest(any(Tag.class))).thenReturn(false);
+            when(failingTable.newCommit(anyString())).thenReturn(commit);
+        } else {
+            when(failingTable.newCommit(anyString()))
+                    .thenThrow(new RuntimeException("Injected commit creation failure"));
+        }
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.getTable(Identifier.fromString("default.T"))).thenReturn(failingTable);
+        RollbackToAsLatestProcedure procedure = new RollbackToAsLatestProcedure();
+        procedure.withCatalog(catalog);
+
+        assertThatThrownBy(() -> procedure.call(null, "default.T", null, 1L))
+                .hasMessageContaining("Failed to roll back to snapshot 1 as latest");
+        assertThat(table.tagManager().tags()).isEmpty();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+    }
+
+    /** Injects a post-commit failure, optionally after another writer advances the latest ID. */
+    public static class FailingRollbackCallback implements CommitCallback {
+
+        private static boolean fail;
+        private static boolean concurrentCommit;
+
+        @Override
+        public void setTable(FileStoreTable table) {
+            if (fail && concurrentCommit) {
+                // The procedure already read latest; core rollback has not read it yet.
+                concurrentCommit = false;
+                fail = false;
+                try {
+                    commitRow(table, 4, "concurrent");
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    fail = true;
+                }
+            }
+        }
+
+        @Override
+        public void call(Context context) {
+            if (fail && context.snapshot.commitUser().startsWith("rollback-to-as-latest-")) {
+                throw new RuntimeException("Injected post-commit callback failure");
+            }
+        }
+
+        @Override
+        public void retry(ManifestCommittable committable) {}
+
+        @Override
+        public void close() {}
+    }
+
     private void assertRollbackDelta(
             FileStoreTable table,
             long snapshotId,
@@ -252,7 +370,7 @@ public class RollbackToAsLatestProcedureITCase extends CatalogITCaseBase {
                 .collect(Collectors.toList());
     }
 
-    private void commitRow(FileStoreTable table, int id, String name) throws Exception {
+    private static void commitRow(FileStoreTable table, int id, String name) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
