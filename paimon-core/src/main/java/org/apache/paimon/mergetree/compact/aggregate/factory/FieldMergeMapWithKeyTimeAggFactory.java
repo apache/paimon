@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact.aggregate.factory;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapWithKeyTimeAgg;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
@@ -77,6 +78,16 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                     field,
                     rowType.getFieldNames());
         }
+        // the merge reads the ts field as a string and compares it lexicographically; any
+        // other type would be read as raw string bits and silently pick the wrong entry
+        DataType tsType = rowType.getFields().get(tsFieldIndex).type();
+        checkArgument(
+                tsType.getTypeRoot() == DataTypeRoot.VARCHAR
+                        || tsType.getTypeRoot() == DataTypeRoot.CHAR,
+                "Timestamp field '%s' for field '%s' must be STRING but was '%s'.",
+                rowType.getFieldNames().get(tsFieldIndex),
+                field,
+                tsType);
         return tsFieldIndex;
     }
 
