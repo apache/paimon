@@ -74,7 +74,10 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         t = self.catalog.get_table(target)
         wb = t.new_batch_write_builder()
         w = wb.new_write()
-        w.write_arrow(data)
+        # These fixtures use the file count to derive Ray shuffle parallelism.
+        chunk_size = min(max(1, data.num_rows), t.options.target_file_row_num())
+        for batch in data.to_batches(max_chunksize=chunk_size):
+            w.write_arrow_batch(batch)
         wb.new_commit().commit(w.prepare_commit())
         w.close()
 

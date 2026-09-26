@@ -322,6 +322,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
+    @pytest.mark.python_write
     def test_dedicated_format_writer_no_blob_column(self):
         """Test that DedicatedFormatWriter raises error when no blob column is found."""
         from pypaimon import Schema

@@ -38,6 +38,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 
@@ -246,6 +247,7 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             self.assertIn('aggregation', msg)
         self.assertIn(expected_substring, msg)
 
+    @pytest.mark.python_read
     def test_remove_record_on_delete_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_remove_on_delete',
@@ -253,6 +255,7 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'aggregation.remove-record-on-delete',
         )
 
+    @pytest.mark.python_read
     def test_field_ignore_retract_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_ignore_retract',
@@ -290,6 +293,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             error_type=ValueError,
         )
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_field_sequence_group_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_sequence_group',
@@ -297,6 +302,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'fields.max_score.sequence-group',
         )
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_out_of_scope_field_aggregator_rejected(self):
         # rbm64 is the aggregator identifier this engine doesn't support
         # yet. The guard must reject the config rather than let the
@@ -307,6 +314,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'fields.label.aggregate-function',
         )
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_out_of_scope_default_aggregator_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_default_rbm64',

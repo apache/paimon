@@ -155,6 +155,9 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
             rb.new_read().to_arrow(rb.new_scan().plan().splits())
             ['id'].to_pylist())
 
+    # Python splits individual rows; Rust/Java bundled writes roll at batch
+    # boundaries (covered by native_write_capabilities_test).
+    @pytest.mark.python_write
     def test_rolls_when_row_count_exceeds_limit(self):
         table = self._create({**self.de_options, 'target-file-row-num': '3'})
         files = self._write_files(table, self._rows(10))
@@ -162,6 +165,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([1, 3, 3, 3], sorted(f.row_count for f in files))
         self.assertEqual(list(range(10)), self._read_ids(table))
 
+    @pytest.mark.python_write
     def test_exact_multiple_rolls_evenly(self):
         table = self._create({**self.de_options, 'target-file-row-num': '3'})
         files = self._write_files(table, self._rows(6))
@@ -179,6 +183,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         # No row limit -> a small batch stays one file (size rolling only).
         self.assertEqual([50], [f.row_count for f in files])
 
+    @pytest.mark.python_write
     def test_oversized_row_rolls_by_itself(self):
         # Each row exceeds target-file-size: the size trigger rolls every row by
         # itself even though target-file-row-num is larger.

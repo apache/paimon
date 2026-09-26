@@ -32,6 +32,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 
@@ -289,6 +290,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'a': 'first', 'b': None, 'c': None}],
         )
 
+    @pytest.mark.python_write
     def test_aggregation_engine_write_logs_fallback_warning(self):
         """The write-side fallback to deduplicate for unsupported engines
         is silent in terms of return value -- a ``logging.warning`` is
@@ -308,6 +310,8 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
 
     # -- partial-update + out-of-scope option combinations ---------------
     #
+    # These tests exercise Python-only writer limitations. The native writer
+    # supports these options; native_write_capabilities_test covers that path.
     # When a user pairs ``merge-engine: partial-update`` with any option
     # this port doesn't implement (sequence-group, per-field aggregator
     # override, ignore-delete, partial-update.remove-record-on-*), we
@@ -331,6 +335,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             self.assertIn(key, msg,
                           "expected option key '{}' in error: {}".format(key, msg))
 
+    @pytest.mark.python_write
     def test_partial_update_with_sequence_group_raises(self):
         self._assert_partial_update_unsupported(
             'pu_seq_group',
@@ -338,6 +343,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             ['fields.b.sequence-group'],
         )
 
+    @pytest.mark.python_write
     def test_partial_update_with_field_aggregate_function_raises(self):
         self._assert_partial_update_unsupported(
             'pu_field_agg',
@@ -345,6 +351,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             ['fields.a.aggregate-function'],
         )
 
+    @pytest.mark.python_write
     def test_partial_update_with_default_aggregate_function_raises(self):
         self._assert_partial_update_unsupported(
             'pu_default_agg',
@@ -352,6 +359,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             ['fields.default-aggregate-function'],
         )
 
+    @pytest.mark.python_write
     def test_partial_update_with_ignore_delete_raises(self):
         self._assert_partial_update_unsupported(
             'pu_ignore_delete',
@@ -359,6 +367,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             ['ignore-delete'],
         )
 
+    @pytest.mark.python_write
     def test_partial_update_with_remove_record_on_delete_raises(self):
         self._assert_partial_update_unsupported(
             'pu_rrod',
@@ -366,6 +375,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             ['partial-update.remove-record-on-delete'],
         )
 
+    @pytest.mark.python_write
     def test_partial_update_with_remove_record_on_sequence_group_raises(self):
         self._assert_partial_update_unsupported(
             'pu_rrosg',
@@ -373,6 +383,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             ['partial-update.remove-record-on-sequence-group'],
         )
 
+    @pytest.mark.python_read
     def test_partial_update_unsupported_options_guard_covers_raw_convertible(self):
         """The read-side guard at ``TableRead.__init__`` must fire even
         when the scan would dispatch every split through

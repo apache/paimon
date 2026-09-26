@@ -152,12 +152,16 @@ class TableRead:
         from pypaimon.read.merge_engine_support import check_supported
         from pypaimon.table.file_store_table import FileStoreTable
 
-        # Validate merge-engine support before any split-level dispatch.
-        # Raw-convertible splits skip MergeFileSplitRead, so this guard
-        # has to live at the read-builder level — otherwise unsupported
-        # options (e.g. partial-update.remove-record-on-delete) get
-        # silently ignored on fresh single-snapshot tables.
-        check_supported(table)
+        # Invalid configurations still fail immediately. Rust supports merge
+        # options outside the Python subset; defer only that capability check
+        # until a read actually needs the Python implementation.
+        self._python_merge_validation_pending = False
+        try:
+            check_supported(table)
+        except NotImplementedError:
+            if not table.options.native_read_enabled():
+                raise
+            self._python_merge_validation_pending = True
 
         self.table: FileStoreTable = table
         self.predicate = predicate
@@ -194,6 +198,7 @@ class TableRead:
         self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
+        self._check_python_merge_supported()
         self._begin_auth_read(splits)
         limit = self.limit
 
@@ -287,6 +292,7 @@ class TableRead:
         if native_batches is not None:
             batch_iterator = iter(native_batches)
         else:
+            self._check_python_merge_supported()
             batch_iterator = self._arrow_batch_generator(
                 splits, schema, effective_bp)
         reader_type = pyarrow.ipc.RecordBatchReader
@@ -384,6 +390,7 @@ class TableRead:
         if native_batches is not None:
             return self._batches_to_arrow(native_batches, schema)
 
+        self._check_python_merge_supported()
         if self._should_run_parallel(splits, effective):
             return self._to_arrow_parallel(splits, schema, effective, effective_bp)
 
@@ -1700,8 +1707,17 @@ class TableRead:
             or "fields.default-aggregate-function" in options
         )
 
+    def _check_python_merge_supported(self):
+        if getattr(self, '_python_merge_validation_pending', False):
+            from pypaimon.read.merge_engine_support import check_supported
+            check_supported(self.table)
+            self._python_merge_validation_pending = False
+
     def __create_reader_for_split(self, split, blob_parallelism=1,
                                   limit: Optional[int] = None):
+        # Raw-convertible splits skip MergeFileSplitRead, so validate before
+        # dispatch, including when native setup failed or bindings are absent.
+        self._check_python_merge_supported()
         auth_result = None
         if isinstance(split, QueryAuthSplit):
             auth_result = split.auth_result
