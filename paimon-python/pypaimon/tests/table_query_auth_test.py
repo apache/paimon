@@ -164,6 +164,16 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Column masking target cannot be empty"):
             TableQueryAuthResult(None, {"": '{"name":"NULL"}'})
 
+    def test_malformed_filter_is_rejected(self):
+        for rules in ({}, "", 0, False, {"a": "b"}):
+            with self.assertRaisesRegex(ValueError, "Row filter must be a list"):
+                TableQueryAuthResult(rules, None)
+
+    def test_malformed_column_masking_is_rejected(self):
+        for masking in ([], "", 0, False, ['{"name":"NULL"}']):
+            with self.assertRaisesRegex(ValueError, "Column masking must be a map"):
+                TableQueryAuthResult(None, masking)
+
     def test_wraps_splits_with_filter(self):
         result = TableQueryAuthResult([_simple_filter_json()], None)
         plan = _FakePlan([_FakeSplit("s1"), _FakeSplit("s2")])
