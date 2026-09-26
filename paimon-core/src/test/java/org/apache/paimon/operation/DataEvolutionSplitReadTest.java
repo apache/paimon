@@ -53,6 +53,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -323,6 +324,122 @@ class DataEvolutionSplitReadTest {
     }
 
     @Test
+    public void testFailingLaterBunchClosesEarlierBunchReaders() throws Exception {
+        // traceable file IO lets us observe streams left open by a failed createReader
+        org.apache.paimon.fs.Path tableRoot =
+                new org.apache.paimon.fs.Path(
+                        org.apache.paimon.utils.TraceableFileIO.SCHEME
+                                + "://"
+                                + java.nio.file.Paths.get(tempDir.toString(), "leak"));
+        org.apache.paimon.fs.FileIO fileIO = org.apache.paimon.fs.FileIOFinder.find(tableRoot);
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        CoreOptions coreOptions = new CoreOptions(options);
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        tableRoot,
+                        RowType.of(),
+                        coreOptions.partitionDefaultName(),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null,
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        false,
+                        null);
+
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .build();
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
+        TableSchema tableSchema = schemaManager.createTable(schema);
+        RowType rowType = tableSchema.logicalRowType();
+
+        Path bucketPath = pathFactory.bucketPath(EMPTY_ROW, 0);
+        fileIO.mkdirs(bucketPath);
+        // bunch 0: a real orc file whose reader opens and holds a stream at creation
+        writeFormatFile(fileIO, new Path(bucketPath, "data-0.orc"), rowType, 10, "orc");
+        // bunch 1: a blob file with no backing bytes on disk — building its reader fails
+
+        // the data file provides only f0, so the blob file (bunch 1) is the only provider
+        // of f1 and its reader must be built — and fail on the missing file
+        DataFileMeta orcFile =
+                DataFileMeta.create(
+                        "data-0.orc",
+                        10000L,
+                        10,
+                        EMPTY_ROW,
+                        EMPTY_ROW,
+                        null,
+                        null,
+                        0L,
+                        1L,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        10L,
+                        Collections.singletonList("f0"));
+        DataFileMeta blobFile =
+                DataFileMeta.create(
+                        "blob-1.blob",
+                        10000L,
+                        10,
+                        EMPTY_ROW,
+                        EMPTY_ROW,
+                        null,
+                        null,
+                        0L,
+                        2L,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        10L,
+                        Collections.singletonList("f1"));
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath(bucketPath.toString())
+                        .withDataFiles(Arrays.asList(orcFile, blobFile))
+                        .rawConvertible(false)
+                        .build();
+
+        DataEvolutionSplitRead splitRead =
+                new DataEvolutionSplitRead(
+                        fileIO, schemaManager, tableSchema, rowType, coreOptions, pathFactory);
+        IndexedSplit indexedSplit =
+                new IndexedSplit(dataSplit, Arrays.asList(new Range(10L, 10L)), null);
+
+        // the blob bunch (sole provider of f1) fails on the missing file; the failing
+        // createReader must not leave the earlier data bunch's stream open
+        assertThatThrownBy(() -> splitRead.createReader(indexedSplit))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("blob");
+
+        assertThat(
+                        org.apache.paimon.utils.TraceableFileIO.openInputStreams(
+                                path -> path.toString().contains("leak")))
+                .isEmpty();
+    }
+
+    @Test
     public void testSparseRowIdReadUsesParquetRowsAtSelectedPositions() throws Exception {
         LocalFileIO fileIO = new LocalFileIO();
         Path tableRoot = new Path(tempDir.toUri().toString(), "sparse-parquet");
@@ -423,13 +540,17 @@ class DataEvolutionSplitReadTest {
     }
 
     private static void writeFormatFile(
-            LocalFileIO fileIO, Path path, RowType rowType, int rowCount, String formatIdentifier)
+            org.apache.paimon.fs.FileIO fileIO,
+            Path path,
+            RowType rowType,
+            int rowCount,
+            String formatIdentifier)
             throws IOException {
         writeFormatFile(fileIO, path, rowType, rowCount, formatIdentifier, new Options());
     }
 
     private static void writeFormatFile(
-            LocalFileIO fileIO,
+            org.apache.paimon.fs.FileIO fileIO,
             Path path,
             RowType rowType,
             int rowCount,
