@@ -74,7 +74,6 @@ import java.util.function.Function;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_ROWS;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
 public class GlobalIndexAssigner implements Serializable, Closeable {
@@ -186,15 +185,21 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     }
 
     public void bootstrapKey(InternalRow value) throws IOException {
-        checkArgument(inBoostrap());
         BinaryRow partition = keyPartExtractor.partition(value);
         BinaryRow key = keyPartExtractor.trimmedPrimaryKey(value);
         int partId = partMapping.index(partition);
         int bucket = value.getInt(bucketIndex);
         bucketAssigner.bootstrapBucket(partition, bucket);
         PositiveIntInt partAndBucket = new PositiveIntInt(partId, bucket);
-        bootstrapKeys.write(
-                GenericRow.of(keyIndex.serializeKey(key), keyIndex.serializeValue(partAndBucket)));
+        if (inBoostrap()) {
+            bootstrapKeys.write(
+                    GenericRow.of(
+                            keyIndex.serializeKey(key), keyIndex.serializeValue(partAndBucket)));
+        } else {
+            // with unaligned checkpoints the bootstrap can end on the barrier while KEY_PART
+            // records are still queued: register the key directly instead of crashing
+            keyIndex.put(key, partAndBucket);
+        }
     }
 
     public boolean inBoostrap() {

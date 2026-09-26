@@ -217,6 +217,33 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
+    public void testLateBootstrapKeyAfterEndRegistersKey() throws Exception {
+        // with unaligned checkpoints the bootstrap can end on the barrier while KEY_PART
+        // records are still queued: the late key must register instead of crashing
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
+        List<List<Integer>> output = new ArrayList<>();
+        assigner.open(
+                0,
+                null,
+                ioManager(),
+                2,
+                0,
+                (row, bucket) ->
+                        output.add(
+                                Arrays.asList(
+                                        row.getInt(0), row.getInt(1), row.getInt(2), bucket)));
+
+        assigner.endBoostrap(false);
+        // a KEY_PART record queued before the barrier now arrives: (pk, pt, bucket)
+        assigner.bootstrapKey(GenericRow.of(1, 2, 2));
+
+        assigner.processInput(GenericRow.of(2, 1, 2));
+
+        assertThat(output).containsExactlyInAnyOrder(Arrays.asList(2, 1, 2, 2));
+        assigner.close();
+    }
+
+    @Test
     public void testBootstrapRecords() throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<List<Integer>> output = new ArrayList<>();
