@@ -336,3 +336,34 @@ class DataTypesTest(unittest.TestCase):
 
         paimon_type = PyarrowFieldParser.to_paimon_type(pa.time32('ms'), nullable=True)
         self.assertEqual(paimon_type.type, "TIME(0)")
+
+    def test_avro_timestamp_seconds_maps_and_roundtrips(self):
+        import datetime
+        import os
+        import tempfile
+
+        import fastavro
+
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        # TIMESTAMP(0) -> pyarrow 's'; Avro's coarsest timestamp is millis, which
+        # holds seconds losslessly and matches Java AvroSchemaConverter (precision<=3).
+        self.assertEqual(
+            PyarrowFieldParser.to_avro_type(pa.timestamp('s'), 'ts', 'r'),
+            {"type": "long", "logicalType": "timestamp-millis"})
+        self.assertEqual(
+            PyarrowFieldParser.to_avro_type(pa.timestamp('s', tz='UTC'), 'ts', 'r'),
+            {"type": "long", "logicalType": "local-timestamp-millis"})
+        # nanos stays rejected: Avro has no nanos logical type (matches Java precision>6).
+        with self.assertRaises(ValueError):
+            PyarrowFieldParser.to_avro_type(pa.timestamp('ns'), 'ts', 'r')
+
+        # A second-granularity value round-trips unchanged (no seconds/millis mixup).
+        ts = datetime.datetime(2024, 1, 2, 3, 4, 5)
+        table = pa.table({"ts": pa.array([ts], pa.timestamp('s'))})
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "data.avro")
+            LocalFileIO().write_avro(path, table)
+            with open(path, 'rb') as f:
+                rows = list(fastavro.reader(f))
+        self.assertEqual(rows[0]["ts"].replace(tzinfo=None), ts)
