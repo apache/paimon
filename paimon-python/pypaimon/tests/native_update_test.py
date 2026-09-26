@@ -534,6 +534,9 @@ def test_row_id_cast_failure_does_not_write_nulls(tmp_path, native, values):
     (pa.array([1.5]), pa.date32()),
     (pa.array([1.5]), pa.time32('ms')),
     (pa.array([1], type=pa.int32()), pa.timestamp('ms')),
+    (pa.array([2.675]), pa.decimal128(10, 2)),
+    (pa.array([2.25], type=pa.float32()), pa.decimal128(10, 1)),
+    (pa.array([0.1]), pa.decimal128(38, 20)),
 ])
 def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target):
     from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
@@ -767,6 +770,9 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
     (pa.array([1.5]), pa.date32(), pa.int64()),
     (pa.array([1.5]), pa.time32('ms'), pa.int64()),
     (pa.array([1], type=pa.int32()), pa.timestamp('ms'), pa.int64()),
+    (pa.array([2.675]), pa.decimal128(10, 2), pa.int64()),
+    (pa.array([2.25], type=pa.float32()), pa.decimal128(10, 1), pa.int64()),
+    (pa.array([0.1]), pa.decimal128(38, 20), pa.int64()),
 ])
 def test_native_row_id_input_conversion_matches_python(
         tmp_path, native, grouped, empty_chunks, values, target, row_id_type):
@@ -898,3 +904,69 @@ def test_core_nested_row_update_uses_whole_column_constructor_fallback(tmp_path,
     read = table.new_read_builder()
     actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
     assert actual['value'].to_pylist() == expected
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('layout', [
+    'legacy', 'canonical', 'ordinary', 'directory', 'external', 'float', 'double', 'external-binary',
+])
+@pytest.mark.parametrize('operation', ['row', 'predicate'])
+def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, operation):
+    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.write.native_update import NativeBatchTableUpdate, NativePredicateTableUpdate
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    part_type = {'float': pa.float32(), 'double': pa.float64(), 'external-binary': pa.binary()}.get(
+        layout, pa.string())
+    schema = pa.schema([('id', pa.int32()), ('part', part_type), ('value', pa.int32())])
+    options = {
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': str(layout == 'canonical').lower(),
+    }
+    if layout == 'directory':
+        options['data-file.path-directory'] = 'data'
+    if layout.startswith('external'):
+        options['data-file.external-paths'] = (tmp_path / 'external').as_uri()
+        options['data-file.external-paths.strategy'] = 'round-robin'
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=['part'], options=options), False)
+    table = catalog.get_table('default.t')
+    seed_table = create_native_write_table(table) if layout == 'canonical' else table
+    builder = seed_table.new_batch_write_builder()
+    writer = builder.new_write()
+    parts = ['east', 'west'] if layout == 'ordinary' else ['a/b', 'a%b']
+    if layout in ('float', 'double'):
+        parts = [1.5, 2.25]
+    elif layout == 'external-binary':
+        parts = [b'x', b'a/b']
+    data = pa.table({'id': [1, 2], 'part': parts, 'value': [10, 20]}, schema=schema)
+    writer.write_arrow(data.to_batches()[0] if layout == 'canonical' else data)
+    builder.new_commit().commit(writer.prepare_commit())
+    if layout != 'canonical':
+        writer.close()
+    table = table.copy({'write.native.enabled': 'true'})
+    native_calls = []
+    wrapper = NativeBatchTableUpdate if operation == 'row' else NativePredicateTableUpdate
+    method = 'update_by_arrow_with_row_id' if operation == 'row' else 'update'
+    original = getattr(wrapper, method)
+
+    def track(*args, **kwargs):
+        native_calls.append(operation)
+        return original(*args, **kwargs)
+
+    # Check a second update too: fallback outputs must remain readable on the
+    # next operation, and canonical files must continue using native updates.
+    with patch.object(wrapper, method, track):
+        for value in [11, 12]:
+            builder = table.new_batch_write_builder()
+            if operation == 'row':
+                messages = builder.new_update().update_by_arrow_with_row_id(
+                    pa.table({'_ROW_ID': [0, 1], 'value': pa.array([value, value], pa.int32())}))
+            else:
+                messages = builder.new_update().update_by_predicate(None, {'value': value})
+            builder.new_commit().commit(messages)
+            read = table.new_read_builder()
+            actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+            assert actual.to_pydict() == {'id': [1, 2], 'part': parts, 'value': [value, value]}
+    expected_calls = 2 if layout in ('canonical', 'ordinary', 'external') else 0
+    assert len(native_calls) == expected_calls

@@ -25,7 +25,7 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.native_write import native_write_available
+from pypaimon.write.native_write import native_write_available, _native_partition_types_supported
 from pypaimon.write.table_update_by_row_id import _RowIdUpdateFileWriter
 from pypaimon.write.row_utils import value_for_arrow
 
@@ -36,6 +36,7 @@ def _native_row_id_table(table, builder_method):
             or not table.options.native_write_enabled()
             or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()
+            or table.options.data_file_path_directory() is not None
             or not _RowIdUpdateFileWriter.supports_table(table)
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_write_available()):
@@ -43,7 +44,40 @@ def _native_row_id_table(table, builder_method):
     from pypaimon_rust.datafusion import BatchWriteBuilder
     if not hasattr(BatchWriteBuilder, builder_method):
         return None
+    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    if not _native_partition_types_supported(schema, table.partition_keys):
+        return None
+    if not _native_update_paths_supported(table):
+        return None
     return create_native_write_table(table)
+
+
+def _native_update_paths_supported(table):
+    """Keep legacy Python partition directories on the path-aware Python updater."""
+    if not table.partition_keys:
+        return True
+    factory = table.path_factory()
+    # Core update scans for itself, unlike native reads which receive splits
+    # with repaired file paths. Decide before callbacks or staging can start.
+    splits = table.new_read_builder().new_scan().plan_for_write().splits()
+    bucket_files = {}
+    for split in splits:
+        partition = tuple(split.partition.values)
+        bucket_path = factory.bucket_path(partition, split.bucket)
+        if bucket_path == factory.bucket_path(partition, split.bucket, canonical_partition=True):
+            continue
+        candidates = [file for file in split.files if not file.external_path]
+        if not candidates:
+            continue
+        if bucket_path not in bucket_files:
+            bucket_files[bucket_path] = {
+                status.base_name for status in table.file_io.list_status(bucket_path)
+            }
+        # Python reads prefer an existing legacy path even if a canonical copy
+        # also exists. Canonical-only files and explicit external paths are safe.
+        if any(file.file_name in bucket_files[bucket_path] for file in candidates):
+            return False
+    return True
 
 
 def create_native_update(table, commit_user, columns):
@@ -112,8 +146,6 @@ def create_native_upsert(table, commit_user, data, keys, columns):
 
 def create_native_predicate_update(table, commit_user, columns, predicate):
     """Prepare a public core operation before any assignment can run."""
-    if table.options.data_file_path_directory() is not None:
-        return None
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     if any(pa.types.is_nested(schema.field(name).type)
            for name in columns if name in schema.names):

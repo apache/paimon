@@ -39,6 +39,14 @@ def native_write_available() -> bool:
     return True
 
 
+def _native_partition_types_supported(schema, partition_keys):
+    """Partition keys which Rust can encode and use to locate existing files."""
+    return not any(
+        pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
+        or pa.types.is_fixed_size_binary(data_type) or pa.types.is_floating(data_type)
+        for data_type in (schema.field(name).type for name in partition_keys))
+
+
 def create_native_write(table, commit_user, static_partition=None, stream=False):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
@@ -49,7 +57,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
         if (not table.options.sequence_field_sort_order_is_ascending()
                 or any(pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
             return None
-    partition_types = [schema.field(name).type for name in table.partition_keys]
     if (not native_write_available()
             or table.options.data_evolution_enabled()
             or table.options.data_file_external_paths()
@@ -69,8 +76,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             or any(pa.types.is_nested(field.type)
                    or pa.types.is_fixed_size_binary(field.type) for field in schema)
             # Rust cannot encode these partition keys yet.
-            or any(pa.types.is_binary(type_) or pa.types.is_large_binary(type_)
-                   or pa.types.is_floating(type_) for type_ in partition_types)
+            or not _native_partition_types_supported(schema, table.partition_keys)
             or any(is_blob_file_field(field) for field in table.table_schema.fields)):
         return None
     native_table = create_native_write_table(table)
