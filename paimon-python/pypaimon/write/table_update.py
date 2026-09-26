@@ -133,6 +133,16 @@ class TableUpdate:
     def _new_row_id_updater(
             self, commit_identifier: int, _precomputed_files_info=None
     ) -> TableUpdateByRowId:
+        if _precomputed_files_info is None:
+            from pypaimon.write.native_update import create_native_update_by_row_id
+            try:
+                native = create_native_update_by_row_id(
+                    self.table, self.commit_user, commit_identifier)
+            except Exception as error:
+                logger.debug('Native row-id updater preparation failed: %s', error)
+            else:
+                if native is not None:
+                    return native
         return TableUpdateByRowId(
             self.table,
             self.commit_user,

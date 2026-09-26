@@ -460,6 +460,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['age'].to_pylist(),
         )
 
+    @pytest.mark.python_write
     def test_literal_predicate_update_projects_only_row_id(self):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()

@@ -22,15 +22,18 @@ import pytest
 _NATIVE_PLAN_ENV = "PYPAIMON_TEST_NATIVE_PLAN"
 _NATIVE_READ_ENV = "PYPAIMON_TEST_NATIVE_READ"
 _NATIVE_WRITE_ENV = "PYPAIMON_TEST_NATIVE_WRITE"
+_NATIVE_UPDATE_ENV = "PYPAIMON_TEST_NATIVE_UPDATE"
 _NATIVE_COMMIT_ENV = "PYPAIMON_TEST_NATIVE_COMMIT"
 _native_plan_count = 0
 _native_read_count = 0
 _native_write_count = 0
 _native_commit_count = 0
+_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental'), 0)
 _force_native_for_test = False
 _force_native_read_for_test = False
 _force_native_write_for_test = False
 _force_native_commit_for_test = False
+_force_native_update_for_test = False
 
 
 def pytest_addoption(parser):
@@ -79,6 +82,10 @@ def _native_write_enabled():
 
 def _native_commit_enabled():
     return os.environ.get(_NATIVE_COMMIT_ENV) == "1"
+
+
+def _native_update_enabled():
+    return os.environ.get(_NATIVE_UPDATE_ENV) == "1"
 
 
 def pytest_configure(config):
@@ -149,6 +156,29 @@ def pytest_configure(config):
 
         TableCommit._prepare_native_commit = tracked_prepare
 
+    if _native_update_enabled():
+        from pypaimon.write.native_update import (
+            NativeBatchTableUpdate, NativePredicateTableUpdate,
+            NativeTableUpdateByRowId, NativeTableUpsert,
+        )
+
+        def track_update(cls, method, kind):
+            original = getattr(cls, method)
+
+            def tracked(self, *args, **kwargs):
+                messages = original(self, *args, **kwargs)
+                if messages and _force_native_update_for_test:
+                    _native_update_counts[kind] += 1
+                return messages
+
+            setattr(cls, method, tracked)
+
+        track_update(NativeBatchTableUpdate, 'update_by_arrow_with_row_id', 'row_id')
+        track_update(NativeBatchTableUpdate, 'update_by_arrow_batches_with_row_id', 'grouped')
+        track_update(NativePredicateTableUpdate, 'update', 'predicate')
+        track_update(NativeTableUpsert, 'upsert', 'upsert')
+        track_update(NativeTableUpdateByRowId, 'update_columns', 'incremental')
+
 
 def pytest_collection_modifyitems(items):
     if _native_plan_enabled():
@@ -163,6 +193,7 @@ def pytest_collection_modifyitems(items):
 def enable_native_backends(request, monkeypatch):
     global _force_native_for_test, _force_native_read_for_test
     global _force_native_write_for_test, _force_native_commit_for_test
+    global _force_native_update_for_test
     python_plan = request.node.get_closest_marker("python_plan") is not None
     python_read = request.node.get_closest_marker("python_read") is not None
     python_write = request.node.get_closest_marker("python_write") is not None
@@ -175,7 +206,8 @@ def enable_native_backends(request, monkeypatch):
                   and not native_plan_test)
     force_write = _native_write_enabled() and not python_write
     force_commit = _native_commit_enabled() and not python_commit
-    if not (force_plan or force_read or force_write or force_commit):
+    force_update = _native_update_enabled() and not python_write
+    if not (force_plan or force_read or force_write or force_commit or force_update):
         yield
         return
 
@@ -195,7 +227,7 @@ def enable_native_backends(request, monkeypatch):
             return original_read(self, True if default is None else default)
 
         monkeypatch.setattr(CoreOptions, "native_read_enabled", read_enabled)
-    if force_write:
+    if force_write or force_update:
         original_write = CoreOptions.native_write_enabled
 
         def write_enabled(self, default=None):
@@ -213,6 +245,7 @@ def enable_native_backends(request, monkeypatch):
     _force_native_read_for_test = force_read
     _force_native_write_for_test = force_write
     _force_native_commit_for_test = force_commit
+    _force_native_update_for_test = force_update
     try:
         yield
     finally:
@@ -220,6 +253,7 @@ def enable_native_backends(request, monkeypatch):
         _force_native_read_for_test = False
         _force_native_write_for_test = False
         _force_native_commit_for_test = False
+        _force_native_update_for_test = False
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -227,6 +261,7 @@ def pytest_sessionfinish(session, exitstatus):
         if ((_native_plan_enabled() and _native_plan_count == 0)
                 or (_native_read_enabled() and _native_read_count == 0)
                 or (_native_write_enabled() and _native_write_count == 0)
+                or (_native_update_enabled() and not all(_native_update_counts.values()))
                 or (_native_commit_enabled() and _native_commit_count == 0)):
             session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
@@ -244,3 +279,7 @@ def pytest_terminal_summary(terminalreporter):
     if _native_commit_enabled():
         terminalreporter.write_line(
             "native commits exercised: %d" % _native_commit_count)
+    if _native_update_enabled():
+        terminalreporter.write_line(
+            "native updates exercised: " + ', '.join(
+                '%s=%d' % item for item in _native_update_counts.items()))

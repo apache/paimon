@@ -20,17 +20,18 @@
 import pyarrow as pa
 
 from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
 from pypaimon.write.native_write import native_write_available, _native_partition_types_supported
-from pypaimon.write.table_update_by_row_id import _RowIdUpdateFileWriter
+from pypaimon.write.table_update_by_row_id import TableUpdateByRowId, _RowIdUpdateFileWriter
 from pypaimon.write.row_utils import value_for_arrow
 
 
-def _native_row_id_table(table, builder_method):
+def _native_row_id_table(table):
     """Resolve an eligible table before creating a native row-ID writer."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
@@ -40,9 +41,6 @@ def _native_row_id_table(table, builder_method):
             or not _RowIdUpdateFileWriter.supports_table(table)
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_write_available()):
-        return None
-    from pypaimon_rust.datafusion import BatchWriteBuilder
-    if not hasattr(BatchWriteBuilder, builder_method):
         return None
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     if not _native_partition_types_supported(schema, table.partition_keys):
@@ -80,18 +78,19 @@ def _native_update_paths_supported(table):
     return True
 
 
-def create_native_update(table, commit_user, columns):
-    """Use the public core updater for direct and grouped row-ID updates."""
+def _native_update_table(table, columns=None):
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     selected = schema.names if columns is None else columns
     if any(pa.types.is_nested(schema.field(name).type)
            for name in selected if name in schema.names):
         return None
-    native_table = _native_row_id_table(table, 'new_update')
+    return _native_row_id_table(table)
+
+
+def create_native_update(table, commit_user, columns):
+    """Use the public core updater for direct and grouped row-ID updates."""
+    native_table = _native_update_table(table, columns)
     if native_table is None:
-        return None
-    from pypaimon_rust.datafusion import BatchTableUpdate
-    if not hasattr(BatchTableUpdate, 'update_by_arrow_batches_with_row_id'):
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
@@ -99,6 +98,25 @@ def create_native_update(table, commit_user, columns):
     if columns is not None:
         writer.with_update_type(columns)
     return NativeBatchTableUpdate(table, writer)
+
+
+def create_native_update_by_row_id(table, commit_user, commit_identifier):
+    """Create a core updater sharing one snapshot across incremental calls."""
+    # Columns are chosen on each later call, which can include partition keys.
+    # Core currently rejects those; choose the Python writer before staging.
+    if table.partition_keys:
+        return None
+    native_table = _native_update_table(table)
+    if native_table is None:
+        return None
+    if commit_identifier == BATCH_COMMIT_IDENTIFIER:
+        writer = (native_table.new_batch_write_builder()._with_commit_user(commit_user)
+                  .new_update().new_update_by_row_id())
+    else:
+        writer = (native_table.new_stream_write_builder().with_commit_user(commit_user)
+                  .new_update().new_update_by_row_id(commit_identifier))
+    return NativeTableUpdateByRowId(
+        table, commit_user, commit_identifier, writer)
 
 
 def _supported_upsert_key_type(data_type):
@@ -113,7 +131,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
     """Prepare one core upsert from full Arrow rows or named row values."""
     if table.partition_keys:
         return None
-    native_table = _native_row_id_table(table, 'new_update')
+    native_table = _native_row_id_table(table)
     if native_table is None:
         return None
     fields = table.table_schema.fields
@@ -139,8 +157,6 @@ def create_native_upsert(table, commit_user, data, keys, columns):
               ._with_commit_user(commit_user)
               .new_update()
               .with_update_type(columns))
-    if not hasattr(writer, 'upsert_by_arrow_with_key'):
-        return None
     return NativeTableUpsert(table, writer, keys, data)
 
 
@@ -150,11 +166,8 @@ def create_native_predicate_update(table, commit_user, columns, predicate):
     if any(pa.types.is_nested(schema.field(name).type)
            for name in columns if name in schema.names):
         return None
-    native_table = _native_row_id_table(table, 'new_update')
+    native_table = _native_row_id_table(table)
     if native_table is None:
-        return None
-    from pypaimon_rust.datafusion import BatchTableUpdate
-    if not hasattr(BatchTableUpdate, 'update_by_predicate'):
         return None
     from pypaimon.read.native_plan import _predicate_to_native
     native_predicate = None if predicate is None else _predicate_to_native(predicate)
@@ -189,11 +202,8 @@ def create_native_delete(table, commit_user):
     """Select Rust's deletion-vector writer for supported batch deletes."""
     if not table.options.deletion_vectors_enabled(False):
         return None
-    native_table = _native_row_id_table(table, 'new_update')
+    native_table = _native_row_id_table(table)
     if native_table is None:
-        return None
-    from pypaimon_rust.datafusion import BatchTableUpdate
-    if not hasattr(BatchTableUpdate, 'delete_by_row_id'):
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
@@ -243,6 +253,31 @@ class NativeBatchTableUpdate:
         except ValueError as error:
             _raise_native_row_id_error(error)
         return from_native_commit_messages(self.table, messages)
+
+
+class NativeTableUpdateByRowId(TableUpdateByRowId):
+    """Adapt Python row inputs around the core incremental Arrow updater."""
+
+    def __init__(self, table, commit_user, commit_identifier, writer):
+        self.table = table
+        self.commit_user = commit_user
+        self.commit_identifier = commit_identifier
+        self.writer = writer
+
+    @property
+    def commit_messages(self):
+        return from_native_commit_messages(self.table, self.writer.commit_messages)
+
+    def update_columns(self, data, column_names):
+        try:
+            messages = self.writer.update_columns(data, column_names)
+        except ValueError as error:
+            _raise_native_row_id_error(error)
+        return from_native_commit_messages(self.table, messages)
+
+    def _write_row_columns(self, data, column_names, blob_object_columns):
+        # This adapter is selected only for plain Parquet tables without blobs.
+        return self.update_columns(data, column_names)
 
 
 class NativeTableUpsert:
