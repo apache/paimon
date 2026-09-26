@@ -303,6 +303,9 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void dropDatabaseImpl(String name) {
+        // Delete the database directory in the warehouse like the file system catalog,
+        // otherwise a re-created same-name database cannot re-create its tables
+        fileIO.deleteDirectoryQuietly(newDatabasePath(name));
         // Delete table from paimon_tables
         execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
         // Delete properties from paimon_database_properties
@@ -320,7 +323,11 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes)
+            throws DatabaseNotExistException {
+        if (!JdbcUtils.databaseExists(connections, catalogKey, name)) {
+            throw new DatabaseNotExistException(name);
+        }
         Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
                 PropertyChange.getSetPropertiesToRemoveKeys(changes);
         Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
@@ -532,17 +539,20 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private void createTableImplWithLock(Identifier identifier, Schema schema) {
+        boolean registered = false;
         try {
             // create table file
             SchemaManager schemaManager = getSchemaManager(identifier);
             TableSchema tableSchema = schemaManager.createTable(schema);
             // Update schema metadata
             Path path = getTableLocation(identifier);
-            if (JdbcUtils.insertTable(
-                    connections,
-                    catalogKey,
-                    identifier.getDatabaseName(),
-                    identifier.getTableName())) {
+            registered =
+                    JdbcUtils.insertTable(
+                            connections,
+                            catalogKey,
+                            identifier.getDatabaseName(),
+                            identifier.getTableName());
+            if (registered) {
                 LOG.debug("Successfully committed to new table: {}", identifier);
             } else {
                 try {
@@ -564,6 +574,12 @@ public class JdbcCatalog extends AbstractCatalog {
                         collectTableProperties(tableSchema));
             }
         } catch (Exception e) {
+            // the schema directory may already be committed: without this cleanup a failed
+            // registration leaves it behind and blocks re-creation. Once registered the
+            // table works even if a later step fails, so the directory must stay.
+            if (!registered) {
+                fileIO.deleteDirectoryQuietly(getTableLocation(identifier));
+            }
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
     }

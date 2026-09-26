@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -840,6 +841,69 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testCreateTableSurvivesLatePropertySyncFailure() throws Exception {
+        // the property-sync step runs after the table row is committed: its failure
+        // must not delete the working table's directory
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        String databaseName = "late_sync_db";
+        jdbcCatalog.createDatabase(databaseName, false);
+        dropPropertyTable(jdbcCatalog);
+        Identifier identifier = Identifier.create(databaseName, "t");
+
+        assertThatThrownBy(
+                        () ->
+                                jdbcCatalog.createTable(
+                                        identifier,
+                                        Schema.newBuilder()
+                                                .column("k", DataTypes.INT())
+                                                .option("comment", "synced")
+                                                .build(),
+                                        false))
+                .isInstanceOf(RuntimeException.class);
+
+        java.nio.file.Path dir =
+                java.nio.file.Paths.get(jdbcCatalog.newDatabasePath(databaseName).toUri());
+        assertThat(dir).exists();
+        // the table is registered and readable: only the property rows are missing
+        assertThat(jdbcCatalog.listTables(databaseName)).contains("t");
+        assertThat(jdbcCatalog.getTable(identifier)).isNotNull();
+    }
+
+    @Test
+    public void testDropDatabaseCascadeDeletesWarehouseDirectory() throws Exception {
+        String databaseName = "drop_dir_db";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, "t");
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("k", DataTypes.INT()).build(), false);
+        java.nio.file.Path dir =
+                java.nio.file.Paths.get(
+                        ((JdbcCatalog) catalog).newDatabasePath(databaseName).toUri());
+        assertThat(dir).exists();
+
+        // leaving the directory behind blocks re-creating the table after re-creating
+        // the database
+        catalog.dropDatabase(databaseName, false, true);
+        assertThat(dir).doesNotExist();
+    }
+
+    @Test
+    public void testAlterDatabaseOnMissingDatabaseThrows() throws Exception {
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterDatabase(
+                                        "missing_db",
+                                        Collections.singletonList(
+                                                PropertyChange.setProperty("k", "v")),
+                                        false))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+        // no phantom database materialized by the property insert
+        assertThatThrownBy(() -> catalog.getDatabase("missing_db"))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+        assertThat(catalog.listDatabases()).doesNotContain("missing_db");
+    }
+
+    @Test
     public void testDropDatabaseCleansViewMetadata() throws Exception {
         String databaseName = "drop_view_db";
         Identifier identifier = Identifier.create(databaseName, "view_name");
@@ -1505,5 +1569,9 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         ImmutableList.of(ViewChange.dropDialect("missing")),
                                         false))
                 .isInstanceOf(Catalog.DialectNotExistException.class);
+    }
+
+    private static void dropPropertyTable(JdbcCatalog catalog) throws Exception {
+        JdbcUtils.execute(catalog.getConnections(), "DROP TABLE paimon_table_properties");
     }
 }
