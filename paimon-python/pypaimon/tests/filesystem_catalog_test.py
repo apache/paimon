@@ -713,3 +713,21 @@ class FileSystemCatalogTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             catalog.drop_partitions(identifier, [])
+
+    def test_create_table_auto_create_boolean_parsing(self):
+        fields = [DataField.from_dict({"id": 0, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        # auto-create=false is a legal no-op (the default) and must not be rejected.
+        catalog.create_table(
+            "test_db.ac_false",
+            Schema(fields=fields, options={"auto-create": "false"}), False)
+        self.assertTrue(
+            os.path.exists(self.warehouse + "/test_db.db/ac_false/schema/schema-0"))
+
+        # auto-create=true stays unsupported by create_table and is rejected.
+        with self.assertRaises(ValueError):
+            catalog.create_table(
+                "test_db.ac_true",
+                Schema(fields=fields, options={"auto-create": "true"}), False)

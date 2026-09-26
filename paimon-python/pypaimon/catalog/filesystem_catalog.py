@@ -35,6 +35,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.time_utils import (duration_to_iso8601,
                                         local_datetime_to_system_zone_millis)
 from pypaimon.filesystem.caching_file_io import CachingFileIO
@@ -174,7 +175,8 @@ class FileSystemCatalog(Catalog):
         return sys_table
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
-        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
+        auto_create = schema.options.get(CoreOptions.AUTO_CREATE.key()) if schema.options else None
+        if auto_create is not None and OptionsUtils.convert_to_boolean(auto_create):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 
         if not isinstance(identifier, Identifier):
