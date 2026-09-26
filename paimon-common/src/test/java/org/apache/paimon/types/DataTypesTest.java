@@ -116,7 +116,20 @@ public class DataTypesTest {
 
     @Test
     void testTimeType() {
-        assertThat(new TimeType(9)).satisfies(baseAssertions("TIME(9)", new TimeType()));
+        assertThat(new TimeType(3)).satisfies(baseAssertions("TIME(3)", new TimeType()));
+    }
+
+    @Test
+    void testTimeTypeRejectsUnrepresentablePrecision() {
+        // Time values are stored as milliseconds of the day in an int, so at most 3 fractional
+        // digits are representable. A higher precision (for example the TIME(7) produced from a
+        // MSSQL TIME(7) column) must fail instead of being silently rounded away, see issue #10099.
+        assertThatThrownBy(() -> new TimeType(7))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Time precision must be between 0 and 3 (both inclusive).");
+        assertThatThrownBy(() -> new TimeType(9))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Time precision must be between 0 and 3 (both inclusive).");
     }
 
     @Test

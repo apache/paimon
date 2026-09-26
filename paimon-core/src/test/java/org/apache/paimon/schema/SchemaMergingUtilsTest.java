@@ -845,7 +845,7 @@ public class SchemaMergingUtilsTest {
 
         // LocalZonedTimestampType -> TimeType
         DataType s3 = new LocalZonedTimestampType();
-        DataType t3 = new TimeType(6);
+        DataType t3 = new TimeType(3);
         assertThatThrownBy(
                         () -> SchemaMergingUtils.merge(s3, t3, highestFieldId, true, false, true))
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -891,12 +891,12 @@ public class SchemaMergingUtilsTest {
                         SchemaMergingUtils.merge(s7, t7, highestFieldId, true, false, true);
         assertThat(r7.getPrecision()).isEqualTo(TimestampType.DEFAULT_PRECISION);
 
-        // TimestampType -> TimestampType
-        DataType s8 = new TimestampType();
-        DataType t8 = new TimeType(6);
+        // TimeType -> TimeType with equal precision
+        DataType s8 = new TimeType(3);
+        DataType t8 = new TimeType(3);
         TimeType r8 =
                 (TimeType) SchemaMergingUtils.merge(s8, t8, highestFieldId, true, false, true);
-        assertThat(r8.getPrecision()).isEqualTo(TimestampType.DEFAULT_PRECISION);
+        assertThat(r8.getPrecision()).isEqualTo(3);
 
         // TimeType.
         DataType s9 = new TimeType();
@@ -907,18 +907,18 @@ public class SchemaMergingUtilsTest {
         assertThat(r9.getPrecision()).isEqualTo(TimeType.DEFAULT_PRECISION);
 
         // lower precision
-        DataType s10 = new TimeType(6);
+        DataType s10 = new TimeType(3);
         assertThatThrownBy(
                         () ->
                                 SchemaMergingUtils.merge(
-                                        s10, new TimeType(3), highestFieldId, true, false, true))
+                                        s10, new TimeType(2), highestFieldId, true, false, true))
                 .isInstanceOf(UnsupportedOperationException.class);
 
         // higher precision
-        DataType t10 = new TimeType(9);
+        DataType t10 = new TimeType(2);
         TimeType r10 =
                 (TimeType) SchemaMergingUtils.merge(s9, t10, highestFieldId, true, false, true);
-        assertThat(r10.getPrecision()).isEqualTo(9);
+        assertThat(r10.getPrecision()).isEqualTo(2);
 
         // TimeType -> LocalZonedTimestampType
         DataType s11 = new TimeType();
