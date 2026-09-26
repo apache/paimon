@@ -27,6 +27,7 @@ from pypaimon.write.native_commit import (
 )
 from pypaimon.write.native_write import native_write_available
 from pypaimon.write.table_update_by_row_id import _RowIdUpdateFileWriter
+from pypaimon.write.row_utils import value_for_arrow
 
 
 def _native_row_id_table(table, builder_method):
@@ -63,23 +64,42 @@ def create_native_update(table, commit_user, columns):
               .new_update())
     if columns is not None:
         writer.with_update_type(columns)
-    return NativeBatchTableUpdate(table, writer, columns)
+    return NativeBatchTableUpdate(table, writer)
+
+
+def _supported_upsert_key_type(data_type):
+    return any(check(data_type) for check in (
+        pa.types.is_boolean, pa.types.is_integer, pa.types.is_string,
+        pa.types.is_large_string, pa.types.is_binary, pa.types.is_large_binary,
+        pa.types.is_fixed_size_binary, pa.types.is_date, pa.types.is_decimal,
+    ))
 
 
 def create_native_upsert(table, commit_user, data, keys, columns):
-    """Select the core Rust upsert for full Arrow rows on plain Parquet."""
+    """Prepare one core upsert from full Arrow rows or named row values."""
     if table.partition_keys:
-        return None
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    if (len(data.column_names) != len(schema.names)
-            or set(data.column_names) != set(schema.names)
-            or any(data.schema.field(name).type != schema.field(name).type
-                   for name in schema.names)
-            or any(pa.types.is_nested(schema.field(name).type)
-                   for name in columns)):
         return None
     native_table = _native_row_id_table(table, 'new_update')
     if native_table is None:
+        return None
+    fields = table.table_schema.fields
+    schema = PyarrowFieldParser.from_paimon_schema(fields)
+    if (any(not _supported_upsert_key_type(schema.field(key).type) for key in keys)
+            or any(pa.types.is_nested(schema.field(name).type) for name in columns)):
+        return None
+    if not isinstance(data, pa.Table):
+        # Missing fields retain their row-object semantics on the fallback
+        # path; converting them to Arrow NULLs would change update behavior.
+        if not columns or any(set(values) != set(schema.names) for values in data):
+            return None
+        data = pa.Table.from_pydict({
+            field.name: [value_for_arrow(values[field.name], field) for values in data]
+            for field in fields
+        }, schema=schema)
+    if (len(data.column_names) != len(schema.names)
+            or set(data.column_names) != set(schema.names)
+            or any(data.schema.field(name).type != schema.field(name).type
+                   for name in schema.names)):
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
@@ -87,7 +107,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
               .with_update_type(columns))
     if not hasattr(writer, 'upsert_by_arrow_with_key'):
         return None
-    return NativeTableUpsert(table, writer, keys)
+    return NativeTableUpsert(table, writer, keys, data)
 
 
 def create_native_predicate_update(table, commit_user, columns, predicate):
@@ -162,22 +182,13 @@ def _raise_native_row_id_error(error):
 class NativeBatchTableUpdate:
     """Wrap public core operations and decode their commit messages."""
 
-    def __init__(self, table, writer, columns=None):
+    def __init__(self, table, writer):
         self.table = table
         self.writer = writer
-        self.columns = columns
-        self.row_id_updater = None
-
-    def pin_read_snapshot(self, snapshot_id):
-        self.row_id_updater = self.writer.new_update_by_row_id()
-        self.row_id_updater._pin_read_snapshot(snapshot_id)
 
     def update_by_arrow_with_row_id(self, data: pa.Table):
         try:
-            if self.row_id_updater is None:
-                messages = self.writer.update_by_arrow_with_row_id(data)
-            else:
-                messages = self.row_id_updater.update_columns(data, self.columns)
+            messages = self.writer.update_by_arrow_with_row_id(data)
         except ValueError as error:
             _raise_native_row_id_error(error)
         return from_native_commit_messages(self.table, messages)
@@ -205,15 +216,16 @@ class NativeBatchTableUpdate:
 class NativeTableUpsert:
     """Submit full Arrow rows to the core Rust upsert writer."""
 
-    def __init__(self, table, writer, keys):
+    def __init__(self, table, writer, keys, data):
         self.table = table
         self.writer = writer
         self.keys = keys
+        self.data = data
 
-    def upsert(self, data: pa.Table):
+    def upsert(self):
         return from_native_commit_messages(
             self.table,
-            self.writer.upsert_by_arrow_with_key(data, self.keys))
+            self.writer.upsert_by_arrow_with_key(self.data, self.keys))
 
 
 class NativePredicateTableUpdate:

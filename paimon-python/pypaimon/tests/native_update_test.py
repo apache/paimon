@@ -336,13 +336,12 @@ def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
 @pytest.mark.native_plan
 def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     try:
-        from pypaimon_rust.datafusion import BatchTableUpdate, _match_upsert_keys
+        from pypaimon_rust.datafusion import BatchTableUpdate
     except ImportError:
-        pytest.skip('installed Rust binding lacks native upsert key matching')
+        pytest.skip('installed Rust binding lacks public native updates')
     if not hasattr(BatchTableUpdate, 'upsert_by_arrow_with_key'):
         pytest.skip('installed Rust binding lacks table-level native upsert')
     from pypaimon.table.row.generic_row import GenericRow
-    assert _match_upsert_keys
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int32()), ('age', pa.int32())])
@@ -369,8 +368,8 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
         messages = builder.new_update().upsert_by_arrow_with_key(updates, ['id'])
     builder.new_commit().commit(messages)
     builder = table.new_batch_write_builder()
-    with patch.object(TableUpsertByKey, '_build_key_to_row_ids_map',
-                      side_effect=AssertionError('Python row key matcher selected')):
+    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+                      side_effect=AssertionError('Python row upsert selected')):
         messages = builder.new_update().upsert_by_key([
             GenericRow([1, 201], table.fields),
             GenericRow([4, 40], table.fields),
@@ -404,16 +403,14 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     snapshot = table.snapshot_manager().get_latest_snapshot()
     assert snapshot.commit_identifier == 77
 
-    # Native key matching can still use the Python row-ID writer when the
-    # native writer is unavailable. Follow the same factory as the pure path.
+    # If the core operation is unavailable, fall back for the whole upsert.
+    # No private matcher can leave Python coordinating native result indices.
     builder = table.new_batch_write_builder()
     fallback_updates = pa.Table.from_pydict({
         'id': [2, 6], 'age': [26, 60],
     }, schema=schema)
     with patch('pypaimon.write.native_update.create_native_upsert', return_value=None), \
-            patch('pypaimon.write.native_update.create_native_update', return_value=None), \
-            patch.object(TableUpsertByKey, '_build_key_to_row_ids_map',
-                         side_effect=AssertionError('Python key matcher selected')):
+            patch('pypaimon.write.native_update.create_native_update', return_value=None):
         messages = builder.new_update().upsert_by_arrow_with_key(fallback_updates, ['id'])
     builder.new_commit().commit(messages)
     read_builder = table.new_read_builder()
@@ -424,6 +421,21 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
         'id': [1, 1, 2, 3, 4, 5, 6],
         'age': [201, 201, 26, 30, 40, 50, 60],
     }
+
+    from pypaimon.write.native_update import NativeTableUpsert
+    before = set(tmp_path.rglob('*.parquet'))
+    snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+    with patch.object(NativeTableUpsert, 'upsert', side_effect=RuntimeError('core upsert failed')), \
+            patch.object(TableUpsertByKey, '_upsert_partition',
+                         side_effect=AssertionError('retried as Python Arrow upsert')), \
+            patch.object(TableUpsertByKey, '_upsert_row_partition',
+                         side_effect=AssertionError('retried as Python row upsert')):
+        with pytest.raises(RuntimeError, match='core upsert failed'):
+            builder.new_update().upsert_by_arrow_with_key(fallback_updates, ['id'])
+        with pytest.raises(RuntimeError, match='core upsert failed'):
+            builder.new_update().upsert_by_key([GenericRow([2, 27], table.fields)], ['id'])
+    assert table.snapshot_manager().get_latest_snapshot().id == snapshot_id
+    assert set(tmp_path.rglob('*.parquet')) == before
 
 
 @pytest.mark.native_plan
@@ -561,4 +573,108 @@ def test_predicate_assignment_order_with_later_partial_file(
     assert actual.select(['id', 'age']).to_pydict() == {
         'id': [1, 2, 3, 4],
         'age': [11, 21, 34, 41] if callable_assignment else [101, 102, 103, 104],
+    }
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('stream', [False, True])
+def test_native_row_upsert_uses_public_operation_with_composite_null_keys(tmp_path, stream):
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    from pypaimon.table.row.generic_row import GenericRow
+    if not hasattr(RustUpdate, 'upsert_by_arrow_with_key'):
+        pytest.skip('installed Rust binding lacks public upsert')
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([
+        ('id', pa.int32()), ('part', pa.string()), ('age', pa.int32()), ('keep', pa.string()),
+    ])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    seed = table.new_batch_write_builder()
+    writer = seed.new_write()
+    writer.write_arrow(pa.Table.from_pydict({
+        'id': [1, 1, None, 2], 'part': ['a', 'a', 'n', 'b'],
+        'age': [10, 11, 20, 30], 'keep': ['old'] * 4,
+    }, schema=schema))
+    seed.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    fields = list(reversed(table.fields))
+    rows = (GenericRow(values, fields) for values in [
+        ['new', 101, 'a', 1], ['new', 102, 'a', 1],
+        ['new', None, 'n', None], ['new', 40, 'c', 3],
+    ])
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    update = builder.new_update().with_update_type(['age'])
+    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+                      side_effect=AssertionError('Python upsert selected')):
+        if stream:
+            messages = update.upsert_by_key(rows, ['id', 'part'], 88)
+            builder.new_commit().commit(messages, 88)
+        else:
+            messages = update.upsert_by_key(rows, ['id', 'part'])
+            builder.new_commit().commit(messages)
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert actual.to_pydict() == {
+        'id': [1, 1, 2, 3, None], 'part': ['a', 'a', 'b', 'c', 'n'],
+        'age': [102, 102, 30, 40, None], 'keep': ['old', 'old', 'old', 'new', 'old'],
+    }
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('case', ['partial', 'float-key', 'partitioned', 'empty-columns'])
+def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.write.native_update import NativeTableUpsert
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([
+        ('id', pa.float64() if case == 'float-key' else pa.int32()),
+        ('age', pa.int32()), ('region', pa.string()),
+    ])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=['region'] if case == 'partitioned' else [], options={
+            'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+            'write.native.enabled': 'true',
+        }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    writer.write_arrow(pa.Table.from_pydict({
+        'id': [1, 2], 'age': [10, 20], 'region': ['east', 'west'],
+    }, schema=schema))
+    builder.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    if case == 'partial':
+        rows = [GenericRow([1, 11], table.fields[:2])]
+    else:
+        rows = [GenericRow(values, table.fields) for values in [
+            [1, 11, 'east'], [3, 30, 'east'],
+        ]]
+    if case == 'empty-columns':
+        before = set(tmp_path.rglob('*.parquet'))
+        with patch.object(NativeTableUpsert, 'upsert',
+                          side_effect=AssertionError('Empty row update became all columns')), \
+                pytest.raises(ValueError, match='column_names cannot be empty'):
+            builder.new_update().with_update_type([]).upsert_by_key(rows, ['id'])
+        assert set(tmp_path.rglob('*.parquet')) == before
+        read = table.new_read_builder()
+        actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+        assert actual.to_pydict() == {
+            'id': [1, 2], 'age': [10, 20], 'region': ['east', 'west'],
+        }
+        return
+    with patch.object(NativeTableUpsert, 'upsert',
+                      side_effect=AssertionError('Unsupported native upsert selected')):
+        messages = builder.new_update().with_update_type(['age']).upsert_by_key(rows, ['id'])
+    builder.new_commit().commit(messages)
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert actual.to_pydict() == {
+        'id': [1, 2] if case == 'partial' else [1, 2, 3],
+        'age': [11, 20] if case == 'partial' else [11, 20, 30],
+        'region': ['east', 'west'] if case == 'partial' else ['east', 'west', 'east'],
     }
