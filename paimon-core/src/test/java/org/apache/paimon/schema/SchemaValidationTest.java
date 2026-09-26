@@ -315,6 +315,39 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testAllDedicatedColumnsSchemaValidation() {
+        // a table mixing BLOB and VECTOR columns satisfies each dedicated kind's own
+        // "must have other normal columns" check (the other column counts as normal for
+        // it) while having no normal column at all; every commit would then fail in
+        // first-row-id assignment with "blobStart ... should be less than start"
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        options.put(CoreOptions.FILE_COMPRESSION.key(), "none");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "v", DataTypes.BLOB()),
+                        new DataField(1, "e", DataTypes.VECTOR(4, DataTypes.FLOAT())));
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessage(
+                        "Table with BLOB or VECTOR type column must have other normal columns.");
+    }
+
+    @Test
     public void testMapBlobSchemaValidation() {
         List<DataField> fields =
                 Arrays.asList(

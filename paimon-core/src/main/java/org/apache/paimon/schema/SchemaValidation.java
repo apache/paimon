@@ -1668,8 +1668,11 @@ public class SchemaValidation {
         }
 
         FileFormat vectorFileFormat = vectorFileFormat(options);
+        Set<String> vectorStoreNames =
+                vectorFileFormat == null
+                        ? Collections.emptySet()
+                        : fieldNamesInVectorFile(schema.logicalRowType(), true);
         if (vectorFileFormat != null) {
-            Set<String> vectorStoreNames = fieldNamesInVectorFile(schema.logicalRowType(), true);
             checkArgument(
                     fields.size() > vectorStoreNames.size(),
                     "Table with VECTOR type column must have other normal columns.");
@@ -1682,6 +1685,18 @@ public class SchemaValidation {
 
             List<DataField> fieldsInVectorFile = fieldsInVectorFile(schema.logicalRowType(), true);
             vectorFileFormat.validateDataFields(new RowType(fieldsInVectorFile));
+        }
+
+        // The two checks above each only exclude their own dedicated kind, so a table
+        // mixing BLOB and VECTOR columns could satisfy both while having no normal column
+        // at all. With no normal column the commit has no anchor file to assign first row
+        // ids from, and every commit fails with "blobStart ... should be less than start".
+        if (!blobNames.isEmpty() || !vectorStoreNames.isEmpty()) {
+            Set<String> dedicatedNames = new HashSet<>(blobNames);
+            dedicatedNames.addAll(vectorStoreNames);
+            checkArgument(
+                    fields.size() > dedicatedNames.size(),
+                    "Table with BLOB or VECTOR type column must have other normal columns.");
         }
     }
 
