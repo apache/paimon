@@ -33,9 +33,9 @@ from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 @pytest.mark.native_plan
 def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
-    from pypaimon_rust.datafusion import BatchWriteBuilder
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
 
-    if not hasattr(BatchWriteBuilder, '_new_matched_update'):
+    if not hasattr(RustUpdate, 'update_by_arrow_with_row_id'):
         pytest.skip('installed Rust binding does not expose batch update yet')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -141,9 +141,9 @@ def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
 
 @pytest.mark.native_plan
 def test_stream_update_and_delete_use_native_writers(tmp_path):
-    from pypaimon_rust.datafusion import BatchWriteBuilder
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
 
-    if not hasattr(BatchWriteBuilder, '_new_matched_update'):
+    if not hasattr(RustUpdate, 'update_by_arrow_with_row_id'):
         pytest.skip('installed Rust binding does not expose native updates')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -202,11 +202,11 @@ def test_stream_update_and_delete_use_native_writers(tmp_path):
 @pytest.mark.native_plan
 def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
     try:
-        from pypaimon_rust.datafusion import _MatchedBatchUpdateWriter
+        from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
     except ImportError:
         pytest.skip('installed Rust binding lacks grouped updates')
 
-    if not hasattr(_MatchedBatchUpdateWriter, 'add_matched_group'):
+    if not hasattr(RustUpdate, 'update_by_arrow_batches_with_row_id'):
         pytest.skip('installed Rust binding lacks grouped updates')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -242,17 +242,28 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
                 ]))
 
         builder = table.new_batch_write_builder()
-        messages = builder.new_update().with_update_type(
-            ['age']).update_by_arrow_batches_with_row_id(iter([
-                first,
-                pa.Table.from_pydict({'_ROW_ID': [2], 'age': [33]}),
-            ]))
+        messages = builder.new_update().update_by_arrow_batches_with_row_id(iter([
+            first,
+            pa.Table.from_pydict({'_ROW_ID': [2], 'age': [33]}),
+            pa.Table.from_pydict({'_ROW_ID': [0], 'id': [10]}),
+        ]))
     builder.new_commit().commit(messages)
     read = table.new_read_builder()
     actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
     assert actual.select(['id', 'age']).to_pydict() == {
-        'id': [1, 2, 3, 4], 'age': [11, 22, 33, 40],
+        'id': [2, 3, 4, 10], 'age': [22, 33, 40, 11],
     }
+
+    before = set(tmp_path.rglob('*.parquet'))
+
+    def failed_input():
+        yield first
+        raise RuntimeError('input generator failed')
+
+    with pytest.raises(RuntimeError, match='input generator failed'):
+        table.new_batch_write_builder().new_update().update_by_arrow_batches_with_row_id(
+            failed_input())
+    assert set(tmp_path.rglob('*.parquet')) == before
 
     read_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
 
@@ -414,3 +425,84 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
         'id': [1, 1, 2, 3, 4, 5, 6],
         'age': [201, 201, 26, 30, 40, 50, 60],
     }
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('values', [
+    pa.array(['bad']), pa.array([2147483648], type=pa.int64()),
+])
+def test_row_id_cast_failure_does_not_write_nulls(tmp_path, native, values):
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    if native and not hasattr(RustUpdate, 'update_by_arrow_with_row_id'):
+        pytest.skip('installed Rust binding lacks public row-ID updates')
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': str(native).lower(),
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    writer.write_arrow(pa.Table.from_pydict({'id': [1], 'value': [10]}, schema=schema))
+    builder.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    before = set(tmp_path.rglob('*.parquet'))
+    update = pa.Table.from_arrays([pa.array([0], type=pa.int64()), values],
+                                  names=['_ROW_ID', 'value'])
+    with pytest.raises((ValueError, pa.ArrowInvalid)):
+        table.new_batch_write_builder().new_update().update_by_arrow_with_row_id(update)
+    assert set(tmp_path.rglob('*.parquet')) == before
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits())
+    assert actual.select(['id', 'value']).to_pydict() == {'id': [1], 'value': [10]}
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('values,target', [
+    (pa.array([1.0]), pa.string()),
+    (pa.array([1e-6], type=pa.float32()), pa.string()),
+    (pa.array([-0.0]), pa.int32()),
+    (pa.array([1.234]), pa.decimal128(10, 2)),
+    (pa.array(['-1000e-5']), pa.decimal128(10, 2)),
+    (pa.array(['1.234']), pa.decimal128(10, 2)),
+    (pa.array([16777218], type=pa.int64()), pa.float32()),
+    (pa.array([1], type=pa.timestamp('us')), pa.string()),
+    (pa.array([1234], type=pa.timestamp('us')), pa.timestamp('ms')),
+    (pa.array([1234], type=pa.timestamp('us')), pa.date32()),
+])
+def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target):
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    if native and not hasattr(RustUpdate, 'update_by_arrow_with_row_id'):
+        pytest.skip('installed Rust binding lacks core assignment support')
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', target)])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': str(native).lower(),
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    writer.write_arrow(pa.Table.from_pydict({'id': [1], 'value': [None]}, schema=schema))
+    builder.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    before = set(tmp_path.rglob('*.parquet'))
+    update = table.new_batch_write_builder()
+    try:
+        expected = values.cast(target).to_pylist()
+    except pa.ArrowInvalid:
+        with pytest.raises((ValueError, pa.ArrowInvalid)):
+            update.new_update().update_by_predicate(None, {'value': values})
+        assert set(tmp_path.rglob('*.parquet')) == before
+        expected = [None]
+    else:
+        messages = update.new_update().update_by_predicate(None, {'value': values})
+        update.new_commit().commit(messages)
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits())
+    assert actual['value'].to_pylist() == expected

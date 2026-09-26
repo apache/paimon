@@ -390,7 +390,7 @@ class TableUpsertByKey:
                     native_writer = None
                 if native_writer is not None:
                     if snapshot_id is not None:
-                        native_writer.writer.pin_read_snapshot(snapshot_id)
+                        native_writer.pin_read_snapshot(snapshot_id)
                     commit_messages.extend(
                         native_writer.update_by_arrow_with_row_id(update_data)
                     )

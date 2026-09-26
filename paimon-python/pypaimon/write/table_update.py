@@ -731,19 +731,15 @@ class BatchTableUpdate(TableUpdate):
         file groups. Conflicting overlap is rejected and all files staged by
         earlier batches are aborted.
         """
-        if self.update_cols:
-            try:
-                from pypaimon.write.native_update import create_native_update
-                native = create_native_update(
-                    self.table, self.commit_user, self.update_cols)
-            except Exception as error:
-                logger.debug('Native batch update preparation failed: %s', error)
-            else:
-                if native is not None:
-                    if hasattr(native.writer, 'add_matched_group'):
-                        return native.update_by_arrow_batches_with_row_id(
-                            tables, self.update_cols)
-                    native.writer.close()
+        try:
+            from pypaimon.write.native_update import create_native_update
+            native = create_native_update(
+                self.table, self.commit_user, self.update_cols)
+        except Exception as error:
+            logger.debug('Native batch update preparation failed: %s', error)
+        else:
+            if native is not None:
+                return native.update_by_arrow_batches_with_row_id(tables)
         return self._update_by_arrow_batches_with_row_id(
             tables, BATCH_COMMIT_IDENTIFIER)
 

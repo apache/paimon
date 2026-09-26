@@ -46,6 +46,27 @@ def _native_row_id_table(table, builder_method):
 
 
 def create_native_update(table, commit_user, columns):
+    """Use the public core updater for direct and grouped row-ID updates."""
+    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    selected = schema.names if columns is None else columns
+    if any(pa.types.is_nested(schema.field(name).type)
+           for name in selected if name in schema.names):
+        return None
+    native_table = _native_row_id_table(table, 'new_update')
+    if native_table is None:
+        return None
+    from pypaimon_rust.datafusion import BatchTableUpdate
+    if not hasattr(BatchTableUpdate, 'update_by_arrow_batches_with_row_id'):
+        return None
+    writer = (native_table.new_batch_write_builder()
+              ._with_commit_user(commit_user)
+              .new_update())
+    if columns is not None:
+        writer.with_update_type(columns)
+    return NativeBatchTableUpdate(table, writer, columns)
+
+
+def _create_native_matched_update(table, commit_user, columns):
     """Select Rust only before writing and only for its plain-Parquet path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     # PyPaimon accepts Arrow's inferred list-of-pairs representation for MAP;
@@ -66,7 +87,7 @@ def create_native_update(table, commit_user, columns):
     except Exception:
         writer.close()
         raise
-    return NativeBatchTableUpdate(table, writer)
+    return _NativeMatchedUpdate(table, writer)
 
 
 def create_native_upsert(table, commit_user, data, keys, columns):
@@ -96,7 +117,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
 def create_native_predicate_update(table, scan_table, commit_user, columns,
                                    predicate, projection):
     """Prepare Rust predicate reading and assignment writing before callbacks."""
-    native = create_native_update(table, commit_user, columns)
+    native = _create_native_matched_update(table, commit_user, columns)
     if native is None or not hasattr(native.writer, 'add_assigned_table'):
         if native is not None:
             native.writer.close()
@@ -162,43 +183,43 @@ def _raise_native_row_id_error(error):
     raise error
 
 
-class NativeBatchTableUpdate:
-    """Submit matched Arrow batches to Rust and decode its commit messages."""
+class _NativeMatchedUpdate:
+    """Private predicate bridge until scan orchestration moves into core."""
 
     def __init__(self, table, writer):
         self.table = table
         self.writer = writer
 
+
+class NativeBatchTableUpdate:
+    """Wrap public core operations and decode their commit messages."""
+
+    def __init__(self, table, writer, columns=None):
+        self.table = table
+        self.writer = writer
+        self.columns = columns
+        self.row_id_updater = None
+
+    def pin_read_snapshot(self, snapshot_id):
+        self.row_id_updater = self.writer.new_update_by_row_id()
+        self.row_id_updater._pin_read_snapshot(snapshot_id)
+
     def update_by_arrow_with_row_id(self, data: pa.Table):
         try:
-            for batch in data.to_batches():
-                self.writer.add_matched_batch(batch)
-            try:
-                messages = self.writer.prepare_commit()
-            except ValueError as error:
-                # Preserve the public PyPaimon error contract while retaining
-                # the native cause for diagnostics.
-                _raise_native_row_id_error(error)
-            return from_native_commit_messages(self.table, messages)
-        finally:
-            self.writer.close()
+            if self.row_id_updater is None:
+                messages = self.writer.update_by_arrow_with_row_id(data)
+            else:
+                messages = self.row_id_updater.update_columns(data, self.columns)
+        except ValueError as error:
+            _raise_native_row_id_error(error)
+        return from_native_commit_messages(self.table, messages)
 
-    def update_by_arrow_batches_with_row_id(self, tables, columns):
+    def update_by_arrow_batches_with_row_id(self, tables):
         try:
-            for table in tables:
-                if '_ROW_ID' not in table.column_names:
-                    raise ValueError('Input data must contain _ROW_ID column')
-                for column in columns:
-                    if column not in table.column_names:
-                        raise ValueError(f'Column {column} not found in input data')
-                self.writer.add_matched_group(table.to_batches())
-            try:
-                messages = self.writer.prepare_commit()
-            except ValueError as error:
-                _raise_native_row_id_error(error)
-            return from_native_commit_messages(self.table, messages)
-        finally:
-            self.writer.close()
+            messages = self.writer.update_by_arrow_batches_with_row_id(tables)
+        except ValueError as error:
+            _raise_native_row_id_error(error)
+        return from_native_commit_messages(self.table, messages)
 
     def delete_by_row_id(self, row_ids):
         ids = []
