@@ -27,7 +27,15 @@ public class CompareUtils {
     private CompareUtils() {}
 
     public static int compareLiteral(DataType type, Object v1, Object v2) {
-        if (v1 instanceof Comparable) {
+        // Engines compare FLOAT/DOUBLE values numerically, so -0.0 equals 0.0, but compareTo
+        // orders -0.0 first. Adding a positive zero turns -0.0 into 0.0 and leaves every other
+        // value, NaN included, unchanged; otherwise a file holding only -0.0 would be skipped
+        // by "= 0.0".
+        if (v1 instanceof Double && v2 instanceof Double) {
+            return Double.compare((Double) v1 + 0.0d, (Double) v2 + 0.0d);
+        } else if (v1 instanceof Float && v2 instanceof Float) {
+            return Float.compare((Float) v1 + 0.0f, (Float) v2 + 0.0f);
+        } else if (v1 instanceof Comparable) {
             return ((Comparable<Object>) v1).compareTo(v2);
         } else if (v1 instanceof byte[]) {
             return compare((byte[]) v1, (byte[]) v2);
