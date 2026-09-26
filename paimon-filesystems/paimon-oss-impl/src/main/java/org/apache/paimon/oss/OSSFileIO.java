@@ -20,6 +20,7 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.CredentialsSupplierRegistry;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
@@ -50,6 +51,8 @@ import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -84,6 +87,7 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_SECOND_LEVEL_DOMAIN_ENABLED = "fs.oss.sld.enabled";
+    private static final String OSS_CREDENTIALS_PROVIDER = "fs.oss.credentials.provider";
 
     /**
      * Set to false for an OSS-compatible endpoint that is neither an official Aliyun domain nor a
@@ -133,6 +137,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     private Options hadoopOptions;
     private boolean allowCache = true;
+    @Nullable private String credentialsSupplierId;
+
+    // Keeps the supplier alive until the file systems created here have picked it up.
+    @Nullable private transient Supplier<Map<String, String>> credentialsSupplier;
 
     @Override
     public boolean isObjectStore() {
@@ -141,7 +149,12 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     @Override
     public void configure(CatalogContext context) {
-        allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
+        String supplierId = context.options().get(CredentialsSupplierRegistry.SUPPLIER_ID);
+        credentialsSupplier =
+                supplierId == null ? null : CredentialsSupplierRegistry.get(supplierId);
+        credentialsSupplierId = credentialsSupplier == null ? null : supplierId;
+        // The file system is bound to the supplier, so it must not be shared through the cache.
+        allowCache = context.options().get(FILE_IO_ALLOW_CACHE) && credentialsSupplierId == null;
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -195,6 +208,13 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                     // retrieve props from the file, which comes at a high cost
                     Configuration hadoopConf = new Configuration(SHARED_CONFIG);
                     hadoopOptions.toMap().forEach(hadoopConf::set);
+                    if (credentialsSupplierId != null) {
+                        hadoopConf.set(
+                                OSS_CREDENTIALS_PROVIDER,
+                                RegisteredCredentialsProvider.class.getName());
+                        hadoopConf.set(
+                                CredentialsSupplierRegistry.SUPPLIER_ID, credentialsSupplierId);
+                    }
                     URI fsUri = path.toUri();
                     if (scheme == null && authority == null) {
                         fsUri = FileSystem.getDefaultUri(hadoopConf);

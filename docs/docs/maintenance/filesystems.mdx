@@ -333,6 +333,12 @@ Download [paimon-jindo-@@VERSION@@.jar](https://repository.apache.org/snapshots/
 
 </Unstable>
 
+### Credentials Provider
+
+Instead of `fs.oss.accessKeyId` and `fs.oss.accessKeySecret`, you can set `fs.oss.credentials.provider` to a class implementing `com.aliyun.oss.common.auth.CredentialsProvider`, for example `com.aliyun.oss.common.auth.EnvironmentVariableCredentialsProvider`. The provider is asked for credentials on every request.
+
+With a REST catalog that vends data tokens, the OSS FileIO signs every request with the catalog's current token, so streams that are already open keep working after the token is refreshed.
+
 ### Server-Side Encryption
 
 Paimon can stamp OSS server-side-encryption headers on the writes it performs (`PutObject`, server-side `CopyObject` used by rename/commit, and multipart-upload initiation) via three keys that map 1:1 to the OSS request headers:

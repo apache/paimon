@@ -18,9 +18,11 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.CredentialsSupplierRegistry;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -49,6 +51,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
@@ -67,12 +70,12 @@ public class RESTTokenFileIO implements FileIO {
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
 
-    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
+    private static final Cache<RESTToken, CachedFileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .maximumSize(1000)
                     .expireAfterAccess(10, TimeUnit.HOURS)
                     .removalListener(
-                            (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
+                            (ignored, value, cause) -> IOUtils.closeQuietly((CachedFileIO) value))
                     .scheduler(
                             Scheduler.forScheduledExecutorService(
                                     Executors.newSingleThreadScheduledExecutor(
@@ -90,6 +93,12 @@ public class RESTTokenFileIO implements FileIO {
                 .eviction()
                 .orElseThrow(IllegalStateException::new)
                 .setMaximum(maximumSize);
+    }
+
+    @VisibleForTesting
+    static void invalidateFileIOCache() {
+        FILE_IO_CACHE.invalidateAll();
+        FILE_IO_CACHE.cleanUp();
     }
 
     static long fileIOCacheMaximumSize() {
@@ -245,28 +254,32 @@ public class RESTTokenFileIO implements FileIO {
                             + "REST credential lifetime after refresh.");
         }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
-        if (fileIO != null) {
-            return new FileIOWithToken(fileIO, currentToken);
+        CachedFileIO cached = FILE_IO_CACHE.getIfPresent(currentToken);
+        if (cached != null) {
+            return new FileIOWithToken(cached.fileIO, currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
-            if (fileIO != null) {
-                return new FileIOWithToken(fileIO, currentToken);
+            cached = FILE_IO_CACHE.getIfPresent(currentToken);
+            if (cached != null) {
+                return new FileIOWithToken(cached.fileIO, currentToken);
             }
 
+            // Lets a FileIO that supports it, such as OSS, sign each request with a fresh token.
+            Supplier<Map<String, String>> supplier = () -> validToken().token();
+            String supplierId = CredentialsSupplierRegistry.register(supplier);
             Options options = catalogContext.options();
             options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
+            options.set(CredentialsSupplierRegistry.SUPPLIER_ID, supplierId);
             CatalogContext context =
                     CatalogContext.create(
                             options,
                             catalogContext.hadoopConf(),
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
-            fileIO = FileIO.get(path, context);
-            FILE_IO_CACHE.put(currentToken, fileIO);
+            FileIO fileIO = FileIO.get(path, context);
+            FILE_IO_CACHE.put(currentToken, new CachedFileIO(fileIO, supplier));
             return new FileIOWithToken(fileIO, currentToken);
         }
     }
@@ -298,6 +311,26 @@ public class RESTTokenFileIO implements FileIO {
         return token == null
                 || token.expireAtMillis() - currentTimeMillis()
                         < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
+    }
+
+    /**
+     * A delegate {@link FileIO} and its credentials supplier, kept alive here until the delegate
+     * picks it up, since the registry only holds it weakly.
+     */
+    private static class CachedFileIO implements AutoCloseable {
+
+        private final FileIO fileIO;
+        private final Supplier<Map<String, String>> credentialsSupplier;
+
+        private CachedFileIO(FileIO fileIO, Supplier<Map<String, String>> credentialsSupplier) {
+            this.fileIO = fileIO;
+            this.credentialsSupplier = credentialsSupplier;
+        }
+
+        @Override
+        public void close() throws Exception {
+            fileIO.close();
+        }
     }
 
     private static class FileIOWithToken {
