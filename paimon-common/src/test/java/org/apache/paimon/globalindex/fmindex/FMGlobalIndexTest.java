@@ -39,10 +39,14 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -62,6 +66,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -107,6 +112,166 @@ public class FMGlobalIndexTest {
         options.set(FMGlobalIndexOptions.COMPRESSION, "lz4");
         options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
         indexer = new FMGlobalIndexer(dataField, options);
+    }
+
+    @ParameterizedTest
+    @MethodSource("partitionRowRanges")
+    public void testPartitionPruning(
+            List<Range> ranges, int expectedPartitions, long[] expectedRows) throws Exception {
+        List<GlobalIndexIOMeta> files =
+                writeData(
+                        Arrays.asList(
+                                str("needle-0"),
+                                str("other-1"),
+                                str("other-2"),
+                                str("needle-3"),
+                                str("other-4"),
+                                str("other-5"),
+                                str("needle-6")),
+                        0);
+        assertThat(files).hasSize(1);
+        assertThat(FMIndexFile.readIndexMeta(files.get(0).metadata()).partitions).hasSize(3);
+        AtomicInteger opens = new AtomicInteger();
+        GlobalIndexFileReader countingReader =
+                meta -> {
+                    opens.incrementAndGet();
+                    return fileIO.newInputStream(meta.filePath());
+                };
+        CountingDirectExecutor executor = new CountingDirectExecutor();
+        try (GlobalIndexReader reader =
+                indexer.createReader(countingReader, files, 7, ranges, executor)) {
+            assertThat(opens).hasValue(0);
+            assertThat(executor.submittedTasks).hasValue(0);
+            assertRows(reader.visitContains(fieldRef, str("needle")).join(), expectedRows);
+            if (expectedPartitions == 0) {
+                assertRows(reader.visitIsNull(fieldRef).join());
+                assertRows(reader.visitIsNotNull(fieldRef).join());
+            }
+        }
+        assertThat(executor.submittedTasks).hasValue(expectedPartitions);
+        assertThat(opens).hasValue(expectedPartitions);
+    }
+
+    private static Stream<Arguments> partitionRowRanges() {
+        return Stream.of(
+                Arguments.of(null, 3, new long[] {0, 3, 6}),
+                Arguments.of(Collections.emptyList(), 0, new long[0]),
+                Arguments.of(Collections.singletonList(new Range(0, 1)), 1, new long[] {0}),
+                Arguments.of(Collections.singletonList(new Range(7, 9)), 0, new long[0]),
+                Arguments.of(Collections.singletonList(new Range(2, 3)), 2, new long[] {0, 3}),
+                Arguments.of(Arrays.asList(new Range(2, 2), new Range(0, 0)), 1, new long[] {0}),
+                Arguments.of(Arrays.asList(new Range(0, 1), new Range(1, 2)), 1, new long[] {0}),
+                Arguments.of(Collections.singletonList(new Range(6, 6)), 1, new long[] {6}),
+                // Boundary partitions retain matching rows outside the requested range.
+                Arguments.of(Collections.singletonList(new Range(2, 2)), 1, new long[] {0}),
+                Arguments.of(Collections.singletonList(new Range(3, 3)), 1, new long[] {3}),
+                Arguments.of(
+                        Arrays.asList(new Range(6, 6), new Range(0, 0)), 2, new long[] {0, 6}));
+    }
+
+    @Test
+    public void testPartitionPruningAcrossFilesPreservesRowIds() throws Exception {
+        List<GlobalIndexIOMeta> files = new ArrayList<>();
+        files.addAll(writeData(Arrays.asList(str("needle-0"), null, str("other-2")), 0));
+        files.addAll(writeData(Arrays.asList(str("needle-3"), null, str("needle-5")), 3));
+        assertThat(files).hasSize(2);
+        AtomicInteger opens = new AtomicInteger();
+        GlobalIndexFileReader countingReader =
+                meta -> {
+                    assertThat(meta.filePath()).isEqualTo(files.get(1).filePath());
+                    opens.incrementAndGet();
+                    return fileIO.newInputStream(meta.filePath());
+                };
+        CountingDirectExecutor executor = new CountingDirectExecutor();
+        try (GlobalIndexReader reader =
+                indexer.createReader(
+                        countingReader,
+                        files,
+                        6,
+                        Collections.singletonList(new Range(4, 4)),
+                        executor)) {
+            assertRows(reader.visitContains(fieldRef, str("needle")).join(), 3L, 5L);
+            assertRows(reader.visitIsNull(fieldRef).join(), 4L);
+        }
+        assertThat(executor.submittedTasks).hasValue(2);
+        assertThat(opens).hasValue(2);
+    }
+
+    @Test
+    public void testPrunedFileMetadataIsStillValidated() throws Exception {
+        GlobalIndexIOMeta first = writeData(Arrays.asList(str("first"), null), 0).get(0);
+        GlobalIndexIOMeta second = writeData(Arrays.asList(str("second"), null), 2).get(0);
+        GlobalIndexIOMeta overlapping = writeData(Arrays.asList(str("overlap"), null), 1).get(0);
+        byte[] metadata = Arrays.copyOf(second.metadata(), second.metadata().length);
+        metadata[metadata.length - 1] ^= 1;
+        GlobalIndexIOMeta corrupted =
+                new GlobalIndexIOMeta(second.filePath(), second.fileSize(), metadata);
+        GlobalIndexFileReader noIO =
+                meta -> {
+                    throw new AssertionError("Unexpected I/O");
+                };
+        for (List<Range> ranges :
+                Arrays.asList(
+                        Collections.<Range>emptyList(),
+                        Collections.singletonList(new Range(0, 0)),
+                        Collections.singletonList(new Range(4, 4)))) {
+            assertThatThrownBy(
+                            () ->
+                                    indexer.createReader(
+                                            noIO,
+                                            Arrays.asList(first, corrupted),
+                                            4,
+                                            ranges,
+                                            newDirectExecutorService()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("metadata checksum mismatch");
+            assertThatThrownBy(
+                            () ->
+                                    indexer.createReader(
+                                            noIO,
+                                            Arrays.asList(first, overlapping),
+                                            4,
+                                            ranges,
+                                            newDirectExecutorService()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("do not exactly cover source rows");
+        }
+    }
+
+    @Test
+    public void testMetadataValidationWithEmptyRanges() throws Exception {
+        List<GlobalIndexIOMeta> files = writeData(Collections.singletonList(str("needle")), 0);
+        GlobalIndexIOMeta file = files.get(0);
+        byte[] metadata = Arrays.copyOf(file.metadata(), file.metadata().length);
+        metadata[metadata.length - 1] ^= 1;
+        GlobalIndexFileReader noIO =
+                meta -> {
+                    throw new AssertionError("Unexpected I/O");
+                };
+        assertThatThrownBy(
+                        () ->
+                                indexer.createReader(
+                                        noIO,
+                                        Collections.singletonList(
+                                                new GlobalIndexIOMeta(
+                                                        file.filePath(),
+                                                        file.fileSize(),
+                                                        metadata)),
+                                        1,
+                                        Collections.emptyList(),
+                                        newDirectExecutorService()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("metadata checksum mismatch");
+        assertThatThrownBy(
+                        () ->
+                                indexer.createReader(
+                                        noIO,
+                                        files,
+                                        2,
+                                        Collections.emptyList(),
+                                        newDirectExecutorService()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("row count mismatch");
     }
 
     @Test

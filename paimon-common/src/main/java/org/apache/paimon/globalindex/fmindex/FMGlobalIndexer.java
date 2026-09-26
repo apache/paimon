@@ -119,6 +119,7 @@ public class FMGlobalIndexer implements GlobalIndexer {
         FMGlobalIndexReader.FileSetRowCountValidator validator =
                 new FMGlobalIndexReader.FileSetRowCountValidator(files.size(), totalRowCount);
         FMIndexFile.IndexMeta[] indexMetas = new FMIndexFile.IndexMeta[files.size()];
+        // Validate the complete file set before pruning partitions.
         for (int i = 0; i < files.size(); i++) {
             byte[] metadata = files.get(i).metadata();
             checkArgument(
@@ -134,6 +135,17 @@ public class FMGlobalIndexer implements GlobalIndexer {
             FMGlobalIndexReader.ContainerMetadataLoader container =
                     new FMGlobalIndexReader.ContainerMetadataLoader(files.get(i), indexMetas[i]);
             for (FMIndexFile.PartitionMeta partition : indexMetas[i].partitions) {
+                if (rowRanges != null
+                        && rowRanges.stream()
+                                .noneMatch(
+                                        range ->
+                                                Range.intersect(
+                                                        range.from,
+                                                        range.to,
+                                                        partition.firstRowId,
+                                                        partition.lastRowId()))) {
+                    continue;
+                }
                 readers.add(
                         new FMGlobalIndexReader(
                                 fileReader,
@@ -145,6 +157,10 @@ public class FMGlobalIndexer implements GlobalIndexer {
                                 demandPageSize,
                                 locateCostRatio));
             }
+        }
+        if (readers.isEmpty()) {
+            return FMGlobalIndexReader.empty(
+                    executor, readContext, demandPageSize, locateCostRatio);
         }
         return readers.size() == 1 ? readers.get(0) : new UnionGlobalIndexReader(readers);
     }

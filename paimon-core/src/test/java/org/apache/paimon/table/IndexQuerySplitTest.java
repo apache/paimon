@@ -824,6 +824,106 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testFMPartitionPruningAfterSplitRestore() throws Exception {
+        write(100);
+        appendRows(100, 101);
+        appendRows(101, 104);
+        appendRows(104, 106);
+        FileStoreTable original = smallSplits(getTableDefault());
+        GlobalIndexFileReadWrite io =
+                new GlobalIndexFileReadWrite(
+                        original.fileIO(), original.store().pathFactory().globalIndexFileFactory());
+        Options indexOptions = new Options();
+        indexOptions.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 2);
+        indexOptions.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1);
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexer.create("fm", original.rowType().getField("f1"), indexOptions)
+                                .createWriter(io);
+        for (int i = 0; i < 6; i++) {
+            writer.write(str("a" + (100 + i)), i);
+        }
+        List<IndexFileMeta> indexes = new ArrayList<>();
+        for (ResultEntry entry : writer.finish()) {
+            indexes.add(
+                    new IndexFileMeta(
+                            "fm",
+                            entry.fileName(),
+                            io.fileSize(entry.fileName()),
+                            entry.rowCount(),
+                            new GlobalIndexMeta(
+                                    100,
+                                    105,
+                                    original.rowType().getField("f1").id(),
+                                    null,
+                                    entry.meta()),
+                            null));
+        }
+        assertThat(indexes).hasSize(1);
+        try (BatchTableCommit commit = original.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    BucketMode.UNAWARE_BUCKET,
+                                    null,
+                                    DataIncrement.indexIncrement(indexes),
+                                    CompactIncrement.emptyIncrement())));
+        }
+        Path indexPath =
+                original.store().pathFactory().globalIndexFileFactory().toPath(indexes.get(0));
+        AtomicInteger opens = new AtomicInteger();
+        FileIO fileIO = spy(original.fileIO());
+        doAnswer(
+                        invocation -> {
+                            if (indexPath.equals(invocation.getArgument(0))) {
+                                opens.incrementAndGet();
+                            }
+                            return invocation.callRealMethod();
+                        })
+                .when(fileIO)
+                .newInputStream(any(Path.class));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast");
+        options.put(FMGlobalIndexOptions.LOCATE_COST_RATIO.key(), "1");
+        FileStoreTable table =
+                distributedTable(
+                        smallSplits(
+                                        new AppendOnlyFileStoreTable(
+                                                fileIO, original.location(), original.schema()))
+                                .copy(options));
+        ReadBuilder read =
+                table.newReadBuilder()
+                        .withFilter(new PredicateBuilder(table.rowType()).contains(1, str("a10")));
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).hasSize(3).allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(opens).hasValue(0);
+        List<Split> restoredSplits = new ArrayList<>();
+        for (Split split : splits) {
+            IndexQuerySplit restored =
+                    (IndexQuerySplit) SplitSerializer.deserialize(SplitSerializer.serialize(split));
+            assertThat(restored).isEqualTo(split);
+            IndexQuerySplit javaRestored =
+                    InstantiationUtil.deserializeObject(
+                            InstantiationUtil.serializeObject(split), getClass().getClassLoader());
+            assertThat(javaRestored).isEqualTo(split);
+            long firstRowId = restored.dataSplit().dataFiles().get(0).nonNullRowIdRange().from;
+            long lastRowId = restored.dataSplit().dataFiles().get(0).nonNullRowIdRange().to;
+            for (IndexQuerySplit transported : Arrays.asList(restored, javaRestored)) {
+                opens.set(0);
+                IndexedSplit evaluated = transported.evaluate(fileIO);
+                assertThat(evaluated.rowRanges()).containsExactly(new Range(firstRowId, lastRowId));
+                assertThat(opens).hasValue(firstRowId == 101 ? 2 : 1);
+            }
+            restoredSplits.add(restored);
+        }
+        assertThat(read(read, restoredSplits)).containsExactly(100, 101, 102, 103, 104, 105);
+        original.fileIO().delete(indexPath, false);
+        assertThatThrownBy(() -> ((IndexQuerySplit) restoredSplits.get(0)).evaluate(fileIO))
+                .isInstanceOf(IOException.class);
+    }
+
+    @Test
     public void testFMFallbackAndMixedDistributedIndex() throws Exception {
         write(100);
         FileStoreTable table = getTableDefault();
