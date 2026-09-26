@@ -385,14 +385,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                         + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
                 .isEmpty();
 
-        // check with not exist schema id
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT schema_id, fields, partition_keys, "
-                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id>=6"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("schema id: 6 should not greater than max schema id: 4");
+        // check with out-of-range schema id: the filter describes an empty range, so the
+        // query returns zero rows instead of failing
+        assertThat(
+                        sql(
+                                "SELECT schema_id, fields, partition_keys, "
+                                        + "primary_keys, options, `comment` FROM T$schemas where schema_id>=6"))
+                .isEmpty();
     }
 
     @Test

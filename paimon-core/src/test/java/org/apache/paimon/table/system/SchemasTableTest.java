@@ -119,6 +119,32 @@ public class SchemasTableTest extends TableTestBase {
         assertThat(result).isEmpty();
     }
 
+    @Test
+    public void testReadSchemasWithOutOfRangeFilterReturnsEmpty() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        int schemaIdIdx = schemasTable.rowType().getFieldNames().indexOf("schema_id");
+
+        List<Predicate> outOfRange = new ArrayList<>();
+        // lower bound above the latest schema id
+        outOfRange.add(builder.greaterThan(schemaIdIdx, 99L));
+        // upper bound below the first schema id
+        outOfRange.add(builder.lessThan(schemaIdIdx, -1L));
+        // lower bound above the upper bound
+        outOfRange.add(
+                PredicateBuilder.and(
+                        builder.greaterThan(schemaIdIdx, 2L), builder.lessThan(schemaIdIdx, 1L)));
+
+        for (Predicate predicate : outOfRange) {
+            ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+            List<InternalRow> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(result::add);
+            assertThat(result).isEmpty();
+        }
+    }
+
     private List<InternalRow> getExpectedResult() {
         List<TableSchema> tableSchemas = schemaManager.listAll();
 
