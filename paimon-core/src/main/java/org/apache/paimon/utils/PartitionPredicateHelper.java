@@ -54,17 +54,27 @@ public class PartitionPredicateHelper {
                     parsePartitionSpec(
                             partitionPredicate.literals().get(0).toString(), partitionKeys);
             if (partSpec == null) {
-                return false;
+                // the rendered partition value does not round-trip through the string
+                // format (a value containing ", " splits into wrong tokens) — pushing
+                // "no partition matches" would silently drop matching partitions, e.g.
+                // the one whose value contains the separator. Do not push down; read
+                // all partitions and let the engine re-apply the predicate.
+                return true;
             }
             snapshotReader.withPartitionFilter(partSpec);
         } else if (partitionPredicate.function() instanceof In) {
             List<Predicate> orPredicates = new ArrayList<>();
             PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
+            boolean allParsed = true;
             for (Object literal : partitionPredicate.literals()) {
                 LinkedHashMap<String, String> partSpec =
                         parsePartitionSpec(literal.toString(), partitionKeys);
                 if (partSpec == null) {
-                    continue;
+                    // same as the equal branch: a literal that does not round-trip must not
+                    // be dropped from the pushed filter — its partitions would silently
+                    // vanish from the results — so do not push down at all
+                    allParsed = false;
+                    break;
                 }
                 List<Predicate> andPredicates = new ArrayList<>();
                 for (int i = 0; i < partitionKeys.size(); i++) {
@@ -75,7 +85,7 @@ public class PartitionPredicateHelper {
                 }
                 orPredicates.add(PredicateBuilder.and(andPredicates));
             }
-            if (!orPredicates.isEmpty()) {
+            if (allParsed && !orPredicates.isEmpty()) {
                 snapshotReader.withPartitionFilter(PredicateBuilder.or(orPredicates));
             }
         } else if (partitionPredicate.function() instanceof LeafBinaryFunction) {

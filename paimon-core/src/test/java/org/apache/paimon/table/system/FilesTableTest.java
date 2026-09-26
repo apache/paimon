@@ -207,7 +207,12 @@ public class FilesTableTest extends TableTestBase {
     @Test
     public void testReadWithNotFullPartitionKey() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
-        assertThat(readPartBucketLevel(builder.equal(0, "[2]"))).isEmpty();
+        // "[2]" does not parse as a full 2-key partition spec; claiming "no partition
+        // matches" would drop partitions whose rendered value contains the separator, so
+        // the pushdown degrades to reading everything and the engine re-applies
+        assertThat(readPartBucketLevel(builder.equal(0, "[2]")))
+                .containsExactlyInAnyOrder(
+                        "{1, 10}-0-0", "{1, 10}-0-0", "{2, 20}-0-0", "{2, 20}-0-0");
     }
 
     @Test
