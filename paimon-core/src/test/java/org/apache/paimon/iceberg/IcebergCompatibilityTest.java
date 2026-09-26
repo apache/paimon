@@ -1788,6 +1788,60 @@ public class IcebergCompatibilityTest {
         }
     }
 
+    @Test
+    public void testRetryRefusesToRepublishWhatTheMirrorCannotPublish() throws Exception {
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                        IcebergOptions.StorageType.HADOOP_CATALOG.toString()));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        RecordingIcebergMetadataCommitter.failNextCommit = true;
+        write.write(GenericRow.of(2, 20));
+        assertThatThrownBy(() -> commit.commit(2, write.prepareCommit(false, 2)))
+                .hasStackTraceContaining("injected catalog failure");
+        write.close();
+        try {
+            commit.close();
+        } catch (Exception ignored) {
+        }
+
+        TableSchema latest = table.schemaManager().latest().get();
+        List<DataField> fields = new ArrayList<>(latest.fields());
+        fields.add(new DataField(latest.highestFieldId() + 1, "ts", DataTypes.TIMESTAMP(9)));
+        TableSchema legacy =
+                new TableSchema(
+                        latest.id() + 1,
+                        fields,
+                        latest.highestFieldId() + 1,
+                        latest.partitionKeys(),
+                        latest.primaryKeys(),
+                        latest.options(),
+                        latest.comment());
+        table.fileIO()
+                .writeFile(
+                        new Path(table.location(), "schema/schema-" + legacy.id()),
+                        legacy.toString(),
+                        true);
+
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser);
+        assertThatThrownBy(() -> callback.retry(new ManifestCommittable(2)))
+                .hasMessageContaining("precision from 3 to 6");
+        callback.close();
+        assertThat(RecordingIcebergMetadataCommitter.COMMITS).isEmpty();
+    }
+
     @ParameterizedTest
     @MethodSource("unpublishableTimestampTypes")
     public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(
