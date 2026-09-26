@@ -1786,6 +1786,44 @@ public class IcebergCompatibilityTest {
         }
     }
 
+    @Test
+    public void testDynamicOptionsReconfiguringTheMirrorAreStillJudged() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, -1);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        options.set(
+                IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.TABLE_LOCATION);
+        options.set(IcebergOptions.FORMAT_VERSION, 3);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.GEOMETRY()},
+                        new String[] {"k", "geom"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options.toMap(),
+                        "");
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, warehouse)) {
+            paimonCatalog.createDatabase("mydb", false);
+            paimonCatalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) paimonCatalog.getTable(identifier);
+
+            assertThatThrownBy(
+                            () ->
+                                    table.copy(
+                                            Collections.singletonMap(
+                                                    IcebergOptions.FORMAT_VERSION.key(), "2")))
+                    .hasMessageContaining(
+                            "require '" + IcebergOptions.FORMAT_VERSION.key() + "'='3'");
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("unpublishableTimestampTypes")
     public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(
