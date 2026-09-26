@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CompactionTaskExecutorMode;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
@@ -61,7 +62,9 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.OptionalLong;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
@@ -101,6 +104,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
     protected WriteRestore restore;
+    private final CompactionTaskExecutorMode compactionTaskExecutorMode;
+    private final int compactionTaskThreads;
+    private final Map<BucketCompactionExecutorKey, ExecutorService> perBucketCompactExecutors =
+            new ConcurrentHashMap<>();
+    private boolean externalCompactExecutor = false;
     private ExecutorService lazyCompactExecutor;
     private ExecutorService lazyPrimaryKeyIndexExecutor;
     private boolean closeCompactExecutorWhenLeaving = true;
@@ -142,6 +150,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.writerNumberMax = options.writeMaxWritersToSpill();
         this.legacyPartitionName = options.legacyPartitionName();
         this.options = options;
+        this.compactionTaskExecutorMode = options.compactionTaskExecutorMode();
+        this.compactionTaskThreads = options.compactionTaskThreads();
         this.partitionTimestampValidator =
                 PartitionTimestampValidator.create(options, partitionType);
     }
@@ -182,6 +192,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     public void withCompactExecutor(ExecutorService compactExecutor) {
         this.lazyCompactExecutor = compactExecutor;
         this.closeCompactExecutorWhenLeaving = false;
+        this.externalCompactExecutor = true;
     }
 
     @Override
@@ -313,6 +324,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         if (writerContainer.primaryKeyIndexMaintainer != null) {
                             writerContainer.primaryKeyIndexMaintainer.close();
                         }
+                        releaseCompactionExecutor(partition, bucket);
                         bucketIter.remove();
                     }
                 } else {
@@ -384,9 +396,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             // also left both thread pools running for the life of the process. None of the
             // calls below throws, so the writer failure is never replaced by one of them.
             writers.clear();
-            if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
-                lazyCompactExecutor.shutdownNow();
-            }
+            shutdownCompactionExecutors();
             if (lazyPrimaryKeyIndexExecutor != null) {
                 lazyPrimaryKeyIndexExecutor.shutdownNow();
             }
@@ -458,7 +468,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.dataFiles,
                             state.maxSequenceNumber,
                             state.commitIncrement,
-                            compactExecutor(),
+                            compactExecutor(state.partition, state.bucket),
                             state.deletionVectorsMaintainer,
                             // Restore reconstructs writer state from checkpointed files, so do
                             // not ignore them.
@@ -591,7 +601,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         startingMaxSequenceNumber(
                                 getMaxSequenceNumber(restoreFiles), latestSnapshot),
                         null,
-                        compactExecutor(),
+                        compactExecutor(partition, bucket),
                         dvMaintainer,
                         actualIgnorePreviousFiles);
         notifyNewWriter(writer);
@@ -703,12 +713,94 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
     }
 
-    private ExecutorService compactExecutor() {
+    private ExecutorService compactExecutor(BinaryRow partition, int bucket) {
+        if (externalCompactExecutor) {
+            return lazyCompactExecutor;
+        }
+
+        switch (compactionTaskExecutorMode) {
+            case PER_BUCKET:
+                return perBucketCompactExecutors.computeIfAbsent(
+                        new BucketCompactionExecutorKey(partition, bucket),
+                        key ->
+                                Executors.newSingleThreadExecutor(
+                                        new ExecutorThreadFactory(
+                                                Thread.currentThread().getName()
+                                                        + "-compaction-bucket-"
+                                                        + key.bucket)));
+            case FIXED_POOL:
+                return sharedCompactionExecutor(compactionTaskThreads, "-compaction-pool");
+            case SINGLE:
+            default:
+                return sharedCompactionExecutor(1, "-compaction");
+        }
+    }
+
+    private void releaseCompactionExecutor(BinaryRow partition, int bucket) {
+        if (compactionTaskExecutorMode != CompactionTaskExecutorMode.PER_BUCKET
+                || externalCompactExecutor) {
+            return;
+        }
+
+        ExecutorService removed =
+                perBucketCompactExecutors.remove(
+                        new BucketCompactionExecutorKey(partition, bucket));
+        if (removed != null) {
+            removed.shutdownNow();
+        }
+    }
+
+    private void shutdownCompactionExecutors() {
+        for (ExecutorService executor : perBucketCompactExecutors.values()) {
+            executor.shutdownNow();
+        }
+        perBucketCompactExecutors.clear();
+
+        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
+            lazyCompactExecutor.shutdownNow();
+            lazyCompactExecutor = null;
+        }
+    }
+
+    private static final class BucketCompactionExecutorKey {
+        private final BinaryRow partition;
+        private final int bucket;
+
+        private BucketCompactionExecutorKey(BinaryRow partition, int bucket) {
+            this.partition = partition;
+            this.bucket = bucket;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            BucketCompactionExecutorKey that = (BucketCompactionExecutorKey) o;
+            return bucket == that.bucket && Objects.equals(partition, that.partition);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket);
+        }
+    }
+
+    private ExecutorService sharedCompactionExecutor(int threads, String nameSuffix) {
         if (lazyCompactExecutor == null) {
-            lazyCompactExecutor =
-                    Executors.newSingleThreadScheduledExecutor(
-                            new ExecutorThreadFactory(
-                                    Thread.currentThread().getName() + "-compaction"));
+            String threadNamePrefix = Thread.currentThread().getName() + nameSuffix;
+            if (threads <= 1) {
+                lazyCompactExecutor =
+                        Executors.newSingleThreadScheduledExecutor(
+                                new ExecutorThreadFactory(threadNamePrefix));
+            } else {
+                lazyCompactExecutor =
+                        Executors.newFixedThreadPool(
+                                threads, new ExecutorThreadFactory(threadNamePrefix));
+            }
         }
         return lazyCompactExecutor;
     }
@@ -721,6 +813,21 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                     Thread.currentThread().getName() + "-primary-key-index"));
         }
         return lazyPrimaryKeyIndexExecutor;
+    }
+
+    @VisibleForTesting
+    public ExecutorService compactExecutorForTesting(BinaryRow partition, int bucket) {
+        return compactExecutor(partition, bucket);
+    }
+
+    @VisibleForTesting
+    public int activePerBucketExecutorCountForTesting() {
+        return perBucketCompactExecutors.size();
+    }
+
+    @VisibleForTesting
+    public void releaseCompactionExecutorForTesting(BinaryRow partition, int bucket) {
+        releaseCompactionExecutor(partition, bucket);
     }
 
     @VisibleForTesting
