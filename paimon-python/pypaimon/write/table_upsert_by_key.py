@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pyarrow as pa
 
 from pypaimon.read.table_read import TableRead
+from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.special_fields import SpecialFields
@@ -170,6 +171,35 @@ class TableUpsertByKey:
     ) -> List[CommitMessage]:
         partition_key_set = set(self.table.partition_keys)
         match_keys = [k for k in upsert_keys if k not in partition_key_set]
+        native_match = self._match_row_partition_native(
+            row_items, match_keys, partition_spec
+        )
+        if native_match is not None:
+            matched_indices, row_ids, new_indices, _ = native_match
+            matched_row_ids = {}
+            for index, row_id in zip(matched_indices, row_ids):
+                matched_row_ids.setdefault(index, []).append(row_id)
+            commit_messages = []
+            if matched_row_ids:
+                cols_to_update = (
+                    list(update_cols) if update_cols is not None
+                    else list(self.table.field_names)
+                )
+                matched_items = [row_items[index] for index in matched_row_ids]
+                for _, values_by_name in matched_items:
+                    require_columns(values_by_name, cols_to_update, 'upsert_by_key')
+                commit_messages.extend(TableUpdateByRowId(
+                    self.table, self.commit_user, self.commit_identifier,
+                ).update_rows_columns(
+                    [row for row, _ in matched_items],
+                    list(matched_row_ids.values()), cols_to_update,
+                ))
+            if new_indices:
+                commit_messages.extend(self._append_rows(
+                    [row_items[index] for index in new_indices]
+                ))
+            return commit_messages
+
         input_key_tuples = [
             tuple(values_by_name[k] for k in match_keys)
             for _, values_by_name in row_items
@@ -215,6 +245,30 @@ class TableUpsertByKey:
             commit_messages.extend(self._append_rows(new_items))
 
         return commit_messages
+
+    def _match_row_partition_native(
+            self, row_items, match_keys, partition_spec):
+        """Encode row-object keys once, then share the Rust Arrow key matcher."""
+        if not self.table.options.native_write_enabled() or not match_keys:
+            return None
+        for _, values_by_name in row_items:
+            if any(isinstance(values_by_name[key], Blob) for key in match_keys):
+                raise ValueError('Blob values are not supported as upsert keys.')
+        schema = PyarrowFieldParser.from_paimon_schema(
+            [self.table.field_dict[key] for key in match_keys]
+        )
+        try:
+            key_table = pa.Table.from_arrays([
+                pa.array([values[key] for _, values in row_items],
+                         type=schema.field(key).type)
+                for key in match_keys
+            ], names=match_keys)
+        except (pa.ArrowException, TypeError, ValueError) as error:
+            logger.debug('Native row upsert keys unsupported: %s', error)
+            return None
+        return self._match_partition_native(
+            key_table, match_keys, partition_spec
+        )
 
     @staticmethod
     def _dedup_row_items_last_write_wins(
@@ -300,6 +354,45 @@ class TableUpsertByKey:
         partition_key_set = set(self.table.partition_keys)
         match_keys = [k for k in upsert_keys if k not in partition_key_set]
 
+        native_match = self._match_partition_native(
+            partition_data, match_keys, partition_spec
+        )
+        if native_match is not None:
+            matched_indices, row_ids, new_indices, snapshot_id = native_match
+            commit_messages = []
+            if matched_indices:
+                cols_to_update = (
+                    list(update_cols) if update_cols
+                    else list(self.table.field_names)
+                )
+                update_data = partition_data.take(matched_indices).append_column(
+                    SpecialFields.ROW_ID.name,
+                    pa.array(row_ids, type=pa.int64()),
+                )
+                from pypaimon.write.native_update import create_native_update
+                try:
+                    native_writer = create_native_update(
+                        self.table, self.commit_user, cols_to_update
+                    )
+                except (RuntimeError, ValueError) as error:
+                    logger.debug('Native upsert writer unavailable: %s', error)
+                    native_writer = None
+                if native_writer is not None:
+                    if snapshot_id is not None:
+                        native_writer.writer.pin_read_snapshot(snapshot_id)
+                    commit_messages.extend(
+                        native_writer.update_by_arrow_with_row_id(update_data)
+                    )
+                else:
+                    commit_messages.extend(TableUpdateByRowId(
+                        self.table, self.commit_user, self.commit_identifier,
+                    ).update_columns(update_data, cols_to_update))
+            if new_indices:
+                commit_messages.extend(
+                    self._do_appends(partition_data, new_indices)
+                )
+            return commit_messages
+
         # 1. Build the composite key tuple for every input row.
         key_columns = [partition_data[k].to_pylist() for k in match_keys]
         input_key_tuples: List[_KeyTuple] = [
@@ -347,6 +440,51 @@ class TableUpsertByKey:
         if new_indices:
             commit_messages.extend(self._do_appends(partition_data, new_indices))
         return commit_messages
+
+    def _match_partition_native(
+            self, partition_data: pa.Table, match_keys: List[str],
+            partition_spec: Dict[str, Any]):
+        """Use Rust for last-write-wins deduplication and row-ID key matching."""
+        if (not self.table.options.native_write_enabled()
+                or not match_keys or not partition_data.num_rows):
+            return None
+        try:
+            from pypaimon_rust.datafusion import UpsertKeyMatcher
+        except ImportError:
+            return None
+        # Key encoding can reject Arrow types that PyPaimon's Python tuple
+        # comparison supports. This probe has no side effects, so those types
+        # keep the established Python implementation.
+        source_batch = partition_data.combine_chunks().to_batches()[0]
+        try:
+            matcher = UpsertKeyMatcher(source_batch, match_keys)
+        except ValueError as error:
+            logger.debug('Native upsert key type unsupported: %s', error)
+            return None
+
+        read_builder = self.table.new_read_builder()
+        if partition_spec:
+            predicate_builder = read_builder.new_predicate_builder()
+            predicates = [
+                predicate_builder.equal(key, value)
+                for key, value in partition_spec.items()
+            ]
+            read_builder.with_filter(predicate_builder.and_predicates(predicates))
+        plan = read_builder.new_scan().plan_for_write()
+        splits = plan.splits()
+        if splits:
+            key_fields = [self.table.field_dict[key] for key in match_keys]
+            table_read = TableRead(
+                table=self.table, predicate=None,
+                read_type=key_fields + [SpecialFields.ROW_ID],
+            )
+            for batch in table_read.to_arrow_batch_reader(splits):
+                try:
+                    matcher.add_existing_batch(batch)
+                except ValueError as error:
+                    logger.debug('Native upsert key type unsupported: %s', error)
+                    return None
+        return (*matcher.finish(), plan.snapshot_id)
 
     @staticmethod
     def _dedup_last_write_wins(

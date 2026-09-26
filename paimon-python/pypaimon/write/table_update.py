@@ -37,6 +37,7 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scanner.data_evolution_split_generator import (
     DataEvolutionSplitGenerator,
 )
@@ -295,6 +296,35 @@ class TableUpdate:
         plan = read_builder.new_scan().plan_for_write()
         splits = plan.splits()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        if (type(self) is BatchTableUpdate and splits
+                and self.table.options.native_write_enabled()
+                and self.table.options.data_file_path_directory() is None
+                and not any(isinstance(split, QueryAuthSplit)
+                            for split in splits)):
+            from pypaimon.write.native_update import create_native_predicate_update
+            projection = (
+                list(dict.fromkeys(read_columns)) + [SpecialFields.ROW_ID.name]
+                if has_callable else [SpecialFields.ROW_ID.name]
+            )
+            try:
+                native = create_native_predicate_update(
+                    self.table, scan_table, self.commit_user,
+                    list(assignments.keys()), predicate, projection,
+                )
+            except Exception as error:
+                logger.debug('Native predicate update preparation failed: %s', error)
+            else:
+                if native is not None:
+                    groups = (splits if has_array else
+                              self._predicate_update_file_groups(splits))
+                    schema = PyarrowFieldParser.from_paimon_schema(
+                        self.table.table_schema.fields
+                    )
+                    if snapshot_id >= 0:
+                        native.native.writer.pin_read_snapshot(snapshot_id)
+                    return native.update(
+                        groups, dict(assignments), schema, combine_all=has_array
+                    )
         files_info = RowIdFileIndex.from_splits(
             snapshot_id, splits
         )
@@ -640,6 +670,19 @@ class TableUpdate:
 
         scan = read_builder.new_scan()
         splits = scan.plan_for_write().splits()
+        if (type(self) is BatchTableUpdate and splits
+                and self.table.options.native_write_enabled()
+                and self.table.options.data_file_path_directory() is None
+                and not any(isinstance(split, QueryAuthSplit)
+                            for split in splits)):
+            try:
+                from pypaimon.write.native_update import native_predicate_row_ids
+                row_ids = native_predicate_row_ids(scan_table, predicate, splits)
+            except Exception as error:
+                logger.debug('Native predicate delete match failed: %s', error)
+            else:
+                if row_ids is not None:
+                    return row_ids
         matched = read_builder.new_read().to_arrow(splits)
         if matched.num_rows == 0:
             return []

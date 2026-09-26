@@ -62,6 +62,49 @@ def create_native_update(table, commit_user, columns):
     return NativeBatchTableUpdate(table, writer)
 
 
+def create_native_predicate_update(table, scan_table, commit_user, columns,
+                                   predicate, projection):
+    """Prepare Rust predicate reading and assignment writing before callbacks."""
+    native = create_native_update(table, commit_user, columns)
+    if native is None or not hasattr(native.writer, 'add_assigned_table'):
+        if native is not None:
+            native.writer.close()
+        return None
+    from pypaimon.read.native_plan import (
+        _prepare_native_read, native_split_bridge_available,
+        native_split_from_python,
+    )
+    if not native_split_bridge_available():
+        native.writer.close()
+        return None
+    try:
+        reader = _prepare_native_read(
+            scan_table, predicate=predicate, projection=projection
+        )
+    except Exception:
+        native.writer.close()
+        raise
+    return NativePredicateTableUpdate(native, reader, native_split_from_python)
+
+
+def native_predicate_row_ids(scan_table, predicate, splits):
+    """Match a batch delete predicate in Rust and return its row IDs."""
+    from pypaimon.read.native_plan import (
+        _prepare_native_read, native_split_bridge_available,
+        native_split_from_python,
+    )
+    if not native_split_bridge_available():
+        return None
+    reader = _prepare_native_read(
+        scan_table, predicate=predicate, projection=['_ROW_ID']
+    )
+    row_ids = []
+    for split in splits:
+        for batch in reader([native_split_from_python(split)]):
+            row_ids.extend(batch.column('_ROW_ID').to_pylist())
+    return row_ids
+
+
 def create_native_delete(table, commit_user):
     """Select Rust's deletion-vector writer for supported batch deletes."""
     if not table.options.deletion_vectors_enabled(False):
@@ -105,6 +148,40 @@ class NativeBatchTableUpdate:
             return from_native_commit_messages(self.table, messages)
         finally:
             self.writer.close()
+
+
+class NativePredicateTableUpdate:
+    """Rust reads predicate matches and evaluates per-group assignments."""
+
+    def __init__(self, native, reader, convert_split):
+        self.native = native
+        self.reader = reader
+        self.convert_split = convert_split
+
+    def update(self, groups, assignments, schema, combine_all=False):
+        writer = self.native.writer
+        try:
+            native_groups = [self.convert_split(split) for split in groups]
+            if combine_all:
+                batches = []
+                for split in native_groups:
+                    batches.extend(self.reader([split]))
+                if batches:
+                    writer.add_assigned_table(
+                        pa.Table.from_batches(batches), assignments, schema
+                    )
+            else:
+                for split in native_groups:
+                    batches = list(self.reader([split]))
+                    if batches:
+                        writer.add_assigned_table(
+                            pa.Table.from_batches(batches), assignments, schema
+                        )
+            return from_native_commit_messages(
+                self.native.table, writer.prepare_commit()
+            )
+        finally:
+            writer.close()
 
 
 class NativeBatchTableDelete:
