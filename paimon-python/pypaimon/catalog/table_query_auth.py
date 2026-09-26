@@ -102,6 +102,14 @@ class TableQueryAuthResult:
     def __init__(self, filter: Optional[List[str]], column_masking: Optional[Dict[str, str]]):
         # A blank rule is a malformed response, not the absence of one: skipping it would read
         # every row or return the column unmasked, so refuse the read as Java does.
+        if filter is not None and not isinstance(filter, list):
+            raise ValueError(
+                "Row filter must be a list, not {}; refusing to read.".format(
+                    type(filter).__name__))
+        if column_masking is not None and not isinstance(column_masking, dict):
+            raise ValueError(
+                "Column masking must be a map, not {}; refusing to read.".format(
+                    type(column_masking).__name__))
         for rule in filter or []:
             if not rule:
                 raise ValueError(
