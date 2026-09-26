@@ -349,8 +349,8 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
         'id': [1, 1, 3], 'age': [100, 101, 30],
     }, schema=schema)
     builder = table.new_batch_write_builder()
-    with patch.object(TableUpsertByKey, '_build_key_to_row_ids_map',
-                      side_effect=AssertionError('Python key matcher selected')):
+    with patch.object(TableUpsertByKey, '_upsert_partition',
+                      side_effect=AssertionError('Python upsert selected')):
         messages = builder.new_update().upsert_by_arrow_with_key(updates, ['id'])
     builder.new_commit().commit(messages)
     builder = table.new_batch_write_builder()
@@ -368,3 +368,23 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     assert actual.select(['id', 'age']).to_pydict() == {
         'id': [1, 1, 2, 3, 4], 'age': [201, 201, 20, 30, 40],
     }
+
+    stream = table.new_stream_write_builder()
+    stream_updates = pa.Table.from_pydict({
+        'id': [2, 5], 'age': [25, 50],
+    }, schema=schema)
+    with patch.object(TableUpsertByKey, '_upsert_partition',
+                      side_effect=AssertionError('Python stream selected')):
+        messages = stream.new_update().upsert_by_arrow_with_key(
+            stream_updates, ['id'], 77)
+    stream.new_commit().commit(messages, 77)
+    read_builder = table.new_read_builder()
+    actual = read_builder.new_read().to_arrow(
+        read_builder.new_scan().plan().splits())
+    actual = actual.sort_by([('id', 'ascending'), ('age', 'ascending')])
+    assert actual.select(['id', 'age']).to_pydict() == {
+        'id': [1, 1, 2, 3, 4, 5],
+        'age': [201, 201, 25, 30, 40, 50],
+    }
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    assert snapshot.commit_identifier == 77

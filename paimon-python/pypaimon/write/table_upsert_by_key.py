@@ -95,6 +95,19 @@ class TableUpsertByKey:
         else:
             effective_update_cols = update_cols
 
+        columns = (list(effective_update_cols) if effective_update_cols
+                   else list(self.table.field_names))
+        try:
+            from pypaimon.write.native_update import create_native_upsert
+            native = create_native_upsert(
+                self.table, self.commit_user, data, upsert_keys, columns)
+        except Exception as error:
+            logger.debug(
+                'Native upsert preparation failed; using Python: %s', error)
+        else:
+            if native is not None:
+                return native.upsert(data)
+
         all_commit_messages: List[CommitMessage] = []
 
         # Process each partition independently

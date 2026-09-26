@@ -69,6 +69,27 @@ def create_native_update(table, commit_user, columns):
     return NativeBatchTableUpdate(table, writer)
 
 
+def create_native_upsert(table, commit_user, data, keys, columns):
+    """Select the core Rust upsert for full Arrow rows on plain Parquet."""
+    if table.partition_keys:
+        return None
+    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    if (len(data.column_names) != len(schema.names)
+            or set(data.column_names) != set(schema.names)
+            or any(data.schema.field(name).type != schema.field(name).type
+                   for name in schema.names)
+            or any(pa.types.is_nested(schema.field(name).type)
+                   for name in columns)):
+        return None
+    native_table = _native_row_id_table(table, 'new_upsert')
+    if native_table is None:
+        return None
+    writer = (native_table.new_batch_write_builder()
+              ._with_commit_user(commit_user)
+              .new_upsert(keys, columns))
+    return NativeTableUpsert(table, writer)
+
+
 def create_native_predicate_update(table, scan_table, commit_user, columns,
                                    predicate, projection):
     """Prepare Rust predicate reading and assignment writing before callbacks."""
@@ -170,6 +191,23 @@ class NativeBatchTableUpdate:
             except ValueError as error:
                 _raise_native_row_id_error(error)
             return from_native_commit_messages(self.table, messages)
+        finally:
+            self.writer.close()
+
+
+class NativeTableUpsert:
+    """Submit full Arrow rows to the core Rust upsert writer."""
+
+    def __init__(self, table, writer):
+        self.table = table
+        self.writer = writer
+
+    def upsert(self, data: pa.Table):
+        try:
+            for batch in data.to_batches():
+                self.writer.add_batch(batch)
+            return from_native_commit_messages(
+                self.table, self.writer.prepare_commit())
         finally:
             self.writer.close()
 
