@@ -74,6 +74,40 @@ class SchemaValidationTest {
                         "Option 'primary-key.nullable' can only be enabled for a table with primary keys.");
     }
 
+    @Test
+    public void testChangelogFileFormatRejectsUnsupportedTypes() {
+        // the changelog format writes the same fields: Avro's type limits apply at DDL
+        // time instead of crashing the first changelog write
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
+        options.put(BUCKET.key(), String.valueOf(-1));
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        singletonList(new DataField(0, "f0", DataTypes.TIMESTAMP(9))),
+                        10,
+                        emptyList(),
+                        emptyList(),
+                        options,
+                        "");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("Avro does not support TIMESTAMP type with precision: 9");
+
+        // both formats hold the type and stay accepted, exercising the differing-format
+        // validation path
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "orc");
+        validateTableSchema(
+                new TableSchema(
+                        1,
+                        singletonList(new DataField(0, "f0", DataTypes.TIMESTAMP(9))),
+                        10,
+                        emptyList(),
+                        emptyList(),
+                        options,
+                        ""));
+    }
+
     private void validateTableSchemaExec(Map<String, String> options) {
         List<DataField> fields =
                 Arrays.asList(

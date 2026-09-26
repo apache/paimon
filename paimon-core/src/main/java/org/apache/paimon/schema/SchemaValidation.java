@@ -101,6 +101,7 @@ import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
+import static org.apache.paimon.CoreOptions.normalizeFileFormat;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOption;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOptionCandidate;
@@ -276,6 +277,16 @@ public class SchemaValidation {
             }
         }
         fileFormat.validateDataFields(new RowType(fieldsInNormalFile));
+
+        // changelog files are written with the changelog format, whose type limits can
+        // differ from the data format's
+        String changelogFormatIdentifier = normalizeFileFormat(options.changelogFileFormat());
+        if (changelogFormatIdentifier != null
+                && !changelogFormatIdentifier.equalsIgnoreCase(
+                        normalizeFileFormat(options.formatType()))) {
+            FileFormat.fromIdentifier(changelogFormatIdentifier, new Options(schema.options()))
+                    .validateDataFields(new RowType(fieldsInNormalFile));
+        }
 
         for (Map.Entry<Integer, String> entry : options.fileFormatPerLevel().entrySet()) {
             if (!"avro".equalsIgnoreCase(entry.getValue())) {
