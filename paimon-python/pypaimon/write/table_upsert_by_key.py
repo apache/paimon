@@ -201,9 +201,7 @@ class TableUpsertByKey:
                 matched_items = [row_items[index] for index in matched_row_ids]
                 for _, values_by_name in matched_items:
                     require_columns(values_by_name, cols_to_update, 'upsert_by_key')
-                commit_messages.extend(TableUpdateByRowId(
-                    self.table, self.commit_user, self.commit_identifier,
-                ).update_rows_columns(
+                commit_messages.extend(self._new_row_id_updater().update_rows_columns(
                     [row for row, _ in matched_items],
                     list(matched_row_ids.values()), cols_to_update,
                 ))
@@ -397,9 +395,8 @@ class TableUpsertByKey:
                         native_writer.update_by_arrow_with_row_id(update_data)
                     )
                 else:
-                    commit_messages.extend(TableUpdateByRowId(
-                        self.table, self.commit_user, self.commit_identifier,
-                    ).update_columns(update_data, cols_to_update))
+                    commit_messages.extend(self._new_row_id_updater().update_columns(
+                        update_data, cols_to_update))
             if new_indices:
                 commit_messages.extend(
                     self._do_appends(partition_data, new_indices)

@@ -393,3 +393,24 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     }
     snapshot = table.snapshot_manager().get_latest_snapshot()
     assert snapshot.commit_identifier == 77
+
+    # Native key matching can still use the Python row-ID writer when the
+    # native writer is unavailable. Follow the same factory as the pure path.
+    builder = table.new_batch_write_builder()
+    fallback_updates = pa.Table.from_pydict({
+        'id': [2, 6], 'age': [26, 60],
+    }, schema=schema)
+    with patch('pypaimon.write.native_update.create_native_upsert', return_value=None), \
+            patch('pypaimon.write.native_update.create_native_update', return_value=None), \
+            patch.object(TableUpsertByKey, '_build_key_to_row_ids_map',
+                         side_effect=AssertionError('Python key matcher selected')):
+        messages = builder.new_update().upsert_by_arrow_with_key(fallback_updates, ['id'])
+    builder.new_commit().commit(messages)
+    read_builder = table.new_read_builder()
+    actual = read_builder.new_read().to_arrow(
+        read_builder.new_scan().plan().splits())
+    actual = actual.sort_by([('id', 'ascending'), ('age', 'ascending')])
+    assert actual.select(['id', 'age']).to_pydict() == {
+        'id': [1, 1, 2, 3, 4, 5, 6],
+        'age': [201, 201, 26, 30, 40, 50, 60],
+    }
