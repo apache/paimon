@@ -31,6 +31,14 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
+@pytest.fixture(autouse=True)
+def require_native_update_api():
+    native = pytest.importorskip('pypaimon_rust.datafusion')
+    update = getattr(native, 'BatchTableUpdate', None)
+    if update is None or not hasattr(update, 'new_update_by_row_id'):
+        pytest.skip('installed Rust binding lacks the paired core update API')
+
+
 @pytest.mark.native_plan
 def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
     from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
@@ -518,6 +526,14 @@ def test_row_id_cast_failure_does_not_write_nulls(tmp_path, native, values):
     (pa.array(['+42']), pa.int32()),
     (pa.array([b'true']), pa.bool_()),
     (pa.array([b'yes']), pa.bool_()),
+    (pa.array(['00:00:01.234567']), pa.time32('ms')),
+    (pa.array(['2024-01-02 12:34:56']), pa.date32()),
+    (pa.array(['2024-01-02']), pa.date32()),
+    (pa.array([1.5]), pa.timestamp('ms')),
+    (pa.array([1000000], type=pa.timestamp('us')), pa.float64()),
+    (pa.array([1.5]), pa.date32()),
+    (pa.array([1.5]), pa.time32('ms')),
+    (pa.array([1], type=pa.int32()), pa.timestamp('ms')),
 ])
 def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target):
     from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
@@ -743,6 +759,14 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
     (pa.array([b'1.234']), pa.decimal128(6, 2), pa.int32()),
     (pa.array([b'0x2a']), pa.int32(), pa.int32()),
     (pa.array([b'+42']), pa.int32(), pa.int32()),
+    (pa.array(['00:00:01.234567']), pa.time32('ms'), pa.int64()),
+    (pa.array(['2024-01-02 12:34:56']), pa.date32(), pa.int64()),
+    (pa.array(['2024-01-02']), pa.date32(), pa.int64()),
+    (pa.array([1.5]), pa.timestamp('ms'), pa.int64()),
+    (pa.array([1000000], type=pa.timestamp('us')), pa.float64(), pa.int64()),
+    (pa.array([1.5]), pa.date32(), pa.int64()),
+    (pa.array([1.5]), pa.time32('ms'), pa.int64()),
+    (pa.array([1], type=pa.int32()), pa.timestamp('ms'), pa.int64()),
 ])
 def test_native_row_id_input_conversion_matches_python(
         tmp_path, native, grouped, empty_chunks, values, target, row_id_type):
@@ -790,3 +814,87 @@ def test_native_row_id_input_conversion_matches_python(
     read = table.new_read_builder()
     result = read.new_read().to_arrow(read.new_scan().plan().splits())
     assert result['value'].to_pylist() == expected
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('duplicate', ['_ROW_ID', 'value', 'unused'])
+def test_row_id_update_rejects_only_referenced_duplicate_columns(tmp_path, native, duplicate):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': str(native).lower(),
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    writer.write_arrow(pa.table({'id': [1, 2], 'value': [10, 20]}, schema=schema))
+    builder.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    data = pa.Table.from_arrays([
+        pa.array([0]), pa.array([100]), pa.array([1]), pa.array([2]),
+    ], names=['_ROW_ID', 'value', duplicate, duplicate])
+    before = set(tmp_path.rglob('*.parquet'))
+    # Repeating configuration names remains valid; ambiguity is in input fields.
+    updater = builder.new_update().with_update_type(['value', 'value'])
+    if duplicate == 'unused':
+        messages = updater.update_by_arrow_with_row_id(data)
+        builder.new_commit().commit(messages)
+    else:
+        with pytest.raises((KeyError, ValueError, pa.ArrowException)):
+            updater.update_by_arrow_with_row_id(data)
+        assert set(tmp_path.rglob('*.parquet')) == before
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert actual['value'].to_pylist() == ([100, 20] if duplicate == 'unused' else [10, 20])
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('values,target', [
+    (pa.array([{'a': 1, 'b': 1.5}], type=pa.struct([('a', pa.int32()), ('b', pa.float64())])),
+     pa.struct([('a', pa.string()), ('b', pa.int32())])),
+    (pa.array([[(1, 1.5)]], type=pa.map_(pa.int32(), pa.float64())), pa.map_(pa.string(), pa.int32())),
+    (pa.array([{'a': 1, 'b': 2.0}], type=pa.struct([('a', pa.int32()), ('b', pa.float64())])),
+     pa.struct([('a', pa.string()), ('b', pa.int32())])),
+    (pa.StructArray.from_arrays([pa.array([2 ** 31, 7])], names=['a'], mask=pa.array([True, False])),
+     pa.struct([('a', pa.int32())])),
+    (pa.ListArray.from_arrays([0, 1, 2], pa.array([2 ** 31, 7]), mask=pa.array([True, False])),
+     pa.list_(pa.int32())),
+    (pa.MapArray.from_arrays([0, 1, 2], pa.array(['a', 'b']), pa.array([1.5, 7.5]),
+                             mask=pa.array([True, False])), pa.map_(pa.string(), pa.int32())),
+])
+def test_core_nested_row_update_uses_whole_column_constructor_fallback(tmp_path, native, values, target):
+    from pypaimon.write.native_commit import create_native_write_table
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', target)])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': 'false',
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    writer.write_arrow(pa.table({'id': list(range(len(values))), 'value': [None] * len(values)}, schema=schema))
+    builder.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    # Exercise core nested conversion directly even when dispatch would fall back.
+    builder = (create_native_write_table(table) if native else table).new_batch_write_builder()
+    data = pa.table({'_ROW_ID': list(range(len(values))), 'value': values})
+    before = set(tmp_path.rglob('*.parquet'))
+    try:
+        expected = TableUpdateByRowId._coerce_column(values, target).to_pylist()
+    except (ValueError, pa.ArrowException):
+        with pytest.raises((ValueError, pa.ArrowException)):
+            builder.new_update().update_by_arrow_with_row_id(data)
+        assert set(tmp_path.rglob('*.parquet')) == before
+        expected = [None] * len(values)
+    else:
+        messages = builder.new_update().update_by_arrow_with_row_id(data)
+        builder.new_commit().commit(messages)
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert actual['value'].to_pylist() == expected
