@@ -397,7 +397,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
+        SchemaValidation.validateTableSchema(
+                withoutIcebergMirror(newTableSchema), dynamicOptions.keySet());
         if (new CoreOptions(tableSchema.options())
                         .toConfiguration()
                         .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
@@ -423,11 +424,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
             mergedOptions.putAll(tableSchema.options());
             TableSchema newTableSchema = latestSchema.copy(mergedOptions);
-            SchemaValidation.validateTableSchema(newTableSchema);
+            SchemaValidation.validateTableSchema(withoutIcebergMirror(newTableSchema));
             return copy(newTableSchema);
         } else {
             return this;
         }
+    }
+
+    /**
+     * Loading judges a table without its Iceberg mirror: the publication rules run again before
+     * every commit, and a table an older release let the mirror publish must still load, if only
+     * for the ALTER that turns the mirror off.
+     */
+    private static TableSchema withoutIcebergMirror(TableSchema schema) {
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.remove(IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        return schema.copy(options);
     }
 
     @Override
