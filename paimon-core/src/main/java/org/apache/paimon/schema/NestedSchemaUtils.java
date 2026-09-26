@@ -233,15 +233,21 @@ public class NestedSchemaUtils {
                 joinedNames,
                 newType);
 
-        List<String> fullFieldNames = new ArrayList<>(fieldNames);
-        // Add the special "element" marker for multiset element access
-        fullFieldNames.add("element");
+        DataType oldElementType = ((MultisetType) oldType).getElementType();
+        DataType newElementType = ((MultisetType) newType).getElementType();
 
-        generateNestedColumnUpdates(
-                fullFieldNames,
-                ((MultisetType) oldType).getElementType(),
-                ((MultisetType) newType).getElementType(),
-                schemaChanges);
+        // A multiset is physically stored as a map whose element is the key. A map key type
+        // cannot be cast on read, and a MULTISET-to-MULTISET cast cannot be resolved at all, so
+        // even an element nullability change is not read-safe. Reject any element change here so
+        // it fails at DDL time with a clear message instead of silently breaking reads of
+        // existing data files.
+        Preconditions.checkArgument(
+                oldElementType.equals(newElementType),
+                "Cannot update the element type of MULTISET column %s from %s to %s "
+                        + "(a multiset element is a map key, whose type cannot be evolved).",
+                joinedNames,
+                oldElementType,
+                newElementType);
     }
 
     private static void handlePrimitiveTypeUpdate(

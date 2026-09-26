@@ -259,21 +259,23 @@ public class NestedSchemaUtilsTest {
     }
 
     @Test
-    public void testMultisetTypeUpdateElement() {
+    public void testMultisetElementTypeChangeRejected() {
         List<String> fieldNames = Arrays.asList("multiset_column");
         List<SchemaChange> schemaChanges = new ArrayList<>();
 
         MultisetType oldType = new MultisetType(true, DataTypes.INT());
         MultisetType newType = new MultisetType(true, DataTypes.BIGINT());
 
-        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
-
-        assertThat(schemaChanges).hasSize(1);
-        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnType.class);
-        SchemaChange.UpdateColumnType typeChange =
-                (SchemaChange.UpdateColumnType) schemaChanges.get(0);
-        assertThat(typeChange.fieldNames()).containsExactly("multiset_column", "element");
-        assertThat(typeChange.newDataType()).isEqualTo(DataTypes.BIGINT());
+        // A multiset element is physically a map key, whose type cannot be evolved on read. The
+        // change must be rejected at DDL time instead of breaking reads of existing data files.
+        assertThatThrownBy(
+                        () ->
+                                NestedSchemaUtils.generateNestedColumnUpdates(
+                                        fieldNames, oldType, newType, schemaChanges))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Cannot update the element type of MULTISET column multiset_column")
+                .hasMessageContaining("a multiset element is a map key");
     }
 
     @Test
@@ -463,22 +465,23 @@ public class NestedSchemaUtilsTest {
     }
 
     @Test
-    public void testMultisetElementNullabilityChange() {
+    public void testMultisetElementNullabilityChangeRejected() {
         List<String> fieldNames = Arrays.asList("multiset_column");
         List<SchemaChange> schemaChanges = new ArrayList<>();
 
-        // Multiset element changes from nullable to non-nullable
+        // Even an element nullability change is not read-safe: createCastExecutor cannot resolve a
+        // MULTISET-to-MULTISET cast once the element differs, so it must be rejected at DDL time.
         MultisetType oldType = new MultisetType(true, DataTypes.INT().nullable());
         MultisetType newType = new MultisetType(true, DataTypes.INT().notNull());
 
-        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
-
-        assertThat(schemaChanges).hasSize(1);
-        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnNullability.class);
-        SchemaChange.UpdateColumnNullability nullabilityChange =
-                (SchemaChange.UpdateColumnNullability) schemaChanges.get(0);
-        assertThat(nullabilityChange.fieldNames()).containsExactly("multiset_column", "element");
-        assertThat(nullabilityChange.newNullability()).isFalse();
+        assertThatThrownBy(
+                        () ->
+                                NestedSchemaUtils.generateNestedColumnUpdates(
+                                        fieldNames, oldType, newType, schemaChanges))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Cannot update the element type of MULTISET column multiset_column")
+                .hasMessageContaining("a multiset element is a map key");
     }
 
     @Test
@@ -868,7 +871,7 @@ public class NestedSchemaUtilsTest {
     }
 
     @Test
-    public void testMultisetOfComplexType() {
+    public void testMultisetOfComplexTypeRejected() {
         List<String> fieldNames = Arrays.asList("multiset_column");
         List<SchemaChange> schemaChanges = new ArrayList<>();
 
@@ -883,27 +886,14 @@ public class NestedSchemaUtilsTest {
                         new DataField(1, "name", DataTypes.STRING()));
         MultisetType newType = new MultisetType(true, newRowType);
 
-        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
-
-        assertThat(schemaChanges).hasSize(2);
-
-        // Verify field paths include "element" for multiset element access
-        SchemaChange.UpdateColumnType typeChange =
-                schemaChanges.stream()
-                        .filter(change -> change instanceof SchemaChange.UpdateColumnType)
-                        .map(change -> (SchemaChange.UpdateColumnType) change)
-                        .findFirst()
-                        .orElse(null);
-        assertThat(typeChange).isNotNull();
-        assertThat(typeChange.fieldNames()).containsExactly("multiset_column", "element", "id");
-
-        SchemaChange.AddColumn addColumn =
-                schemaChanges.stream()
-                        .filter(change -> change instanceof SchemaChange.AddColumn)
-                        .map(change -> (SchemaChange.AddColumn) change)
-                        .findFirst()
-                        .orElse(null);
-        assertThat(addColumn).isNotNull();
-        assertThat(addColumn.fieldNames()).containsExactly("multiset_column", "element", "name");
+        // The element (a ROW) is the map key; evolving it is not read-safe and must be rejected.
+        assertThatThrownBy(
+                        () ->
+                                NestedSchemaUtils.generateNestedColumnUpdates(
+                                        fieldNames, oldType, newType, schemaChanges))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Cannot update the element type of MULTISET column multiset_column")
+                .hasMessageContaining("a multiset element is a map key");
     }
 }
