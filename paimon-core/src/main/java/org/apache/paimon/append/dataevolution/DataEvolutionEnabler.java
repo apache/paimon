@@ -52,9 +52,11 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -83,8 +85,8 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  *   <li>Assign ids to the files committed before the fence without one.
  * </ol>
  *
- * <p>The procedure is idempotent: on a table that already has data evolution enabled it only
- * assigns ids to files that still lack one, and reports {@code skipped} when there are none.
+ * <p>The procedure is idempotent: it reports {@code skipped} once the files have row ids and
+ * compatible sequence numbers, and a snapshot on a data-evolution schema has fenced old writers.
  */
 public class DataEvolutionEnabler {
 
@@ -133,7 +135,7 @@ public class DataEvolutionEnabler {
         long schemaBefore = table.schema().id();
         Long snapshotBefore = table.snapshotManager().latestSnapshotId();
         Assignment planned = plan(table);
-        if (enabled && planned.files.isEmpty()) {
+        if (enabled && !planned.hasChanges() && hasFence(table, planned.snapshot)) {
             return Result.skipped(
                     schemaBefore, snapshotBefore, "data evolution is already enabled");
         }
@@ -157,16 +159,16 @@ public class DataEvolutionEnabler {
         beforeFence.run();
         commitFence(table);
         Assignment remaining = plan(table);
-        if (!remaining.files.isEmpty()) {
+        if (remaining.hasChanges()) {
             LOG.info(
-                    "Assigning row ids to {} file(s) of table {} that were committed without one.",
-                    remaining.files.size(),
+                    "Repairing row ids or sequence numbers of table {} after fencing old writers.",
                     identifier.getFullName());
             totals.add(assignRowIdsWithRetry(table, remaining));
         }
         checkState(
-                plan(table).files.isEmpty(),
-                "Table %s still has data files without a row id. A writer of an older Paimon "
+                !plan(table).hasChanges(),
+                "Table %s still has data files without a row id or with incompatible sequence "
+                        + "numbers. A writer of an older Paimon "
                         + "version may still be writing to it; stop it and run the procedure "
                         + "again.",
                 identifier.getFullName());
@@ -191,7 +193,7 @@ public class DataEvolutionEnabler {
      */
     private void assignRowIdsAndEnable(FileStoreTable table, Assignment planned, Totals totals)
             throws Exception {
-        if (!planned.files.isEmpty()) {
+        if (planned.hasChanges()) {
             totals.add(assignRowIdsWithRetry(table, planned));
         }
         beforeSchemaChange.run();
@@ -211,6 +213,15 @@ public class DataEvolutionEnabler {
                                                 + identifier.getFullName())
                                 .options());
         return latest.rowTrackingEnabled() && latest.dataEvolutionEnabled();
+    }
+
+    private boolean hasFence(FileStoreTable table, @Nullable Snapshot snapshot) {
+        // A writer that passed the old schema check read its base snapshot before that check.
+        // Any snapshot on a DE schema therefore forces it to retry (and fail the new check).
+        // Merely seeing the enabled schema is insufficient after a failure before commitFence.
+        return snapshot != null
+                && CoreOptions.fromMap(table.schemaManager().schema(snapshot.schemaId()).options())
+                        .dataEvolutionEnabled();
     }
 
     /**
@@ -267,7 +278,7 @@ public class DataEvolutionEnabler {
         }
     }
 
-    /** Plans a first row id for every live data file of the latest snapshot that has none. */
+    /** Plans missing row ids and normalizes the baseline of row-tracking-only files. */
     private Assignment plan(FileStoreTable table) {
         Snapshot latest = table.snapshotManager().latestSnapshot();
         if (latest == null) {
@@ -282,15 +293,40 @@ public class DataEvolutionEnabler {
                 manifestFile, manifests, live, table.coreOptions().scanManifestParallelism());
 
         List<ManifestEntry> withoutRowId = new ArrayList<>();
+        Set<FileEntry.Identifier> resetSequences = new HashSet<>();
+        Map<Long, Boolean> rowTrackingOnlySchemas = new HashMap<>();
         for (ManifestEntry entry : live.values()) {
-            if (entry.kind() == FileKind.ADD && entry.file().firstRowId() == null) {
+            if (entry.kind() != FileKind.ADD) {
+                continue;
+            }
+            if (entry.file().firstRowId() == null) {
                 withoutRowId.add(entry);
+            }
+            if ((entry.file().firstRowId() == null
+                            || entry.file().minSequenceNumber() != Snapshot.FIRST_SNAPSHOT_ID
+                            || entry.file().maxSequenceNumber() != Snapshot.FIRST_SNAPSHOT_ID)
+                    && rowTrackingOnlySchemas.computeIfAbsent(
+                            entry.file().schemaId(),
+                            id -> {
+                                CoreOptions fileOptions =
+                                        CoreOptions.fromMap(
+                                                table.schemaManager().schema(id).options());
+                                return fileOptions.rowTrackingEnabled()
+                                        && !fileOptions.dataEvolutionEnabled();
+                            })) {
+                resetSequences.add(entry.identifier());
             }
         }
         long start = latest.nextRowId() == null ? 0L : latest.nextRowId();
         if (withoutRowId.isEmpty()) {
             return new Assignment(
-                    latest, manifests, Collections.emptyList(), Collections.emptyMap(), 0L, start);
+                    latest,
+                    manifests,
+                    Collections.emptyList(),
+                    Collections.emptyMap(),
+                    resetSequences,
+                    0L,
+                    start);
         }
 
         // Contiguous per partition, partitions in order: the layout reassign_row_id produces.
@@ -310,7 +346,8 @@ public class DataEvolutionEnabler {
             next += entry.file().rowCount();
             rowCount += entry.file().rowCount();
         }
-        return new Assignment(latest, manifests, withoutRowId, firstRowIds, rowCount, next);
+        return new Assignment(
+                latest, manifests, withoutRowId, firstRowIds, resetSequences, rowCount, next);
     }
 
     private Assignment assignRowIdsWithRetry(FileStoreTable table, Assignment initial)
@@ -340,7 +377,7 @@ public class DataEvolutionEnabler {
             // Another commit landed: plan again from the new latest snapshot. Files that already
             // received an id in it (written by a writer on the new schema) keep it.
             assignment = plan(table);
-            if (assignment.files.isEmpty()) {
+            if (!assignment.hasChanges()) {
                 return assignment;
             }
             LOG.info(
@@ -374,9 +411,21 @@ public class DataEvolutionEnabler {
             for (ManifestEntry entry : entries) {
                 Long firstRowId = assignment.firstRowIds.get(entry.identifier());
                 if (firstRowId != null && entry.file().firstRowId() == null) {
+                    long assignedSequence =
+                            assignment.resetSequences.contains(entry.identifier())
+                                    ? Snapshot.FIRST_SNAPSHOT_ID
+                                    : sequenceNumber;
                     rewritten.add(
                             entry.assignFirstRowId(firstRowId)
-                                    .assignSequenceNumber(sequenceNumber, sequenceNumber));
+                                    .assignSequenceNumber(assignedSequence, assignedSequence));
+                    changed = true;
+                } else if (assignment.resetSequences.contains(entry.identifier())) {
+                    // Row-tracking-only writers can retain row-count sequences after rolling a
+                    // file. Keep their row ids, but make them older than every DE update. Using
+                    // this repair's snapshot id could hide an update committed before a retry.
+                    rewritten.add(
+                            entry.assignSequenceNumber(
+                                    Snapshot.FIRST_SNAPSHOT_ID, Snapshot.FIRST_SNAPSHOT_ID));
                     changed = true;
                 } else {
                     rewritten.add(entry);
@@ -433,6 +482,7 @@ public class DataEvolutionEnabler {
         final List<ManifestFileMeta> manifests;
         final List<ManifestEntry> files;
         final Map<FileEntry.Identifier, Long> firstRowIds;
+        final Set<FileEntry.Identifier> resetSequences;
         final long rowCount;
         final long nextRowId;
 
@@ -441,14 +491,20 @@ public class DataEvolutionEnabler {
                 List<ManifestFileMeta> manifests,
                 List<ManifestEntry> files,
                 Map<FileEntry.Identifier, Long> firstRowIds,
+                Set<FileEntry.Identifier> resetSequences,
                 long rowCount,
                 long nextRowId) {
             this.snapshot = snapshot;
             this.manifests = manifests;
             this.files = files;
             this.firstRowIds = firstRowIds;
+            this.resetSequences = resetSequences;
             this.rowCount = rowCount;
             this.nextRowId = nextRowId;
+        }
+
+        boolean hasChanges() {
+            return !files.isEmpty() || !resetSequences.isEmpty();
         }
 
         static Assignment empty(@Nullable Snapshot snapshot, long nextRowId) {
@@ -457,6 +513,7 @@ public class DataEvolutionEnabler {
                     Collections.emptyList(),
                     Collections.emptyList(),
                     Collections.emptyMap(),
+                    Collections.emptySet(),
                     0L,
                     nextRowId);
         }

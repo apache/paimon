@@ -1047,7 +1047,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         TableSchema latestSchema =
                 schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
         long latestSchemaId = latestSchema.id();
-        checkRowTrackingNotEnabledAfterLoad(latestSchema);
+        checkRowTrackingOrDataEvolutionNotEnabledAfterLoad(latestSchema);
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
@@ -1412,21 +1412,25 @@ public class FileStoreCommitImpl implements FileStoreCommit {
      * new file, so a file committed by a writer which does not know that the table enabled row
      * tracking would never get one and could not be read as a data-evolution file. Such a writer
      * loaded the table before {@code sys.enable_data_evolution} converted it: refuse its commit so
-     * that it reloads the table.
+     * that it reloads the table. A row-tracking-only writer must also reload after data evolution
+     * is enabled: its compactor does not preserve row ids and its files use row-count sequences.
      */
-    private void checkRowTrackingNotEnabledAfterLoad(TableSchema latestSchema) {
-        if (options.rowTrackingEnabled()) {
-            return;
-        }
-        if (!CoreOptions.fromMap(latestSchema.options()).rowTrackingEnabled()) {
+    private void checkRowTrackingOrDataEvolutionNotEnabledAfterLoad(TableSchema latestSchema) {
+        CoreOptions latestOptions = CoreOptions.fromMap(latestSchema.options());
+        String feature;
+        if (!options.rowTrackingEnabled() && latestOptions.rowTrackingEnabled()) {
+            feature = "row tracking";
+        } else if (!options.dataEvolutionEnabled() && latestOptions.dataEvolutionEnabled()) {
+            feature = "data evolution";
+        } else {
             return;
         }
         throw new IllegalStateException(
                 String.format(
-                        "Table %s enabled row tracking in schema %d after this writer loaded the "
+                        "Table %s enabled %s in schema %d after this writer loaded the "
                                 + "table without it. Restart the writer so that it picks up the "
                                 + "current schema.",
-                        tableName, latestSchema.id()));
+                        tableName, feature, latestSchema.id()));
     }
 
     public boolean replaceManifestList(

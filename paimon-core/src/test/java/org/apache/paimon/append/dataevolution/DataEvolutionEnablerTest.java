@@ -20,8 +20,10 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -33,6 +35,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
@@ -391,6 +394,62 @@ public class DataEvolutionEnablerTest extends TableTestBase {
 
         Map<Integer, String> values = valuesById(loadTable());
         for (int i = 0; i < rows.length; i++) {
+            assertThat(values).containsEntry(i, "new" + i);
+        }
+    }
+
+    @Test
+    public void testColumnWriteAfterRowTrackingOnlyConversionWinsOverOldSequenceNumbers()
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "10");
+        FileStoreTable table = createTable(options);
+        GenericRow[] rows = new GenericRow[20];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = row(i, "old" + i, "p1");
+        }
+        writeRows(table, rows);
+        assertThat(liveFiles(table)).hasSize(2);
+        assertThat(rowIdsById(table)).containsEntry(10, 10L).containsEntry(19, 19L);
+        Map<Integer, Long> rowIdsBefore = rowIdsById(table);
+        long snapshotBefore = table.snapshotManager().latestSnapshotId();
+        // Row tracking assigns ids, but the second rolled file keeps row-count sequences.
+        assertThat(liveFiles(table))
+                .filteredOn(file -> file.nonNullFirstRowId() == 10L)
+                .extracting(DataFileMeta::maxSequenceNumber)
+                .containsExactly(19L);
+
+        assertThat(enabler().run(true).dryRun).isTrue();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotBefore);
+        DataEvolutionEnabler.Result converted = enabler().run(false);
+        assertThat(converted.assignedFileCount).isZero();
+        assertThat(converted.assignedRowCount).isZero();
+        assertThat(converted.nextRowId).isEqualTo(20L);
+        table = loadTable();
+        assertThat(rowIdsById(table)).isEqualTo(rowIdsBefore);
+        assertThat(enabler().run(false).skipped).isTrue();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(converted.snapshotAfter);
+        RowType writeType = table.rowType().project(Collections.singletonList("v"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 10; i < rows.length; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("new" + i)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            for (CommitMessage message : messages) {
+                CommitMessageImpl impl = (CommitMessageImpl) message;
+                List<DataFileMeta> files = new ArrayList<>(impl.newFilesIncrement().newFiles());
+                impl.newFilesIncrement().newFiles().clear();
+                files.forEach(f -> impl.newFilesIncrement().newFiles().add(f.assignFirstRowId(10)));
+            }
+            commit.commit(messages);
+        }
+
+        // The new column file must win even though its snapshot id is below the old sequence 19.
+        Map<Integer, String> values = valuesById(loadTable());
+        for (int i = 10; i < rows.length; i++) {
             assertThat(values).containsEntry(i, "new" + i);
         }
     }
@@ -795,6 +854,150 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
+    public void testRowTrackingOnlyCompactorCannotCommitAfterConversion() throws Exception {
+        FileStoreTable staleTable =
+                createTable(
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeRows(staleTable, row(1, "a", "p1"));
+        writeRows(staleTable, row(2, "b", "p1"));
+        AppendCompactTask task = new AppendCompactTask(BinaryRow.EMPTY_ROW, liveFiles(staleTable));
+        BaseAppendFileStoreWrite write =
+                (BaseAppendFileStoreWrite) staleTable.store().newWrite("stale-compact");
+        CommitMessage message;
+        try {
+            write.withIOManager(ioManager);
+            message = task.doCompact(staleTable, write);
+        } finally {
+            write.close();
+        }
+
+        enabler().run(false);
+        assertNoDuplicateOrMissingRowIds(loadTable(), 2);
+
+        // This old append compactor does not preserve row ids, despite row tracking being on.
+        // The conversion must fence it off just like a writer loaded without row tracking.
+        try (BatchTableCommit commit = staleTable.newBatchWriteBuilder().newCommit()) {
+            assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+        assertNoDuplicateOrMissingRowIds(loadTable(), 2);
+    }
+
+    @Test
+    public void testRowTrackingOnlyCompactionBeforeFenceIsFullyRepaired() throws Exception {
+        FileStoreTable staleTable =
+                createTable(
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeRows(staleTable, row(1, "a", "p1"));
+        writeRows(staleTable, row(2, "b", "p1"));
+        AppendCompactTask task = new AppendCompactTask(BinaryRow.EMPTY_ROW, liveFiles(staleTable));
+        BaseAppendFileStoreWrite write =
+                (BaseAppendFileStoreWrite) staleTable.store().newWrite("stale-compact");
+        CommitMessage message;
+        try {
+            write.withIOManager(ioManager);
+            message = task.doCompact(staleTable, write);
+        } finally {
+            write.close();
+        }
+
+        new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        () -> {
+                            try (BatchTableCommit commit =
+                                    staleTable.newBatchWriteBuilder().newCommit()) {
+                                commit.commit(Collections.singletonList(message));
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        })
+                .run(false);
+
+        assertThat(rowIdsById(loadTable())).containsEntry(1, 2L).containsEntry(2, 3L);
+        assertThat(enabler().run(false).skipped).isTrue();
+    }
+
+    @Test
+    public void testRowTrackingOnlyWriterCannotCommitAfterConversion() throws Exception {
+        FileStoreTable staleTable =
+                createTable(
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeRows(staleTable, row(1, "a", "p1"));
+        enabler().run(false);
+
+        assertThatThrownBy(() -> writeRows(staleTable, row(2, "b", "p1")))
+                .hasStackTraceContaining("enabled data evolution")
+                .hasStackTraceContaining("Restart the writer");
+        writeRows(loadTable(), row(2, "b", "p1"));
+        assertNoDuplicateOrMissingRowIds(loadTable(), 2);
+    }
+
+    @Test
+    public void testRepairRowTrackingOnlySequencesPreservesConcurrentColumnUpdate()
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "10");
+        FileStoreTable staleTable = createTable(options);
+        writeRows(staleTable, row(0, "old0", "p1"));
+        GenericRow[] rows = new GenericRow[20];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = row(i + 1, "old" + (i + 1), "p1");
+        }
+        PausedWriter writer = new PausedWriter(rows);
+        DataEvolutionEnabler failing =
+                new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        writer::startAndAwaitPause,
+                        () -> {
+                            // The old writer passed its check before DE was enabled, and commits
+                            // before the conversion can fence it off.
+                            assertThat(writer.releaseAndJoin()).isNull();
+                            throw new RuntimeException("failure before fence");
+                        });
+        try {
+            assertThatThrownBy(() -> failing.run(false)).hasMessage("failure before fence");
+        } finally {
+            writer.releaseAndJoin();
+        }
+
+        FileStoreTable table = loadTable();
+        assertThat(liveFiles(table))
+                .filteredOn(file -> file.nonNullFirstRowId() == 11L)
+                .extracting(DataFileMeta::maxSequenceNumber)
+                .containsExactly(19L);
+        RowType writeType = table.rowType().project(Collections.singletonList("v"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 11; i <= 20; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("new" + i)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            for (CommitMessage message : messages) {
+                CommitMessageImpl impl = (CommitMessageImpl) message;
+                List<DataFileMeta> files = new ArrayList<>(impl.newFilesIncrement().newFiles());
+                impl.newFilesIncrement().newFiles().clear();
+                files.forEach(f -> impl.newFilesIncrement().newFiles().add(f.assignFirstRowId(11)));
+            }
+            commit.commit(messages);
+        }
+
+        // A repair snapshot is newer than the column update. Restamping old files with its id
+        // would make them win again; only normalize their baseline, not the real DE update.
+        enabler().run(false);
+        Map<Integer, String> values = valuesById(loadTable());
+        for (int i = 11; i <= 20; i++) {
+            assertThat(values).containsEntry(i, "new" + i);
+        }
+        assertNoDuplicateOrMissingRowIds(loadTable(), 21);
+    }
+
+    @Test
     public void testConcurrentRunsSwitchTheSchemaOnce() throws Exception {
         FileStoreTable table = createTable(Collections.emptyMap());
         writeRows(table, row(1, "a", "p1"));
@@ -871,6 +1074,67 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         table = loadTable();
         assertThat(valuesById(table)).containsOnlyKeys(1, 2);
         assertNoDuplicateOrMissingRowIds(table, 2);
+    }
+
+    @Test
+    public void testRetryAfterSchemaChangeStillFencesPausedWriter() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        PausedWriter writer = new PausedWriter(row(2, "b", "p1"));
+        DataEvolutionEnabler failing =
+                new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        writer::startAndAwaitPause,
+                        () -> {
+                            throw new RuntimeException("failure before fence");
+                        });
+        try {
+            assertThatThrownBy(() -> failing.run(false)).hasMessage("failure before fence");
+            assertThat(loadTable().coreOptions().dataEvolutionEnabled()).isTrue();
+            assertNoDuplicateOrMissingRowIds(loadTable(), 1);
+
+            // The schema and row ids alone do not prove that the previous run fenced writers.
+            enabler().run(false);
+            Throwable writerFailure = writer.releaseAndJoin();
+            assertThat(liveFiles(loadTable()))
+                    .as("a resumed conversion must not allow a file without row id to commit")
+                    .allMatch(file -> file.firstRowId() != null);
+            assertThat(writerFailure).hasStackTraceContaining("Restart the writer");
+        } finally {
+            writer.releaseAndJoin();
+        }
+    }
+
+    @Test
+    public void testRetryAfterSchemaChangeOnEmptyTableStillFencesPausedWriter() throws Exception {
+        createTable(Collections.emptyMap());
+        PausedWriter writer = new PausedWriter(row(1, "a", "p1"));
+        DataEvolutionEnabler failing =
+                new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        writer::startAndAwaitPause,
+                        () -> {
+                            throw new RuntimeException("failure before fence");
+                        });
+        try {
+            assertThatThrownBy(() -> failing.run(false)).hasMessage("failure before fence");
+            assertThat(loadTable().snapshotManager().latestSnapshot()).isNull();
+            DataEvolutionEnabler.Result dryRun = enabler().run(true);
+            assertThat(dryRun.dryRun).isTrue();
+            assertThat(loadTable().snapshotManager().latestSnapshot()).isNull();
+            enabler().run(false);
+            assertThat(writer.releaseAndJoin()).hasStackTraceContaining("Restart the writer");
+            assertThat(liveFiles(loadTable())).isEmpty();
+            long snapshotAfter = loadTable().snapshotManager().latestSnapshotId();
+            assertThat(enabler().run(false).skipped).isTrue();
+            assertThat(loadTable().snapshotManager().latestSnapshotId()).isEqualTo(snapshotAfter);
+        } finally {
+            writer.releaseAndJoin();
+        }
     }
 
     @Test
