@@ -29,7 +29,7 @@ from requests.exceptions import RequestException
 from pypaimon.api.client import ExponentialRetry
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
-from pypaimon.common.json_util import JSON, json_field
+from pypaimon.common.json_util import JSON, json_field, json_ignore_field
 
 
 @dataclass
@@ -40,7 +40,7 @@ class DLFToken:
     access_key_secret: str = json_field('AccessKeySecret')
     security_token: Optional[str] = json_field('SecurityToken')
     expiration: Optional[str] = json_field('Expiration')
-    expiration_at_millis: Optional[int] = json_field('ExpirationAt', default=None)
+    expiration_at_millis: Optional[int] = json_ignore_field(default=None)
 
     @staticmethod
     def parse_expiration_to_millis(expiration: str) -> int:
