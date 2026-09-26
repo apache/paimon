@@ -88,6 +88,60 @@ def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, 
     assert actual.to_pydict() == {'id': [1, 2], 'name': ['a', 'B'], 'age': [11, 20]}
 
 
+@pytest.mark.parametrize('stream', [False, True])
+def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
+    from pypaimon.write.native_update import NativeTableUpdateByRowId
+    from pypaimon.table.row.generic_row import GenericRow
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('p', pa.string()), ('id', pa.int32()), ('v', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, partition_keys=['p'], options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    seed = table.new_batch_write_builder()
+    writer = seed.new_write()
+    writer.write_arrow(pa.table({'p': ['a', 'b', None], 'id': [1, 1, 1], 'v': [10, 20, 30]}, schema=schema))
+    seed.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    update = builder.new_update()
+    input_rows = pa.table({'p': ['a', 'c', None], 'id': [1, 1, 1], 'v': [11, 40, 31]}, schema=schema)
+    with patch.object(TableUpsertByKey, '_upsert_partition',
+                      side_effect=AssertionError('Python partition upsert selected')):
+        messages = (update.upsert_by_arrow_with_key(input_rows, ['id'], 1) if stream
+                    else update.upsert_by_arrow_with_key(input_rows, ['id']))
+    commit = builder.new_commit()
+    commit.commit(messages, 1) if stream else commit.commit(messages)
+    commit.close()
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    update = builder.new_update()
+    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+                      side_effect=AssertionError('Python partition row upsert selected')):
+        rows = [GenericRow(['a', 1, 12], table.fields)]
+        messages = (update.upsert_by_key(rows, ['id'], 2) if stream
+                    else update.upsert_by_key(rows, ['id']))
+    commit = builder.new_commit()
+    commit.commit(messages, 2) if stream else commit.commit(messages)
+    commit.close()
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    update = builder.new_update()
+    read = table.new_read_builder().with_projection(['p', 'id', 'v', '_ROW_ID'])
+    current = read.new_read().to_arrow(read.new_scan().plan().splits())
+    selected = current.filter(pa.compute.equal(current['p'], 'a'))
+    updater = update.new_update_by_row_id(3) if stream else update.new_update_by_row_id()
+    assert isinstance(updater, NativeTableUpdateByRowId)
+    messages = updater.update_columns(selected.select(['p', '_ROW_ID']), ['p'])
+    commit = builder.new_commit()
+    commit.commit(messages, 3) if stream else commit.commit(messages)
+    commit.close()
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('p')
+    assert actual.to_pydict() == {'p': ['a', 'b', 'c', None], 'id': [1, 1, 1, 1], 'v': [12, 20, 40, 31]}
+
+
 def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
@@ -680,7 +734,7 @@ def test_native_row_upsert_uses_public_operation_with_composite_null_keys(tmp_pa
     }
 
 
-@pytest.mark.parametrize('case', ['partial', 'float-key', 'partitioned', 'empty-columns'])
+@pytest.mark.parametrize('case', ['partial', 'float-key', 'empty-columns'])
 def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
     from pypaimon.table.row.generic_row import GenericRow
     from pypaimon.write.native_update import NativeTableUpsert
@@ -691,7 +745,7 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
         ('age', pa.int32()), ('region', pa.string()),
     ])
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
-        schema, partition_keys=['region'] if case == 'partitioned' else [], options={
+        schema, options={
             'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
             'write.native.enabled': 'true',
         }), False)

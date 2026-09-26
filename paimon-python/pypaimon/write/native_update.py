@@ -102,10 +102,6 @@ def create_native_update(table, commit_user, columns):
 
 def create_native_update_by_row_id(table, commit_user, commit_identifier):
     """Create a core updater sharing one snapshot across incremental calls."""
-    # Columns are chosen on each later call, which can include partition keys.
-    # Core currently rejects those; choose the Python writer before staging.
-    if table.partition_keys:
-        return None
     native_table = _native_update_table(table)
     if native_table is None:
         return None
@@ -129,14 +125,12 @@ def _supported_upsert_key_type(data_type):
 
 def create_native_upsert(table, commit_user, data, keys, columns):
     """Prepare one core upsert from full Arrow rows or named row values."""
-    if table.partition_keys:
-        return None
     native_table = _native_row_id_table(table)
     if native_table is None:
         return None
     fields = table.table_schema.fields
     schema = PyarrowFieldParser.from_paimon_schema(fields)
-    if (any(not _supported_upsert_key_type(schema.field(key).type) for key in keys)
+    if (any(not _supported_upsert_key_type(schema.field(key).type) for key in set(keys + table.partition_keys))
             or any(pa.types.is_nested(schema.field(name).type) for name in columns)):
         return None
     if not isinstance(data, pa.Table):
