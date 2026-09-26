@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,24 @@ from pypaimon.common.options.config import CatalogOptions
 
 
 class DLFLocalFileTokenLoaderTest(unittest.TestCase):
+
+    def test_expiration_at_millis_is_internal_only(self):
+        token = DLFToken(
+            access_key_id="access-key-id",
+            access_key_secret="access-key-secret",
+            security_token="security-token",
+            expiration="2099-12-01T12:00:00Z",
+        )
+
+        token_json = JSON.to_json(token)
+        self.assertNotIn("ExpirationAt", json.loads(token_json))
+
+        loaded_token = JSON.from_json(
+            '{"AccessKeyId":"ak","AccessKeySecret":"sk",'
+            '"SecurityToken":"sts","ExpirationAt":123}',
+            DLFToken,
+        )
+        self.assertIsNone(loaded_token.expiration_at_millis)
 
     def test_load_token_from_configured_path(self):
         token = DLFToken(

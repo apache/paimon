@@ -28,6 +28,12 @@ def json_field(json_name: str, **kwargs):
     return field(metadata={"json_name": json_name, **metadata}, **kwargs)
 
 
+def json_ignore_field(**kwargs):
+    """Create a field excluded from JSON serialization and deserialization."""
+    metadata = kwargs.pop("metadata", {})
+    return field(metadata={"json_ignore": True, **metadata}, **kwargs)
+
+
 def optional_json_field(json_name: str, json_include: str):
     """Create a field with custom JSON name"""
     return field(metadata={"json_name": json_name, "json_include": json_include}, default=None)
@@ -76,6 +82,9 @@ class JSON:
         # Otherwise, use dataclass field-by-field serialization
         result = {}
         for field_info in fields(obj):
+            if field_info.metadata.get("json_ignore", False):
+                continue
+
             field_value = getattr(obj, field_info.name)
 
             # Get custom JSON name from metadata
@@ -122,6 +131,9 @@ class JSON:
         type_mapping = {}
         decoder_mapping = {}
         for field_info in fields(target_class):
+            if field_info.metadata.get("json_ignore", False):
+                continue
+
             json_name = field_info.metadata.get("json_name", field_info.name)
             field_mapping[json_name] = field_info.name
             decoder = field_info.metadata.get("decoder")
@@ -168,6 +180,9 @@ class JSON:
                     kwargs[field_name] = value
 
         for field_info in fields(target_class):
+            if field_info.metadata.get("json_ignore", False):
+                continue
+
             json_name = field_info.metadata.get("json_name", field_info.name)
             if (
                 json_name not in data
