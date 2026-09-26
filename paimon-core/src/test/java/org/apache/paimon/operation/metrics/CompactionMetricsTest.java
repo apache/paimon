@@ -48,10 +48,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -279,6 +282,45 @@ public class CompactionMetricsTest {
             }
         }
         assertThat(metrics.activeCompactTimerCount()).isZero();
+    }
+
+    @Test
+    public void testCompactTimerConcurrentUnregisterAndStartOnSharedWorker() throws Exception {
+        for (int attempt = 0; attempt < 200; attempt++) {
+            CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+            ExecutorService worker = Executors.newSingleThreadExecutor();
+            CompactionMetrics.Reporter retiring = metrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+            CompactionMetrics.Reporter starting = metrics.createReporter(BinaryRow.EMPTY_ROW, 1);
+            CountDownLatch compactionStarted = new CountDownLatch(1);
+            CountDownLatch allowWorkerContinue = new CountDownLatch(1);
+            AtomicReference<Throwable> workerError = new AtomicReference<>();
+
+            Future<?> compaction =
+                    worker.submit(
+                            () -> {
+                                try {
+                                    retiring.getCompactTimer().start();
+                                    retiring.getCompactTimer().finish();
+                                    compactionStarted.countDown();
+                                    allowWorkerContinue.await(30, TimeUnit.SECONDS);
+                                    starting.getCompactTimer().start();
+                                    starting.getCompactTimer().finish();
+                                } catch (Throwable t) {
+                                    workerError.set(t);
+                                }
+                            });
+
+            assertThat(compactionStarted.await(30, TimeUnit.SECONDS)).isTrue();
+            retiring.unregister();
+            allowWorkerContinue.countDown();
+
+            compaction.get(30, TimeUnit.SECONDS);
+            worker.shutdownNow();
+
+            assertThat(workerError.get()).isNull();
+            starting.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isZero();
+        }
     }
 
     @Test

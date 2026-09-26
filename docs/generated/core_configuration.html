@@ -465,6 +465,12 @@ under the License.
             <td>When total size is smaller than this threshold, force a full compaction.</td>
         </tr>
         <tr>
+            <td><h5>compaction.task-threads</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Number of threads for async compaction in each write task (for example, each Flink sink subtask). 1 (default): all buckets in the task share one compaction thread. -1: one dedicated compaction thread per active (partition, bucket) writer in the task so different buckets compact in parallel. N (&gt;1): a fixed thread pool of N threads shared by all buckets in the task. Compaction within the same bucket is still serialized. Values 0 and other negative integers except -1 are not allowed. Higher thread counts increase TaskManager memory pressure; monitor level-0 file count and compaction metrics.</td>
+        </tr>
+        <tr>
             <td><h5>consumer-id</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

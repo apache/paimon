@@ -106,7 +106,7 @@ The old data file is retained, with both obsolete positions marked in its deleti
 
 By default, batch reads skip Level-0 files until lookup compaction publishes them. Writers wait
 for this compaction by default. Asynchronous compaction or a dedicated compaction job can delay
-visibility; see [Asynchronous Compaction](./compaction#asynchronous-compaction). 
+visibility; see [Asynchronous Compaction](./compaction#asynchronous-compaction).
 
 When async compaction falls behind or data visibility latency is high, consider increasing
 `compaction.task-threads` to reduce visibility delay. See

@@ -69,6 +69,7 @@ public class CompactionMetrics {
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
     private final Map<Long, Integer> compactTimerRefCounts;
+    private final Map<Long, Object> compactTimerLocks;
     private final Queue<Long> compactionTimes;
     private Counter compactionsCompletedCounter;
     private Counter compactionsTotalCounter;
@@ -79,6 +80,7 @@ public class CompactionMetrics {
         this.reporters = new HashMap<>();
         this.compactTimers = new ConcurrentHashMap<>();
         this.compactTimerRefCounts = new ConcurrentHashMap<>();
+        this.compactTimerLocks = new ConcurrentHashMap<>();
         this.compactionTimes = new ConcurrentLinkedQueue<>();
 
         registerGenericCompactionMetrics();
@@ -94,20 +96,23 @@ public class CompactionMetrics {
         return compactTimers.size();
     }
 
-    private void acquireCompactTimer(long threadId) {
-        compactTimerRefCounts.merge(threadId, 1, Integer::sum);
+    private Object compactTimerLock(long threadId) {
+        return compactTimerLocks.computeIfAbsent(threadId, ignored -> new Object());
     }
 
     private void releaseCompactTimer(long threadId) {
-        compactTimerRefCounts.compute(
-                threadId,
-                (id, count) -> {
-                    if (count == null || count <= 1) {
-                        compactTimers.remove(id);
-                        return null;
-                    }
-                    return count - 1;
-                });
+        synchronized (compactTimerLock(threadId)) {
+            compactTimerRefCounts.compute(
+                    threadId,
+                    (id, count) -> {
+                        if (count == null || count <= 1) {
+                            compactTimers.remove(id);
+                            compactTimerLocks.remove(id);
+                            return null;
+                        }
+                        return count - 1;
+                    });
+        }
     }
 
     private void registerGenericCompactionMetrics() {
@@ -253,13 +258,15 @@ public class CompactionMetrics {
         @Override
         public CompactTimer getCompactTimer() {
             long threadId = Thread.currentThread().getId();
-            CompactTimer timer =
-                    compactTimers.computeIfAbsent(
-                            threadId, ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
-            if (compactThreadIds.add(threadId)) {
-                acquireCompactTimer(threadId);
+            synchronized (compactTimerLock(threadId)) {
+                CompactTimer timer =
+                        compactTimers.computeIfAbsent(
+                                threadId, ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
+                if (compactThreadIds.add(threadId)) {
+                    compactTimerRefCounts.merge(threadId, 1, Integer::sum);
+                }
+                return timer;
             }
-            return timer;
         }
 
         @Override
