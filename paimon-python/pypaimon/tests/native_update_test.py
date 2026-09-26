@@ -287,12 +287,9 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
 
 @pytest.mark.native_plan
 def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
-    try:
-        from pypaimon_rust.datafusion import _MatchedBatchUpdateWriter
-    except ImportError:
-        pytest.skip('installed Rust binding lacks native batch updates')
-    if not hasattr(_MatchedBatchUpdateWriter, 'add_assigned_table'):
-        pytest.skip('installed Rust binding lacks native assignments')
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    if not hasattr(RustUpdate, 'update_by_predicate'):
+        pytest.skip('installed Rust binding lacks public predicate updates')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int32()), ('age', pa.int32())])
@@ -315,7 +312,9 @@ def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
     predicate = table.new_read_builder().new_predicate_builder().greater_or_equal('id', 2)
     builder = table.new_batch_write_builder()
     with patch.object(BatchTableUpdate, '_build_predicate_update_table',
-                      side_effect=AssertionError('Python assignments selected')):
+                      side_effect=AssertionError('Python assignments selected')), \
+            patch.object(BatchTableUpdate, '_matched_update_scan_table',
+                         side_effect=AssertionError('Python scan planning selected')):
         messages = builder.new_update().update_by_predicate(
             predicate,
             {'age': lambda matched: (
@@ -476,7 +475,7 @@ def test_row_id_cast_failure_does_not_write_nulls(tmp_path, native, values):
 ])
 def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target):
     from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
-    if native and not hasattr(RustUpdate, 'update_by_arrow_with_row_id'):
+    if native and not hasattr(RustUpdate, 'update_by_predicate'):
         pytest.skip('installed Rust binding lacks core assignment support')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -506,3 +505,60 @@ def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target
     read = table.new_read_builder()
     actual = read.new_read().to_arrow(read.new_scan().plan().splits())
     assert actual['value'].to_pylist() == expected
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('callable_assignment', [False, True])
+def test_predicate_assignment_order_with_later_partial_file(
+        tmp_path, native, callable_assignment):
+    from contextlib import nullcontext
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    if native and not hasattr(RustUpdate, 'update_by_predicate'):
+        pytest.skip('installed Rust binding lacks public predicate updates')
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('age', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+        'write.native.enabled': str(native).lower(),
+    }), False)
+    table = catalog.get_table('default.t')
+    for ids in ([1, 2], [3, 4]):
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': ids, 'age': [value * 10 for value in ids],
+        }, schema=schema))
+        builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+    builder = table.new_batch_write_builder()
+    messages = builder.new_update().update_by_arrow_with_row_id(
+        pa.table({'_ROW_ID': [2], 'age': [33]}))
+    builder.new_commit().commit(messages)
+
+    seen = []
+
+    def assign(matched):
+        seen.append(matched['id'].to_pylist())
+        return pa.compute.add(matched['age'], 1)
+
+    assignment = assign if callable_assignment else pa.chunked_array(
+        [[101], [102, 103, 104]], type=pa.int32())
+    guard = (patch.object(BatchTableUpdate, '_matched_update_scan_table',
+                          side_effect=AssertionError('Python planning selected'))
+             if native else nullcontext())
+    with guard:
+        messages = builder.new_update().update_by_predicate(
+            None, {'age': assignment},
+            read_columns=['id', 'age'] if callable_assignment else None)
+    builder.new_commit().commit(messages)
+    if callable_assignment:
+        assert seen == [[1, 2], [3, 4]]
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert actual.select(['id', 'age']).to_pydict() == {
+        'id': [1, 2, 3, 4],
+        'age': [11, 21, 34, 41] if callable_assignment else [101, 102, 103, 104],
+    }

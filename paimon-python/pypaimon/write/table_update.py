@@ -292,6 +292,17 @@ class TableUpdate:
             assignments, read_columns, has_callable, has_array
         )
 
+        if self.table.options.native_write_enabled():
+            from pypaimon.write.native_update import create_native_predicate_update
+            try:
+                native = create_native_predicate_update(
+                    self.table, self.commit_user, list(assignments.keys()), predicate)
+            except Exception as error:
+                logger.debug('Native predicate update preparation failed: %s', error)
+            else:
+                if native is not None:
+                    return native.update(assignments, read_columns)
+
         scan_table = self._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
@@ -306,35 +317,6 @@ class TableUpdate:
         plan = read_builder.new_scan().plan_for_write()
         splits = plan.splits()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
-        if (splits
-                and self.table.options.native_write_enabled()
-                and self.table.options.data_file_path_directory() is None
-                and not any(isinstance(split, QueryAuthSplit)
-                            for split in splits)):
-            from pypaimon.write.native_update import create_native_predicate_update
-            projection = (
-                list(dict.fromkeys(read_columns)) + [SpecialFields.ROW_ID.name]
-                if has_callable else [SpecialFields.ROW_ID.name]
-            )
-            try:
-                native = create_native_predicate_update(
-                    self.table, scan_table, self.commit_user,
-                    list(assignments.keys()), predicate, projection,
-                )
-            except Exception as error:
-                logger.debug('Native predicate update preparation failed: %s', error)
-            else:
-                if native is not None:
-                    groups = (splits if has_array else
-                              self._predicate_update_file_groups(splits))
-                    schema = PyarrowFieldParser.from_paimon_schema(
-                        self.table.table_schema.fields
-                    )
-                    if snapshot_id >= 0:
-                        native.native.writer.pin_read_snapshot(snapshot_id)
-                    return native.update(
-                        groups, dict(assignments), schema, combine_all=has_array
-                    )
         files_info = RowIdFileIndex.from_splits(
             snapshot_id, splits
         )

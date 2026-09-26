@@ -66,30 +66,6 @@ def create_native_update(table, commit_user, columns):
     return NativeBatchTableUpdate(table, writer, columns)
 
 
-def _create_native_matched_update(table, commit_user, columns):
-    """Select Rust only before writing and only for its plain-Parquet path."""
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    # PyPaimon accepts Arrow's inferred list-of-pairs representation for MAP;
-    # the Rust writer requires the exact nested Arrow type at this boundary.
-    if any(pa.types.is_nested(schema.field(name).type)
-           for name in columns if name in schema.names):
-        return None
-    native_table = _native_row_id_table(table, '_new_matched_update')
-    if native_table is None:
-        return None
-    writer = (native_table.new_batch_write_builder()
-              ._with_commit_user(commit_user)
-              ._new_matched_update(columns))
-    try:
-        snapshot = table.snapshot_manager().get_latest_snapshot()
-        if snapshot is not None:
-            writer.pin_read_snapshot(snapshot.id)
-    except Exception:
-        writer.close()
-        raise
-    return _NativeMatchedUpdate(table, writer)
-
-
 def create_native_upsert(table, commit_user, data, keys, columns):
     """Select the core Rust upsert for full Arrow rows on plain Parquet."""
     if table.partition_keys:
@@ -114,29 +90,29 @@ def create_native_upsert(table, commit_user, data, keys, columns):
     return NativeTableUpsert(table, writer, keys)
 
 
-def create_native_predicate_update(table, scan_table, commit_user, columns,
-                                   predicate, projection):
-    """Prepare Rust predicate reading and assignment writing before callbacks."""
-    native = _create_native_matched_update(table, commit_user, columns)
-    if native is None or not hasattr(native.writer, 'add_assigned_table'):
-        if native is not None:
-            native.writer.close()
+def create_native_predicate_update(table, commit_user, columns, predicate):
+    """Prepare a public core operation before any assignment can run."""
+    if table.options.data_file_path_directory() is not None:
         return None
-    from pypaimon.read.native_plan import (
-        _prepare_native_read, native_split_bridge_available,
-        native_split_from_python,
-    )
-    if not native_split_bridge_available():
-        native.writer.close()
+    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    if any(pa.types.is_nested(schema.field(name).type)
+           for name in columns if name in schema.names):
         return None
-    try:
-        reader = _prepare_native_read(
-            scan_table, predicate=predicate, projection=projection
-        )
-    except Exception:
-        native.writer.close()
-        raise
-    return NativePredicateTableUpdate(native, reader, native_split_from_python)
+    native_table = _native_row_id_table(table, 'new_update')
+    if native_table is None:
+        return None
+    from pypaimon_rust.datafusion import BatchTableUpdate
+    if not hasattr(BatchTableUpdate, 'update_by_predicate'):
+        return None
+    from pypaimon.read.native_plan import _predicate_to_native
+    native_predicate = None if predicate is None else _predicate_to_native(predicate)
+    if native_predicate is not None:
+        # Check predicate translation while fallback is still safe. Planning,
+        # reading and callback execution belong to the core operation below.
+        native_table.new_read_builder().with_filter(native_predicate)
+    writer = (native_table.new_batch_write_builder()
+              ._with_commit_user(commit_user).new_update())
+    return NativePredicateTableUpdate(table, writer, native_predicate)
 
 
 def native_predicate_row_ids(scan_table, predicate, splits):
@@ -181,14 +157,6 @@ def _raise_native_row_id_error(error):
         raise ValueError(
             detail + ' does not belong to any valid range') from error
     raise error
-
-
-class _NativeMatchedUpdate:
-    """Private predicate bridge until scan orchestration moves into core."""
-
-    def __init__(self, table, writer):
-        self.table = table
-        self.writer = writer
 
 
 class NativeBatchTableUpdate:
@@ -249,34 +217,15 @@ class NativeTableUpsert:
 
 
 class NativePredicateTableUpdate:
-    """Rust reads predicate matches and evaluates per-group assignments."""
+    """Convert operation inputs and commit messages around the core updater."""
 
-    def __init__(self, native, reader, convert_split):
-        self.native = native
-        self.reader = reader
-        self.convert_split = convert_split
+    def __init__(self, table, writer, predicate):
+        self.table = table
+        self.writer = writer
+        self.predicate = predicate
 
-    def update(self, groups, assignments, schema, combine_all=False):
-        writer = self.native.writer
-        try:
-            native_groups = [self.convert_split(split) for split in groups]
-            if combine_all:
-                batches = []
-                for split in native_groups:
-                    batches.extend(self.reader([split]))
-                if batches:
-                    writer.add_assigned_table(
-                        pa.Table.from_batches(batches), assignments, schema
-                    )
-            else:
-                for split in native_groups:
-                    batches = list(self.reader([split]))
-                    if batches:
-                        writer.add_assigned_table(
-                            pa.Table.from_batches(batches), assignments, schema
-                        )
-            return from_native_commit_messages(
-                self.native.table, writer.prepare_commit()
-            )
-        finally:
-            writer.close()
+    def update(self, assignments, read_columns):
+        return from_native_commit_messages(
+            self.table,
+            self.writer.update_by_predicate(
+                self.predicate, dict(assignments), list(read_columns or ())))
