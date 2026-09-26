@@ -28,6 +28,7 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.utils.UriReaderFactory;
@@ -58,6 +59,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
     private final TableWriteFactory tableWriteFactory;
+    @Nullable private final PartitionBucketMapping partitionBucketMapping;
 
     @Nullable private UriReaderFactory blobDescriptorReaderFactory;
 
@@ -83,6 +85,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 isStreamingMode,
                 memoryPoolFactory,
                 metricGroup,
+                null,
                 FileStoreTable::newWrite);
     }
 
@@ -96,6 +99,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean isStreamingMode,
             MemoryPoolFactory memoryPoolFactory,
             @Nullable MetricGroup metricGroup,
+            @Nullable PartitionBucketMapping partitionBucketMapping,
             TableWriteFactory tableWriteFactory) {
         this.commitUser = commitUser;
         this.state = state;
@@ -105,6 +109,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.isStreamingMode = isStreamingMode;
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
+        this.partitionBucketMapping = partitionBucketMapping;
         this.tableWriteFactory = tableWriteFactory;
         this.write = newTableWrite(table);
     }
@@ -116,6 +121,10 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withMemoryPoolFactory(memoryPoolFactory);
+
+        if (partitionBucketMapping != null) {
+            tableWrite.withPartitionBucketMapping(partitionBucketMapping);
+        }
 
         if (metricGroup != null) {
             tableWrite.withMetricRegistry(new FlinkMetricRegistry(metricGroup));
@@ -140,7 +149,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     @Override
     @Nullable
     public SinkRecord write(InternalRow rowData) throws Exception {
-        return write.writeAndReturn(withBlobDescriptorReader(rowData));
+        InternalRow row = withBlobDescriptorReader(rowData);
+        if (partitionBucketMapping == null) {
+            return write.writeAndReturn(row);
+        }
+
+        BinaryRow partition = write.getPartition(row);
+        return write.writeAndReturn(
+                row, write.getBucket(row), partitionBucketMapping.resolveNumBuckets(partition));
     }
 
     @Override

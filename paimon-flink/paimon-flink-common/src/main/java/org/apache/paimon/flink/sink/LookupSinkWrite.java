@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -48,6 +49,32 @@ public class LookupSinkWrite extends StoreSinkWriteImpl {
             boolean isStreaming,
             MemoryPoolFactory memoryPoolFactory,
             MetricGroup metricGroup) {
+        this(
+                table,
+                commitUser,
+                state,
+                ioManager,
+                ignorePreviousFiles,
+                waitCompaction,
+                isStreaming,
+                memoryPoolFactory,
+                metricGroup,
+                null,
+                FileStoreTable::newWrite);
+    }
+
+    LookupSinkWrite(
+            FileStoreTable table,
+            String commitUser,
+            StoreSinkWriteState state,
+            IOManager ioManager,
+            boolean ignorePreviousFiles,
+            boolean waitCompaction,
+            boolean isStreaming,
+            MemoryPoolFactory memoryPoolFactory,
+            MetricGroup metricGroup,
+            PartitionBucketMapping partitionBucketMapping,
+            TableWriteFactory tableWriteFactory) {
         super(
                 table,
                 commitUser,
@@ -57,7 +84,9 @@ public class LookupSinkWrite extends StoreSinkWriteImpl {
                 waitCompaction,
                 isStreaming,
                 memoryPoolFactory,
-                metricGroup);
+                metricGroup,
+                partitionBucketMapping,
+                tableWriteFactory);
 
         this.tableName = table.name();
 
