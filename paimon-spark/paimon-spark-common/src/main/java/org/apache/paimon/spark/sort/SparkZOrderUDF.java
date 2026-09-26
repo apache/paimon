@@ -29,6 +29,7 @@ import org.apache.spark.sql.types.ByteType;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.DateType;
+import org.apache.spark.sql.types.DecimalType;
 import org.apache.spark.sql.types.DoubleType;
 import org.apache.spark.sql.types.FloatType;
 import org.apache.spark.sql.types.IntegerType;
@@ -364,6 +365,8 @@ public class SparkZOrderUDF implements Serializable {
             return longToOrderedBytesUDF().apply(column.cast(DataTypes.LongType));
         } else if (type instanceof TimestampNTZType) {
             return longToOrderedBytesUDF().apply(timestampNtzToLongUDF().apply(column));
+        } else if (type instanceof DecimalType) {
+            return longToOrderedBytesUDF().apply(column.cast(DataTypes.LongType));
         } else if (type instanceof DateType) {
             return longToOrderedBytesUDF().apply(column.cast(DataTypes.LongType));
         } else {
