@@ -1595,6 +1595,44 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testFilterAndCommitAcrossRunsOfOneCommitUser() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> {});
+        SnapshotManager sm = table.snapshotManager();
+
+        // A run of a streaming job, committing two identifiers through one committer, the way a
+        // Spark micro-batch sink and a Flink checkpoint do.
+        StreamWriteBuilder first = table.newStreamWriteBuilder().withCommitUser("user");
+        try (StreamTableWrite write = first.newWrite();
+                StreamTableCommit commit = first.newCommit()) {
+            for (long identifier = 1; identifier <= 2; identifier++) {
+                write.write(rowData((int) identifier, (int) identifier * 10, identifier * 100L));
+                commit.filterAndCommit(
+                        Collections.singletonMap(
+                                identifier, write.prepareCommit(true, identifier)));
+            }
+        }
+        long committed = sm.latestSnapshotId();
+        assertThat(committed).isEqualTo(2);
+
+        // The job is restarted and replays the identifier it committed last, then commits the one
+        // after it. Only the second one produces a snapshot.
+        StreamWriteBuilder replay = table.newStreamWriteBuilder().withCommitUser("user");
+        try (StreamTableWrite write = replay.newWrite();
+                StreamTableCommit commit = replay.newCommit()) {
+            write.write(rowData(2, 20, 200L));
+            commit.filterAndCommit(Collections.singletonMap(2L, write.prepareCommit(true, 2L)));
+            assertThat(sm.latestSnapshotId())
+                    .as("a replayed identifier must not be committed again")
+                    .isEqualTo(committed);
+
+            write.write(rowData(3, 30, 300L));
+            commit.filterAndCommit(Collections.singletonMap(3L, write.prepareCommit(true, 3L)));
+        }
+        assertThat(sm.latestSnapshotId()).isEqualTo(committed + 1);
+        assertThat(sm.latestSnapshot().commitIdentifier()).isEqualTo(3);
+    }
+
+    @Test
     @Timeout(120)
     public void testExpireWithLimit() throws Exception {
         FileStoreTable table = createFileStoreTable();

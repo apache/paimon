@@ -66,6 +66,56 @@ Use a durable checkpoint location accessible to the cluster for deployed jobs. G
 its own checkpoint directory. Stop this example with `writer.stop()`.
 Streaming writes also support [Schema Evolution on Write](./schema-evolution).
 
+### Exactly-once
+
+Structured Streaming replays a micro-batch with its original batch id when a query is restarted
+after failing between the sink writing the batch and Spark recording that batch as completed.
+Paimon commits every micro-batch under a commit user that is stable across restarts, and skips a
+batch that the same user already committed, so a replay does not write the data twice. Micro-batch
+`n` is committed under commit identifier `n + 1`, the way Flink numbers its checkpoints, which is
+what the `$snapshots` system table shows and what a `compacted-full` scan recognises a scheduled
+full compaction by.
+
+What the commit user identifies is one incarnation of a checkpoint, since the batch ids it
+numbers are only unique within one: reusing it across two checkpoints would make Paimon skip the
+data of the second one, while changing it within one query would bring the duplicate back. It is
+therefore derived from the query id that Spark persists in the checkpoint, which is new when a
+checkpoint is recreated, unchanged when a query resumes from one, and independent of how the
+location is spelled, and it cannot be set explicitly. `commit.user-prefix` is read from the table as
+usual and prefixes the derived user, so a job keeps the name its table was configured with.
+
+:::note
+
+A skipped replay leaves the data files it wrote behind, uncommitted. They are removed by
+[orphan file cleaning](../maintenance/manage-snapshots#remove-orphan-files), like any other
+uncommitted file.
+
+A query that starts from a new checkpoint gets a new commit user, so a micro-batch the previous
+run committed is not recognised and its data is written again.
+
+A replay is recognised by the snapshots its commit user left behind, which snapshot expiration
+eventually removes. Before committing a micro-batch, the sink records under the checkpoint location
+of the query which snapshot was the latest before its first attempt. Retries preserve this original
+marker rather than advancing it. If filtering cannot recognise the replay and expiration has removed
+the snapshot immediately after that boundary, the query fails instead of possibly writing it twice.
+An incomplete or corrupt marker also fails the query, since it may belong to an already committed
+batch. The error names the marker file; restore it or delete it only after verifying that the batch
+was not committed. Retain snapshots for longer than a query may be down.
+
+A streaming write to a postpone bucket table writes the postpone bucket, as a Flink streaming job
+does, whatever `postpone.batch-write-fixed-bucket` says: that option is for a batch job which ends
+with its commit. The rows become readable once a
+[compaction](../primary-key-table/data-distribution#postpone-bucket) has sorted them into real
+buckets.
+
+:::
+
+The committer of a query is created with its first micro-batch and lives until the query
+terminates, again as a Flink committer lives across checkpoints. Only the first micro-batch of a
+run looks up what a previous run committed; the maintenance a commit schedules, such as tag
+creation and snapshot or partition expiration, runs while the next micro-batch is written when
+`snapshot.expire.execution-mode` is `async`.
+
 ## Streaming Query
 
 :::info

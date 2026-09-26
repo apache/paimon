@@ -24,7 +24,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.analysis.ReplacePaimonFunctions
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.spark.write.PaimonWriteOptions
+import org.apache.paimon.spark.write.{PaimonWriteOptions, StreamingWrite}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
@@ -40,7 +40,7 @@ case class WriteIntoPaimonTable(
     saveMode: SaveMode,
     _data: DataFrame,
     options: Options,
-    batchId: Option[Long] = None)
+    streaming: Option[StreamingWrite] = None)
   extends RunnableCommand
   with ExpressionHelper
   with SchemaEvolutionHelper
@@ -58,7 +58,7 @@ case class WriteIntoPaimonTable(
     updateTableWithOptions(
       Map(DYNAMIC_PARTITION_OVERWRITE.key -> dynamicPartitionOverwriteMode.toString))
 
-    val writer = PaimonSparkWriter(table, batchId = batchId)
+    val writer = PaimonSparkWriter(table, streaming = streaming)
     if (overwritePartition != null) {
       writer.withOverwrite(overwritePartition.asJava)
     }
