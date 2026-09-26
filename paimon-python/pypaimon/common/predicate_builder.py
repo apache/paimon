@@ -18,7 +18,7 @@
 from typing import Any, List, Optional
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import ArrayType, DataField
 
 
 class PredicateBuilder:
@@ -26,6 +26,9 @@ class PredicateBuilder:
 
     def __init__(self, row_field: List[DataField]):
         self.field_names = [field.name for field in row_field]
+        # Keep the declared types so the array predicates can reject a
+        # non-ARRAY field instead of silently running Python containment.
+        self._field_types = {field.name: field.type for field in row_field}
 
     def _get_field_index(self, field: str) -> int:
         """Get the index of a field in the schema."""
@@ -33,6 +36,19 @@ class PredicateBuilder:
             return self.field_names.index(field)
         except ValueError:
             raise ValueError(f'The field {field} is not in field list {self.field_names}.')
+
+    def _validate_array_field(self, method: str, field: str) -> None:
+        """Reject a non-ARRAY field, mirroring Java ``ArrayContains.elementType``
+        which requires an ARRAY column. Without this, the row-level testers run
+        ``literal in value`` and would match against a STRING (or other) column,
+        silently selecting wrong rows on a wrong name or after a schema change.
+        """
+        if field not in self._field_types:
+            raise ValueError(f'The field {field} is not in field list {self.field_names}.')
+        field_type = self._field_types[field]
+        if not isinstance(field_type, ArrayType):
+            raise ValueError(
+                "{} requires an ARRAY field, but '{}' is {}.".format(method, field, field_type))
 
     def _build_predicate(self, method: str, field: str, literals: Optional[List[Any]] = None) -> Predicate:
         """Build a predicate with the given method, field, and literals."""
@@ -107,6 +123,29 @@ class PredicateBuilder:
     def like(self, field: str, pattern_literal: Any) -> Predicate:
         """Create a SQL LIKE predicate. Supports '%' (any sequence) and '_' (any single char)."""
         return self._build_predicate('like', field, [pattern_literal])
+
+    def array_contains(self, field: str, element_literal: Any) -> Predicate:
+        """Create an ARRAY_CONTAINS predicate: the array column contains
+        ``element_literal``. Mirrors Java ``PredicateBuilder.arrayContains``.
+        """
+        self._validate_array_field('arrayContains', field)
+        return self._build_predicate('arrayContains', field, [element_literal])
+
+    def arrays_overlap(self, field: str, element_literals: List[Any]) -> Predicate:
+        """Create an ARRAYS_OVERLAP predicate: the array column shares at
+        least one element with ``element_literals``. Mirrors Java
+        ``PredicateBuilder.arraysOverlap``.
+        """
+        self._validate_array_field('arraysOverlap', field)
+        return self._build_predicate('arraysOverlap', field, list(element_literals))
+
+    def array_contains_all(self, field: str, element_literals: List[Any]) -> Predicate:
+        """Create an ARRAY_CONTAINS_ALL predicate: the array column contains
+        every element in ``element_literals``. Mirrors Java
+        ``PredicateBuilder.arrayContainsAll``.
+        """
+        self._validate_array_field('arrayContainsAll', field)
+        return self._build_predicate('arrayContainsAll', field, list(element_literals))
 
     @staticmethod
     def and_predicates(predicates: List[Predicate]) -> Optional[Predicate]:
