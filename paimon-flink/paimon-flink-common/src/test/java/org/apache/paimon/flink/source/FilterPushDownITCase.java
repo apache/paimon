@@ -74,6 +74,29 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
                 Row.ofKind(RowKind.INSERT, 1, 1, "1"));
     }
 
+    /** Flink evaluates {@code -0.0 = 0.0} as true, so a pushed-down filter must keep the row. */
+    @Test
+    public void testNegativeZeroMatchesEqualityOnZero() {
+        // constants are folded through DECIMAL, which has no -0.0, so negate at runtime
+        sql("CREATE TABLE ZERO_SRC (d DOUBLE, f FLOAT)");
+        batchSql("INSERT INTO ZERO_SRC VALUES (CAST(0 AS DOUBLE), CAST(0 AS FLOAT))");
+        for (String format : Arrays.asList("parquet", "orc", "avro")) {
+            String table = "ZERO_" + format;
+            sql(
+                    "CREATE TABLE %s (id INT, d DOUBLE, f FLOAT) WITH ('file.format' = '%s')",
+                    table, format);
+            batchSql("INSERT INTO %s SELECT 1, -d, -f FROM ZERO_SRC", table);
+            assertThat(batchSql("SELECT CAST(d AS STRING), CAST(f AS STRING) FROM %s", table))
+                    .containsExactly(Row.of("-0.0", "-0.0"));
+
+            for (String condition : Arrays.asList("d = 0.0", "d = 0", "f = 0")) {
+                assertThat(batchSql("SELECT id FROM %s WHERE %s", table, condition))
+                        .as("%s: %s", format, condition)
+                        .containsExactly(Row.of(1));
+            }
+        }
+    }
+
     @Test
     public void testPartitionConditionNotConsuming1() {
         // a = 1 not consumed

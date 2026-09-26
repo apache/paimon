@@ -607,10 +607,10 @@ public class PredicateConverterTest {
         assertThat(PredicateConverter.convert(rowType, negatedNotEquals)).isEmpty();
         assertThat(PredicateConverter.convert(rowType, negatedEquals)).isEmpty();
 
-        // Non-negated equal stays on the pre-existing compareTo path.
+        // Non-negated equal is converted and, like Flink, treats the two zeros as equal.
         Predicate equal = call(BuiltInFunctionDefinitions.EQUALS, field, zero).accept(converter);
         assertThat(equal.test(GenericRow.of(0.0d))).isTrue();
-        assertThat(equal.test(GenericRow.of(-0.0d))).isFalse();
+        assertThat(equal.test(GenericRow.of(-0.0d))).isTrue();
     }
 
     @Test

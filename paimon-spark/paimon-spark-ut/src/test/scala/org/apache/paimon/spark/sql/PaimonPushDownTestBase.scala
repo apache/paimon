@@ -322,6 +322,31 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test("Paimon push down: -0.0 matches predicates on 0.0") {
+    for (format <- Seq("parquet", "orc", "avro"); primaryKey <- Seq(false, true)) {
+      withTable("t") {
+        val pkProps = if (primaryKey) ", 'primary-key' = 'id', 'bucket' = '1'" else ""
+        sql(s"""
+               |CREATE TABLE t (id INT, d DOUBLE, f FLOAT) USING paimon
+               |TBLPROPERTIES ('file.format' = '$format'$pkProps)
+               |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, CAST('-0.0' AS DOUBLE), CAST('-0.0' AS FLOAT))")
+        val stored = spark.table("t").collect().head
+        assert(java.lang.Double.doubleToRawLongBits(stored.getDouble(1)) == 0x8000000000000000L)
+        assert(java.lang.Float.floatToRawIntBits(stored.getFloat(2)) == 0x80000000)
+
+        for (
+          column <- Seq("d", "f");
+          condition <- Seq("= 0.0", "IN (0.0, 5.0)", ">= 0.0", "<= 0.0", "BETWEEN 0.0 AND 0.5")
+        ) {
+          withClue(s"$format, primary key: $primaryKey, $column $condition: ") {
+            checkAnswer(sql(s"SELECT id FROM t WHERE $column $condition"), Seq(Row(1)))
+          }
+        }
+      }
+    }
+  }
+
   test("Paimon pushDown: limit for append-only tables with deletion vector") {
     withTable("dv_test") {
       spark.sql(
