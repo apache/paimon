@@ -145,6 +145,80 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
+    public void testRejectTypeWideningOnPrimaryKeyColumn() {
+        // An INT primary key must not be widened to BIGINT by the automatic merge path: INT
+        // values hash into different buckets than their BIGINT counterparts, so the same logical
+        // key would end up in two buckets and bypass intra-bucket deduplication.
+        DataField a = new DataField(0, "a", new IntType());
+        DataField b = new DataField(1, "b", new VarCharType(VarCharType.MAX_LENGTH));
+        TableSchema current =
+                new TableSchema(
+                        0,
+                        Lists.newArrayList(a, b),
+                        1,
+                        new ArrayList<>(),
+                        Lists.newArrayList("a"),
+                        new HashMap<>(),
+                        "");
+
+        DataField aWidened = new DataField(-1, "a", new BigIntType());
+        RowType t = new RowType(Lists.newArrayList(aWidened, b));
+
+        assertThatThrownBy(() -> SchemaMergingUtils.mergeSchemas(current, t, true, false, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot update primary key type");
+    }
+
+    @Test
+    public void testRejectTypeWideningOnPartitionColumn() {
+        // Partition columns are equally encoded into the partition path; widening them would
+        // silently create a second partition layout for the same logical key.
+        DataField a = new DataField(0, "a", new IntType());
+        DataField b = new DataField(1, "b", new VarCharType(VarCharType.MAX_LENGTH));
+        TableSchema current =
+                new TableSchema(
+                        0,
+                        Lists.newArrayList(a, b),
+                        1,
+                        Lists.newArrayList("b"),
+                        new ArrayList<>(),
+                        new HashMap<>(),
+                        "");
+
+        DataField bWidened = new DataField(-1, "b", new VarCharType(100));
+        RowType t = new RowType(Lists.newArrayList(a, bWidened));
+
+        assertThatThrownBy(() -> SchemaMergingUtils.mergeSchemas(current, t, true, true, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot update partition column type");
+    }
+
+    @Test
+    public void testAllowTypeWideningOnNonKeyColumn() {
+        // Widening a non-key column is unaffected by the key-column guard.
+        DataField a = new DataField(0, "a", new IntType());
+        DataField b = new DataField(1, "b", new IntType());
+        TableSchema current =
+                new TableSchema(
+                        0,
+                        Lists.newArrayList(a, b),
+                        1,
+                        new ArrayList<>(),
+                        Lists.newArrayList("a"),
+                        new HashMap<>(),
+                        "");
+
+        DataField bWidened = new DataField(-1, "b", new BigIntType());
+        RowType t = new RowType(Lists.newArrayList(a, bWidened));
+
+        TableSchema merged = SchemaMergingUtils.mergeSchemas(current, t, true, false, true);
+        assertThat(merged.id()).isEqualTo(1);
+        assertThat(merged.primaryKeys()).containsExactly("a");
+        assertThat(merged.fields().get(0).type()).isEqualTo(new IntType());
+        assertThat(merged.fields().get(1).type()).isEqualTo(new BigIntType());
+    }
+
+    @Test
     public void testMergeSchemas() {
         // This will test both `mergeSchemas` and `merge` methods.
         // Init the source schema
