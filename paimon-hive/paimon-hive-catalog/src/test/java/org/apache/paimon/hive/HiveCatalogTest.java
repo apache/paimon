@@ -305,6 +305,76 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testCreateExternalTableWithSchemelessLocation() throws Exception {
+        // A `LOCATION '/path'` without a scheme must resolve against the default filesystem rather
+        // than silently falling back to FileIO's local implementation, which would write the
+        // schema files to the driver's local disk on a cluster.
+        String databaseName = "test_db";
+        String tableName = "external_table";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+
+        String schemelessLocation = "/data/external/" + tableName;
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), schemelessLocation);
+        Schema schemaWithLocation =
+                new Schema(
+                        schema.fields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment());
+
+        catalog.createTable(identifier, schemaWithLocation, false);
+
+        // The location stored in the metastore must carry an explicit scheme.
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+        Path storedLocation = hiveCatalog.getTableLocation(identifier);
+        assertThat(storedLocation.toUri().getScheme()).isNotNull();
+        assertThat(storedLocation.toUri().getPath()).isEqualTo(schemelessLocation);
+    }
+
+    @Test
+    public void testCreateTableDoesNotLeaveZombieEntryWhenMetastoreFails() throws Exception {
+        // If the metastore registration fails the table must not be left behind as a zombie entry.
+        String databaseName = "test_db";
+        String tableName = "failing_table";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+
+        // Simulate the state left by a failed metastore registration: the table has already been
+        // registered in HMS, but the call as a whole failed.
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        catalog.createTable(identifier, schema, false);
+        assertThat(hiveCatalog.tableExists(identifier)).isTrue();
+
+        // The rollback path must remove the entry again instead of leaving it behind.
+        hiveCatalog.cleanupOnCreateTableFailure(
+                identifier, hiveCatalog.getTableLocation(identifier), false);
+
+        assertThat(hiveCatalog.tableExists(identifier)).isFalse();
+    }
+
+    @Test
     public void testDropTableWhenTablePathMissing() throws Exception {
         String databaseName = "test_db";
         String tableName = "new_table";
