@@ -495,6 +495,29 @@ def test_row_id_cast_failure_does_not_write_nulls(tmp_path, native, values):
     (pa.array(['yes']), pa.bool_()),
     (pa.array(['f']), pa.bool_()),
     (pa.array(['TRUE']), pa.bool_()),
+    (pa.array(['1970-01-01 00:00:00.123456']), pa.timestamp('ms')),
+    (pa.array(['1970-01-01 00:00:00.0000']), pa.timestamp('ms')),
+    (pa.array(['1970-01-01 00:00:00.123']), pa.timestamp('ms')),
+    (pa.array(['1970-01-01T01']), pa.timestamp('ms')),
+    (pa.array(['1970-01-01 00:00:00Z']), pa.timestamp('ms')),
+    (pa.array([0], type=pa.date64()), pa.string()),
+    (pa.array([0], type=pa.timestamp('us', 'Asia/Shanghai')), pa.timestamp('us')),
+    (pa.array([-1000], type=pa.timestamp('us', 'Asia/Shanghai')), pa.timestamp('ms')),
+    (pa.array([-1001], type=pa.timestamp('us', 'Asia/Shanghai')), pa.timestamp('ms')),
+    (pa.array([42], type=pa.int64()), pa.binary()),
+    (pa.array([None], type=pa.int64()), pa.binary()),
+    (pa.array([b'1.25']), pa.float64()),
+    (pa.array([b'1.25'], type=pa.large_binary()), pa.float64()),
+    (pa.array([b'1.25']), pa.decimal128(6, 2)),
+    (pa.array([b'1.234']), pa.decimal128(6, 2)),
+    (pa.array([b'0042']), pa.int32()),
+    (pa.array([b'0x2a']), pa.int32()),
+    (pa.array([b'0Xffffffff'], type=pa.large_binary()), pa.int32()),
+    (pa.array([b'+42']), pa.int32()),
+    (pa.array(['0x2a']), pa.int32()),
+    (pa.array(['+42']), pa.int32()),
+    (pa.array([b'true']), pa.bool_()),
+    (pa.array([b'yes']), pa.bool_()),
 ])
 def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target):
     from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
@@ -517,8 +540,8 @@ def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target
     update = table.new_batch_write_builder()
     try:
         expected = values.cast(target).to_pylist()
-    except pa.ArrowInvalid:
-        with pytest.raises((ValueError, pa.ArrowInvalid)):
+    except pa.ArrowException:
+        with pytest.raises((ValueError, pa.ArrowException)):
             update.new_update().update_by_predicate(None, {'value': values})
         assert set(tmp_path.rglob('*.parquet')) == before
         expected = [None]
@@ -694,6 +717,7 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
 @pytest.mark.native_plan
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('grouped', [False, True])
+@pytest.mark.parametrize('empty_chunks', [False, True])
 @pytest.mark.parametrize('values,target,row_id_type', [
     (pa.array([99], type=pa.int32()), pa.int32(), pa.int32()),
     (pa.array([99], type=pa.int32()), pa.int32(), pa.uint64()),
@@ -706,9 +730,22 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
     (pa.array([2 ** 63 - 1], type=pa.int64()), pa.float64(), pa.int64()),
     (pa.array([-1234567], type=pa.timestamp('ns')), pa.timestamp('ms'), pa.int64()),
     (pa.array([1234567], type=pa.timestamp('ns')), pa.time32('ms'), pa.int64()),
+    (pa.array([99], type=pa.int32()), pa.int32(), pa.uint32()),
+    (pa.array(['1970-01-01 00:00:00.123456']), pa.timestamp('ms'), pa.int32()),
+    (pa.array(['1970-01-01 00:00:00.123']), pa.timestamp('ms'), pa.int32()),
+    (pa.array([0], type=pa.date64()), pa.string(), pa.int32()),
+    (pa.array([0], type=pa.timestamp('us', 'Asia/Shanghai')), pa.timestamp('us'), pa.int32()),
+    (pa.array([-1001], type=pa.timestamp('us', 'Asia/Shanghai')), pa.timestamp('ms'), pa.int32()),
+    (pa.array([42], type=pa.int64()), pa.binary(), pa.int32()),
+    (pa.array([None], type=pa.int64()), pa.binary(), pa.int32()),
+    (pa.array([b'1.25']), pa.float64(), pa.int32()),
+    (pa.array([b'1.25'], type=pa.large_binary()), pa.float64(), pa.int32()),
+    (pa.array([b'1.234']), pa.decimal128(6, 2), pa.int32()),
+    (pa.array([b'0x2a']), pa.int32(), pa.int32()),
+    (pa.array([b'+42']), pa.int32(), pa.int32()),
 ])
 def test_native_row_id_input_conversion_matches_python(
-        tmp_path, native, grouped, values, target, row_id_type):
+        tmp_path, native, grouped, empty_chunks, values, target, row_id_type):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int32()), ('value', target)])
@@ -723,6 +760,9 @@ def test_native_row_id_input_conversion_matches_python(
     builder.new_commit().commit(writer.prepare_commit())
     writer.close()
     data = pa.table({'_ROW_ID': pa.array([0], type=row_id_type), 'value': values})
+    if empty_chunks:
+        batch = data.to_batches()[0]
+        data = pa.Table.from_batches([batch.slice(0, 0), batch, batch.slice(1, 0)])
     before = set(tmp_path.rglob('*.parquet'))
     updater = builder.new_update()
 
