@@ -32,6 +32,7 @@ import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -76,5 +77,21 @@ class PostponeBucketWriterTest {
         verify(writerFactory).hasBlobExternalizer();
         verify(writerFactory, never()).externalizeBlob(any(), any());
         verify(rollingWriter).write(same(record));
+    }
+
+    @Test
+    void testGetWriteIdWithSeparatorInCommitUser() {
+        // the commit user is interpolated verbatim into the writer prefix, so it may
+        // contain the "-s-" separator itself
+        assertThat(
+                        PostponeBucketFileStoreWrite.getWriteId(
+                                "a-s-123-b-u-my-s-user-s-42-w-data-uuid-0.orc"))
+                .isEqualTo(42);
+        assertThat(PostponeBucketFileStoreWrite.getWriteId("p-u-cu-s-7-w-data-uuid-0.orc"))
+                .isEqualTo(7);
+        // hostile commit user alone: the first split would hit the in-user separator and
+        // crash on the missing dash
+        assertThat(PostponeBucketFileStoreWrite.getWriteId("p-u-my-s-user-s-42-w-data-uuid-0.orc"))
+                .isEqualTo(42);
     }
 }

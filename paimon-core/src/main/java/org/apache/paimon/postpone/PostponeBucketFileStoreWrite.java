@@ -231,8 +231,11 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
 
     public static int getWriteId(String fileName) {
         try {
-            String[] parts = fileName.split("-s-");
-            return Integer.parseInt(parts[1].substring(0, parts[1].indexOf('-')));
+            // the write id is the segment between the last "-s-" and the writer marker:
+            // the commit user is interpolated verbatim and may itself contain "-s-"
+            int writerMarker = fileName.lastIndexOf("-w-");
+            int sequenceMarker = fileName.lastIndexOf("-s-", writerMarker);
+            return Integer.parseInt(fileName.substring(sequenceMarker + 3, writerMarker));
         } catch (Exception e) {
             throw new RuntimeException(
                     "Data file name "
