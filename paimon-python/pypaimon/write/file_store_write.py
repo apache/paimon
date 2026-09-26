@@ -41,11 +41,16 @@ class FileStoreWrite:
 
     def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.common.options.core_options import MergeEngine
         from pypaimon.read.merge_engine_support import check_sequence_field_supported
 
         # TableWrite constructs this before the row-key extractor, whose
         # dynamic bucket index must not retain hashes for rejected writes.
         check_sequence_field_supported(table)
+        if table.is_primary_key_table and table.options.merge_engine() == MergeEngine.AGGREGATE:
+            from pypaimon.read.merge_engine_support import check_supported
+
+            check_supported(table)
 
         self.table: FileStoreTable = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
@@ -219,14 +224,9 @@ class FileStoreWrite:
         partial-update with no out-of-scope options) cannot drift
         between sides.
 
-        For wholly unsupported engines (``aggregation``) the writer
-        falls back to ``DeduplicateMergeFunction`` so the flushed file
-        still maintains the LSM "PK unique within a file" invariant.
-        The read path's dispatch still raises ``NotImplementedError``,
-        so the user gets an explicit error before they observe
-        wrong-engine data; the fallback only narrows the damage to
-        "file is deduped, not aggregated" rather than the silent
-        multi-row-per-PK corruption that existed pre-PR.
+        Aggregation options are validated with the read-side guard at writer
+        construction. Unsupported configurations must not be committed using
+        fallback merge semantics that discard input values.
 
         Partial-update with out-of-scope options (sequence-group,
         per-field aggregator, ignore-delete, remove-record-on-*) does
