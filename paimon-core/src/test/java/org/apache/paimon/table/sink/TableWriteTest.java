@@ -38,9 +38,11 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -543,6 +545,104 @@ public class TableWriteTest {
                                 options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), path, tableSchema);
+    }
+
+    @Test
+    public void testWithWriteTypeRebuildsDefaultValueRow() throws Exception {
+        // at least one column default makes TableWriteImpl wrap rows with DefaultValueRow
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, -1);
+        conf.set(CoreOptions.ROW_TRACKING_ENABLED, true);
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "pt", DataTypes.INT()),
+                        new DataField(1, "k", DataTypes.INT()),
+                        new DataField(2, "v", DataTypes.INT(), null, "7"));
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                fields,
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        // the Spark copy-on-write rewrite writes with the row-tracking-extended type; the
+        // appended special positions are null, and a stale DefaultValueRow sized for the
+        // original type crashes with an out-of-bounds read on them
+        RowType writeType = SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true);
+        write.withWriteType(writeType);
+
+        int arity = writeType.getFieldCount();
+        GenericRow row = new GenericRow(arity);
+        row.setField(0, 1);
+        row.setField(1, 10);
+        row.setField(2, 20); // non-default value on the defaulted column
+        row.setField(3, 0L); // _ROW_ID is required
+        // leave the appended _SEQUENCE_NUMBER null, like the Spark rewrite does
+        write.write(row);
+
+        StreamTableCommit commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        // the explicit value survives the type change (single row: the write-type path
+        // reuses one DefaultValueRow instance, so only one row is written here)
+        List<InternalRow> rows = readRows(table);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(2)).isEqualTo(20);
+    }
+
+    @Test
+    public void testWithWriteTypeSubstitutesDefaultValue() throws Exception {
+        // same shape as testWithWriteTypeRebuildsDefaultValueRow, but the defaulted column
+        // is null: the rebuilt DefaultValueRow must fill the default at the new write-type
+        // position
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, -1);
+        conf.set(CoreOptions.ROW_TRACKING_ENABLED, true);
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "pt", DataTypes.INT()),
+                        new DataField(1, "k", DataTypes.INT()),
+                        new DataField(2, "v", DataTypes.INT(), null, "7"));
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                fields,
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        RowType writeType = SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true);
+        write.withWriteType(writeType);
+
+        int arity = writeType.getFieldCount();
+        GenericRow row = new GenericRow(arity);
+        row.setField(0, 1);
+        row.setField(1, 11);
+        row.setField(3, 1L);
+        // v and the appended _SEQUENCE_NUMBER stay null
+        write.write(row);
+
+        StreamTableCommit commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        List<InternalRow> rows = readRows(table);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(2)).isEqualTo(7);
     }
 
     private FileStoreTable createFileStoreTable(Options conf) throws Exception {
