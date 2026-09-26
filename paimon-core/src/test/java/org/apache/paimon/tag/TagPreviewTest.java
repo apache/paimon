@@ -38,6 +38,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link TagPreview}. */
 public class TagPreviewTest extends PrimaryKeyTableTestBase {
@@ -89,6 +90,29 @@ public class TagPreviewTest extends PrimaryKeyTableTestBase {
 
         assertThat(preview.timeTravel(table, "2023-07-19"))
                 .containsAllEntriesOf(singletonMap(SCAN_TAG_NAME.key(), "2023-07-18"));
+    }
+
+    @Test
+    public void testTimeTravelSkipsManualOnlySnapshots() throws Exception {
+        TagPreview preview = create();
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+
+        // only manually named tags exist and no snapshot's preview time resolves the
+        // requested tag: the lookup must fail with the intended error instead of the
+        // misleading "more than 1 auto-created tags"
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        table.createTag("my-manual-tag", 1);
+
+        assertThatThrownBy(() -> preview.timeTravel(table, "2023-07-01"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot find snapshot or tag");
+
+        // a date-shaped (auto-format) tag resolves normally through the short-circuit
+        table.createTag("2023-07-19", 1);
+        assertThat(preview.timeTravel(table, "2023-07-19"))
+                .containsAllEntriesOf(singletonMap(SCAN_TAG_NAME.key(), "2023-07-19"));
+
+        commit.close();
     }
 
     private TagPreview create() {

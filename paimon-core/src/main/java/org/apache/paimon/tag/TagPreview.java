@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static java.util.Collections.singletonMap;
@@ -87,6 +88,7 @@ public class TagPreview {
         Optional<String> findTag =
                 tagManager.tags().values().stream()
                         .map(this::toOneAutoTag)
+                        .filter(Objects::nonNull)
                         .filter(t -> t.compareTo(tag) <= 0)
                         .max(Comparator.naturalOrder());
         if (findTag.isPresent()) {
@@ -102,6 +104,10 @@ public class TagPreview {
             if (periodHandler.isAutoTag(tag)) {
                 autoTags.add(tag);
             }
+        }
+        if (autoTags.isEmpty()) {
+            // a snapshot may carry only manually created tags: nothing to resolve here
+            return null;
         }
         return TagAutoCreation.checkAndGetOneAutoTag(autoTags);
     }
