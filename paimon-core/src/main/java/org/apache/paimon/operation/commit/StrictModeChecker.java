@@ -29,6 +29,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -145,13 +146,24 @@ public class StrictModeChecker {
         // Fast exit: if this snapshot's indexManifest file name equals the
         // previous snapshot's, no index file was added/removed by this commit
         // (writeIndexFiles reuses the previous file when newIndexFiles is empty).
+        String prevIndexManifest = null;
         long prevId = snapshot.id() - 1;
-        if (snapshotManager.snapshotExists(prevId)
-                && indexManifest.equals(snapshotManager.snapshot(prevId).indexManifest())) {
+        if (snapshotManager.snapshotExists(prevId)) {
+            prevIndexManifest = snapshotManager.snapshot(prevId).indexManifest();
+        }
+        if (indexManifest.equals(prevIndexManifest)) {
             return false;
         }
+        // Only index entries added or replaced by this snapshot's commit conflict;
+        // entries inherited from earlier snapshots were already covered when the
+        // commit that wrote them was itself checked, like the data check which
+        // only reads the snapshot's delta.
+        Set<IndexManifestEntry> previousEntries =
+                prevIndexManifest == null
+                        ? Collections.emptySet()
+                        : new HashSet<>(indexManifestFile.read(prevIndexManifest));
         for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
-            if (newPartitions.contains(entry.partition())) {
+            if (!previousEntries.contains(entry) && newPartitions.contains(entry.partition())) {
                 return true;
             }
         }
