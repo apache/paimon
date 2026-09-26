@@ -26,6 +26,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -33,11 +34,43 @@ from pypaimon.tests.data_evolution_test_helpers import (
 )
 from pypaimon.write.table_update import BatchTableUpdate
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
 # ======================================================================
 # Shared base for batch & stream table-update tests
 # ======================================================================
+
+
+@pytest.mark.parametrize("stream, commit_identifier", [
+    (False, BATCH_COMMIT_IDENTIFIER),
+    (True, 123),
+])
+def test_write_builder_creates_row_id_updater_with_commit_identity(
+        stream, commit_identifier):
+    table = mock.Mock()
+    table.options.commit_user_prefix.return_value = None
+    files_info = mock.Mock(
+        snapshot_id=42,
+        first_row_ids=[0],
+        first_row_id_index={},
+        valid_row_id_ranges=[],
+    )
+
+    builder = StreamWriteBuilder(table) if stream else BatchWriteBuilder(table)
+    update = builder.new_update()
+    if stream:
+        updater = update.new_update_by_row_id(
+            commit_identifier, _precomputed_files_info=files_info)
+    else:
+        updater = update.new_update_by_row_id(
+            _precomputed_files_info=files_info)
+
+    assert updater.table is table
+    assert updater.commit_user == update.commit_user == builder.commit_user
+    assert updater.commit_identifier == commit_identifier
+    assert updater.snapshot_id == 42
+    table.new_read_builder.assert_not_called()
 
 
 def test_batch_row_id_update_batches_reuse_file_index():
@@ -48,8 +81,8 @@ def test_batch_row_id_update_batches_reuse_file_index():
         pa.table({"_ROW_ID": [1], "value": [20]}),
     ]
 
-    with mock.patch(
-            "pypaimon.write.table_update.TableUpdateByRowId") as factory:
+    with mock.patch.object(
+            BatchTableUpdate, "_new_row_id_updater") as factory:
         updater = factory.return_value
         updater.commit_messages = []
 
@@ -64,7 +97,7 @@ def test_batch_row_id_update_batches_reuse_file_index():
             .update_by_arrow_batches_with_row_id(iter(batches))
         )
 
-    factory.assert_called_once()
+    factory.assert_called_once_with(BATCH_COMMIT_IDENTIFIER)
     assert updater.update_columns.call_count == 2
     assert messages == [
         (batches[0], ["value"]),

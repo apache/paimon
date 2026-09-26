@@ -675,13 +675,14 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         )
         self._compact_all_data_files(table)
 
+        from pypaimon.write.row_id_file_index import RowIdFileIndex
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
-        original_build = TableUpdateByRowId._files_info_from_entries
+        original_build = RowIdFileIndex.from_entries
         advanced = [False]
 
         def build_after_concurrent_compaction(
-                updater_cls, current_table, snapshot_id, entries):
+                index_cls, current_table, snapshot_id, entries):
             if not advanced[0]:
                 advanced[0] = True
                 self._write_arrow(table, pa.Table.from_pydict({
@@ -698,8 +699,8 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
                 '_load_existing_files_info',
                 side_effect=AssertionError("unexpected snapshot scan"),
         ), mock.patch.object(
-                TableUpdateByRowId,
-                '_files_info_from_entries',
+                RowIdFileIndex,
+                'from_entries',
                 classmethod(build_after_concurrent_compaction)):
             commit = wb.new_commit()
             self._apply_commit(commit, messages, commit_identifier)

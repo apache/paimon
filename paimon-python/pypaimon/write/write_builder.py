@@ -46,6 +46,11 @@ class WriteBuilder(ABC):
     def new_commit(self) -> TableCommit:
         """Returns a table commit."""
 
+    def _with_commit_user(self, commit_user: str):
+        """Reuse the identity of an existing write or commit operation."""
+        self.commit_user = commit_user
+        return self
+
     def _create_commit_user(self):
         commit_user_prefix = self.table.options.commit_user_prefix()
         if commit_user_prefix is not None:
@@ -111,3 +116,21 @@ class StreamWriteBuilder(WriteBuilder):
     def new_commit(self) -> StreamTableCommit:
         commit = StreamTableCommit(self.table, self.commit_user)
         return commit
+
+
+def _new_update_by_row_id(
+        table, commit_user: str, commit_identifier: int,
+        _precomputed_files_info=None):
+    """Build an internal updater with an operation's existing commit identity."""
+    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+
+    if commit_identifier == BATCH_COMMIT_IDENTIFIER:
+        return (table.new_batch_write_builder()
+                ._with_commit_user(commit_user)
+                .new_update()
+                .new_update_by_row_id(_precomputed_files_info))
+    return (table.new_stream_write_builder()
+            ._with_commit_user(commit_user)
+            .new_update()
+            .new_update_by_row_id(
+                commit_identifier, _precomputed_files_info))
