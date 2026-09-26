@@ -21,6 +21,7 @@ package org.apache.paimon.deletionvectors.append;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -32,6 +33,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DeletionFile;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -47,6 +49,48 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AppendDeletionFileMaintainerTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testMergeStoredBitmap32IntoBitmap64() throws Exception {
+        // write DVs as bitmap32, then flip deletion-vectors.bitmap64 on: the next
+        // notification must merge the stored vector instead of crashing on the type
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "false");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+
+        CommitMessageImpl commitMessage =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Collections.singletonMap("f1", Arrays.asList(1, 3, 5)));
+        store.commit(commitMessage);
+
+        IndexPathFactory indexPathFactory =
+                store.pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0);
+        Map<String, DeletionFile> dataFileToDeletionFiles =
+                createDeletionFileMapFromIndexFileMetas(
+                        indexPathFactory, commitMessage.newFilesIncrement().newIndexFiles());
+
+        Map<String, String> flipped = new HashMap<>();
+        flipped.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        TestAppendFileStore flippedStore = TestAppendFileStore.createAppendStore(tempDir, flipped);
+        AppendDeleteFileMaintainer dvIFMaintainer =
+                flippedStore.createDVIFMaintainer(BinaryRow.EMPTY_ROW, dataFileToDeletionFiles);
+
+        Bitmap64DeletionVector fresh = new Bitmap64DeletionVector();
+        fresh.delete(7);
+        dvIFMaintainer.notifyNewDeletionVector("f1", fresh);
+
+        List<IndexManifestEntry> res = dvIFMaintainer.persist();
+        assertThat(res).hasSize(2);
+        // the old index file is replaced by one holding the merged vector: stored 3
+        // deletions plus the fresh one
+        assertThat(res).anyMatch(entry -> entry.kind() == FileKind.DELETE);
+        IndexManifestEntry added =
+                res.stream().filter(entry -> entry.kind() == FileKind.ADD).findAny().get();
+        assertThat(added.indexFile().dvRanges()).containsKey("f1");
+        assertThat(added.indexFile().dvRanges().get("f1").cardinality()).isEqualTo(4);
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
