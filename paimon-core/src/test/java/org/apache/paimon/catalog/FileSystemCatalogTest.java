@@ -70,6 +70,43 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testCreateTableWithUnsupportedTypeFailsLoudly() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "iceberg_t");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .option("type", "iceberg-table")
+                        .build();
+
+        // falling through the switch silently would report a successful DDL without
+        // creating anything
+        assertThatThrownBy(() -> catalog.createTable(identifier, schema, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("iceberg-table");
+        assertThat(catalog.listTables("test_db")).doesNotContain(identifier.getObjectName());
+    }
+
+    @Test
+    public void testDropTableToleratesBlankExternalPaths() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "external_paths_t");
+        Path external = new Path(new Path(warehouse), "test_db/external_dir");
+        fileIO.mkdirs(external);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .option("data-file.external-paths", " , " + external + " ,")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        // the drop must not crash on the blank segments the create-time validation
+        // tolerates
+        catalog.dropTable(identifier, false);
+        assertThat(catalog.listTables("test_db")).doesNotContain(identifier.getObjectName());
+    }
+
+    @Test
     public void testValidateFormatTableDefaultOptions() throws Exception {
         String database = "format_table_default_validation_db";
         catalog.createDatabase(database, false);

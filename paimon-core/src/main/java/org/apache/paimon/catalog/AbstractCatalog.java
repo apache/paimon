@@ -415,6 +415,8 @@ public abstract class AbstractCatalog implements Catalog {
                         })
                 .filter(Objects::nonNull)
                 .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
+                .map(String::trim)
+                .filter(path -> !path.isEmpty())
                 .map(Path::new)
                 .distinct()
                 .collect(Collectors.toList());
@@ -445,7 +447,8 @@ public abstract class AbstractCatalog implements Catalog {
         copyTableDefaultOptions(schema.options());
         validateCreateTable(schema, false);
 
-        switch (Options.fromMap(schema.options()).get(TYPE)) {
+        TableType type = Options.fromMap(schema.options()).get(TYPE);
+        switch (type) {
             case TABLE:
             case MATERIALIZED_TABLE:
                 createTableImpl(identifier, schema);
@@ -456,6 +459,11 @@ public abstract class AbstractCatalog implements Catalog {
             case OBJECT_TABLE:
                 createObjectTable(identifier, schema);
                 break;
+            default:
+                // silently falling through would report a successful DDL without
+                // creating anything
+                throw new UnsupportedOperationException(
+                        "Create table with type '" + type + "' is not supported.");
         }
     }
 
