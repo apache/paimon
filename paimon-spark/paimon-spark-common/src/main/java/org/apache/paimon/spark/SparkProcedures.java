@@ -31,6 +31,7 @@ import org.apache.paimon.spark.procedure.CreateFunctionProcedure;
 import org.apache.paimon.spark.procedure.CreateGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.CreatePolicyProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
+import org.apache.paimon.spark.procedure.CreateTagFromWatermarkProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
@@ -106,6 +107,8 @@ public class SparkProcedures {
         procedureBuilders.put("rename_tag", RenameTagProcedure::builder);
         procedureBuilders.put(
                 "create_tag_from_timestamp", CreateTagFromTimestampProcedure::builder);
+        procedureBuilders.put(
+                "create_tag_from_watermark", CreateTagFromWatermarkProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         procedureBuilders.put("expire_tags", ExpireTagsProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
