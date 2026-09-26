@@ -24,7 +24,9 @@ from pypaimon.read.native_plan import (
     _catalog_context_options, _catalog_metastore, _option_value_to_string,
     _resolved_schema_file_io_options)
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
-from pypaimon.write.commit_message_serializer import serialize_commit_message
+from pypaimon.write.commit_message_serializer import (
+    deserialize_commit_message, serialize_commit_message,
+)
 
 
 _DEFAULT_MANIFEST_TARGET_SIZE = 8 * 1024 * 1024
@@ -183,3 +185,15 @@ def to_native_commit_messages(table, messages):
     return [NativeCommitMessage.deserialize(
         serialize_commit_message(message, table.partition_keys_fields), version=14)
         for message in messages]
+
+
+def from_native_commit_messages(table, messages):
+    """Decode native v14 messages for PyPaimon's existing commit API."""
+    decoded = [deserialize_commit_message(
+        message.serialize(), table.partition_keys_fields,
+        table.trimmed_primary_keys_fields) for message in messages]
+    for message in decoded:
+        for file in message.new_files + message.changelog_files:
+            file.file_path = file.external_path or canonical_data_file_path(
+                table, message.partition, message.bucket, file.file_name)
+    return decoded

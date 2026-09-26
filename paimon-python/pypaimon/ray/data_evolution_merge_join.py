@@ -715,7 +715,8 @@ def distributed_update_apply(
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
-    planner = scan_table.new_batch_write_builder().new_update().new_update_by_row_id()
+    from pypaimon.write.row_id_file_index import RowIdFileIndex
+    planner = RowIdFileIndex.from_table(scan_table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
@@ -742,7 +743,7 @@ def distributed_update_apply(
     # detection covers the read→planner window.
     from dataclasses import replace
     files_info = replace(
-        planner._snapshot_files_info(),
+        planner,
         snapshot_id=check_from_snapshot,
     )
     precomputed_info_ref = ray.put(files_info)
@@ -916,7 +917,8 @@ def distributed_read_by_row_id(
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
     # The caller pinned the resolved snapshot, including any retained tag metadata.
-    planner = table.new_batch_write_builder().new_update().new_update_by_row_id()
+    from pypaimon.write.row_id_file_index import RowIdFileIndex
+    planner = RowIdFileIndex.from_table(table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return None
@@ -929,7 +931,7 @@ def distributed_read_by_row_id(
         data_context=data_context,
     )
 
-    precomputed_info_ref = ray.put(planner._snapshot_files_info())
+    precomputed_info_ref = ray.put(planner)
     frid_col = "_FIRST_ROW_ID"
     sorted_arr = np.asarray(sorted_first_row_ids, dtype=np.int64)
     valid_ranges = planner.valid_row_id_ranges

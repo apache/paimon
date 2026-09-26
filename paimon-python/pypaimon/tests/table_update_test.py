@@ -336,6 +336,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['name'].to_pylist(),
         )
 
+    @pytest.mark.python_write
     def test_update_by_predicate_processes_one_file_group_at_a_time(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
@@ -368,6 +369,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['city'].to_pylist(),
         )
 
+    @pytest.mark.python_write
     def test_predicate_update_aborts_groups_after_later_failure(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
@@ -458,6 +460,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['age'].to_pylist(),
         )
 
+    @pytest.mark.python_write
     def test_literal_predicate_update_projects_only_row_id(self):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()

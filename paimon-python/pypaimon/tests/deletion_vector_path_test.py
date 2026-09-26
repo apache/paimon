@@ -151,8 +151,9 @@ def test_legacy_python_index_directory_remains_readable_and_new_deletes_use_buck
     # Old Python writers ignored the option and placed the index under table/index.
     legacy_factory = table.path_factory()
     legacy_factory.index_file_in_data_file_dir = False
-    with patch.object(table, 'path_factory', return_value=legacy_factory):
-        _delete(table, [0, 2])
+    legacy_table = table.copy({'write.native.enabled': 'false'})
+    with patch.object(legacy_table, 'path_factory', return_value=legacy_factory):
+        _delete(legacy_table, [0, 2])
     old_paths = [Path(table.table_path) / 'index' / entry.index_file.file_name for entry in _entries(table, 2)]
     assert all(path.is_file() for path in old_paths)
     _read(table, planner, 2, [1, 3])
