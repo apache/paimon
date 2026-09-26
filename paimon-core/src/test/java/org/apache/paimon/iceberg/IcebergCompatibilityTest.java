@@ -57,6 +57,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -1714,6 +1715,76 @@ public class IcebergCompatibilityTest {
                 DataTypes.TIMESTAMP(2),
                 DataTypes.TIMESTAMP(9),
                 DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9));
+    }
+
+    @ParameterizedTest
+    @MethodSource("unpublishableTimestampTypes")
+    public void testExistingTableWithUnpublishableTimestampsStillLoads(DataType timestampType)
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), timestampType}, new String[] {"k", "ts"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options.toMap(),
+                        "");
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, warehouse)) {
+            paimonCatalog.createDatabase("mydb", false);
+            paimonCatalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) paimonCatalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, Timestamp.fromEpochMillis(0)));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            // an older release let the mirror be switched on with the column in place
+            Path tablePath = new Path(warehouse, "mydb.db/t");
+            TableSchema latest = new FileSystemSchemaManager(fileIO, tablePath).latest().get();
+            Map<String, String> upgraded = new HashMap<>(latest.options());
+            upgraded.put(
+                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                    IcebergOptions.StorageType.TABLE_LOCATION.toString());
+            TableSchema legacy =
+                    new TableSchema(
+                            latest.id() + 1,
+                            latest.fields(),
+                            latest.highestFieldId(),
+                            latest.partitionKeys(),
+                            latest.primaryKeys(),
+                            upgraded,
+                            latest.comment());
+            fileIO.writeFile(
+                    new Path(tablePath, "schema/schema-" + legacy.id()), legacy.toString(), true);
+
+            FileStoreTable loaded = (FileStoreTable) paimonCatalog.getTable(identifier);
+            ReadBuilder readBuilder = loaded.newReadBuilder();
+            List<Integer> keys = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(row -> keys.add(row.getInt(0)));
+            assertThat(keys).containsExactly(1);
+
+            paimonCatalog.alterTable(
+                    identifier,
+                    SchemaChange.setOption(
+                            IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                            IcebergOptions.StorageType.DISABLED.toString()),
+                    false);
+        }
     }
 
     @ParameterizedTest
