@@ -323,9 +323,11 @@ def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
 @pytest.mark.native_plan
 def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     try:
-        from pypaimon_rust.datafusion import UpsertKeyMatcher
+        from pypaimon_rust.datafusion import BatchTableUpdate, UpsertKeyMatcher
     except ImportError:
         pytest.skip('installed Rust binding lacks native upsert key matching')
+    if not hasattr(BatchTableUpdate, 'upsert_by_arrow_with_key'):
+        pytest.skip('installed Rust binding lacks table-level native upsert')
     from pypaimon.table.row.generic_row import GenericRow
     assert UpsertKeyMatcher
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})

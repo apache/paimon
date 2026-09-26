@@ -81,13 +81,17 @@ def create_native_upsert(table, commit_user, data, keys, columns):
             or any(pa.types.is_nested(schema.field(name).type)
                    for name in columns)):
         return None
-    native_table = _native_row_id_table(table, 'new_upsert')
+    native_table = _native_row_id_table(table, 'new_update')
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
-              .new_upsert(keys, columns))
-    return NativeTableUpsert(table, writer)
+              .new_update()
+              .with_update_type(columns))
+    if not hasattr(writer, 'upsert_by_arrow_with_key'):
+        writer.close()
+        return None
+    return NativeTableUpsert(table, writer, keys)
 
 
 def create_native_predicate_update(table, scan_table, commit_user, columns,
@@ -198,16 +202,16 @@ class NativeBatchTableUpdate:
 class NativeTableUpsert:
     """Submit full Arrow rows to the core Rust upsert writer."""
 
-    def __init__(self, table, writer):
+    def __init__(self, table, writer, keys):
         self.table = table
         self.writer = writer
+        self.keys = keys
 
     def upsert(self, data: pa.Table):
         try:
-            for batch in data.to_batches():
-                self.writer.add_batch(batch)
             return from_native_commit_messages(
-                self.table, self.writer.prepare_commit())
+                self.table,
+                self.writer.upsert_by_arrow_with_key(data, self.keys))
         finally:
             self.writer.close()
 
