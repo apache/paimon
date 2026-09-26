@@ -16,6 +16,7 @@
 # under the License.
 
 from collections import defaultdict
+import logging
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow
@@ -52,6 +53,8 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+
+logger = logging.getLogger(__name__)
 
 
 def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total_tasks: int) -> List[DataSplit]:
@@ -655,6 +658,22 @@ class BatchTableUpdate(TableUpdate):
 
     def update_by_arrow_with_row_id(self, table: pa.Table) -> List[CommitMessage]:
         """Apply column updates keyed by ``_ROW_ID`` to existing rows."""
+        columns = self.update_cols if self.update_cols is not None else [
+            name for name in table.column_names
+            if name != SpecialFields.ROW_ID.name
+        ]
+        if (table.num_rows and columns
+                and SpecialFields.ROW_ID.name in table.column_names):
+            try:
+                from pypaimon.write.native_update import create_native_update
+                native = create_native_update(self.table, self.commit_user, columns)
+            except Exception as error:
+                # No native file has been written; Python can still validate
+                # the input and take its established update path.
+                logger.debug('Native update preparation failed; using Python: %s', error)
+            else:
+                if native is not None:
+                    return native.update_by_arrow_with_row_id(table)
         return self._update_by_arrow_with_row_id(table, BATCH_COMMIT_IDENTIFIER)
 
     def update_by_arrow_batches_with_row_id(
