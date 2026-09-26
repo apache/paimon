@@ -23,6 +23,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.write.native_update import create_native_delete, create_native_update
+from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update import BatchTableUpdate
 
 
@@ -51,6 +53,11 @@ def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
     builder.new_commit().commit(writer.prepare_commit())
     writer.close()
 
+    pinned = table.copy({
+        'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
+    })
+    assert create_native_update(pinned, builder.commit_user, ['name']) is None
+
     update_builder = table.new_batch_write_builder()
     update = update_builder.new_update().with_update_type(['name', 'age'])
     changed = pa.Table.from_batches([
@@ -77,3 +84,51 @@ def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
     assert actual.select(['id', 'name', 'age']).to_pydict() == {
         'id': [1, 2, 3], 'name': ['A', 'b', 'C'], 'age': [11, 20, 31],
     }
+
+
+@pytest.mark.native_plan
+def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
+    from pypaimon_rust.datafusion import BatchWriteBuilder
+
+    if not hasattr(BatchWriteBuilder, 'new_delete'):
+        pytest.skip('installed Rust binding does not expose batch delete yet')
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+        'deletion-vectors.enabled': 'true',
+        'write.native.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    writer.write_arrow(pa.Table.from_pydict({
+        'id': [1, 2, 3], 'name': ['a', 'b', 'c'],
+    }, schema=schema))
+    builder.new_commit().commit(writer.prepare_commit())
+    writer.close()
+
+    pinned = table.copy({
+        'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
+    })
+    assert create_native_delete(pinned, builder.commit_user) is None
+
+    with patch.object(TableDeleteByRowId, 'delete',
+                      side_effect=AssertionError('Python delete was selected')):
+        delete_builder = table.new_batch_write_builder()
+        messages = delete_builder.new_update().delete_by_row_id([0, 2, 2])
+        assert messages and sum(len(message.index_adds) for message in messages) == 1
+        delete_builder.new_commit().commit(messages)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        delete_builder = table.new_batch_write_builder()
+        messages = delete_builder.new_update().delete_by_predicate(
+            predicate_builder.equal('id', 2))
+        assert messages
+        delete_builder.new_commit().commit(messages)
+
+    read_builder = table.new_read_builder()
+    actual = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+    assert actual.num_rows == 0

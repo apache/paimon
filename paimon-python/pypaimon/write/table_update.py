@@ -512,7 +512,7 @@ class TableUpdate:
             return self._delete_by_partition_filter(partition_filter)
 
         row_ids = self._matched_delete_row_ids(predicate)
-        return TableDeleteByRowId(self.table).delete(row_ids)
+        return self._delete_by_row_id(row_ids, commit_identifier)
 
     def _delete_by_partition_filter(
             self, partition_filter: Predicate) -> List[CommitMessage]:
@@ -728,6 +728,20 @@ class BatchTableUpdate(TableUpdate):
     def delete_by_row_id(self, row_ids: Sequence[int]) -> List[CommitMessage]:
         """Delete rows by ``_ROW_ID`` using deletion vectors."""
         return self._delete_by_row_id(row_ids, BATCH_COMMIT_IDENTIFIER)
+
+    def _delete_by_row_id(
+            self, row_ids: Sequence[int], commit_identifier: int
+    ) -> List[CommitMessage]:
+        if len(row_ids):
+            try:
+                from pypaimon.write.native_update import create_native_delete
+                native = create_native_delete(self.table, self.commit_user)
+            except Exception as error:
+                logger.debug('Native delete preparation failed; using Python: %s', error)
+            else:
+                if native is not None:
+                    return native.delete_by_row_id(row_ids)
+        return super()._delete_by_row_id(row_ids, commit_identifier)
 
     def merge_into(
             self,
