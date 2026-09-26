@@ -94,6 +94,12 @@ class TableUpsertByKey:
         else:
             effective_update_cols = update_cols
 
+        columns = (list(effective_update_cols) if effective_update_cols
+                   else list(self.table.field_names))
+        native = self._create_native_upsert(data, upsert_keys, columns)
+        if native is not None:
+            return native.upsert()
+
         all_commit_messages: List[CommitMessage] = []
 
         # Process each partition independently
@@ -123,6 +129,13 @@ class TableUpsertByKey:
         else:
             effective_update_cols = update_cols
 
+        columns = (list(effective_update_cols) if effective_update_cols is not None
+                   else list(self.table.field_names))
+        native = self._create_native_upsert(
+            [values for _, values in row_items], upsert_keys, columns)
+        if native is not None:
+            return native.upsert()
+
         commit_messages: List[CommitMessage] = []
         for partition_spec, partition_items in self._group_rows_by_partition(row_items):
             commit_messages.extend(
@@ -134,6 +147,16 @@ class TableUpsertByKey:
                 )
             )
         return commit_messages
+
+    def _create_native_upsert(self, data, upsert_keys, columns):
+        try:
+            from pypaimon.write.native_update import create_native_upsert
+            return create_native_upsert(
+                self.table, self.commit_user, data, upsert_keys, columns)
+        except Exception as error:
+            logger.debug(
+                'Native upsert preparation failed; using Python: %s', error)
+            return None
 
     @staticmethod
     def _normalize_rows(rows) -> List:

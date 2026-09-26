@@ -16,6 +16,7 @@
 # under the License.
 
 from collections import defaultdict
+import logging
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow
@@ -36,6 +37,7 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scanner.data_evolution_split_generator import (
     DataEvolutionSplitGenerator,
 )
@@ -52,6 +54,8 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+
+logger = logging.getLogger(__name__)
 
 
 def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total_tasks: int) -> List[DataSplit]:
@@ -129,6 +133,16 @@ class TableUpdate:
     def _new_row_id_updater(
             self, commit_identifier: int, _precomputed_files_info=None
     ) -> TableUpdateByRowId:
+        if _precomputed_files_info is None:
+            from pypaimon.write.native_update import create_native_update_by_row_id
+            try:
+                native = create_native_update_by_row_id(
+                    self.table, self.commit_user, commit_identifier)
+            except Exception as error:
+                logger.debug('Native row-id updater preparation failed: %s', error)
+            else:
+                if native is not None:
+                    return native
         return TableUpdateByRowId(
             self.table,
             self.commit_user,
@@ -174,6 +188,16 @@ class TableUpdate:
         cols = self.update_cols if self.update_cols is not None else [
             c for c in table.column_names if c != SpecialFields.ROW_ID.name
         ]
+        if (table.num_rows and cols
+                and SpecialFields.ROW_ID.name in table.column_names):
+            try:
+                from pypaimon.write.native_update import create_native_update
+                native = create_native_update(self.table, self.commit_user, cols)
+            except Exception as error:
+                logger.debug('Native update preparation failed; using Python: %s', error)
+            else:
+                if native is not None:
+                    return native.update_by_arrow_with_row_id(table)
         return self._new_row_id_updater(commit_identifier).update_columns(
             table, cols)
 
@@ -277,6 +301,17 @@ class TableUpdate:
         self._validate_predicate_update(
             assignments, read_columns, has_callable, has_array
         )
+
+        if self.table.options.native_write_enabled():
+            from pypaimon.write.native_update import create_native_predicate_update
+            try:
+                native = create_native_predicate_update(
+                    self.table, self.commit_user, list(assignments.keys()), predicate)
+            except Exception as error:
+                logger.debug('Native predicate update preparation failed: %s', error)
+            else:
+                if native is not None:
+                    return native.update(assignments, read_columns)
 
         scan_table = self._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
@@ -509,7 +544,7 @@ class TableUpdate:
             return self._delete_by_partition_filter(partition_filter)
 
         row_ids = self._matched_delete_row_ids(predicate)
-        return TableDeleteByRowId(self.table).delete(row_ids)
+        return self._delete_by_row_id(row_ids, commit_identifier)
 
     def _delete_by_partition_filter(
             self, partition_filter: Predicate) -> List[CommitMessage]:
@@ -576,6 +611,15 @@ class TableUpdate:
             row_ids: Sequence[int],
             commit_identifier: int,
     ) -> List[CommitMessage]:
+        if len(row_ids):
+            try:
+                from pypaimon.write.native_update import create_native_delete
+                native = create_native_delete(self.table, self.commit_user)
+            except Exception as error:
+                logger.debug('Native delete preparation failed; using Python: %s', error)
+            else:
+                if native is not None:
+                    return native.delete_by_row_id(row_ids)
         return TableDeleteByRowId(self.table).delete(list(row_ids))
 
     def _partition_only_delete_filter(
@@ -637,6 +681,19 @@ class TableUpdate:
 
         scan = read_builder.new_scan()
         splits = scan.plan_for_write().splits()
+        if (splits
+                and self.table.options.native_write_enabled()
+                and self.table.options.data_file_path_directory() is None
+                and not any(isinstance(split, QueryAuthSplit)
+                            for split in splits)):
+            try:
+                from pypaimon.write.native_update import native_predicate_row_ids
+                row_ids = native_predicate_row_ids(scan_table, predicate, splits)
+            except Exception as error:
+                logger.debug('Native predicate delete match failed: %s', error)
+            else:
+                if row_ids is not None:
+                    return row_ids
         matched = read_builder.new_read().to_arrow(splits)
         if matched.num_rows == 0:
             return []
@@ -666,6 +723,15 @@ class BatchTableUpdate(TableUpdate):
         file groups. Conflicting overlap is rejected and all files staged by
         earlier batches are aborted.
         """
+        try:
+            from pypaimon.write.native_update import create_native_update
+            native = create_native_update(
+                self.table, self.commit_user, self.update_cols)
+        except Exception as error:
+            logger.debug('Native batch update preparation failed: %s', error)
+        else:
+            if native is not None:
+                return native.update_by_arrow_batches_with_row_id(tables)
         return self._update_by_arrow_batches_with_row_id(
             tables, BATCH_COMMIT_IDENTIFIER)
 
@@ -709,6 +775,11 @@ class BatchTableUpdate(TableUpdate):
     def delete_by_row_id(self, row_ids: Sequence[int]) -> List[CommitMessage]:
         """Delete rows by ``_ROW_ID`` using deletion vectors."""
         return self._delete_by_row_id(row_ids, BATCH_COMMIT_IDENTIFIER)
+
+    def _delete_by_row_id(
+            self, row_ids: Sequence[int], commit_identifier: int
+    ) -> List[CommitMessage]:
+        return super()._delete_by_row_id(row_ids, commit_identifier)
 
     def merge_into(
             self,

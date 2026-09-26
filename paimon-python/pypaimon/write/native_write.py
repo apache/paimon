@@ -24,9 +24,9 @@ from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.utils.file_store_path_factory import canonical_data_file_path
-from pypaimon.write.commit_message_serializer import deserialize_commit_message
-from pypaimon.write.native_commit import create_native_write_table
+from pypaimon.write.native_commit import (
+    create_native_write_table, from_native_commit_messages,
+)
 from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_table
 
 
@@ -39,6 +39,14 @@ def native_write_available() -> bool:
     return True
 
 
+def _native_partition_types_supported(schema, partition_keys):
+    """Partition keys which Rust can encode and use to locate existing files."""
+    return not any(
+        pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
+        or pa.types.is_fixed_size_binary(data_type) or pa.types.is_floating(data_type)
+        for data_type in (schema.field(name).type for name in partition_keys))
+
+
 def create_native_write(table, commit_user, static_partition=None, stream=False):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
@@ -49,7 +57,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
         if (not table.options.sequence_field_sort_order_is_ascending()
                 or any(pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
             return None
-    partition_types = [schema.field(name).type for name in table.partition_keys]
     if (not native_write_available()
             or table.options.data_evolution_enabled()
             or table.options.data_file_external_paths()
@@ -69,8 +76,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             or any(pa.types.is_nested(field.type)
                    or pa.types.is_fixed_size_binary(field.type) for field in schema)
             # Rust cannot encode these partition keys yet.
-            or any(pa.types.is_binary(type_) or pa.types.is_large_binary(type_)
-                   or pa.types.is_floating(type_) for type_ in partition_types)
+            or not _native_partition_types_supported(schema, table.partition_keys)
             or any(is_blob_file_field(field) for field in table.table_schema.fields)):
         return None
     native_table = create_native_write_table(table)
@@ -179,14 +185,7 @@ class NativeTableWrite:
             if commit_identifier is not None:
                 raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
             messages = self._native_writer.prepare_commit()
-        decoded = [deserialize_commit_message(
-            message.serialize(), self.table.partition_keys_fields,
-            self.table.trimmed_primary_keys_fields) for message in messages]
-        for message in decoded:
-            for file in message.new_files + message.changelog_files:
-                file.file_path = file.external_path or canonical_data_file_path(
-                    self.table, message.partition, message.bucket, file.file_name)
-        return decoded
+        return from_native_commit_messages(self.table, messages)
 
     def close(self):
         if self._python_writer is not None:

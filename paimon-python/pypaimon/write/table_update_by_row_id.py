@@ -355,6 +355,9 @@ class TableUpdateByRowId:
             fields.append(arrow_field)
 
         update_data = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+        return self._write_row_columns(update_data, column_names, blob_object_columns)
+
+    def _write_row_columns(self, update_data, column_names, blob_object_columns):
         data_with_first_row_id = self._calculate_first_row_id(update_data)
         self._write_by_first_row_id(
             data_with_first_row_id, column_names, blob_object_columns)

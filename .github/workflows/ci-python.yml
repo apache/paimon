@@ -196,10 +196,10 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust with REST native commit support
+      - name: Build paimon-rust with native update support
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@aa60a6ac7cbe9299aca19effd9ba8301c1bc55da#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@780bc7957f24a78828b7910369e079bbff30e92c#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
@@ -227,12 +227,13 @@ jobs:
                 'commit', source['vcs_info']['commit_id'])
           PY
 
-      - name: Run Python tests with native planning, reading, writing and committing
+      - name: Run Python tests with native planning, reading, writing, updating and committing
         shell: bash
         env:
           PYPAIMON_TEST_NATIVE_PLAN: '1'
           PYPAIMON_TEST_NATIVE_READ: '1'
           PYPAIMON_TEST_NATIVE_WRITE: '1'
+          PYPAIMON_TEST_NATIVE_UPDATE: '1'
           PYPAIMON_TEST_NATIVE_COMMIT: '1'
         run: |
           bash paimon-python/dev/lint-python.sh -i pytest
