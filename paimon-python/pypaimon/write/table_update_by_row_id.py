@@ -38,7 +38,6 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 from pypaimon.write.row_id_file_index import RowIdFileIndex
