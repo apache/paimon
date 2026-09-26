@@ -280,6 +280,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     @Override
     public void retry(ManifestCommittable committable) {
+        // a retry runs no pre-commit validation and may republish metadata as it stands
+        SchemaValidation.validateHistoricalIcebergTypes(
+                table.schemaManager()::listAll, table.coreOptions());
         SnapshotManager snapshotManager = table.snapshotManager();
         Snapshot snapshot =
                 snapshotManager
