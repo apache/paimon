@@ -110,11 +110,11 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
         }
 
         if (startSnapshot == null) {
-            Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
-            if (earliestSnapshot.id() == Snapshot.FIRST_SNAPSHOT_ID) {
-                return new StaticFromSnapshotStartingScanner(snapshotManager, endSnapshot.id());
-            }
-            startSnapshot = earliestSnapshot;
+            // the start timestamp predates every retained snapshot, so the true "before"
+            // state is empty or has been expired: every row live at the end belongs in
+            // the diff. Diffing from the earliest retained snapshot would silently drop
+            // rows created at or before it that are still live.
+            return new StaticFromSnapshotStartingScanner(snapshotManager, endSnapshot.id());
         }
 
         return new IncrementalDiffStartingScanner(snapshotManager, startSnapshot, endSnapshot);
