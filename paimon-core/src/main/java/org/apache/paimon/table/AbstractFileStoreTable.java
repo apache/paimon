@@ -431,11 +431,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
     }
 
-    /**
-     * Loading judges a table without its Iceberg mirror: the publication rules run again before
-     * every commit, and a table an older release let the mirror publish must still load, if only
-     * for the ALTER that turns the mirror off.
-     */
+    /** Tables the mirror cannot publish must still load; every commit still checks them. */
     private static TableSchema withoutIcebergMirror(TableSchema schema) {
         Map<String, String> options = new HashMap<>(schema.options());
         options.remove(IcebergOptions.METADATA_ICEBERG_STORAGE.key());

@@ -1750,7 +1750,6 @@ public class IcebergCompatibilityTest {
                 commit.commit(1, write.prepareCommit(false, 1));
             }
 
-            // an older release let the mirror be switched on with the column in place
             Path tablePath = new Path(warehouse, "mydb.db/t");
             TableSchema latest = new FileSystemSchemaManager(fileIO, tablePath).latest().get();
             Map<String, String> upgraded = new HashMap<>(latest.options());
