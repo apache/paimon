@@ -53,12 +53,12 @@ def create_native_update(table, commit_user, columns):
     if any(pa.types.is_nested(schema.field(name).type)
            for name in columns if name in schema.names):
         return None
-    native_table = _native_row_id_table(table, 'new_update')
+    native_table = _native_row_id_table(table, '_new_matched_update')
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
-              .new_update(columns))
+              ._new_matched_update(columns))
     try:
         snapshot = table.snapshot_manager().get_latest_snapshot()
         if snapshot is not None:
@@ -89,7 +89,6 @@ def create_native_upsert(table, commit_user, data, keys, columns):
               .new_update()
               .with_update_type(columns))
     if not hasattr(writer, 'upsert_by_arrow_with_key'):
-        writer.close()
         return None
     return NativeTableUpsert(table, writer, keys)
 
@@ -202,19 +201,16 @@ class NativeBatchTableUpdate:
             self.writer.close()
 
     def delete_by_row_id(self, row_ids):
+        ids = []
+        for row_id in row_ids:
+            if row_id is None:
+                raise ValueError('_ROW_ID value must not be null.')
+            ids.append(int(row_id))
         try:
-            ids = []
-            for row_id in row_ids:
-                if row_id is None:
-                    raise ValueError('_ROW_ID value must not be null.')
-                ids.append(int(row_id))
-            try:
-                messages = self.writer.delete_by_row_id(ids)
-            except ValueError as error:
-                _raise_native_row_id_error(error)
-            return from_native_commit_messages(self.table, messages)
-        finally:
-            self.writer.close()
+            messages = self.writer.delete_by_row_id(ids)
+        except ValueError as error:
+            _raise_native_row_id_error(error)
+        return from_native_commit_messages(self.table, messages)
 
 
 class NativeTableUpsert:
@@ -226,12 +222,9 @@ class NativeTableUpsert:
         self.keys = keys
 
     def upsert(self, data: pa.Table):
-        try:
-            return from_native_commit_messages(
-                self.table,
-                self.writer.upsert_by_arrow_with_key(data, self.keys))
-        finally:
-            self.writer.close()
+        return from_native_commit_messages(
+            self.table,
+            self.writer.upsert_by_arrow_with_key(data, self.keys))
 
 
 class NativePredicateTableUpdate:

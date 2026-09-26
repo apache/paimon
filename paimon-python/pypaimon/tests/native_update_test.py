@@ -35,7 +35,7 @@ from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
     from pypaimon_rust.datafusion import BatchWriteBuilder
 
-    if not hasattr(BatchWriteBuilder, 'new_update'):
+    if not hasattr(BatchWriteBuilder, '_new_matched_update'):
         pytest.skip('installed Rust binding does not expose batch update yet')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -91,9 +91,9 @@ def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
 
 @pytest.mark.native_plan
 def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
-    from pypaimon_rust.datafusion import BatchWriteBuilder
+    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
 
-    if not hasattr(BatchWriteBuilder, 'new_delete'):
+    if not hasattr(RustUpdate, 'delete_by_row_id'):
         pytest.skip('installed Rust binding does not expose batch delete yet')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -143,7 +143,7 @@ def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
 def test_stream_update_and_delete_use_native_writers(tmp_path):
     from pypaimon_rust.datafusion import BatchWriteBuilder
 
-    if not hasattr(BatchWriteBuilder, 'new_update'):
+    if not hasattr(BatchWriteBuilder, '_new_matched_update'):
         pytest.skip('installed Rust binding does not expose native updates')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -201,9 +201,12 @@ def test_stream_update_and_delete_use_native_writers(tmp_path):
 
 @pytest.mark.native_plan
 def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
-    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    try:
+        from pypaimon_rust.datafusion import _MatchedBatchUpdateWriter
+    except ImportError:
+        pytest.skip('installed Rust binding lacks grouped updates')
 
-    if not hasattr(RustUpdate, 'add_matched_group'):
+    if not hasattr(_MatchedBatchUpdateWriter, 'add_matched_group'):
         pytest.skip('installed Rust binding lacks grouped updates')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -274,10 +277,10 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
 @pytest.mark.native_plan
 def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
     try:
-        from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+        from pypaimon_rust.datafusion import _MatchedBatchUpdateWriter
     except ImportError:
         pytest.skip('installed Rust binding lacks native batch updates')
-    if not hasattr(RustUpdate, 'add_assigned_table'):
+    if not hasattr(_MatchedBatchUpdateWriter, 'add_assigned_table'):
         pytest.skip('installed Rust binding lacks native assignments')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
