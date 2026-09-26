@@ -60,7 +60,13 @@ public abstract class AbstractDistributedLockDialect implements JdbcDistributedL
                         preparedStatement.setLong(2, timeoutMillSeconds / 1000);
                         return preparedStatement.executeUpdate() > 0;
                     } catch (SQLException ex) {
-                        return false;
+                        // only a constraint violation means the lock is held; swallowing
+                        // anything else turns a broken lock table into a silent full-timeout
+                        // spin that hides the root cause
+                        if (isConstraintViolation(ex)) {
+                            return false;
+                        }
+                        throw ex;
                     }
                 });
     }
@@ -96,4 +102,19 @@ public abstract class AbstractDistributedLockDialect implements JdbcDistributedL
     }
 
     public abstract String getTryReleaseTimedOutLock();
+
+    private static boolean isConstraintViolation(SQLException ex) {
+        // SQLState 23xxx covers MySQL/PostgreSQL; SQLite reports constraint failures
+        // without a standard SQLState
+        if (ex.getSQLState() != null && ex.getSQLState().startsWith("23")) {
+            return true;
+        }
+        if (ex instanceof java.sql.SQLIntegrityConstraintViolationException) {
+            return true;
+        }
+        String message = ex.getMessage();
+        return message != null
+                && (message.toLowerCase(java.util.Locale.ROOT).contains("constraint")
+                        || message.toLowerCase(java.util.Locale.ROOT).contains("duplicate"));
+    }
 }

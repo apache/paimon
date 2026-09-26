@@ -203,6 +203,32 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testBrokenLockInsertSurfacesRootCause() throws Exception {
+        // an INSERT failure other than a constraint violation is a configuration or
+        // connection error, not a held lock: the old catch-all swallowed it and spun
+        // for the whole acquire timeout
+        java.sql.SQLException failure = new java.sql.SQLException("connection reset");
+        java.sql.Connection connection = org.mockito.Mockito.mock(java.sql.Connection.class);
+        org.mockito.Mockito.when(
+                        connection.prepareStatement(org.mockito.ArgumentMatchers.anyString()))
+                .thenThrow(failure);
+        JdbcClientPool pool = org.mockito.Mockito.mock(JdbcClientPool.class);
+        org.mockito.Mockito.doAnswer(
+                        invocation ->
+                                ((org.apache.paimon.client.ClientPool.Action<
+                                                        ?, java.sql.Connection, ?>)
+                                                invocation.getArgument(0))
+                                        .run(connection))
+                .when(pool)
+                .run(org.mockito.ArgumentMatchers.any());
+        MysqlDistributedLockDialect dialect = new MysqlDistributedLockDialect();
+
+        assertThatThrownBy(() -> dialect.lockAcquire(pool, "jdbc.broken.lock", 1000))
+                .isInstanceOf(java.sql.SQLException.class)
+                .hasMessageContaining("connection reset");
+    }
+
+    @Test
     public void testCleanTimeoutLockAndAcquireLock() throws SQLException, InterruptedException {
         String lockId = "jdbc.testDb.testTable";
         assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 1000))
