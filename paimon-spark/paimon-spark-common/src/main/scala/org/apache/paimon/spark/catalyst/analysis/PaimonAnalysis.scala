@@ -25,6 +25,7 @@ import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
 import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsCommand, PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
 import org.apache.paimon.spark.format.PaimonFormatTable
+import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
@@ -119,7 +120,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       table: DataSourceV2Relation,
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
-    val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val query =
+      stripChangelogMetadataColumns(stripHiveDynamicPartitionMarker(v2WriteCommand.query), table)
     val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
       case Some(dynamicPartitionColumns)
@@ -163,16 +165,30 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     query.transformDown { case PaimonHiveDynamicPartitionQuery(_, child) => child }
   }
 
+  /** Synthetic event metadata is readable but is not part of a physical write row. */
+  private def stripChangelogMetadataColumns(
+      query: LogicalPlan,
+      table: DataSourceV2Relation): LogicalPlan = {
+    table.table.asInstanceOf[SparkTable].getTable match {
+      case fileStoreTable: FileStoreTable =>
+        val physicalOutput =
+          SparkSystemColumns.filterChangelogMetadataColumns(query.output, fileStoreTable)
+        if (physicalOutput.size == query.output.size) query else Project(physicalOutput, query)
+      case _ => query
+    }
+  }
+
   private def resolveDynamicPartitionWrite(
       query: LogicalPlan,
       table: DataSourceV2Relation,
       hiveStyleOutput: Option[Seq[Attribute]],
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
+    val physicalTableOutput = physicalOutput(table)
     hiveStyleOutput match {
       case Some(hiveStyleOutput)
-          if !sameOutputNames(query.output, table.output) &&
-            !sameOutputNames(hiveStyleOutput, table.output) =>
+          if !sameOutputNames(query.output, physicalTableOutput) &&
+            !sameOutputNames(hiveStyleOutput, physicalTableOutput) =>
         val hiveStyleQuery =
           resolveWriteOutput(query, table.name, hiveStyleOutput, byName = false, mergeSchemaEnabled)
         resolveWriteOutput(
@@ -235,6 +251,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   private def hiveStyleDynamicPartitionOutput(
       table: DataSourceV2Relation,
       dynamicPartitionColumns: Seq[String]): Option[Seq[Attribute]] = {
+    val physicalTableOutput = physicalOutput(table)
     val partitionKeys = table.table.asInstanceOf[SparkTable].getTable.partitionKeys().asScala.toSeq
     if (partitionKeys.isEmpty || dynamicPartitionColumns.isEmpty) {
       None
@@ -244,9 +261,10 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
           partition => dynamicPartitionColumns.exists(dynamic => conf.resolver(dynamic, partition))
         }
         .flatMap {
-          dynamicPartition => table.output.find(attr => conf.resolver(attr.name, dynamicPartition))
+          dynamicPartition =>
+            physicalTableOutput.find(attr => conf.resolver(attr.name, dynamicPartition))
         }
-      val dataAttrs = table.output.filterNot {
+      val dataAttrs = physicalTableOutput.filterNot {
         attr => dynamicPartitionColumns.exists(partition => conf.resolver(attr.name, partition))
       }
       val hiveStyleOutput = dataAttrs ++ dynamicPartitionAttrs
@@ -255,6 +273,14 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       } else {
         None
       }
+    }
+  }
+
+  private def physicalOutput(table: DataSourceV2Relation): Seq[Attribute] = {
+    table.table.asInstanceOf[SparkTable].getTable match {
+      case fileStoreTable: FileStoreTable =>
+        SparkSystemColumns.filterChangelogMetadataColumns(table.output, fileStoreTable)
+      case _ => table.output
     }
   }
 

@@ -58,6 +58,7 @@ import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
@@ -134,6 +135,13 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         this.schema = schema;
         this.recordLevelExpire = recordLevelExpire;
         this.cacheManager = cacheManager;
+
+        ChangelogEventMetadata.validate(valueType, options);
+        if (options.changelogProducer() == ChangelogProducer.LOOKUP
+                && !options.changelogExposeFieldAsMetadata().isEmpty()) {
+            writerFactoryBuilder.withChangelogValueType(
+                    ChangelogEventMetadata.appendMetadataFields(valueType, valueType, options));
+        }
     }
 
     @Override
@@ -332,6 +340,10 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             PersistProcessor.Factory<?> processorFactory;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
             FileReaderFactory<KeyValue> lookupReaderFactory = readerFactory;
+            int[] preserveFieldIndices =
+                    options.changelogProducer() == ChangelogProducer.LOOKUP
+                            ? ChangelogEventMetadata.preserveFieldIndices(valueType, options)
+                            : null;
             if (lookupStrategy.isFirstRow) {
                 if (options.deletionVectorsEnabled()) {
                     throw new UnsupportedOperationException(
@@ -343,7 +355,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                                 .withReadValueType(RowType.of())
                                 .build(partition, bucket, dvFactory);
                 processorFactory = PersistEmptyProcessor.factory();
-                wrapperFactory = new FirstRowMergeFunctionWrapperFactory();
+                wrapperFactory = new FirstRowMergeFunctionWrapperFactory(preserveFieldIndices);
             } else {
                 if (lookupStrategy.deletionVector) {
                     if (lookupStrategy.produceChangelog
@@ -368,7 +380,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         new LookupMergeFunctionWrapperFactory<>(
                                 logDedupEqualSupplier.get(),
                                 lookupStrategy,
-                                UserDefinedSeqComparator.create(valueType, options));
+                                UserDefinedSeqComparator.create(valueType, options),
+                                preserveFieldIndices);
             }
             LookupLevels<?> lookupLevels =
                     createLookupLevels(

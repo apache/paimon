@@ -18,7 +18,14 @@
 
 package org.apache.paimon.spark.schema
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.system.ChangelogEventMetadata
+
+import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.types.StructType
+
+import scala.collection.JavaConverters._
 
 /** System columns for paimon spark. */
 object SparkSystemColumns {
@@ -33,5 +40,30 @@ object SparkSystemColumns {
 
   def filterSparkSystemColumns(schema: StructType): StructType = {
     StructType(schema.fields.filterNot(field => SPARK_SYSTEM_COLUMNS_NAME.contains(field.name)))
+  }
+
+  /** Names exposed by a table only for changelog reads, never as physical write columns. */
+  def changelogMetadataFieldNames(table: FileStoreTable): Set[String] = {
+    val options = CoreOptions.fromMap(table.options())
+    ChangelogEventMetadata
+      .extraValueFields(table.schema().logicalRowType(), options)
+      .asScala
+      .map(_.name())
+      .toSet
+  }
+
+  def filterSparkSystemColumns(schema: StructType, table: FileStoreTable): StructType = {
+    val metadataNames = changelogMetadataFieldNames(table)
+    StructType(
+      schema.fields.filterNot(
+        field =>
+          SPARK_SYSTEM_COLUMNS_NAME.contains(field.name) || metadataNames.contains(field.name)))
+  }
+
+  def filterChangelogMetadataColumns(
+      attributes: Seq[Attribute],
+      table: FileStoreTable): Seq[Attribute] = {
+    val metadataNames = changelogMetadataFieldNames(table)
+    attributes.filterNot(attribute => metadataNames.contains(attribute.name))
   }
 }

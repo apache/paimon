@@ -2279,6 +2279,48 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
 
+    @Test
+    public void testExposeFieldAsMetadataOnlySupportsLookupChangelogProducer() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(), "f1");
+
+        for (String producer : Arrays.asList("none", "input", "full-compaction")) {
+            options.put(CoreOptions.CHANGELOG_PRODUCER.key(), producer);
+            assertThatThrownBy(() -> validateTableSchemaExec(options))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key())
+                    .hasMessageContaining(CoreOptions.CHANGELOG_PRODUCER.key())
+                    .hasMessageContaining("lookup");
+        }
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testExposeFieldAsMetadataRejectsInvalidColumns() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(), "unknown");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unknown")
+                .hasMessageContaining("not found");
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(), "f1,f1");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("more than once");
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(), "f1");
+        options.put(CoreOptions.CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX.key(), "");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("conflicts");
+    }
+
     private Map<String, String> mapSharedShreddingOptions() {
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), "-1");

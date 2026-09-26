@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
+import org.apache.paimon.casting.FallbackMappingRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
@@ -38,6 +39,7 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
     private final int level;
     private final boolean overrideSequenceWithSnapshotId;
     private final long snapshotId;
+    @Nullable private final FallbackMappingRow metadataFallbackRow;
 
     public KeyValueDataFileRecordReader(
             FileRecordReader<InternalRow> reader,
@@ -45,12 +47,18 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
             RowType valueType,
             int level,
             boolean overrideSequenceWithSnapshotId,
-            long snapshotId) {
+            long snapshotId,
+            @Nullable int[] metadataFallbackMapping,
+            boolean applyMetadataFallback) {
         this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
         this.overrideSequenceWithSnapshotId = overrideSequenceWithSnapshotId;
         this.snapshotId = snapshotId;
+        this.metadataFallbackRow =
+                applyMetadataFallback && metadataFallbackMapping != null
+                        ? new FallbackMappingRow(metadataFallbackMapping)
+                        : null;
     }
 
     @Nullable
@@ -67,6 +75,9 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
                         return null;
                     }
                     KeyValue kv = serializer.fromRow(internalRow).setLevel(level);
+                    if (metadataFallbackRow != null) {
+                        kv.replaceValue(metadataFallbackRow.replace(kv.value(), kv.value()));
+                    }
                     // In snapshot-ordering mode, an APPEND file's on-disk per-record sequence
                     // numbers are stale; we override them with the commit snapshot id so later
                     // snapshots win during merge. Any read path bypassing this override would

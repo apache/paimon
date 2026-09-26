@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.casting.FallbackMappingRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
@@ -40,6 +41,7 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.EmptyFileRecordReader;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
@@ -51,11 +53,14 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
@@ -65,6 +70,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,8 +94,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final boolean nestedFieldEnabled;
     private final boolean ignoreCorruptFiles;
     private final boolean ignoreLostFiles;
+    private final List<DataField> changelogExtraValueFields;
+    private final List<String> metadataPreserveColumns;
+    private final String metadataFieldPrefix;
 
     private RowType readRowType;
+    @Nullable private RowType outerReadRowType;
+    @Nullable private int[] metadataFallbackMapping;
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Long limit;
@@ -114,7 +125,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
         this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
-        this.readRowType = rowType;
+        this.metadataPreserveColumns = coreOptions.changelogExposeFieldAsMetadata();
+        this.metadataFieldPrefix = coreOptions.changelogMetadataFieldPrefix();
+        this.changelogExtraValueFields = createChangelogExtraValueFields(schema, coreOptions);
+        this.readRowType = readTypeWithMetadataDependencies(rowType);
+        this.outerReadRowType = this.readRowType.equals(rowType) ? null : rowType;
+        this.metadataFallbackMapping = createMetadataFallbackMapping(this.readRowType);
     }
 
     @Override
@@ -129,10 +145,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public SplitRead<InternalRow> withReadType(RowType readRowType) {
-        if (!this.readRowType.equals(readRowType)) {
+        RowType adjustedReadType = readTypeWithMetadataDependencies(readRowType);
+        if (!this.readRowType.equals(adjustedReadType)) {
             formatReaderMappings.clear();
         }
-        this.readRowType = readRowType;
+        this.readRowType = adjustedReadType;
+        this.outerReadRowType = adjustedReadType.equals(readRowType) ? null : readRowType;
+        this.metadataFallbackMapping = createMetadataFallbackMapping(adjustedReadType);
         return this;
     }
 
@@ -264,12 +283,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 formatDiscover,
                 outputRowType.getFields(),
                 schema -> {
+                    List<DataField> fields = new ArrayList<>(schema.fields());
+                    fields.addAll(changelogExtraValueFields);
                     if (rowTrackingEnabled) {
                         // maybe file has no row id and sequence number, but in manifest entry
-                        return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
-                                .getFields();
+                        return rowTypeWithRowTracking(new RowType(fields), true, true).getFields();
                     }
-                    return schema.fields();
+                    return fields;
                 },
                 filters,
                 pushDownTopN,
@@ -387,8 +407,93 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         }
 
         if (deletionVector != null && !deletionVector.isEmpty()) {
-            return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
+            fileRecordReader = new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
-        return fileRecordReader;
+        return applyMetadataFallbackAndOuterProjection(fileRecordReader);
+    }
+
+    private RowType readTypeWithMetadataDependencies(RowType requestedReadType) {
+        if (changelogExtraValueFields.isEmpty()) {
+            return requestedReadType;
+        }
+
+        List<String> readFieldNames = requestedReadType.getFieldNames();
+        List<DataField> dependencies = new ArrayList<>();
+        for (String preserveColumn : metadataPreserveColumns) {
+            String metadataName = metadataFieldPrefix + preserveColumn;
+            if (readFieldNames.contains(metadataName)
+                    && !readFieldNames.contains(preserveColumn)
+                    && schema.logicalRowType().containsField(preserveColumn)) {
+                dependencies.add(schema.logicalRowType().getField(preserveColumn));
+            }
+        }
+
+        if (dependencies.isEmpty()) {
+            return requestedReadType;
+        }
+        List<DataField> fields = new ArrayList<>(requestedReadType.getFields());
+        fields.addAll(dependencies);
+        return new RowType(fields);
+    }
+
+    @Nullable
+    private int[] createMetadataFallbackMapping(RowType rowType) {
+        if (metadataPreserveColumns.isEmpty()) {
+            return null;
+        }
+
+        int[] mapping = new int[rowType.getFieldCount()];
+        Arrays.fill(mapping, -1);
+        boolean hasMapping = false;
+        List<String> fieldNames = rowType.getFieldNames();
+        for (String preserveColumn : metadataPreserveColumns) {
+            int metadataIndex = fieldNames.indexOf(metadataFieldPrefix + preserveColumn);
+            int physicalIndex = fieldNames.indexOf(preserveColumn);
+            if (metadataIndex >= 0 && physicalIndex >= 0) {
+                mapping[metadataIndex] = physicalIndex;
+                hasMapping = true;
+            }
+        }
+        return hasMapping ? mapping : null;
+    }
+
+    private static List<DataField> createChangelogExtraValueFields(
+            TableSchema schema, CoreOptions options) {
+        return ChangelogEventMetadata.extraValueFields(schema.logicalRowType(), options);
+    }
+
+    private FileRecordReader<InternalRow> applyMetadataFallbackAndOuterProjection(
+            FileRecordReader<InternalRow> reader) {
+        if (metadataFallbackMapping == null && outerReadRowType == null) {
+            return reader;
+        }
+
+        final FallbackMappingRow fallbackRow =
+                metadataFallbackMapping == null
+                        ? null
+                        : new FallbackMappingRow(metadataFallbackMapping);
+        final ProjectedRow projectedRow =
+                outerReadRowType == null ? null : ProjectedRow.from(outerReadRowType, readRowType);
+        return new FileRecordReader<InternalRow>() {
+            @Nullable
+            @Override
+            public FileRecordIterator<InternalRow> readBatch() throws IOException {
+                FileRecordIterator<InternalRow> iterator = reader.readBatch();
+                if (iterator == null) {
+                    return null;
+                }
+                return iterator.transform(
+                        row -> {
+                            InternalRow result =
+                                    fallbackRow == null ? row : fallbackRow.replace(row, row);
+                            return projectedRow == null ? result : projectedRow.replaceRow(result);
+                        });
+            }
+
+            @Override
+            public void close() throws IOException {
+                reader.close();
+            }
+        };
     }
 }

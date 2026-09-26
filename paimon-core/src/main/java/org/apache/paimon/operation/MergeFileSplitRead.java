@@ -52,6 +52,7 @@ import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
@@ -119,6 +120,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
         this.sequenceFields = options.sequenceField();
         this.sequenceOrder = options.sequenceFieldSortOrderIsAscending();
+        ChangelogEventMetadata.validate(tableSchema.logicalRowType(), options);
     }
 
     public Comparator<InternalRow> keyComparator() {
@@ -168,6 +170,31 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             }
             if (!extraFields.isEmpty()) {
                 List<DataField> allFields = new ArrayList<>(readType.getFields());
+                allFields.addAll(extraFields);
+                adjustedReadType = new RowType(allFields);
+            }
+        }
+
+        // Metadata columns are backed by values from the incoming event. Ordinary data files do
+        // not physically contain the synthetic metadata fields, so retain the corresponding
+        // physical fields while reading whenever a metadata field was requested. The outer read
+        // projection removes these internal dependencies after the reader has populated the
+        // metadata columns.
+        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+        if (!preserveColumns.isEmpty()) {
+            List<String> readFieldNames = adjustedReadType.getFieldNames();
+            List<DataField> extraFields = new ArrayList<>();
+            RowType logicalRowType = tableSchema.logicalRowType();
+            for (String preserveColumn : preserveColumns) {
+                String metadataName =
+                        ChangelogEventMetadata.metadataFieldName(preserveColumn, options);
+                if (readFieldNames.contains(metadataName)
+                        && !readFieldNames.contains(preserveColumn)) {
+                    extraFields.add(logicalRowType.getField(preserveColumn));
+                }
+            }
+            if (!extraFields.isEmpty()) {
+                List<DataField> allFields = new ArrayList<>(adjustedReadType.getFields());
                 allFields.addAll(extraFields);
                 adjustedReadType = new RowType(allFields);
             }

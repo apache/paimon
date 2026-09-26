@@ -103,11 +103,48 @@ Lookup uses memory and local disk caches:
 | `lookup.cache-max-disk-size` | Unlimited | Bound local disk usage |
 | `lookup.cache-max-memory-size` | `256 mb` | Bound in-memory cache usage |
 
-In Flink, `execution.checkpointing.max-concurrent-checkpoints` can also affect throughput when
-checkpoint completion waits for compaction. Tune it with checkpoint duration and resource usage.
-
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
+
+Set `'changelog-producer.expose-field-as-metadata'` to a comma-separated list of columns to copy
+from the lookup changelog event into metadata columns. Metadata columns are named by concatenating
+the configured prefix and column name (`__internal__<column>` by default). The same name is used as
+the Flink metadata key. For retractions (`-U`, `-D`), regular columns contain the before-image while
+metadata columns contain the event values; for forward records (`+I`, `+U`), they mirror the regular
+values. External sinks that need event timestamps for conflict resolution can read these metadata
+columns.
+
+Paimon readers such as Spark expose these generated fields as regular columns using the configured
+names. Flink SQL must declare the field as a metadata column, for example
+`METADATA FROM '__internal__event_ts'` with the default prefix. The Flink column alias is not a
+physical Paimon column and is not automatically visible to Spark.
+
+The metadata values come from the merge result, which equals the incoming value for the `deduplicate`
+merge engine but may differ for aggregation engines. This option is supported only by the `lookup`
+changelog producer. Set `'changelog-producer.metadata-field-prefix'` if the default prefix conflicts
+with an existing column name. Changelog files written before this option was enabled expose these
+metadata fields as `NULL`.
+
+```sql
+-- Source table with event metadata preservation
+CREATE TABLE my_table (
+    id INT PRIMARY KEY NOT ENFORCED,
+    data STRING,
+    event_ts BIGINT
+) WITH (
+    'changelog-producer' = 'lookup',
+    'sequence.field' = 'event_ts',
+    'changelog-producer.expose-field-as-metadata' = 'event_ts'
+);
+
+-- External sink reading event metadata
+CREATE TABLE external_sink (
+    id INT,
+    data STRING,
+    event_ts BIGINT,
+    retract_event_ts BIGINT METADATA FROM '__internal__event_ts'
+) WITH (...);
+```
 
 ## Full Compaction
 

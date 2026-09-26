@@ -40,6 +40,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
@@ -87,6 +88,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.changelogRowDeduplicate()
                         ? ValueEqualiserSupplier.fromIgnoreFields(valueType, logDedupIgnoreFields)
                         : () -> null;
+        ChangelogEventMetadata.validate(valueType, options);
     }
 
     @Override
@@ -126,16 +128,26 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
-        return KeyValueFileReaderFactory.builder(
-                fileIO,
-                schemaManager,
-                schema,
-                keyType,
-                valueType,
-                FileFormatDiscover.of(options),
-                pathFactory(),
-                keyValueFieldsExtractor,
-                options);
+        KeyValueFileReaderFactory.Builder builder =
+                KeyValueFileReaderFactory.builder(
+                        fileIO,
+                        schemaManager,
+                        schema,
+                        keyType,
+                        valueType,
+                        FileFormatDiscover.of(options),
+                        pathFactory(),
+                        keyValueFieldsExtractor,
+                        options);
+        if (options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP
+                && !options.changelogExposeFieldAsMetadata().isEmpty()) {
+            List<org.apache.paimon.types.DataField> extraFields =
+                    ChangelogEventMetadata.extraValueFields(valueType, options);
+            if (!extraFields.isEmpty()) {
+                builder.withChangelogExtraValueFields(extraFields);
+            }
+        }
+        return builder;
     }
 
     @Override
