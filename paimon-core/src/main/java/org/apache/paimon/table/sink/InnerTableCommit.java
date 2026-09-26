@@ -29,6 +29,13 @@ import java.util.Map;
 /** Inner {@link TableCommit} contains overwrite setter. */
 public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
+    /**
+     * Filters committed identifiers, then validates the remaining commits before publishing any of
+     * them. The check is not run for an already committed replay; its retry callbacks still run.
+     */
+    int filterAndCommit(
+            Map<Long, List<CommitMessage>> commitIdentifiersAndMessages, Runnable beforeCommit);
+
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
     InnerTableCommit withOverwrite(@Nullable Map<String, String> spec);
 

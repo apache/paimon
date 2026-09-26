@@ -65,6 +65,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -205,6 +206,57 @@ public class TableCommitTest {
 
         @Override
         public void close() throws Exception {}
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testValidationAfterFiltering(boolean overwrite) throws Exception {
+        Path path = new Path(tempDir.toString());
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        TableSchema schema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), path, schema, CatalogEnvironment.empty());
+        String user = UUID.randomUUID().toString();
+        try (StreamTableWrite write = table.newWrite(user);
+                InnerTableCommit commit = table.newCommit(user)) {
+            if (overwrite) {
+                commit.withOverwrite(Collections.emptyMap());
+            }
+            write.write(GenericRow.of(0, 0L));
+            List<CommitMessage> messages = write.prepareCommit(true, 1);
+            Runnable refuseCommit =
+                    () -> {
+                        throw new IllegalStateException("Replay history expired");
+                    };
+            assertThatThrownBy(
+                            () -> commit.filterAndCommit(singletonMap(1L, messages), refuseCommit))
+                    .hasMessage("Replay history expired");
+            assertThat(table.snapshotManager().latestSnapshotId()).isNull();
+
+            AtomicInteger validations = new AtomicInteger();
+            assertThat(
+                            commit.filterAndCommit(
+                                    singletonMap(1L, messages), validations::incrementAndGet))
+                    .isEqualTo(1);
+            assertThat(validations.get()).isEqualTo(1);
+            long snapshotId = table.snapshotManager().latestSnapshotId();
+
+            // Validation must not reject a replay the actual filter could still recognise.
+            assertThat(commit.filterAndCommit(singletonMap(1L, messages), refuseCommit)).isZero();
+            assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
+        }
     }
 
     @Test

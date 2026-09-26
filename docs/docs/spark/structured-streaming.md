@@ -95,10 +95,12 @@ run committed is not recognised and its data is written again.
 
 A replay is recognised by the snapshots its commit user left behind, which snapshot expiration
 eventually removes. Before committing a micro-batch, the sink records under the checkpoint location
-of the query which snapshot was the latest. If a query stays down until expiration has gone past
-that snapshot, whether the micro-batch was committed can no longer be told, and the query fails
-instead of possibly writing it twice; the error names the marker file to delete once the table
-shows the micro-batch was not committed. Retain snapshots for longer than a query may be down.
+of the query which snapshot was the latest before its first attempt. Retries preserve this original
+marker rather than advancing it. If filtering cannot recognise the replay and expiration has removed
+the snapshot immediately after that boundary, the query fails instead of possibly writing it twice.
+An incomplete or corrupt marker also fails the query, since it may belong to an already committed
+batch. The error names the marker file; restore it or delete it only after verifying that the batch
+was not committed. Retain snapshots for longer than a query may be down.
 
 A streaming write to a postpone bucket table writes the postpone bucket, as a Flink streaming job
 does, whatever `postpone.batch-write-fixed-bucket` says: that option is for a batch job which ends

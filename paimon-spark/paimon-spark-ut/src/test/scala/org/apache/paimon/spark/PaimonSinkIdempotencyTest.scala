@@ -27,12 +27,15 @@ import org.apache.paimon.spark.write.{CommitMarker, StreamingWrite, StreamingWri
 import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
 import org.apache.paimon.table.sink.{CommitCallback, InnerTableCommit}
 
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.{Path, RawLocalFileSystem}
+import org.apache.hadoop.fs.permission.FsPermission
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.{OutputMode, StreamingQuery, StreamTest}
 
-import java.io.File
+import java.io.{File, IOException, OutputStream}
 import java.util.{Collections, List => JList, Map => JMap}
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -752,17 +755,9 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
         attempt("other", _.write("user-other", 4, 0))
         // A marker of this batch that no expiration has gone past: a commit would be retained.
         attempt("kept", m => m.write("user-kept", 5, latestId()))
-        // A marker that was not written completely: the attempt died before its commit.
-        attempt(
-          "torn",
-          m => {
-            val file = new File(m.path.toUri.getPath)
-            file.getParentFile.mkdirs()
-            java.nio.file.Files.write(file.toPath, "user-torn\n5".getBytes("UTF-8"))
-          })
         assert(
           spark.sql("SELECT b FROM T WHERE a = 1").collect().map(_.getString(0)).toSet ==
-            Set("none", "other", "kept", "torn"),
+            Set("none", "other", "kept"),
           "each of these attempts should have been committed"
         )
 
@@ -786,6 +781,136 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
         assert(new File(named.get).delete(), s"cannot delete ${named.get}")
         attempt("expired", _ => ())
         checkAnswer(spark.sql("SELECT a FROM T WHERE b = 'expired'"), Row(1) :: Nil)
+    }
+  }
+
+  private def commitReplayAttempt(marker: CommitMarker, batchId: Long = 0): Unit = {
+    val table = loadTable("T")
+    val user = "recovery-user"
+    val context = new StreamingWriteContext(user, Some(marker))
+    val builder = table.newStreamWriteBuilder().withCommitUser(user)
+    val write = builder.newWrite()
+    try {
+      write.write(GenericRow.of(Integer.valueOf(1), BinaryString.fromString("stream")))
+      val messages = write.prepareCommit(true, batchId + 1).asScala.toSeq
+      context.openCommitter(builder.newCommit().asInstanceOf[InnerTableCommit])
+      context.commit(StreamingWrite(context, batchId), messages, table)
+    } finally {
+      write.close()
+      context.close()
+    }
+  }
+
+  test("Paimon Sink: repeated recovery preserves the first attempt's marker") {
+    withTempDir {
+      dir =>
+        spark.sql(
+          "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES (" +
+            "'snapshot.num-retained.min' = '1', 'snapshot.num-retained.max' = '1')")
+        val conf = spark.sessionState.newHadoopConf()
+        val marker = new CommitMarker(dir.getCanonicalPath, conf)
+        commitReplayAttempt(marker)
+        val original = loadTable("T").snapshotManager().latestSnapshotId()
+        val interrupted = new CommitMarker(dir.getCanonicalPath, conf) {
+          override def write(user: String, batch: Long, latest: Long): Unit = {
+            super.write(user, batch, latest)
+            throw new IllegalStateException("driver failed before filtering")
+          }
+        }
+        (1 to 2).foreach {
+          _ =>
+            assert(
+              intercept[IllegalStateException](commitReplayAttempt(interrupted)).getMessage
+                .contains("driver failed"))
+        }
+        assert(marker.latestSnapshotIdBefore("recovery-user", 0).contains(0L))
+        spark.sql("INSERT INTO T VALUES (2, 'other')")
+        assert(!loadTable("T").snapshotManager().snapshotExists(original))
+        assert(
+          intercept[IllegalStateException](commitReplayAttempt(marker)).getMessage
+            .contains("Cannot tell whether"))
+        checkAnswer(spark.sql("SELECT * FROM T WHERE b = 'stream'"), Row(1, "stream") :: Nil)
+    }
+  }
+
+  Seq(false, true).foreach {
+    staleHint =>
+      test(s"Paimon Sink: expiration before replay filtering is refused (stale hint: $staleHint)") {
+        withTempDir {
+          dir =>
+            spark.sql(
+              "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES (" +
+                "'snapshot.num-retained.min' = '1', 'snapshot.num-retained.max' = '1')")
+            val conf = spark.sessionState.newHadoopConf()
+            val marker = new CommitMarker(dir.getCanonicalPath, conf)
+            commitReplayAttempt(marker)
+            val original = loadTable("T").snapshotManager().latestSnapshotId()
+            val concurrentExpiration = new CommitMarker(dir.getCanonicalPath, conf) {
+              override def write(user: String, batch: Long, latest: Long): Unit = {
+                super.write(user, batch, latest)
+                // Interleave another writer after the old precheck but before actual filtering.
+                spark.sql("INSERT INTO T VALUES (2, 'other')")
+                val snapshots = loadTable("T").snapshotManager()
+                assert(!snapshots.snapshotExists(original))
+                if (staleHint) {
+                  // Expiration removes snapshot files before advancing the earliest hint.
+                  snapshots.commitEarliestHint(original)
+                }
+              }
+            }
+            assert(
+              intercept[IllegalStateException](commitReplayAttempt(concurrentExpiration)).getMessage
+                .contains("Cannot tell whether"))
+            checkAnswer(spark.sql("SELECT * FROM T WHERE b = 'stream'"), Row(1, "stream") :: Nil)
+        }
+      }
+  }
+
+  test("Paimon Sink: a corrupt marker must not be treated as an uncommitted batch") {
+    withTempDir {
+      dir =>
+        spark.sql(
+          "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES (" +
+            "'snapshot.num-retained.min' = '1', 'snapshot.num-retained.max' = '1')")
+        val conf = spark.sessionState.newHadoopConf()
+        val marker = new CommitMarker(dir.getCanonicalPath, conf)
+        commitReplayAttempt(marker)
+        spark.sql("INSERT INTO T VALUES (2, 'other')")
+        // An older sink could truncate the committed batch's marker during recovery.
+        val out = marker.path.getFileSystem(conf).create(marker.path, true)
+        out.write("recovery-user\n0".getBytes("UTF-8"))
+        out.close()
+        val failure = intercept[IllegalStateException](commitReplayAttempt(marker))
+        assert(failure.getMessage.contains(marker.path.toString))
+        checkAnswer(spark.sql("SELECT * FROM T WHERE b = 'stream'"), Row(1, "stream") :: Nil)
+    }
+  }
+
+  test("Paimon Sink: an interrupted marker update keeps the previous batch's marker") {
+    withTempDir {
+      dir =>
+        val conf = new Configuration(spark.sessionState.newHadoopConf())
+        conf.setClass(
+          "fs.file.impl",
+          classOf[FailingMarkerFileSystem],
+          classOf[org.apache.hadoop.fs.FileSystem])
+        conf.setBoolean("fs.file.impl.disable.cache", true)
+        val marker = new CommitMarker(dir.getCanonicalPath, conf)
+        marker.write("recovery-user", 0, 0)
+        FailingMarkerFileSystem.failWrites = true
+        try {
+          // A same-batch retry must not write, even when the filesystem rejects new writes.
+          marker.write("recovery-user", 0, 1)
+          intercept[IOException](marker.write("recovery-user", 1, 2))
+        } finally {
+          FailingMarkerFileSystem.failWrites = false
+        }
+        assert(marker.latestSnapshotIdBefore("recovery-user", 0).contains(0L))
+        marker.write("recovery-user", 1, 2)
+        assert(marker.latestSnapshotIdBefore("recovery-user", 1).contains(2L))
+        // Recreating the checkpoint gives the same batch number a different identity.
+        marker.write("another-query", 0, 3)
+        assert(marker.latestSnapshotIdBefore("another-query", 0).contains(3L))
     }
   }
 
@@ -1176,4 +1301,24 @@ private[spark] object FailOnceRegistration {
         identifier: Identifier,
         partitions: JList[JMap[String, String]]): Unit = {}
   }
+}
+
+/** Fails after opening and partially writing a marker, as a storage failure can. */
+private[spark] class FailingMarkerFileSystem extends RawLocalFileSystem {
+  override protected def createOutputStreamWithMode(
+      path: Path,
+      append: Boolean,
+      permission: FsPermission): OutputStream = {
+    val out = super.createOutputStreamWithMode(path, append, permission)
+    if (FailingMarkerFileSystem.failWrites) {
+      out.write("partial".getBytes("UTF-8"))
+      out.close()
+      throw new IOException("marker write interrupted")
+    }
+    out
+  }
+}
+
+private[spark] object FailingMarkerFileSystem {
+  @volatile var failWrites: Boolean = false
 }

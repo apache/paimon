@@ -75,9 +75,9 @@ class StreamingWriteContext(val commitUser: String, @transient marker: Option[Co
       require(committer != null, "The committer of the streaming query has not been created.")
       val identifier = write.commitIdentifier
       val mayBeReplay = !lastCommitted.exists(identifier > _)
-      if (mayBeReplay) {
-        checkReplayIsRecognisable(write.batchId, identifier, table)
-      }
+      val previousAttempt =
+        if (mayBeReplay) marker.flatMap(_.latestSnapshotIdBefore(commitUser, write.batchId))
+        else None
       marker.foreach(
         _.write(
           commitUser,
@@ -85,7 +85,9 @@ class StreamingWriteContext(val commitUser: String, @transient marker: Option[Co
           Option(table.snapshotManager().latestSnapshotId()).map(_.longValue()).getOrElse(0L)))
       if (mayBeReplay) {
         val commits =
-          committer.filterAndCommit(Collections.singletonMap(Long.box(identifier), messages.asJava))
+          committer.filterAndCommit(
+            Collections.singletonMap(Long.box(identifier), messages.asJava),
+            () => checkReplayIsRecognisable(previousAttempt, identifier, table))
         if (commits == 0) {
           // Expected of a replay; the only trace of a misconfigured identity otherwise.
           logInfo(
@@ -99,36 +101,33 @@ class StreamingWriteContext(val commitUser: String, @transient marker: Option[Co
     }
 
   /**
-   * A replay is recognised by the latest snapshot the commit user left behind. While any snapshot
-   * of the user is retained, that lookup is exact: expiration removes the oldest snapshots first,
-   * so a commit of this batch, being newer, would be retained too. Without one, the marker the
-   * previous attempt of this batch left before committing tells whether expiration has gone past
-   * the snapshots that commit could have produced; if it has, whether the batch was committed can
-   * no longer be told, and committing it again could write it twice.
+   * Validate only after the committer has actually filtered the replay. Checking beforehand would
+   * race expiration between two independent lookups of the commit user's snapshots. Once filtering
+   * says this batch needs committing, its original boundary must still be retained; otherwise the
+   * lookup may have missed an expired commit. A batch with no previous marker never reached commit.
    */
   private def checkReplayIsRecognisable(
-      batchId: Long,
+      previousAttempt: Option[Long],
       identifier: Long,
       table: FileStoreTable): Unit = {
-    val snapshotManager = table.snapshotManager()
-    if (snapshotManager.latestSnapshotOfUser(commitUser).isPresent) {
-      return
-    }
-    for {
-      m <- marker
-      before <- m.latestSnapshotIdBefore(commitUser, batchId)
-      earliest <- Option(snapshotManager.earliestSnapshotId()).map(_.longValue())
-      if earliest > before + 1
-    } {
-      throw new IllegalStateException(
-        s"Cannot tell whether micro-batch $identifier of this query was committed to " +
-          s"${table.name()}. A previous attempt of it was about to commit when the latest " +
-          s"snapshot was $before, but snapshot expiration has since removed every snapshot up " +
-          s"to ${earliest - 1}, including any it may have committed under commit user " +
-          s"'$commitUser'. Committing it again could write it twice. Retain snapshots for " +
-          s"longer than a query may be down. If the table shows that the micro-batch was not " +
-          s"committed, delete ${m.path} and restart the query to commit it; otherwise restart " +
-          s"the query from a new checkpoint.")
+    val snapshots = table.snapshotManager()
+    previousAttempt.foreach {
+      before =>
+        // Check the file itself: expiration deletes snapshots before updating the earliest hint.
+        if (
+          Option(snapshots.latestSnapshotId()).exists(_.longValue() > before) &&
+          !snapshots.snapshotExists(before + 1)
+        ) {
+          throw new IllegalStateException(
+            s"Cannot tell whether micro-batch $identifier of this query was committed to " +
+              s"${table.name()}. A previous attempt of it was about to commit when the latest " +
+              s"snapshot was $before, but snapshot ${before + 1} is no longer retained, so " +
+              s"the lookup of commit user '$commitUser' may have missed its commit. " +
+              "Committing it again could write it twice. Retain snapshots for longer than a " +
+              "query may be down. If the table shows that the micro-batch was not committed, " +
+              s"delete ${marker.get.path} and restart the query to commit it; otherwise restart " +
+              "the query from a new checkpoint.")
+        }
     }
   }
 

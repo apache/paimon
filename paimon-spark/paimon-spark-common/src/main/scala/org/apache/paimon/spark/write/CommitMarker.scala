@@ -21,7 +21,9 @@ package org.apache.paimon.spark.write
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 
+import java.io.IOException
 import java.nio.charset.StandardCharsets.UTF_8
+import java.util.UUID
 
 import scala.io.Source
 import scala.util.Try
@@ -36,26 +38,45 @@ import scala.util.Try
  * user sees everything the micro-batch may have committed. Once expiration has gone past it, the
  * lookup can no longer tell, and the replay must not be committed blindly.
  *
- * The marker is written before the commit, so a micro-batch without one never reached its commit.
+ * A marker is published before committing and is never replaced by a retry of the same batch. Only
+ * a later batch (or a new query) replaces it, after writing its complete contents to a temp file. A
+ * missing marker therefore means this batch never reached its commit.
  */
 class CommitMarker(checkpointLocation: String, hadoopConf: Configuration) {
 
   val path: Path = new Path(new Path(checkpointLocation, "paimon"), "commit-marker")
 
   def write(commitUser: String, batchId: Long, latestSnapshotId: Long): Unit = {
+    if (latestSnapshotIdBefore(commitUser, batchId).isDefined) {
+      return
+    }
     val fs = path.getFileSystem(hadoopConf)
-    val out = fs.create(path, true)
+    val temporary = new Path(path.getParent, s".commit-marker-${UUID.randomUUID()}")
     try {
-      out.write(s"$commitUser\n$batchId\n$latestSnapshotId\n".getBytes(UTF_8))
+      val out = fs.create(temporary, false)
+      try {
+        out.write(s"$commitUser\n$batchId\n$latestSnapshotId\n".getBytes(UTF_8))
+      } finally {
+        out.close()
+      }
+      // Spark has only one writer per checkpoint. The previous marker belongs to a different
+      // batch/query, so losing it here is safe: this batch has not reached its commit yet. Never
+      // delete a marker of this same batch, even if its first attempt has already committed.
+      if (fs.exists(path) && !fs.delete(path, false)) {
+        throw new IOException(s"Cannot replace commit marker $path")
+      }
+      if (!fs.rename(temporary, path)) {
+        throw new IOException(s"Cannot publish commit marker $path")
+      }
     } finally {
-      out.close()
+      fs.delete(temporary, false)
     }
   }
 
   /**
-   * The latest snapshot id recorded before `batchId` of `commitUser` was committed, if that batch
-   * got as far as its commit. A marker left by another batch or another query, or one that was not
-   * written completely, says nothing about this batch.
+   * The boundary of the first attempt of `batchId` of `commitUser`. A marker of another batch or
+   * query says nothing about this one. A corrupt marker, however, might have been truncated by an
+   * older sink retrying an already committed batch, so it must not be treated as a missing marker.
    */
   def latestSnapshotIdBefore(commitUser: String, batchId: Long): Option[Long] = {
     val fs = path.getFileSystem(hadoopConf)
@@ -69,11 +90,22 @@ class CommitMarker(checkpointLocation: String, hadoopConf: Configuration) {
       } finally {
         in.close()
       }
-    lines match {
-      case user :: batch :: snapshot :: Nil
-          if user == commitUser && Try(batch.toLong).toOption.contains(batchId) =>
-        Try(snapshot.toLong).toOption
+    val entry = lines match {
+      case user :: batch :: snapshot :: Nil =>
+        for {
+          id <- Try(batch.toLong).toOption.filter(_ >= 0)
+          before <- Try(snapshot.toLong).toOption.filter(_ >= 0)
+          if user.nonEmpty
+        } yield (user, id, before)
       case _ => None
+    }
+    entry match {
+      case Some((user, batch, snapshot)) =>
+        if (user == commitUser && batch == batchId) Some(snapshot) else None
+      case None =>
+        throw new IllegalStateException(
+          s"Cannot read commit marker $path. It may belong to an already committed micro-batch; " +
+            "restore a valid marker or verify the table before deleting it and restarting.")
     }
   }
 }
