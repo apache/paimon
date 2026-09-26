@@ -45,6 +45,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -218,14 +219,25 @@ public abstract class ConflictDetection {
             // then the delta file must be <DELETE deltaFile1, DELETE dv1>; and vice versa,
             // If the delta file is <DELETE deltaFile2, DELETE dv2>,
             // then the base file must be <ADD baseFile2, ADD dv2>.
+            List<IndexManifestEntry> baseIndexEntries;
             try {
-                baseEntries =
-                        buildBaseEntriesWithDV(
-                                baseEntries,
-                                latestSnapshot.indexManifest() == null
-                                        ? Collections.emptyList()
-                                        : indexFileHandler.readManifest(
-                                                latestSnapshot.indexManifest()));
+                baseIndexEntries =
+                        latestSnapshot.indexManifest() == null
+                                ? Collections.emptyList()
+                                : indexFileHandler.readManifestWithIOException(
+                                        latestSnapshot.indexManifest());
+            } catch (IOException e) {
+                // an unreadable index manifest is an IO problem, not a deletion conflict:
+                // classifying it as a conflict makes the commit give up (and can trigger a
+                // pointless rollback of a valid snapshot), so let it propagate
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to read index manifest %s of snapshot %s for conflict detection.",
+                                latestSnapshot.indexManifest(), latestSnapshot.id()),
+                        e);
+            }
+            try {
+                baseEntries = buildBaseEntriesWithDV(baseEntries, baseIndexEntries);
                 deltaEntries =
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {
