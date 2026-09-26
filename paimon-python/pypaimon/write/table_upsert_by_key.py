@@ -462,18 +462,10 @@ class TableUpsertByKey:
                 or not match_keys or not partition_data.num_rows):
             return None
         try:
-            from pypaimon_rust.datafusion import UpsertKeyMatcher
+            from pypaimon_rust.datafusion import _match_upsert_keys
         except ImportError:
             return None
-        # Key encoding can reject Arrow types that PyPaimon's Python tuple
-        # comparison supports. This probe has no side effects, so those types
-        # keep the established Python implementation.
         source_batch = partition_data.combine_chunks().to_batches()[0]
-        try:
-            matcher = UpsertKeyMatcher(source_batch, match_keys)
-        except ValueError as error:
-            logger.debug('Native upsert key type unsupported: %s', error)
-            return None
 
         read_builder = self.table.new_read_builder()
         if partition_spec:
@@ -491,13 +483,19 @@ class TableUpsertByKey:
                 table=self.table, predicate=None,
                 read_type=key_fields + [SpecialFields.ROW_ID],
             )
-            for batch in table_read.to_arrow_batch_reader(splits):
-                try:
-                    matcher.add_existing_batch(batch)
-                except ValueError as error:
-                    logger.debug('Native upsert key type unsupported: %s', error)
-                    return None
-        return (*matcher.finish(), plan.snapshot_id)
+            existing_batches = table_read.to_arrow_batch_reader(splits)
+        else:
+            existing_batches = ()
+        try:
+            match = _match_upsert_keys(
+                source_batch, match_keys, existing_batches
+            )
+        except ValueError as error:
+            # Arrow key encoding does not support every type accepted by the
+            # Python tuple matcher. Keep its established behavior for those.
+            logger.debug('Native upsert key type unsupported: %s', error)
+            return None
+        return (*match, plan.snapshot_id)
 
     @staticmethod
     def _dedup_last_write_wins(

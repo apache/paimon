@@ -141,13 +141,16 @@ def create_native_delete(table, commit_user):
     """Select Rust's deletion-vector writer for supported batch deletes."""
     if not table.options.deletion_vectors_enabled(False):
         return None
-    native_table = _native_row_id_table(table, 'new_delete')
+    native_table = _native_row_id_table(table, 'new_update')
     if native_table is None:
+        return None
+    from pypaimon_rust.datafusion import BatchTableUpdate
+    if not hasattr(BatchTableUpdate, 'delete_by_row_id'):
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
-              .new_delete())
-    return NativeBatchTableDelete(table, writer)
+              .new_update())
+    return NativeBatchTableUpdate(table, writer)
 
 
 def _raise_native_row_id_error(error):
@@ -192,6 +195,21 @@ class NativeBatchTableUpdate:
                 self.writer.add_matched_group(table.to_batches())
             try:
                 messages = self.writer.prepare_commit()
+            except ValueError as error:
+                _raise_native_row_id_error(error)
+            return from_native_commit_messages(self.table, messages)
+        finally:
+            self.writer.close()
+
+    def delete_by_row_id(self, row_ids):
+        try:
+            ids = []
+            for row_id in row_ids:
+                if row_id is None:
+                    raise ValueError('_ROW_ID value must not be null.')
+                ids.append(int(row_id))
+            try:
+                messages = self.writer.delete_by_row_id(ids)
             except ValueError as error:
                 _raise_native_row_id_error(error)
             return from_native_commit_messages(self.table, messages)
@@ -248,27 +266,3 @@ class NativePredicateTableUpdate:
             )
         finally:
             writer.close()
-
-
-class NativeBatchTableDelete:
-    """Submit row IDs to Rust's deletion-vector writer and decode messages."""
-
-    def __init__(self, table, writer):
-        self.table = table
-        self.writer = writer
-
-    def delete_by_row_id(self, row_ids):
-        try:
-            ids = []
-            for row_id in row_ids:
-                if row_id is None:
-                    raise ValueError('_ROW_ID value must not be null.')
-                ids.append(int(row_id))
-            self.writer.add_row_ids(ids)
-            try:
-                messages = self.writer.prepare_commit()
-            except ValueError as error:
-                _raise_native_row_id_error(error)
-            return from_native_commit_messages(self.table, messages)
-        finally:
-            self.writer.close()
