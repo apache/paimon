@@ -140,6 +140,55 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
                 _RowIdUpdateFileWriter(table, (), ['id'])
             output_stream.assert_not_called()
 
+    def test_row_id_update_file_honors_stats_mode(self):
+        # A row-id update file must honor metadata.stats-mode like the other
+        # writers. Under counts / truncate(N) the manifest declares value
+        # stats (value_stats_cols=None) so it must actually write them --
+        # previously this path only collected stats under full and left
+        # null_counts empty, contradicting the declared columns.
+        schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        rows = pa.Table.from_pylist(
+            [{'id': 10, 'name': 'apple'},
+             {'id': 20, 'name': 'banana'},
+             {'id': 30, 'name': None}], schema=schema)
+
+        def write_update_file(mode):
+            table = self._create_table(pa_schema=schema, options={
+                **self.table_options, 'metadata.stats-mode': mode})
+            writer = _RowIdUpdateFileWriter(table, (), ['id', 'name'])
+            try:
+                metas = writer.write_batches(rows.to_batches())
+            finally:
+                writer.close()
+            self.assertEqual(len(metas), 1)
+            return table, metas[0]
+
+        def min_max(table, file):
+            vs = file.value_stats
+            return (list(vs.min_values.values),
+                    list(vs.max_values.values),
+                    list(vs.null_counts))
+
+        for mode in ('counts', 'truncate(3)'):
+            with self.subTest(mode=mode):
+                table, file = write_update_file(mode)
+                # Declares all columns have value stats...
+                self.assertIsNone(file.value_stats_cols)
+                mn, mx, null_counts = min_max(table, file)
+                # ...so it must record the null counts (id none, name one).
+                self.assertEqual(null_counts, [0, 1])
+                if mode == 'counts':
+                    self.assertEqual((mn, mx), ([None, None], [None, None]))
+                else:
+                    # int is not truncated; string min/max are (max bumped to
+                    # stay a sound upper bound): "apple"->"app", "banana"->"bao".
+                    self.assertEqual(mn, [10, 'app'])
+                    self.assertEqual(mx, [30, 'bao'])
+
+        # none writes no value stats at all (value_stats_cols=[]).
+        table, file = write_update_file('none')
+        self.assertEqual(file.value_stats_cols, [])
+
     @mock.patch.object(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 2)
     def test_partial_upsert_streams_original_file_group(self):
         schema = pa.schema([

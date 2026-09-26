@@ -1378,6 +1378,13 @@ class CoreOptions:
     def metadata_stats_enabled(self, default=None):
         return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
 
+    def metadata_stats_mode(self, default="none"):
+        """Raw ``metadata.stats-mode`` string (``none`` / ``counts`` /
+        ``truncate(N)`` / ``full``). Parsed by
+        ``pypaimon.write.writer.stats_mode.parse_stats_mode``.
+        """
+        return self.options.get(CoreOptions.METADATA_STATS_MODE, default)
+
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
