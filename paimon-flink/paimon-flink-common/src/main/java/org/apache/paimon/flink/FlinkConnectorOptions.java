@@ -474,6 +474,19 @@ public class FlinkConnectorOptions {
                                     + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
                                     + "automatically generate the operator uid, which may be incompatible when the topology changes.");
 
+    public static final ConfigOption<Boolean> SOURCE_OPERATOR_UID_COVER_ALL_OPERATORS =
+            key("source.operator-uid.cover-all-operators")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, 'source.operator-uid.suffix' also names every other operator a streaming "
+                                    + "read adds: the split monitor, the split reader, the watermark assigner and the "
+                                    + "DataStream row conversion. Without it those operators take their uid from the "
+                                    + "shape of the stream graph, so a change elsewhere in the job orphans their "
+                                    + "checkpoint state. Has no effect unless 'source.operator-uid.suffix' is set. "
+                                    + "Turning it on for a running job changes those uids, see the migration steps "
+                                    + "in the Flink savepoint documentation.");
+
     public static final ConfigOption<String> SINK_OPERATOR_UID_SUFFIX =
             key("sink.operator-uid.suffix")
                     .stringType()
@@ -482,6 +495,20 @@ public class FlinkConnectorOptions {
                             "Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is "
                                     + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
                                     + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+
+    public static final ConfigOption<Boolean> SINK_OPERATOR_UID_COVER_ALL_OPERATORS =
+            key("sink.operator-uid.cover-all-operators")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, 'sink.operator-uid.suffix' also names every other operator a streaming "
+                                    + "write adds: the row conversions, the local merge, the compaction operators, "
+                                    + "the partition statistics operators, the index bootstrap and the final sink. "
+                                    + "Without it those operators take their uid from the shape of the stream graph, "
+                                    + "so a change elsewhere in the job orphans their checkpoint state. Has no effect "
+                                    + "unless 'sink.operator-uid.suffix' is set. Turning it on for a running job "
+                                    + "changes those uids, see the migration steps in the Flink savepoint "
+                                    + "documentation.");
 
     public static final ConfigOption<Boolean> SCAN_BOUNDED =
             key("scan.bounded")

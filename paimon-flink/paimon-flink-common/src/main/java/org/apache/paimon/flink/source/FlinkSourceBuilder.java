@@ -26,6 +26,7 @@ import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
 import org.apache.paimon.flink.source.operator.MonitorSource;
+import org.apache.paimon.flink.utils.OperatorUidAssigner;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
@@ -83,6 +84,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class FlinkSourceBuilder {
 
     private static final String SOURCE_NAME = "Source";
+
+    private static final String ROW_CONVERSION_NAME = "Source Row Conversion";
+    private static final String WATERMARKS_NAME = "Timestamps/Watermarks";
 
     private final Table table;
     private final Options conf;
@@ -415,7 +419,7 @@ public class FlinkSourceBuilder {
                 source.map((MapFunction<RowData, Row>) converter::toExternal)
                         .returns(ExternalTypeInfo.of(rowType));
         forwardParallelism(result, source);
-        return result;
+        return OperatorUidAssigner.forSource(table).assign(result, ROW_CONVERSION_NAME);
     }
 
     /** Build source {@link DataStream} with {@link RowData}. */
@@ -494,7 +498,11 @@ public class FlinkSourceBuilder {
             dataStream.getTransformation().setParallelism(parallelism);
         }
         if (watermarkStrategy != null) {
-            dataStream = dataStream.assignTimestampsAndWatermarks(watermarkStrategy);
+            dataStream =
+                    OperatorUidAssigner.forSource(table)
+                            .assign(
+                                    dataStream.assignTimestampsAndWatermarks(watermarkStrategy),
+                                    WATERMARKS_NAME);
         }
         return dataStream;
     }

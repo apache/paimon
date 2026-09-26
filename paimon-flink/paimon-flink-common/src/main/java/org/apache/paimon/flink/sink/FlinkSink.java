@@ -24,6 +24,7 @@ import org.apache.paimon.flink.compact.changelog.ChangelogCompactCoordinateOpera
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactSortOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactWorkerOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogTaskTypeInfo;
+import org.apache.paimon.flink.utils.OperatorUidAssigner;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -79,6 +80,12 @@ public abstract class FlinkSink<T> implements Serializable {
     private static final String WRITER_NAME = "Writer";
     private static final String WRITER_WRITE_ONLY_NAME = "Writer(write-only)";
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
+
+    private static final String CHANGELOG_COMPACT_COORDINATOR_NAME =
+            "Changelog Compact Coordinator";
+    private static final String CHANGELOG_COMPACT_WORKER_NAME = "Changelog Compact Worker";
+    private static final String CHANGELOG_SORT_NAME = "Changelog Sort by Creation Time";
+    private static final String END_NAME = "end";
 
     protected final FileStoreTable table;
     private final boolean ignorePreviousFiles;
@@ -170,26 +177,34 @@ public abstract class FlinkSink<T> implements Serializable {
                 written, options.get(SINK_WRITER_CPU), options.get(SINK_WRITER_MEMORY));
 
         if (!table.primaryKeys().isEmpty() && options.get(PRECOMMIT_COMPACT)) {
+            OperatorUidAssigner uids = OperatorUidAssigner.forSink(table);
             SingleOutputStreamOperator<Committable> beforeSort =
-                    written.transform(
-                                    "Changelog Compact Coordinator",
-                                    new EitherTypeInfo<>(
-                                            new CommittableTypeInfo(), new ChangelogTaskTypeInfo()),
-                                    new ChangelogCompactCoordinateOperator(table.coreOptions()))
-                            .forceNonParallel()
+                    uids.assign(
+                                    written.transform(
+                                                    CHANGELOG_COMPACT_COORDINATOR_NAME,
+                                                    new EitherTypeInfo<>(
+                                                            new CommittableTypeInfo(),
+                                                            new ChangelogTaskTypeInfo()),
+                                                    new ChangelogCompactCoordinateOperator(
+                                                            table.coreOptions()))
+                                            .forceNonParallel(),
+                                    CHANGELOG_COMPACT_COORDINATOR_NAME)
                             .transform(
-                                    "Changelog Compact Worker",
+                                    CHANGELOG_COMPACT_WORKER_NAME,
                                     new CommittableTypeInfo(),
                                     new ChangelogCompactWorkerOperator(table));
+            uids.assign(beforeSort, CHANGELOG_COMPACT_WORKER_NAME);
             forwardParallelism(beforeSort, written);
 
             written =
-                    beforeSort
-                            .transform(
-                                    "Changelog Sort by Creation Time",
-                                    new CommittableTypeInfo(),
-                                    new ChangelogCompactSortOperator())
-                            .forceNonParallel();
+                    uids.assign(
+                            beforeSort
+                                    .transform(
+                                            CHANGELOG_SORT_NAME,
+                                            new CommittableTypeInfo(),
+                                            new ChangelogCompactSortOperator())
+                                    .forceNonParallel(),
+                            CHANGELOG_SORT_NAME);
         }
 
         return written;
@@ -233,9 +248,12 @@ public abstract class FlinkSink<T> implements Serializable {
         // The commit runs inside the writer's OperatorCoordinator on the JobManager, so there
         // is no global committer operator. Committables are still forwarded by the writer for
         // observability and are discarded here.
-        return written.sinkTo(new PaimonDiscardingSink<>(table))
-                .name("end")
-                .setParallelism(written.getParallelism());
+        return OperatorUidAssigner.forSink(table)
+                .assign(
+                        written.sinkTo(new PaimonDiscardingSink<>(table))
+                                .name(END_NAME)
+                                .setParallelism(written.getParallelism()),
+                        END_NAME);
     }
 
     private DataStreamSink<?> doOperatorCommit(
@@ -288,7 +306,13 @@ public abstract class FlinkSink<T> implements Serializable {
         }
         configureSlotSharingGroup(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
-        return committed.sinkTo(new PaimonDiscardingSink<>(table)).name("end").setParallelism(1);
+        return OperatorUidAssigner.forSink(table)
+                .assign(
+                        committed
+                                .sinkTo(new PaimonDiscardingSink<>(table))
+                                .name(END_NAME)
+                                .setParallelism(1),
+                        END_NAME);
     }
 
     public static void configureSlotSharingGroup(
