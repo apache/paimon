@@ -20,6 +20,8 @@ package org.apache.paimon.disk;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockCompressionType;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 
 import org.junit.jupiter.api.Test;
@@ -61,6 +63,41 @@ public class ChannelWriterOutputViewTest {
                                         .next())
                         .isNull();
                 assertThat(output.getBlockCount()).isZero();
+            } finally {
+                input.getChannel().closeAndDelete();
+            }
+        }
+    }
+
+    @Test
+    public void testSpillCompressionNoneRoundTrip() throws Exception {
+        // spill-compression 'none' maps the factory to null: writing and reading must
+        // fall back to plain blocks instead of crashing on the missing codec
+        BinaryRowSerializer serializer = new BinaryRowSerializer(1);
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, 42);
+        writer.complete();
+        try (IOManager ioManager = IOManager.create(tempDir.toString())) {
+            FileIOChannel.ID channel = ioManager.createChannel();
+            ChannelWriterOutputView output =
+                    FileChannelUtil.createOutputView(ioManager, channel, null, BLOCK_SIZE);
+            BinaryRowSerializer ser = serializer.duplicate();
+            for (int i = 0; i < 100; i++) {
+                ser.serializeToPages(row, output);
+            }
+            output.close();
+
+            ChannelReaderInputView input =
+                    new ChannelReaderInputView(
+                            channel, ioManager, null, BLOCK_SIZE, output.getBlockCount());
+            try {
+                ChannelReaderInputViewIterator iterator =
+                        new ChannelReaderInputViewIterator(input, null, serializer);
+                for (int i = 0; i < 100; i++) {
+                    assertThat(iterator.next().getInt(0)).isEqualTo(42);
+                }
+                assertThat(iterator.next()).isNull();
             } finally {
                 input.getChannel().closeAndDelete();
             }

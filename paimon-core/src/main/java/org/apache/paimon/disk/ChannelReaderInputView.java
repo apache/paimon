@@ -28,6 +28,8 @@ import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.utils.MutableObjectIterator;
 
+import javax.annotation.Nullable;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.Collections;
@@ -53,13 +55,19 @@ public class ChannelReaderInputView extends AbstractPagedInputView {
     public ChannelReaderInputView(
             FileIOChannel.ID id,
             IOManager ioManager,
-            BlockCompressionFactory compressionCodecFactory,
+            @Nullable BlockCompressionFactory compressionCodecFactory,
             int compressionBlockSize,
             int numBlocks)
             throws IOException {
         this.numBlocksRemaining = numBlocks;
         this.reader = ioManager.createBufferFileReader(id);
         uncompressedBuffer = MemorySegment.wrap(new byte[compressionBlockSize]);
+        // spill-compression 'none' maps the factory to null: read plain blocks
+        if (compressionCodecFactory == null) {
+            decompressor = null;
+            compressedBuffer = uncompressedBuffer;
+            return;
+        }
         decompressor = compressionCodecFactory.getDecompressor();
         compressedBuffer =
                 MemorySegment.wrap(
@@ -79,6 +87,11 @@ public class ChannelReaderInputView extends AbstractPagedInputView {
 
         Buffer buffer = Buffer.create(compressedBuffer);
         reader.readInto(buffer);
+        if (decompressor == null) {
+            this.currentSegmentLimit = buffer.getSize();
+            this.numBlocksRemaining--;
+            return compressedBuffer;
+        }
         this.currentSegmentLimit =
                 decompressor.decompress(
                         buffer.getMemorySegment().getArray(),

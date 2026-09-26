@@ -25,6 +25,8 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
 
@@ -47,13 +49,18 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView imple
 
     public ChannelWriterOutputView(
             BufferFileWriter writer,
-            BlockCompressionFactory compressionCodecFactory,
+            @Nullable BlockCompressionFactory compressionCodecFactory,
             int compressionBlockSize) {
         super(MemorySegment.wrap(new byte[compressionBlockSize]), compressionBlockSize);
 
-        compressor = compressionCodecFactory.getCompressor();
+        // spill-compression 'none' maps the factory to null: write plain blocks
+        compressor =
+                compressionCodecFactory == null ? null : compressionCodecFactory.getCompressor();
         compressedBuffer =
-                MemorySegment.wrap(new byte[compressor.getMaxCompressedSize(compressionBlockSize)]);
+                compressor == null
+                        ? null
+                        : MemorySegment.wrap(
+                                new byte[compressor.getMaxCompressedSize(compressionBlockSize)]);
         this.writer = writer;
     }
 
@@ -90,6 +97,13 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView imple
     }
 
     private void writeCompressed(MemorySegment current, int size) throws IOException {
+        if (compressor == null) {
+            writer.writeBlock(Buffer.create(current, size));
+            blockCount++;
+            numBytes += size;
+            numCompressedBytes += size;
+            return;
+        }
         int compressedLen =
                 compressor.compress(current.getArray(), 0, size, compressedBuffer.getArray(), 0);
         writer.writeBlock(Buffer.create(compressedBuffer, compressedLen));
