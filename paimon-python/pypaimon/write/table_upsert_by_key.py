@@ -26,7 +26,6 @@ from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import require_columns, row_to_named_values
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_write import StreamTableWrite
 
 # Composite key is represented as a tuple of values
@@ -53,6 +52,12 @@ class TableUpsertByKey:
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_identifier = commit_identifier
+
+    def _new_row_id_updater(self):
+        from pypaimon.write.write_builder import _new_update_by_row_id
+
+        return _new_update_by_row_id(
+            self.table, self.commit_user, self.commit_identifier)
 
     def upsert(self, data: pa.Table, upsert_keys: List[str],
                update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
@@ -200,9 +205,7 @@ class TableUpsertByKey:
             )
             for _, values_by_name in matched_items:
                 require_columns(values_by_name, cols_to_update, "upsert_by_key")
-            commit_messages.extend(TableUpdateByRowId(
-                self.table, self.commit_user, self.commit_identifier,
-            ).update_rows_columns(
+            commit_messages.extend(self._new_row_id_updater().update_rows_columns(
                 [row for row, _ in matched_items],
                 matched_row_ids,
                 cols_to_update,
@@ -551,9 +554,8 @@ class TableUpsertByKey:
         )
 
         cols_to_update = list(update_cols) if update_cols else list(self.table.field_names)
-        return TableUpdateByRowId(
-            self.table, self.commit_user, self.commit_identifier,
-        ).update_columns(update_data, cols_to_update)
+        return self._new_row_id_updater().update_columns(
+            update_data, cols_to_update)
 
     def _do_appends(
             self,

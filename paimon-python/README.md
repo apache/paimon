@@ -105,6 +105,27 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Row ID column updates
+
+For a batch update of selected columns in a data-evolution table with row
+tracking, pass an Arrow table containing `_ROW_ID` and the columns to update.
+Create the updater and committer from the same builder so they share a commit
+user:
+
+```python
+builder = table.new_batch_write_builder()
+updater = builder.new_update().new_update_by_row_id()
+messages = updater.update_columns(updates, ["name"])
+commit = builder.new_commit()
+try:
+    commit.commit(messages)
+finally:
+    commit.close()
+```
+
+For stream updates, use `table.new_stream_write_builder()` and pass the stream
+commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
+
 # Parquet page-index reads
 
 For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a

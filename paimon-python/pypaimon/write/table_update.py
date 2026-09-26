@@ -46,6 +46,7 @@ from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import _abort_commit_messages
+from pypaimon.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -125,6 +126,16 @@ class TableUpdate:
         self.update_cols = None
         self.projection = None
 
+    def _new_row_id_updater(
+            self, commit_identifier: int, _precomputed_files_info=None
+    ) -> TableUpdateByRowId:
+        return TableUpdateByRowId(
+            self.table,
+            self.commit_user,
+            commit_identifier,
+            _precomputed_files_info=_precomputed_files_info,
+        )
+
     def with_update_type(self, update_cols: List[str]):
         update_cols = list(dict.fromkeys(update_cols))
         for col in update_cols:
@@ -163,9 +174,8 @@ class TableUpdate:
         cols = self.update_cols if self.update_cols is not None else [
             c for c in table.column_names if c != SpecialFields.ROW_ID.name
         ]
-        return TableUpdateByRowId(
-            self.table, self.commit_user, commit_identifier,
-        ).update_columns(table, cols)
+        return self._new_row_id_updater(commit_identifier).update_columns(
+            table, cols)
 
     def _update_by_arrow_batches_with_row_id(
             self, tables: Iterable[pa.Table], commit_identifier: int
@@ -178,8 +188,7 @@ class TableUpdate:
                     if c != SpecialFields.ROW_ID.name
                 ]
                 if updater is None:
-                    updater = TableUpdateByRowId(
-                        self.table, self.commit_user, commit_identifier)
+                    updater = self._new_row_id_updater(commit_identifier)
                 updater.update_columns(table, cols)
             return [] if updater is None else updater.commit_messages
         except Exception:
@@ -283,14 +292,11 @@ class TableUpdate:
         plan = read_builder.new_scan().plan_for_write()
         splits = plan.splits()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
-        files_info = TableUpdateByRowId._files_info_from_splits(
+        files_info = RowIdFileIndex.from_splits(
             snapshot_id, splits
         )
         table_read = read_builder.new_read()
-        updater = TableUpdateByRowId(
-            self.table, self.commit_user, commit_identifier,
-            _precomputed_files_info=files_info,
-        )
+        updater = self._new_row_id_updater(commit_identifier, files_info)
         try:
             if has_array:
                 matched = table_read.to_arrow(splits)
@@ -641,6 +647,12 @@ class BatchTableUpdate(TableUpdate):
     """Batch-mode table update; commit messages always use
     :data:`BATCH_COMMIT_IDENTIFIER`."""
 
+    def new_update_by_row_id(
+            self, _precomputed_files_info=None) -> TableUpdateByRowId:
+        """Create a row-id updater using this batch update's commit user."""
+        return self._new_row_id_updater(
+            BATCH_COMMIT_IDENTIFIER, _precomputed_files_info)
+
     def update_by_arrow_with_row_id(self, table: pa.Table) -> List[CommitMessage]:
         """Apply column updates keyed by ``_ROW_ID`` to existing rows."""
         return self._update_by_arrow_with_row_id(table, BATCH_COMMIT_IDENTIFIER)
@@ -719,6 +731,13 @@ class BatchTableUpdate(TableUpdate):
 class StreamTableUpdate(TableUpdate):
     """Stream-mode table update; the same instance may drive many rounds,
     each tagged with its own ``commit_identifier``."""
+
+    def new_update_by_row_id(
+            self, commit_identifier: int,
+            _precomputed_files_info=None) -> TableUpdateByRowId:
+        """Create a row-id updater for a stream commit identifier."""
+        return self._new_row_id_updater(
+            commit_identifier, _precomputed_files_info)
 
     def update_by_arrow_with_row_id(
             self, table: pa.Table, commit_identifier: int
