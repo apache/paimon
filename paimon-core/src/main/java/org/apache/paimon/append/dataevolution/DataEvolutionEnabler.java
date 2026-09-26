@@ -72,17 +72,15 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  *   <li>Assign a first row id to every live data file that has none, by rewriting the manifests of
  *       the latest snapshot and committing them as a metadata-only snapshot. Ids are contiguous per
  *       partition, in the order {@code sys.reassign_row_id} would produce, so the converted table
- *       needs no reassignment afterwards. The snapshot is marked as one whose live files all have a
- *       row id, see {@link #rowIdsAssigned(Snapshot)}.
+ *       needs no reassignment afterwards.
  *   <li>Commit a schema with both options enabled through the catalog, so that catalog metadata
- *       stays in sync. The schema change is accepted only while the latest snapshot is such a
- *       marked one (or the table has none): when a writer committed in between, steps 1 and 2 are
- *       repeated.
+ *       stays in sync. Only this class can create that schema change, see {@link
+ *       EnableDataEvolution}.
  *   <li>Commit a fence: an empty snapshot on the new schema. A writer that checked the previous
  *       schema read its base snapshot before that check, so it either committed before the fence,
  *       or its commit loses the race for the next snapshot id and is refused on retry, see {@code
  *       FileStoreCommitImpl}.
- *   <li>Assign ids to the files that such writers committed before the fence.
+ *   <li>Assign ids to the files committed before the fence without one.
  * </ol>
  *
  * <p>The procedure is idempotent: on a table that already has data evolution enabled it only
@@ -92,14 +90,6 @@ public class DataEvolutionEnabler {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionEnabler.class);
     private static final String COMMIT_USER_PREFIX = "enable-data-evolution";
-
-    /**
-     * Snapshot property set by the row id commits of this class. Its value is the id of the
-     * snapshot it was written to, so that a later snapshot which copies the properties of its base
-     * does not carry the mark.
-     */
-    public static final String ROW_IDS_ASSIGNED_SNAPSHOT_ID =
-            "data-evolution.row-ids-assigned-snapshot-id";
 
     private final Catalog catalog;
     private final Identifier identifier;
@@ -131,17 +121,6 @@ public class DataEvolutionEnabler {
         this.beforeRowIdCommit = beforeRowIdCommit;
         this.beforeSchemaChange = beforeSchemaChange;
         this.beforeFence = beforeFence;
-    }
-
-    /**
-     * Whether {@code snapshot} was committed by this class, which guarantees that every live data
-     * file in it has a first row id.
-     */
-    public static boolean rowIdsAssigned(Snapshot snapshot) {
-        Map<String, String> properties = snapshot.properties();
-        return properties != null
-                && Long.toString(snapshot.id())
-                        .equals(properties.get(ROW_IDS_ASSIGNED_SNAPSHOT_ID));
     }
 
     /** Validates and, unless {@code dryRun}, converts the table. */
@@ -183,7 +162,7 @@ public class DataEvolutionEnabler {
                     "Assigning row ids to {} file(s) of table {} that were committed without one.",
                     remaining.files.size(),
                     identifier.getFullName());
-            totals.add(assignRowIdsWithRetry(table, remaining, false));
+            totals.add(assignRowIdsWithRetry(table, remaining));
         }
         checkState(
                 plan(table).files.isEmpty(),
@@ -207,61 +186,20 @@ public class DataEvolutionEnabler {
     }
 
     /**
-     * Assigns row ids to the files of the latest snapshot and switches the schema. The schema
-     * change is only accepted on a snapshot committed by the assignment, so a commit that lands in
-     * between makes both steps run again.
+     * Assigns row ids to the files of the latest snapshot and switches the schema. Files that a
+     * writer on the previous schema commits in between get their row ids after the fence.
      */
     private void assignRowIdsAndEnable(FileStoreTable table, Assignment planned, Totals totals)
             throws Exception {
-        CoreOptions options = table.coreOptions();
-        RetryWaiter retryWaiter =
-                new RetryWaiter(options.commitMinRetryWait(), options.commitMaxRetryWait());
-        long startMillis = System.currentTimeMillis();
-        Assignment assignment = planned;
-        int retryCount = 0;
-        while (true) {
-            if (assignment.snapshot != null) {
-                // also when no file needs an id: the commit marks the snapshot as fully assigned
-                totals.add(assignRowIdsWithRetry(table, assignment, true));
-            }
-            beforeSchemaChange.run();
-            if (dataEvolutionEnabled(table)) {
-                // a concurrent run switched the schema already
-                return;
-            }
-            try {
-                catalog.alterTable(identifier, SchemaChange.enableDataEvolution(), false);
-                return;
-            } catch (RuntimeException e) {
-                Snapshot latest = table.snapshotManager().latestSnapshot();
-                if (latest == null || rowIdsAssigned(latest)) {
-                    throw e;
-                }
-                if (System.currentTimeMillis() - startMillis > options.commitTimeout()
-                        || retryCount >= options.commitMaxRetries()) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "Failed to enable data evolution on table %s after %s millis "
-                                            + "and %s retries because newer snapshots kept being "
-                                            + "committed between the row id assignment and the "
-                                            + "schema change.",
-                                    identifier.getFullName(),
-                                    System.currentTimeMillis() - startMillis,
-                                    retryCount),
-                            e);
-                }
-                LOG.info(
-                        "Snapshot {} of table {} was committed after the row id assignment, "
-                                + "assigning again ({}/{}).",
-                        latest.id(),
-                        identifier.getFullName(),
-                        retryCount + 1,
-                        options.commitMaxRetries());
-                retryWaiter.retryWait(retryCount);
-                retryCount++;
-                assignment = plan(table);
-            }
+        if (!planned.files.isEmpty()) {
+            totals.add(assignRowIdsWithRetry(table, planned));
         }
+        beforeSchemaChange.run();
+        if (dataEvolutionEnabled(table)) {
+            // a concurrent run switched the schema already
+            return;
+        }
+        catalog.alterTable(identifier, new EnableDataEvolution(), false);
     }
 
     private boolean dataEvolutionEnabled(FileStoreTable table) {
@@ -375,8 +313,7 @@ public class DataEvolutionEnabler {
         return new Assignment(latest, manifests, withoutRowId, firstRowIds, rowCount, next);
     }
 
-    private Assignment assignRowIdsWithRetry(
-            FileStoreTable table, Assignment initial, boolean commitIfNothingToAssign)
+    private Assignment assignRowIdsWithRetry(FileStoreTable table, Assignment initial)
             throws Exception {
         CoreOptions options = table.coreOptions();
         RetryWaiter retryWaiter =
@@ -403,7 +340,7 @@ public class DataEvolutionEnabler {
             // Another commit landed: plan again from the new latest snapshot. Files that already
             // received an id in it (written by a writer on the new schema) keep it.
             assignment = plan(table);
-            if (assignment.files.isEmpty() && !commitIfNothingToAssign) {
+            if (assignment.files.isEmpty()) {
                 return assignment;
             }
             LOG.info(
@@ -417,8 +354,7 @@ public class DataEvolutionEnabler {
 
     /**
      * Rewrites the manifests holding the planned files and commits them, referencing the latest
-     * schema and marking the new snapshot, see {@link #rowIdsAssigned}. Returns false when the
-     * snapshot moved on in the meantime.
+     * schema. Returns false when the snapshot moved on in the meantime.
      */
     private boolean commitAssignment(FileStoreTable table, Assignment assignment) {
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
@@ -467,12 +403,6 @@ public class DataEvolutionEnabler {
                                     "Cannot get latest schema for table "
                                             + identifier.getFullName())
                             .id();
-            Map<String, String> properties = new HashMap<>();
-            if (assignment.snapshot.properties() != null) {
-                properties.putAll(assignment.snapshot.properties());
-            }
-            properties.put(
-                    ROW_IDS_ASSIGNED_SNAPSHOT_ID, Long.toString(assignment.snapshot.id() + 1));
             return commit.replaceManifestList(
                     assignment.snapshot,
                     schemaId,
@@ -481,8 +411,21 @@ public class DataEvolutionEnabler {
                     deltaManifestList,
                     assignment.snapshot.indexManifest(),
                     assignment.nextRowId,
-                    properties);
+                    assignment.snapshot.properties());
         }
+    }
+
+    /**
+     * Switches on {@code row-tracking.enabled} and {@code data-evolution.enabled}. The constructor
+     * is private: switching the options without assigning row ids to the existing files before and
+     * fencing off writers on the previous schema after would leave files without a row id, so this
+     * class is the only one that issues it. It is not part of the REST protocol either.
+     */
+    public static final class EnableDataEvolution implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        private EnableDataEvolution() {}
     }
 
     private static class Assignment {

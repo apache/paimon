@@ -171,17 +171,6 @@ public interface SchemaChange extends Serializable {
         return new DropPrimaryKey();
     }
 
-    /**
-     * Enables {@code row-tracking.enabled} and {@code data-evolution.enabled} on a table that
-     * already has snapshots. Both options are immutable for {@code ALTER TABLE}; this change is
-     * issued by the {@code sys.enable_data_evolution} procedure, which first assigns a first row id
-     * to every existing data file. A table with data files accepts it only in that state, so it is
-     * no general-purpose schema change: it is not part of the REST protocol.
-     */
-    static SchemaChange enableDataEvolution() {
-        return new EnableDataEvolution();
-    }
-
     /** A SchemaChange to set a table option. */
     final class SetOption implements SchemaChange {
 
@@ -830,25 +819,6 @@ public interface SchemaChange extends Serializable {
 
     /** A SchemaChange to drop primary key. */
     final class DropPrimaryKey implements SchemaChange {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            return o != null && getClass() == o.getClass();
-        }
-
-        @Override
-        public int hashCode() {
-            return getClass().hashCode();
-        }
-    }
-
-    /** A SchemaChange to enable row tracking and data evolution. */
-    final class EnableDataEvolution implements SchemaChange {
 
         private static final long serialVersionUID = 1L;
 

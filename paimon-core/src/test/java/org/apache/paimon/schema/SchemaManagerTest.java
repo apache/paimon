@@ -1231,35 +1231,6 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testEnableDataEvolutionChange() throws Exception {
-        Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
-        manager.createTable(
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        ""));
-
-        TableSchema enabled = manager.commitChanges(SchemaChange.enableDataEvolution());
-
-        assertThat(enabled.id()).isEqualTo(1L);
-        assertThat(enabled.options())
-                .containsEntry(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                .containsEntry(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        assertThat(enabled.fields()).isEqualTo(rowType.getFields());
-        assertThat(enabled.partitionKeys()).isEqualTo(partitionKeys);
-
-        // the change still validates the constraints of a row-tracking table
-        Path pkRoot = new Path(tempDir.toString(), "pk_table");
-        SchemaManager pkManager = new FileSystemSchemaManager(LocalFileIO.create(), pkRoot);
-        pkManager.createTable(schema);
-        assertThatThrownBy(() -> pkManager.commitChanges(SchemaChange.enableDataEvolution()))
-                .hasMessageContaining("primary-key");
-    }
-
-    @Test
     public void testDropPrimaryKeyOnEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString(), "table");
         SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);

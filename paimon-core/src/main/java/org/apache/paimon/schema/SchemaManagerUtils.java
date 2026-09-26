@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.dataevolution.DataEvolutionEnabler;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -436,12 +437,12 @@ final class SchemaManagerUtils {
                             "Cannot drop primary keys on a non-empty table.");
                 }
                 newPrimaryKeys = Collections.emptyList();
-            } else if (change instanceof SchemaChange.EnableDataEvolution) {
+            } else if (change instanceof DataEvolutionEnabler.EnableDataEvolution) {
                 // Deliberately not subject to checkAlterTableOption: the two options are
-                // immutable for ALTER TABLE, and only sys.enable_data_evolution issues this change,
-                // after it has assigned a first row id to every existing data file. The constraints
-                // of a row-tracking table (no primary key, bucket -1, ...) are enforced by
-                // validateTableSchema below.
+                // immutable for ALTER TABLE. Only DataEvolutionEnabler can create this change: it
+                // assigns a first row id to every existing data file before, and fences off and
+                // repairs writers on the previous schema after. The constraints of a row-tracking
+                // table (no primary key, bucket -1, ...) are enforced by validateTableSchema below.
                 newOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
                 newOptions.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
             } else {

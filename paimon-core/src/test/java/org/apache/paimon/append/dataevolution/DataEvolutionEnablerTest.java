@@ -33,7 +33,6 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
@@ -62,7 +61,6 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -71,6 +69,7 @@ import org.junit.jupiter.api.Test;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.Modifier;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -157,13 +156,11 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         assertThat(rowIdSnapshot.nextRowId()).isEqualTo(6L);
         assertThat(rowIdSnapshot.schemaId()).isEqualTo(0L);
         assertThat(rowIdSnapshot.totalRecordCount()).isEqualTo(6L);
-        assertThat(DataEvolutionEnabler.rowIdsAssigned(rowIdSnapshot)).isTrue();
         Snapshot fence = table.snapshotManager().latestSnapshot();
         assertThat(fence.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(fence.schemaId()).isEqualTo(1L);
         assertThat(fence.nextRowId()).isEqualTo(6L);
         assertThat(fence.totalRecordCount()).isEqualTo(6L);
-        assertThat(DataEvolutionEnabler.rowIdsAssigned(fence)).isFalse();
 
         // files in commit order, ids contiguous, row id = first row id + position
         assertThat(liveFiles(table).stream().map(DataFileMeta::firstRowId))
@@ -537,24 +534,6 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                 restCatalog.createDatabase(TABLE.getDatabaseName(), true);
                 restCatalog.createTable(
                         TABLE, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
-                FileStoreTable restTable = (FileStoreTable) restCatalog.getTable(TABLE);
-                BatchWriteBuilder writeBuilder = restTable.newBatchWriteBuilder();
-                try (BatchTableWrite write = writeBuilder.newWrite();
-                        BatchTableCommit commit = writeBuilder.newCommit()) {
-                    write.write(GenericRow.of(1));
-                    commit.commit(write.prepareCommit());
-                }
-
-                // the schema change alone cannot be sent either
-                assertThatThrownBy(
-                                () ->
-                                        restCatalog.alterTable(
-                                                TABLE, SchemaChange.enableDataEvolution(), false))
-                        .isInstanceOf(UnsupportedOperationException.class)
-                        .hasMessage(
-                                "Enabling data evolution on table default.t of a REST catalog is "
-                                        + "not supported yet.");
-
                 DataEvolutionEnabler enabler = new DataEvolutionEnabler(restCatalog, TABLE);
                 for (boolean dryRun : new boolean[] {true, false}) {
                     assertThatThrownBy(() -> enabler.run(dryRun))
@@ -684,12 +663,13 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         table = loadTable();
         assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
         assertNoDuplicateOrMissingRowIds(table, 2);
-        // 2: row ids, 3: the stale write, which made the schema change fail, 4: row ids again,
-        // 5: the fence
+        // 2: row ids, 3: the stale write, 4: the fence, 5: row ids for the stale write
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
+        assertThat(table.snapshotManager().snapshot(4).commitKind())
+                .isEqualTo(Snapshot.CommitKind.APPEND);
+        assertThat(table.snapshotManager().snapshot(5).commitKind())
+                .isEqualTo(Snapshot.CommitKind.OVERWRITE);
         assertThat(table.schemaManager().listAllIds()).containsExactly(0L, 1L);
-        assertThat(DataEvolutionEnabler.rowIdsAssigned(table.snapshotManager().snapshot(4)))
-                .isTrue();
         assertThat(table.snapshotManager().latestSnapshot().schemaId()).isEqualTo(1L);
 
         // and from now on the stale writer is refused
@@ -760,86 +740,6 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
-    public void testSchemaChangeAloneIsRefusedWhileFilesHaveNoRowId() throws Exception {
-        FileStoreTable table = createTable(Collections.emptyMap());
-        writeRows(table, row(1, "a", "p1"));
-
-        assertThatThrownBy(
-                        () -> catalog.alterTable(TABLE, SchemaChange.enableDataEvolution(), false))
-                .hasStackTraceContaining(
-                        "Cannot enable data evolution on table default.t: its data files have no "
-                                + "row id")
-                .hasStackTraceContaining("sys.enable_data_evolution");
-        table = loadTable();
-        assertThat(table.schema().id()).isEqualTo(0L);
-        assertThat(table.coreOptions().rowTrackingEnabled()).isFalse();
-        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
-    }
-
-    @Test
-    public void testSchemaChangeAloneIsAcceptedOnTableWithoutSnapshot() throws Exception {
-        createTable(Collections.emptyMap());
-
-        catalog.alterTable(TABLE, SchemaChange.enableDataEvolution(), false);
-
-        FileStoreTable table = loadTable();
-        assertThat(table.coreOptions().rowTrackingEnabled()).isTrue();
-        assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
-    }
-
-    @Test
-    public void testSchemaChangeNeedsTheLatestSnapshotToBeAMarkedOne() throws Exception {
-        FileStoreTable table = createTable(Collections.emptyMap());
-        writeRows(table, row(1, "a", "p1"));
-        // stop after the row id commit
-        assertThatThrownBy(
-                        () ->
-                                new DataEvolutionEnabler(
-                                                catalog,
-                                                TABLE,
-                                                () -> {},
-                                                () -> {
-                                                    throw new RuntimeException("stop");
-                                                })
-                                        .run(false))
-                .hasMessage("stop");
-        table = loadTable();
-        Snapshot marked = table.snapshotManager().latestSnapshot();
-        assertThat(DataEvolutionEnabler.rowIdsAssigned(marked)).isTrue();
-
-        // a snapshot that copies the properties of its base does not inherit the mark
-        try (FileStoreCommitImpl commit =
-                (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
-            assertThat(
-                            commit.replaceManifestList(
-                                    marked,
-                                    marked.totalRecordCount(),
-                                    Pair.of(
-                                            marked.baseManifestList(),
-                                            marked.baseManifestListSize()),
-                                    Pair.of(
-                                            marked.deltaManifestList(),
-                                            marked.deltaManifestListSize())))
-                    .isTrue();
-        }
-        Snapshot copy = table.snapshotManager().latestSnapshot();
-        assertThat(copy.properties())
-                .containsEntry(
-                        DataEvolutionEnabler.ROW_IDS_ASSIGNED_SNAPSHOT_ID,
-                        Long.toString(marked.id()));
-        assertThat(DataEvolutionEnabler.rowIdsAssigned(copy)).isFalse();
-        assertThatThrownBy(
-                        () -> catalog.alterTable(TABLE, SchemaChange.enableDataEvolution(), false))
-                .hasStackTraceContaining("its data files have no row id");
-
-        // the procedure completes the conversion
-        DataEvolutionEnabler.Result result = enabler().run(false);
-        assertThat(result.describe(TABLE)).startsWith("Success.");
-        assertThat(result.assignedFileCount).isZero();
-        assertNoDuplicateOrMissingRowIds(loadTable(), 1);
-    }
-
-    @Test
     public void testRowIdCommitReferencesTheLatestSchema() throws Exception {
         FileStoreTable table = createTable(Collections.emptyMap());
         writeRows(table, row(1, "a", "p1"));
@@ -869,38 +769,6 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         assertThat(table.rowType().getFieldNames()).containsExactly("id", "v", "pt", "c");
         assertThat(table.coreOptions().dataEvolutionEnabled()).isTrue();
         assertNoDuplicateOrMissingRowIds(table, 1);
-    }
-
-    @Test
-    public void testGivesUpWhenWritersKeepCommittingBeforeTheSchemaChange() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.COMMIT_MAX_RETRIES.key(), "2");
-        FileStoreTable table = createTable(options);
-        writeRows(table, row(1, "a", "p1"));
-        FileStoreTable concurrentWriter = loadTable();
-        AtomicInteger commits = new AtomicInteger();
-
-        DataEvolutionEnabler enabler =
-                new DataEvolutionEnabler(
-                        catalog,
-                        TABLE,
-                        () -> {},
-                        () ->
-                                writeRowsUnchecked(
-                                        concurrentWriter,
-                                        row(commits.incrementAndGet() + 1, "x", "p1")));
-
-        assertThatThrownBy(() -> enabler.run(false))
-                .hasMessageContaining("Failed to enable data evolution on table default.t")
-                .hasMessageContaining("between the row id assignment and the schema change");
-        assertThat(commits.get()).isEqualTo(3);
-        table = loadTable();
-        assertThat(table.schema().id()).isEqualTo(0L);
-        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
-
-        // once the writer stops, the procedure completes
-        assertThat(enabler().run(false).describe(TABLE)).startsWith("Success.");
-        assertNoDuplicateOrMissingRowIds(loadTable(), 4);
     }
 
     @Test
@@ -1019,6 +887,23 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         FileStoreTable table = loadTable();
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
         assertThat(liveFiles(table)).isEmpty();
+    }
+
+    @Test
+    public void testSchemaChangeCannotBeCreatedOutsideTheEnabler() {
+        // The only way to switch the options on an existing table is the full procedure. Java 8
+        // adds a synthetic accessor constructor for the enclosing class, which no source can call.
+        assertThat(DataEvolutionEnabler.EnableDataEvolution.class.getDeclaredConstructors())
+                .filteredOn(constructor -> !constructor.isSynthetic())
+                .isNotEmpty()
+                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()));
+        assertThat(DataEvolutionEnabler.EnableDataEvolution.class.getDeclaredMethods())
+                .noneMatch(method -> Modifier.isStatic(method.getModifiers()));
+        assertThat(SchemaChange.class.getMethods())
+                .noneMatch(
+                        method ->
+                                DataEvolutionEnabler.EnableDataEvolution.class.isAssignableFrom(
+                                        method.getReturnType()));
     }
 
     // ---------------------------------------------------------------------------------------------
