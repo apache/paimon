@@ -484,6 +484,17 @@ def test_row_id_cast_failure_does_not_write_nulls(tmp_path, native, values):
     (pa.array([1], type=pa.timestamp('us')), pa.string()),
     (pa.array([1234], type=pa.timestamp('us')), pa.timestamp('ms')),
     (pa.array([1234], type=pa.timestamp('us')), pa.date32()),
+    (pa.array([1.5]).dictionary_encode(), pa.int32()),
+    (pa.array(['1.234']).dictionary_encode(), pa.decimal128(10, 2)),
+    (pa.array([1.0]).dictionary_encode(), pa.string()),
+    (pa.array([[1.5]]), pa.list_(pa.int32())),
+    (pa.array([[1.0, None]]), pa.list_(pa.int32())),
+    (pa.array([1234567], type=pa.timestamp('ns')), pa.time32('ms')),
+    (pa.array([86400001000000], type=pa.timestamp('ns')), pa.time32('ms')),
+    (pa.array([-1000000], type=pa.timestamp('ns')), pa.time32('ms')),
+    (pa.array(['yes']), pa.bool_()),
+    (pa.array(['f']), pa.bool_()),
+    (pa.array(['TRUE']), pa.bool_()),
 ])
 def test_native_assignment_cast_matches_pyarrow(tmp_path, native, values, target):
     from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
@@ -678,3 +689,64 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
         'age': [11, 20] if case == 'partial' else [11, 20, 30],
         'region': ['east', 'west'] if case == 'partial' else ['east', 'west', 'east'],
     }
+
+
+@pytest.mark.native_plan
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('grouped', [False, True])
+@pytest.mark.parametrize('values,target,row_id_type', [
+    (pa.array([99], type=pa.int32()), pa.int32(), pa.int32()),
+    (pa.array([99], type=pa.int32()), pa.int32(), pa.uint64()),
+    (pa.array([99], type=pa.int32()), pa.int32(),
+     pa.dictionary(pa.int8(), pa.int32())),
+    (pa.array([1.0]), pa.string(), pa.int64()),
+    (pa.array([0], type=pa.timestamp('us')), pa.string(), pa.int64()),
+    (pa.array(['yes']), pa.bool_(), pa.int64()),
+    (pa.array([1.5]), pa.int32(), pa.int64()),
+    (pa.array([2 ** 63 - 1], type=pa.int64()), pa.float64(), pa.int64()),
+    (pa.array([-1234567], type=pa.timestamp('ns')), pa.timestamp('ms'), pa.int64()),
+    (pa.array([1234567], type=pa.timestamp('ns')), pa.time32('ms'), pa.int64()),
+])
+def test_native_row_id_input_conversion_matches_python(
+        tmp_path, native, grouped, values, target, row_id_type):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', target)])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': str(native).lower(),
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    writer.write_arrow(pa.table({'id': [1], 'value': [None]}, schema=schema))
+    builder.new_commit().commit(writer.prepare_commit())
+    writer.close()
+    data = pa.table({'_ROW_ID': pa.array([0], type=row_id_type), 'value': values})
+    before = set(tmp_path.rglob('*.parquet'))
+    updater = builder.new_update()
+
+    def prepare():
+        if grouped:
+            return updater.update_by_arrow_batches_with_row_id(iter([data]))
+        return updater.update_by_arrow_with_row_id(data)
+
+    try:
+        expected = TableUpdateByRowId._coerce_column(values, target).to_pylist()
+    except (ValueError, pa.ArrowException):
+        with pytest.raises((ValueError, pa.ArrowException)):
+            prepare()
+        expected = [None]
+        assert set(tmp_path.rglob('*.parquet')) == before
+    else:
+        # Ensure a native case does not silently exercise the Python fallback.
+        if native:
+            with patch.object(TableUpdateByRowId, 'update_columns',
+                              side_effect=AssertionError('Python update selected')):
+                messages = prepare()
+        else:
+            messages = prepare()
+        builder.new_commit().commit(messages)
+    read = table.new_read_builder()
+    result = read.new_read().to_arrow(read.new_scan().plan().splits())
+    assert result['value'].to_pylist() == expected
