@@ -41,10 +41,11 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Weig
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_DV_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
@@ -197,17 +198,22 @@ public class CachingCatalog extends DelegateCatalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
+        // enumerate before the drop: cascade removes the tables from the wrapped catalog,
+        // and cache entries alone miss tables whose table-cache entry already expired
+        List<Identifier> tables = Collections.emptyList();
+        if (cascade) {
+            try {
+                tables =
+                        listTables(name).stream()
+                                .map(tableName -> new Identifier(name, tableName))
+                                .collect(Collectors.toList());
+            } catch (DatabaseNotExistException ignored) {
+                // super.dropDatabase reports the missing database on its own terms
+            }
+        }
         super.dropDatabase(name, ignoreIfNotExists, cascade);
         databaseCache.invalidate(name);
-        if (cascade) {
-            List<Identifier> tables = new ArrayList<>();
-            for (Identifier identifier : tableCache.asMap().keySet()) {
-                if (identifier.getDatabaseName().equals(name)) {
-                    tables.add(identifier);
-                }
-            }
-            tables.forEach(tableCache::invalidate);
-        }
+        tables.forEach(this::invalidateTable);
     }
 
     @Override

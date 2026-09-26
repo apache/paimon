@@ -346,6 +346,26 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testDropDatabaseCascadeInvalidatesPartitionCache() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Partition dropped = new Partition(singletonMap("dt", "20260101"), 0, 0, 0, 0, -1, false);
+        Mockito.when(wrapped.listTables("db")).thenReturn(singletonList("tbl"));
+        Mockito.when(wrapped.listPartitions(identifier))
+                .thenReturn(singletonList(dropped), emptyList());
+
+        assertThat(catalog.listPartitions(identifier)).containsExactly(dropped);
+
+        // the table-cache key-set enumeration missed tables whose entry already expired,
+        // so a recreated same-name table served the dropped table's partitions
+        catalog.dropDatabase("db", false, true);
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+    }
+
+    @Test
     public void testCreatePartitionsInvalidatesPartitionCache() throws Exception {
         Catalog wrapped = Mockito.mock(Catalog.class);
         TestableCachingCatalog catalog =
