@@ -59,6 +59,13 @@ def create_native_update(table, commit_user, columns):
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
               .new_update(columns))
+    try:
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if snapshot is not None:
+            writer.pin_read_snapshot(snapshot.id)
+    except Exception:
+        writer.close()
+        raise
     return NativeBatchTableUpdate(table, writer)
 
 

@@ -251,6 +251,25 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
         'id': [1, 2, 3, 4], 'age': [11, 22, 33, 40],
     }
 
+    read_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+
+    def interleaved_tables():
+        yield pa.Table.from_pydict({'_ROW_ID': [0], 'age': [12]})
+        concurrent = table.new_batch_write_builder()
+        changed = concurrent.new_update().with_update_type(['age'])
+        concurrent.new_commit().commit(changed.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [1], 'age': [23]})))
+
+    with patch.object(BatchTableUpdate, '_update_by_arrow_batches_with_row_id',
+                      side_effect=AssertionError('Python batch update selected')):
+        staged = (table.new_batch_write_builder().new_update()
+                  .with_update_type(['age'])
+                  .update_by_arrow_batches_with_row_id(interleaved_tables()))
+    assert staged and all(message.check_from_snapshot == read_snapshot_id
+                          for message in staged)
+    from pypaimon.write.file_store_commit import _abort_commit_messages
+    _abort_commit_messages(table, staged)
+
 
 @pytest.mark.native_plan
 def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
