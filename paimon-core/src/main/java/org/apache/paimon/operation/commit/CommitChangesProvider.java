@@ -24,13 +24,20 @@ import org.apache.paimon.manifest.ManifestEntry;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /** Provider to provide {@link CommitChanges}. */
 @FunctionalInterface
 public interface CommitChangesProvider {
 
     CommitChanges provide(@Nullable Snapshot latestSnapshot);
+
+    /** Reassignments already validated and applied to this provider's compact results. */
+    default Set<Long> rebasedReassignments() {
+        return Collections.emptySet();
+    }
 
     static CommitChangesProvider provider(
             List<ManifestEntry> tableFiles,
