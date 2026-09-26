@@ -1307,9 +1307,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean success;
         final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
-        commitPreCallbacks.forEach(
-                callback ->
-                        callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+        try {
+            commitPreCallbacks.forEach(
+                    callback ->
+                            callback.call(
+                                    finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+        } catch (Throwable e) {
+            // a vetoing callback aborts the commit after all manifests were written; clean
+            // them up like a preparation failure instead of leaving orphan files behind
+            commitCleaner.cleanUpReuseTmpManifests(
+                    deltaManifestList, changelogManifestList, oldIndexManifest, indexManifest);
+            commitCleaner.cleanUpNoReuseTmpManifests(
+                    baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+            throw e;
+        }
         try {
             success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
         } catch (Exception e) {
@@ -1530,8 +1541,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        Pair<String, Long> baseManifestList =
-                manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
+        List<ManifestFileMeta> baseManifests =
+                manifestFile.write(new ArrayList<>(latestEntries.values()));
+        Pair<String, Long> baseManifestList = manifestList.write(baseManifests);
         Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
         // For row-tracking tables nextRowId must stay monotonic: a rollback to an older snapshot
         // must not move it backwards, otherwise new appends would reuse row ids already assigned by
@@ -1574,12 +1586,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // They may veto the rollback by throwing (e.g. a chain-table snapshot branch rejects a
         // pure-DELETE overwrite that would drop a snapshot partition still anchoring delta
         // partitions), in which case the rollback snapshot is never created.
-        commitPreCallbacks.forEach(
-                callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
+        try {
+            commitPreCallbacks.forEach(
+                    callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
+        } catch (Throwable e) {
+            // a vetoing callback aborts the rollback after its manifests were written; clean
+            // them up instead of leaving orphan files behind
+            commitCleaner.cleanUpReuseTmpManifests(deltaManifestList, null, null, null);
+            commitCleaner.cleanUpNoReuseTmpManifests(
+                    baseManifestList, Collections.emptyList(), baseManifests);
+            throw e;
+        }
 
         boolean success =
                 commitSnapshotImpl(
                         latest, newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
+        if (!success) {
+            // the CAS-failed rollback never publishes its snapshot and has no retry loop,
+            // so its manifests and manifest lists would stay as permanent orphans
+            commitCleaner.cleanUpReuseTmpManifests(deltaManifestList, null, null, null);
+            commitCleaner.cleanUpNoReuseTmpManifests(
+                    baseManifestList, Collections.emptyList(), baseManifests);
+        }
         if (success) {
             // Notify the post-commit callbacks so external views stay in sync with the rolled-back
             // state (e.g. Iceberg compatibility metadata and chain-table overwrite handling).
@@ -1713,7 +1741,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.nextRowId(),
                         null);
 
-        return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
+        boolean success = commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
+        if (!success) {
+            // the CAS failure makes this attempt's merged manifests and manifest lists
+            // permanent orphans; the next attempt re-runs the full merge, so delete them
+            commitCleaner.cleanUpReuseTmpManifests(deltaManifestList, null, null, null);
+            commitCleaner.cleanUpNoReuseTmpManifests(
+                    baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+        }
+        return success;
     }
 
     static CoreOptions manifestCompactionOptions(CoreOptions options) {
