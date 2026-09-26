@@ -140,7 +140,10 @@ def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
 
 @pytest.mark.native_plan
 def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
-    from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    try:
+        from pypaimon_rust.datafusion import BatchTableUpdate as RustUpdate
+    except ImportError:
+        pytest.skip('installed Rust binding lacks native batch updates')
     if not hasattr(RustUpdate, 'add_assigned_table'):
         pytest.skip('installed Rust binding lacks native assignments')
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
