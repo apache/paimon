@@ -36,6 +36,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -49,6 +50,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -130,6 +132,45 @@ public class GlobalIndexBuilderUtils {
         }
         indexedRanges = Range.sortAndMergeOverlap(indexedRanges, true);
         return Range.sortAndMergeOverlap(dataRange.exclude(indexedRanges), true);
+    }
+
+    /**
+     * A primary column can own at most one column set: the read-time scanner groups index files by
+     * primary field and rejects conflicting column sets, so a second index over the same primary
+     * column with different columns would make every filtered query fail. Creation procedures must
+     * reject it here; the same column set is the refresh flow and stays allowed.
+     */
+    public static void checkPrimaryFieldNotIndexed(
+            FileStoreTable table, DataField indexField, List<DataField> fields) {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+        // the read-time grouping is type-agnostic, so the creation check scans all types
+        checkPrimaryFieldNotIndexed(
+                table.store().newIndexFileHandler().scan(snapshot, Filter.alwaysTrue()),
+                indexField,
+                extraFieldIds(fields));
+    }
+
+    static void checkPrimaryFieldNotIndexed(
+            Collection<IndexManifestEntry> existingEntries,
+            DataField indexField,
+            int[] newExtraFieldIds) {
+        for (IndexManifestEntry entry : existingEntries) {
+            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+            // re-running the creation with the same column set is the refresh flow;
+            // only a different column set over the same primary field is rejected
+            if (meta != null
+                    && meta.indexFieldId() == indexField.id()
+                    && !sameExtraFieldIds(meta.extraFieldIds(), newExtraFieldIds)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Primary field %s already owns an index with different columns; "
+                                        + "a primary column can own at most one column set.",
+                                indexField.name()));
+            }
+        }
     }
 
     public static List<IndexManifestEntry> currentIndexEntries(

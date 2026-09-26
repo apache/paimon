@@ -24,11 +24,13 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.SimpleStats;
@@ -36,6 +38,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
@@ -55,6 +58,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link GlobalIndexBuilderUtils}. */
 class GlobalIndexBuilderUtilsTest {
@@ -365,5 +369,47 @@ class GlobalIndexBuilderUtilsTest {
                 firstRowId,
                 null,
                 null);
+    }
+
+    @Test
+    public void testCheckPrimaryFieldNotIndexed() {
+        DataField vector = new DataField(5, "vec", DataTypes.VECTOR(2, DataTypes.FLOAT()));
+        DataField text = new DataField(6, "txt", DataTypes.STRING());
+        DataField untouched = new DataField(7, "plain", DataTypes.INT());
+        GlobalIndexMeta owned = new GlobalIndexMeta(0, 10, vector.id(), new int[] {7}, null, null);
+        GlobalIndexMeta other = new GlobalIndexMeta(0, 10, text.id(), null, null, null);
+        IndexManifestEntry ownedEntry =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        new IndexFileMeta("lumina", "f1", 1L, 1L, owned, null));
+        IndexManifestEntry otherEntry =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        new IndexFileMeta("lumina", "f2", 1L, 1L, other, null));
+
+        // a different column set over the same primary field is what the read-time scanner
+        // rejects, so creation must reject it too
+        assertThatThrownBy(
+                        () ->
+                                GlobalIndexBuilderUtils.checkPrimaryFieldNotIndexed(
+                                        Arrays.asList(ownedEntry, otherEntry),
+                                        vector,
+                                        new int[] {8}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Primary field vec already owns an index with different columns; "
+                                + "a primary column can own at most one column set.");
+        // the same column set is the refresh flow and stays allowed, including the
+        // single-column form against a null extras entry
+        GlobalIndexBuilderUtils.checkPrimaryFieldNotIndexed(
+                Arrays.asList(ownedEntry, otherEntry), vector, new int[] {7});
+        GlobalIndexBuilderUtils.checkPrimaryFieldNotIndexed(
+                Arrays.asList(ownedEntry, otherEntry), text, null);
+        GlobalIndexBuilderUtils.checkPrimaryFieldNotIndexed(
+                Arrays.asList(ownedEntry, otherEntry), untouched, new int[] {8});
     }
 }

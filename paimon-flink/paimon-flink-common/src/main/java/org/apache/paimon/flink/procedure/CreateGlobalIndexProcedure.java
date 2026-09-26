@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -116,6 +117,10 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         Options userOptions = createUserOptions(table, options);
 
         indexType = indexType.toLowerCase(Locale.ROOT).trim();
+        GlobalIndexBuilderUtils.checkPrimaryFieldNotIndexed(
+                table,
+                rowType.getField(indexColumns.get(0)),
+                indexColumns.stream().map(rowType::getField).collect(Collectors.toList()));
         if (indexColumns.size() > 1) {
             // Fail fast before submitting the job: index types that do not support multi-column
             // throw from GlobalIndexerFactory#create, which happens before any indexer side effect.

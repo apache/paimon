@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -171,6 +172,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
                         Options userOptions = createUserOptions(table, optionString);
 
+                        GlobalIndexBuilderUtils.checkPrimaryFieldNotIndexed(
+                                table, indexFields.get(0), indexFields);
                         if (indexColumns.size() > 1) {
                             // Fail fast before submitting the job: index types that do not support
                             // multi-column throw from GlobalIndexerFactory#create, which happens
