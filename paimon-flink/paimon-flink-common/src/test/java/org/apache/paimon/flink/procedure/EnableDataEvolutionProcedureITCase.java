@@ -89,6 +89,23 @@ public class EnableDataEvolutionProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAlterTableCannotEnableRowTracking() {
+        sql("CREATE TABLE T (id INT, v STRING)");
+        assertThatThrownBy(() -> sql("ALTER TABLE T SET ('row-tracking.enabled' = 'true')"))
+                .hasStackTraceContaining(
+                        "Cannot enable 'row-tracking.enabled' on an existing table")
+                .hasStackTraceContaining("sys.enable_data_evolution");
+
+        sql("INSERT INTO T VALUES (1, 'a')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T SET ('data-evolution.enabled' = 'true')"))
+                .hasStackTraceContaining("Change 'data-evolution.enabled' is not supported yet");
+
+        // the procedure converts it
+        sql("CALL sys.enable_data_evolution('default.T')");
+        assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking")).containsExactly(Row.of(1, 0L));
+    }
+
+    @Test
     public void testAction() throws Exception {
         sql("CREATE TABLE T (id INT, v STRING)");
         sql("INSERT INTO T VALUES (1, 'a')");

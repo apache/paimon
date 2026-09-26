@@ -256,6 +256,17 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
         }
       }.getMessage
       assert(alterError.contains("Change 'row-tracking.enabled' is not supported yet"), alterError)
+
+      // not even before the first write: a writer may be committing at the same time
+      val emptyAlterError = intercept[Exception] {
+        withTable("empty") {
+          sql("CREATE TABLE empty (id INT)")
+          sql("ALTER TABLE empty SET TBLPROPERTIES ('data-evolution.enabled' = 'true')")
+        }
+      }.getMessage
+      assert(
+        emptyAlterError.contains("Cannot enable 'data-evolution.enabled' on an existing table"),
+        emptyAlterError)
     }
   }
 

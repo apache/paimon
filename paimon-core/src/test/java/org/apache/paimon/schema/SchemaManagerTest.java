@@ -1231,6 +1231,55 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testSetOptionCannotEnableRowTrackingWithoutSnapshots() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+
+        // a writer may be committing the first snapshot without row ids at the same time
+        for (String key :
+                new String[] {
+                    CoreOptions.ROW_TRACKING_ENABLED.key(), CoreOptions.DATA_EVOLUTION_ENABLED.key()
+                }) {
+            assertThatThrownBy(() -> manager.commitChanges(SchemaChange.setOption(key, "true")))
+                    .isInstanceOf(UnsupportedOperationException.class)
+                    .hasMessageContaining("Cannot enable '" + key + "' on an existing table")
+                    .hasMessageContaining("sys.enable_data_evolution");
+        }
+        assertThat(manager.latest().get().id()).isEqualTo(0L);
+        // switching it off stays possible
+        assertThat(
+                        manager.commitChanges(
+                                        SchemaChange.setOption(
+                                                CoreOptions.ROW_TRACKING_ENABLED.key(), "false"))
+                                .id())
+                .isEqualTo(1L);
+
+        // setting the value a table was created with is no change
+        Path enabledRoot = new Path(tempDir.toString(), "enabled_table");
+        SchemaManager enabledManager =
+                new FileSystemSchemaManager(LocalFileIO.create(), enabledRoot);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        enabledManager.createTable(
+                new Schema(
+                        rowType.getFields(), partitionKeys, Collections.emptyList(), options, ""));
+        assertThat(
+                        enabledManager
+                                .commitChanges(
+                                        SchemaChange.setOption(
+                                                CoreOptions.ROW_TRACKING_ENABLED.key(), "true"))
+                                .options())
+                .containsEntry(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+    }
+
+    @Test
     public void testDropPrimaryKeyOnEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString(), "table");
         SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);

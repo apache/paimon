@@ -155,8 +155,10 @@ file by rewriting the manifests of the latest snapshot, then switches on
 finally commits an empty snapshot that fences off writers which checked the
 previous schema. No data file is rewritten. The table must be an append table
 without primary key, with `bucket = -1` and without `clustering.incremental`;
-REST catalog tables are not supported yet. The two options cannot be switched
-on by a plain schema change while the table has data files without a row ID.
+REST catalog tables are not supported yet. The procedure is the only way to
+switch the two options on for an existing table, even an empty one: `ALTER
+TABLE` refuses it, because it cannot fence off a writer that is committing at
+the same time.
 
 <Tabs groupId="data-evolution-enable">
 

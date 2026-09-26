@@ -152,6 +152,9 @@ final class SchemaManagerUtils {
                 if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
+                if (!unchanged && !hasSnapshots.get()) {
+                    checkNotEnablingRowTracking(setOption.key(), newValue);
+                }
                 if (hasSnapshots.get() && !unchanged) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
@@ -1047,6 +1050,26 @@ final class SchemaManagerUtils {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Row tracking cannot be switched on by an ALTER TABLE, not even before the first snapshot: a
+     * writer that loaded the table without it may be committing that snapshot at the same time,
+     * with files that get no row id. Once the table has snapshots, {@link #checkAlterTableOption}
+     * refuses both options as immutable.
+     */
+    private static void checkNotEnablingRowTracking(String key, String newValue) {
+        if ((CoreOptions.ROW_TRACKING_ENABLED.key().equals(key)
+                        || CoreOptions.DATA_EVOLUTION_ENABLED.key().equals(key))
+                && Boolean.parseBoolean(newValue)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot enable '%s' on an existing table. Set it when creating the "
+                                    + "table, or call the sys.enable_data_evolution procedure, "
+                                    + "which also fences off writers that loaded the table "
+                                    + "before.",
+                            key));
+        }
     }
 
     static void checkAlterTableOption(

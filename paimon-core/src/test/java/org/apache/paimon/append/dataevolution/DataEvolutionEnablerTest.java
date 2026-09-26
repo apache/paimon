@@ -906,6 +906,73 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                                         method.getReturnType()));
     }
 
+    @Test
+    public void testAlterTableCannotEnableRowTrackingOnTableWithoutSnapshot() throws Exception {
+        createTable(Collections.emptyMap());
+
+        for (String key :
+                new String[] {
+                    CoreOptions.ROW_TRACKING_ENABLED.key(), CoreOptions.DATA_EVOLUTION_ENABLED.key()
+                }) {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            TABLE, SchemaChange.setOption(key, "true"), false))
+                    .hasStackTraceContaining("Cannot enable '" + key + "' on an existing table")
+                    .hasStackTraceContaining("sys.enable_data_evolution");
+        }
+        FileStoreTable table = loadTable();
+        assertThat(table.schema().id()).isEqualTo(0L);
+        assertThat(table.coreOptions().rowTrackingEnabled()).isFalse();
+
+        // switching them off, or setting them when creating a table, is unaffected
+        catalog.alterTable(
+                TABLE,
+                SchemaChange.setOption(CoreOptions.ROW_TRACKING_ENABLED.key(), "false"),
+                false);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        Identifier created = new Identifier("default", "created");
+        catalog.createTable(
+                created,
+                Schema.newBuilder().column("id", DataTypes.INT()).options(options).build(),
+                false);
+        assertThat(
+                        ((FileStoreTable) catalog.getTable(created))
+                                .coreOptions()
+                                .dataEvolutionEnabled())
+                .isTrue();
+    }
+
+    @Test
+    public void testAlterTableWithWriterInFlightOnTableWithoutSnapshot() throws Exception {
+        // The race of a direct switch: a writer that checked the schema without row tracking is
+        // about to commit the first snapshot. The switch is refused, so its files stay consistent
+        // with the schema.
+        createTable(Collections.emptyMap());
+        PausedWriter writer = new PausedWriter(row(1, "a", "p1"));
+        writer.startAndAwaitPause();
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        TABLE,
+                                        SchemaChange.setOption(
+                                                CoreOptions.ROW_TRACKING_ENABLED.key(), "true"),
+                                        false))
+                .hasStackTraceContaining("Cannot enable 'row-tracking.enabled'");
+
+        assertThat(writer.releaseAndJoin()).isNull();
+        FileStoreTable table = loadTable();
+        assertThat(table.coreOptions().rowTrackingEnabled()).isFalse();
+        assertThat(valuesById(table)).containsOnlyKeys(1);
+
+        // the procedure is the way to convert it, with the fence
+        assertThat(enabler().run(false).describe(TABLE)).startsWith("Success.");
+        assertNoDuplicateOrMissingRowIds(loadTable(), 1);
+    }
+
     // ---------------------------------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------------------------------
