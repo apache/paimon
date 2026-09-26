@@ -261,25 +261,13 @@ public class IcebergRowLineageCompatibilityTest {
     }
 
     @Test
-    public void testVariantRejectedWithFormatVersion2() throws Exception {
+    public void testVariantRejectedWithFormatVersion2() {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.VARIANT()},
                         new String[] {"k", "payload"});
-        FileStoreTable table = createPaimonTable(rowType, formatVersionOptions(2), "parquet");
-        String commitUser = UUID.randomUUID().toString();
-        TableWriteImpl<?> write =
-                table.newWrite(commitUser)
-                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
-        TableCommitImpl commit = table.newCommit(commitUser);
-
-        write.write(GenericRow.of(1, GenericVariant.fromJson("{\"a\": 1}")));
-        // hasStackTraceContaining: robust whether or not the commit path wraps the
-        // IllegalArgumentException from the guard
-        assertThatThrownBy(() -> commit.commit(1, write.prepareCommit(false, 1)))
+        assertThatThrownBy(() -> createPaimonTable(rowType, formatVersionOptions(2), "parquet"))
                 .hasStackTraceContaining("VARIANT");
-        write.close();
-        commit.close();
     }
 
     @Test
