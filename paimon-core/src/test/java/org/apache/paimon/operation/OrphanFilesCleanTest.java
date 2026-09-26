@@ -37,6 +37,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -44,6 +45,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -66,6 +68,40 @@ public class OrphanFilesCleanTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "The arg olderThan must be less than now, because dataFiles that are currently being written and not referenced by snapshots will be mistakenly cleaned up.");
+    }
+
+    @Test
+    public void testValidBranchesDoesNotMutateManagerList() throws Exception {
+        Path tablePath = new Path(tempDir.newFolder().toURI());
+        FileIO fileIO = LocalFileIO.create();
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(fileIO, tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.<String>emptyList(),
+                                Collections.<String>emptyList(),
+                                new Options().toMap(),
+                                ""));
+        FileStoreTable real = FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+
+        // REST catalogs hand out an immutable empty list for branch-less tables; the
+        // cleaner must not try to add the main branch to that shared list
+        BranchManager branchManager = org.mockito.Mockito.mock(BranchManager.class);
+        org.mockito.Mockito.when(branchManager.branches()).thenReturn(Collections.emptyList());
+        FileStoreTable table =
+                org.mockito.Mockito.mock(
+                        FileStoreTable.class, org.mockito.AdditionalAnswers.delegatesTo(real));
+        org.mockito.Mockito.doReturn(branchManager).when(table).branchManager();
+
+        java.lang.reflect.Method method =
+                LocalOrphanFilesClean.class.getSuperclass().getDeclaredMethod("validBranches");
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<String> valid = (List<String>) method.invoke(new LocalOrphanFilesClean(table));
+
+        assertThat(valid).containsExactly("main");
     }
 
     @Test
