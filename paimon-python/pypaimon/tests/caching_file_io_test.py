@@ -86,7 +86,8 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
 
         # Simulate restart: new cache instance on same directory
         cache2 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
-        self.assertEqual(300, cache2._current_size)
+        self.assertEqual(cache1._current_size, cache2._current_size)
+        self.assertGreaterEqual(cache2._current_size, 8192)
         self.assertEqual(b"x" * 100, cache2.get_block("f", 0))
         self.assertEqual(b"y" * 200, cache2.get_block("f", 1))
 

@@ -51,8 +51,9 @@ The cache classifies files by path. Set `local-cache.whitelist` to select the fi
 | BUCKET_INDEX | bucket-index | Hash, deletion vector index files | No |
 | DATA | data | Data files (ORC, Parquet, etc.) | No |
 | FILE_INDEX | file-index | Data-file level bloom filter, bitmap | No |
+| BLOB_META | blob-meta | BLOB metadata read ranges (Python only) | Python only |
 
-The default whitelist is `meta,global-index`. The Python reader additionally includes
+The Java default whitelist is `meta,global-index`. The Python reader additionally includes
 `blob-meta`, which caches exact BLOB metadata ranges rather than whole data blocks; see
 [Python BLOB metadata cache](../pypaimon/blob.md#blob-metadata-cache). The mutable `LATEST` and `EARLIEST` hint files bypass
 the cache even though they are classified as metadata.
@@ -128,7 +129,11 @@ The Java snippet is a method-body fragment; declare or handle the catalog except
 | `local-cache.dir` | String | (none) | Directory for storing cached blocks on disk. If not configured, memory cache is used. |
 | `local-cache.max-size` | MemorySize | See below | Maximum cached block bytes per cache manager. Least recently used blocks are evicted when the limit is exceeded. |
 | `local-cache.block-size` | MemorySize | 1 mb | Block size for caching. Files are logically divided into fixed-size blocks and cached independently. |
-| `local-cache.whitelist` | String | meta,global-index | Comma-separated list of file types to cache. Supported values: `meta`, `global-index`, `bucket-index`, `data`, `file-index`. |
+| `local-cache.whitelist` | String | Java: `meta,global-index`; Python: `meta,global-index,blob-meta` | Comma-separated cache categories: `meta`, `global-index`, `bucket-index`, `data`, `file-index`, and Python-only `blob-meta`. |
+
+Python charges estimated object overhead for memory entries and allocated disk bytes (at least 4 KiB)
+for disk entries, and limits each cache manager to 65,536 entries. These limits do not represent a
+strict process RSS or total filesystem usage limit.
 
 When `local-cache.max-size` is omitted, Java has no configured size limit. PyPaimon uses a 256 MiB
 memory limit or a 10 GiB disk limit. Set the option explicitly when you want the same limit across

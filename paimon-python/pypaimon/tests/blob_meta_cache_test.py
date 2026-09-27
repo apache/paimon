@@ -85,7 +85,7 @@ def test_blob_metadata_ranges_exclude_values(tmp_path, disk, kind):
                 assert all(end <= descriptor.offset or start >= descriptor.offset + descriptor.length
                            for start, end in reads)
         retained = cache._current_size
-        assert 0 < retained < len(payload)
+        assert retained > 0
         reads.clear()
         if disk:
             # Reopen the disk manager to verify persistence, not just memory hits.
@@ -121,21 +121,121 @@ def test_metadata_cache_budget_and_data_cache_coexist(tmp_path, disk):
     (tmp_path / 'data.blob').write_bytes(b'abcdefgh')
     delegate = LocalFileIO(str(tmp_path), Options({}))
     options = Options({'local-cache.enabled': 'true', 'local-cache.whitelist': 'blob-meta',
-                       'local-cache.max-size': '4 b', 'local-cache.block-size': '4 b',
+                       'local-cache.max-size': '4096 b', 'local-cache.block-size': '4 b',
                        **({'local-cache.dir': str(tmp_path / 'cache')} if disk else {})})
     cache = CachingFileIO.create_cache_manager(options)
     file_io = CachingFileIO.wrap_with_caching_if_needed(delegate, options, cache)
     with file_io.new_input_stream(path) as stream:
         assert stream.read_blob_metadata(4) == b'abcd'
         assert stream.read_blob_metadata(4) == b'efgh'
-        assert cache._current_size == 4
+        assert 0 < cache._current_size <= 4096
+        retained = cache._current_size
         assert stream.read_blob_metadata(4) == b''  # Never cache a short read.
-        assert cache._current_size == 4
+        assert cache._current_size == retained
         stream.seek(0)
         assert stream.read_blob_metadata(4) == b'abcd'
-        assert cache._current_size == 4
+        assert 0 < cache._current_size <= 4096
     # Reusing a manager for normal data blocks cannot hit metadata range entries.
     data_io = CachingFileIO(delegate, cache, {FileType.DATA, FileType.BLOB_META})
     with data_io.new_input_stream(path) as stream:
         assert type(stream) is CachingInputStream
         assert stream.read() == b'abcdefgh'
+
+
+@pytest.mark.parametrize('disk', [False, True], ids=['memory', 'disk'])
+@pytest.mark.parametrize('kind', ['array', 'map'])
+def test_many_blob_rows_respect_cache_budget(tmp_path, disk, kind):
+    blob = AtomicType('BLOB')
+    field = DataField(0, 'value', ArrayType(True, blob) if kind == 'array'
+                      else MapType(True, AtomicType('STRING'), blob))
+    value = [BlobData(b'x')] if kind == 'array' else [('key', BlobData(b'x'))]
+    path = str(tmp_path / 'data.blob')
+    writer = BlobFormatWriter(open(path, 'wb'))
+    for _ in range(1000):
+        writer.add_element(GenericRow([value], [field]))
+    writer.close()
+    budget = 64 * 1024
+    options = Options({'local-cache.enabled': 'true', 'local-cache.max-size': '64 kb',
+                       **({'local-cache.dir': str(tmp_path / 'cache')} if disk else {})})
+    cache = CachingFileIO.create_cache_manager(options)
+    delegate = LocalFileIO(str(tmp_path), Options({}))
+    file_io = CachingFileIO.wrap_with_caching_if_needed(delegate, options, cache)
+    reader = FormatBlobReader(file_io, path, ['value'], [field], None, True)
+    try:
+        batch = reader.read_arrow_batch()
+        assert batch.num_rows == 1000
+        for row in batch.column(0).to_pylist():
+            raw = row[0] if kind == 'array' else row[0][1]
+            descriptor = BlobDescriptor.deserialize(raw)
+            with open(path, 'rb') as stream:
+                stream.seek(descriptor.offset)
+                assert stream.read(descriptor.length) == b'x'
+    finally:
+        reader.close()
+    assert 0 < cache._current_size <= budget
+    entries = cache._entry_index if disk else cache._cache
+    assert 0 < len(entries) <= budget // (4096 if disk else 512)
+    if disk:
+        files = [p for p in (tmp_path / 'cache').rglob('*') if p.is_file()]
+        assert len(files) == len(entries)
+        assert sum(p.stat().st_blocks * 512 for p in files) <= budget
+        reopened = CachingFileIO.create_cache_manager(options)
+        assert reopened._current_size == cache._current_size
+        assert len(reopened._entry_index) == len(entries)
+
+
+@pytest.mark.parametrize('disk', [False, True], ids=['memory', 'disk'])
+def test_tiny_ranges_respect_entry_limit_and_lru(tmp_path, disk):
+    options = Options({'local-cache.enabled': 'true', 'local-cache.max-size': '1 gb',
+                       **({'local-cache.dir': str(tmp_path / 'cache')} if disk else {})})
+    cache = CachingFileIO.create_cache_manager(options)
+    with patch('pypaimon.filesystem.caching_file_io._MAX_CACHE_ENTRIES', 32):
+        for offset in range(32):
+            cache.put_block('data.blob', ('blob-meta', offset, 1), b'x')
+        assert cache.get_block('data.blob', ('blob-meta', 0, 1)) == b'x'
+        cache.put_block('data.blob', ('blob-meta', 32, 1), b'x')
+        assert cache.get_block('data.blob', ('blob-meta', 0, 1)) == b'x'
+        assert cache.get_block('data.blob', ('blob-meta', 1, 1)) is None
+        for offset in range(33, 1000):
+            cache.put_block('data.blob', ('blob-meta', offset, 1), b'x')
+        entries = cache._entry_index if disk else cache._cache
+        assert len(entries) == 32
+        assert cache._current_size >= 32 * (4096 if disk else 512)
+    if disk:
+        # Opening an existing directory must enforce both limits immediately.
+        with patch('pypaimon.filesystem.caching_file_io._MAX_CACHE_ENTRIES', 8):
+            reopened = CachingFileIO.create_cache_manager(options)
+            assert len(reopened._entry_index) == 8
+        options = Options({'local-cache.enabled': 'true', 'local-cache.max-size': '4 kb',
+                           'local-cache.dir': str(tmp_path / 'cache')})
+        reopened = CachingFileIO.create_cache_manager(options)
+        assert reopened._current_size <= 4096
+        assert len(reopened._entry_index) <= 1
+        assert len([p for p in (tmp_path / 'cache').rglob('*') if p.is_file()]) <= 1
+
+
+@pytest.mark.parametrize('whitelist', ['blob-meta', 'data'])
+def test_blob_readinto(tmp_path, whitelist):
+    from pypaimon.table.row.blob import BlobRef
+
+    path = str(tmp_path / 'data.blob')
+    (tmp_path / 'data.blob').write_bytes(b'abcdefgh')
+    delegate = LocalFileIO(str(tmp_path), Options({}))
+    options = Options({'local-cache.enabled': 'true', 'local-cache.whitelist': whitelist})
+    cache = CachingFileIO.create_cache_manager(options)
+    file_io = CachingFileIO.wrap_with_caching_if_needed(delegate, options, cache)
+    blob = BlobRef(file_io, BlobDescriptor(path, 1, 4))
+    with blob.new_input_stream() as stream:
+        assert stream.readinto(bytearray()) == 0
+        buf = bytearray(b'------')
+        assert stream.readinto(buf) == 4
+        assert buf == b'bcde--'
+        assert stream.readinto(buf) == 0
+        stream.seek(0)
+        assert stream.readinto(memoryview(buf)[1:3]) == 2
+        assert buf == b'bbce--'
+        assert stream.tell() == 2
+    if whitelist == 'blob-meta':
+        assert cache._current_size == 0  # readinto must not cache value bodies.
+    else:
+        assert cache._current_size > 0
