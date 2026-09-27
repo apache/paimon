@@ -286,3 +286,35 @@ def test_blob_readinto_delegates_without_caching(tmp_path, support):
             assert stream.readinto(memoryview(buf)[:2]) == 2
             assert stream.tell() == 2
     assert cache._current_size == 0
+
+
+@pytest.mark.parametrize('disk', [False, True], ids=['memory', 'disk'])
+def test_oversized_map_keys_preserve_cached_manifest(tmp_path, disk):
+    field = DataField(0, 'value', MapType(True, AtomicType('STRING'), AtomicType('BLOB')))
+    key = 'k' * (128 * 1024)
+    path = str(tmp_path / 'data.blob')
+    writer = BlobFormatWriter(open(path, 'wb'))
+    writer.add_element(GenericRow([[(key, BlobData(b'value'))]], [field]))
+    writer.close()
+    options = Options({'local-cache.enabled': 'true', 'local-cache.max-size': '64 kb',
+                       **({'local-cache.dir': str(tmp_path / 'cache')} if disk else {})})
+    cache = CachingFileIO.create_cache_manager(options)
+    cache.put_block('manifest', 0, b'manifest')
+    delegate = LocalFileIO(str(tmp_path), Options({}))
+    file_io = CachingFileIO.wrap_with_caching_if_needed(delegate, options, cache)
+    reader = FormatBlobReader(file_io, path, ['value'], [field], None, True)
+    try:
+        result = reader.read_arrow_batch().column(0)[0].as_py()
+        assert result[0][0] == key
+        descriptor = BlobDescriptor.deserialize(result[0][1])
+        with open(path, 'rb') as stream:
+            stream.seek(descriptor.offset)
+            assert stream.read(descriptor.length) == b'value'
+    finally:
+        reader.close()
+    assert cache.get_block('manifest', 0) == b'manifest'
+    assert 0 < cache._current_size <= 64 * 1024
+    if disk:
+        # Reject obviously oversized entries before opening a temporary file.
+        with patch('pypaimon.filesystem.caching_file_io.open', side_effect=AssertionError):
+            cache.put_block('oversized', 0, b'x' * (128 * 1024))

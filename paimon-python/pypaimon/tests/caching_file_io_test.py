@@ -181,6 +181,40 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
         files = [name for _, _, names in os.walk(self.cache_dir) for name in names]
         self.assertEqual([os.path.basename(path)], files)
 
+    def test_slow_eviction_allows_hits_and_same_key_republication(self):
+        cache = LocalDiskCacheManager(self.cache_dir, 8192)
+        cache.put_block("old", 0, b"old")
+        cache.put_block("keep", 0, b"cached")
+        deleting = threading.Event()
+        release = threading.Event()
+        unlink = os.unlink
+
+        def slow_unlink(path):
+            if path.endswith('.evicted') and not deleting.is_set():
+                deleting.set()
+                if not release.wait(5):
+                    raise AssertionError("Timed out waiting to release deletion")
+            return unlink(path)
+
+        with patch('pypaimon.filesystem.caching_file_io.os.unlink', side_effect=slow_unlink):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                writer = executor.submit(cache.put_block, "new", 0, b"new")
+                try:
+                    self.assertTrue(deleting.wait(5))
+                    hit = executor.submit(cache.get_block, "keep", 0)
+                    self.assertEqual(b"cached", hit.result(timeout=2))
+                    replacement = executor.submit(cache.put_block, "old", 0, b"replacement")
+                    replacement.result(timeout=2)
+                    self.assertFalse(writer.done())
+                finally:
+                    release.set()
+                writer.result(timeout=5)
+        self.assertEqual(b"replacement", cache.get_block("old", 0))
+        self.assertLessEqual(cache._current_size, 8192)
+        files = [name for _, _, names in os.walk(self.cache_dir) for name in names]
+        self.assertEqual(2, len(files))
+        self.assertFalse(any(name.endswith('.evicted') for name in files))
+
     def test_unlimited_cache_skips_eviction(self):
         cache = LocalDiskCacheManager(self.cache_dir, max_size_bytes=2 ** 63 - 1, block_size=64)
         for i in range(50):

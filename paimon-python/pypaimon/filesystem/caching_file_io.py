@@ -29,6 +29,7 @@ import hashlib
 import os
 import sys
 import threading
+import uuid
 from collections import OrderedDict
 from io import UnsupportedOperation
 from typing import Optional, Tuple, Union
@@ -76,10 +77,13 @@ class LocalMemoryCacheManager:
 
     def put_block(self, file_path: str, cache_key: _CacheEntryKey, data: bytes) -> None:
         key = (file_path, cache_key)
+        size = _memory_entry_size(key, data)
+        if size > self._max_size_bytes:
+            return
         with self._lock:
             if key in self._cache:
                 return
-            self._current_size += _memory_entry_size(key, data)
+            self._current_size += size
             self._cache[key] = data
             while self._cache and (self._current_size > self._max_size_bytes
                                    or len(self._cache) > _MAX_CACHE_ENTRIES):
@@ -137,6 +141,8 @@ class LocalDiskCacheManager:
             return None
 
     def put_block(self, file_path: str, cache_key: _CacheEntryKey, data: bytes) -> None:
+        if max(len(data), 4096) > self._max_size_bytes:
+            return
         path = self._cache_path(file_path, cache_key)
         with self._lock:
             if path in self._entry_index:
@@ -148,6 +154,8 @@ class LocalDiskCacheManager:
             with open(tmp_path, 'wb') as f:
                 f.write(data)
             size = self._disk_entry_size(tmp_path)
+            if size > self._max_size_bytes:
+                return
             with self._lock:
                 # Another writer may have published this key during the write.
                 if path in self._entry_index:
@@ -155,7 +163,8 @@ class LocalDiskCacheManager:
                 os.rename(tmp_path, path)
                 self._entry_index[path] = size
                 self._current_size += size
-                self._evict_locked()
+                evicted = self._evict_locked()
+            self._delete_evicted(evicted)
         except OSError:
             return
         finally:
@@ -172,19 +181,38 @@ class LocalDiskCacheManager:
         return max(stat.st_size, getattr(stat, 'st_blocks', 0) * 512,
                    getattr(stat, 'st_blksize', 4096), 4096)
 
-    def _evict_locked(self) -> None:
+    def _evict_locked(self):
+        evicted = []
         while (self._entry_index
                and (self._current_size > self._max_size_bytes
                     or len(self._entry_index) > _MAX_CACHE_ENTRIES)):
             path, size = self._entry_index.popitem(last=False)
+            # Detach the old file before unlocking, so deletion cannot remove a
+            # newly published entry for the same key.
+            retired = os.path.join(os.path.dirname(path), uuid.uuid4().hex + '.evicted')
             try:
-                os.unlink(path)
+                os.rename(path, retired)
             except FileNotFoundError:
                 pass
             except OSError:
                 self._entry_index[path] = size
                 break
+            else:
+                evicted.append((retired, size))
             self._current_size -= size
+        return evicted
+
+    def _delete_evicted(self, evicted) -> None:
+        for path, size in evicted:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # Keep failed deletions accounted for and eligible for retry.
+                with self._lock:
+                    self._entry_index[path] = size
+                    self._current_size += size
 
     def _scan_and_populate_index(self) -> None:
         for dirpath, _, filenames in os.walk(self._cache_dir):
@@ -197,7 +225,7 @@ class LocalDiskCacheManager:
                     self._entry_index[fp] = size
                     self._current_size += size
                     # Bound the index while scanning an existing cache directory.
-                    self._evict_locked()
+                    self._delete_evicted(self._evict_locked())
                 except OSError:
                     pass
 
