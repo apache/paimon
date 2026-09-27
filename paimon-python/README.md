@@ -105,6 +105,27 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Row ID column updates
+
+For a batch update of selected columns in a data-evolution table with row
+tracking, pass an Arrow table containing `_ROW_ID` and the columns to update.
+Create the updater and committer from the same builder so they share a commit
+user:
+
+```python
+builder = table.new_batch_write_builder()
+updater = builder.new_update().new_update_by_row_id()
+messages = updater.update_columns(updates, ["name"])
+commit = builder.new_commit()
+try:
+    commit.commit(messages)
+finally:
+    commit.close()
+```
+
+For stream updates, use `table.new_stream_write_builder()` and pass the stream
+commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
+
 # Parquet page-index reads
 
 For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a
@@ -262,6 +283,8 @@ JDBC planning uses the resolved table location and storage properties without
 opening another database connection.
 REST tables use `Table.copy_with_resolved_schema()` to preserve the same schema
 and option semantics, including branches whose schemas are catalog-managed.
+Matching REST tables retain the native environment across scans and read-option
+copies, preserving FileIO caches. Worker deserialization creates a fresh environment.
 The native table retains REST credentials, token refresh and catalog snapshot
 resolution. Database and table names containing dots are passed as separate
 identifier components. REST snapshot results (including empty results) take precedence over

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
 import javax.annotation.Nullable;
@@ -29,11 +30,14 @@ public class PlanImpl implements SnapshotReader.Plan {
 
     private final Long watermark;
     private final Long snapshotId;
+    @Nullable private final Snapshot snapshot;
     private final List<Split> splits;
 
-    public PlanImpl(Long watermark, Long snapshotId, List<Split> splits) {
+    public PlanImpl(
+            Long watermark, Long snapshotId, @Nullable Snapshot snapshot, List<Split> splits) {
         this.watermark = watermark;
         this.snapshotId = snapshotId;
+        this.snapshot = snapshot;
         this.splits = splits;
     }
 
@@ -47,6 +51,12 @@ public class PlanImpl implements SnapshotReader.Plan {
     @Override
     public Long snapshotId() {
         return snapshotId;
+    }
+
+    @Nullable
+    @Override
+    public Snapshot snapshot() {
+        return snapshot;
     }
 
     @Override

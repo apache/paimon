@@ -162,14 +162,6 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         return startingScanner.scanPartitions(snapshotReader);
     }
 
-    /** The scanner used for snapshot selection, also shared with deferred index planning. */
-    public StartingScanner getStartingScanner() {
-        if (startingScanner == null) {
-            startingScanner = createStartingScanner(false);
-        }
-        return startingScanner;
-    }
-
     @Override
     public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
         return PartitionTopNUtils.topNFileStorePartitions(
@@ -207,7 +199,11 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
                 long splitRowCount = mergedRowCount.getAsLong();
                 if (scannedRowCount >= pushDownLimit - splitRowCount) {
                     SnapshotReader.Plan newPlan =
-                            new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                            new PlanImpl(
+                                    plan.watermark(),
+                                    plan.snapshotId(),
+                                    plan.snapshot(),
+                                    limitedSplits);
                     LOG.info(
                             "Limit pushdown applied successfully. Original splits: {}, Limited splits: {}, Pushdown limit: {}",
                             splits.size(),
@@ -264,7 +260,8 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
         TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema, schemaManager);
         List<Split> topNSplits = new ArrayList<>(evaluator.evaluate(order, topN.limit(), splits));
-        SnapshotReader.Plan newPlan = new PlanImpl(plan.watermark(), plan.snapshotId(), topNSplits);
+        SnapshotReader.Plan newPlan =
+                new PlanImpl(plan.watermark(), plan.snapshotId(), plan.snapshot(), topNSplits);
         return Optional.of(new ScannedResult(newPlan));
     }
 
@@ -285,10 +282,6 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         if (timeRetained == null) {
             return;
         }
-        createReadProtectionTag(snapshotId, timeRetained);
-    }
-
-    public final void createReadProtectionTag(long snapshotId, Duration timeRetained) {
         SnapshotManager sm = snapshotReader.snapshotManager();
         TagManager tagMgr = new TagManager(sm.fileIO(), sm.tablePath(), sm.branch());
         BatchReadTagCreator creator = new BatchReadTagCreator(tagMgr, sm, timeRetained);

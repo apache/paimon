@@ -106,6 +106,15 @@ class TableScan:
         )
         if not native_runtime_available():
             return False
+        # ``data-file.path-directory`` relocates data files under a
+        # sub-directory that only the Python write/plan paths resolve (see
+        # FileStoreTable and the split generators). The native planner still
+        # resolves files at the bucket root, so a native plan would read the
+        # wrong location and fail with NotFound. Fall back to the Python
+        # scanner -- which honors the directory -- until the native runtime
+        # learns this option.
+        if self.table.options.data_file_path_directory() is not None:
+            return False
         fs = self.file_scanner
         if not self._native_global_index_result_supported():
             return False

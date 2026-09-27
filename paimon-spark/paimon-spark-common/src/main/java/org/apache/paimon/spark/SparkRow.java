@@ -208,7 +208,11 @@ public class SparkRow implements InternalRow, Serializable {
 
     private static int toPaimonDate(Object object) {
         if (object instanceof Date) {
-            return DateTimeUtils.toInternal((Date) object);
+            // Spark builds this java.sql.Date from its internal day through the hybrid calendar,
+            // which is Julian before 1582-10-15, so only Spark's own inverse recovers the day.
+            // Counting epoch days off the instant follows the java.time rules instead, which
+            // leaves a date from before the cutover stored days away from the one written.
+            return org.apache.spark.sql.catalyst.util.DateTimeUtils.fromJavaDate((Date) object);
         } else {
             return DateTimeUtils.toInternal((LocalDate) object);
         }

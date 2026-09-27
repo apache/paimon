@@ -211,6 +211,7 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                                         archiveReader,
                                         Collections.singletonList(ioMeta),
                                         totalRowCount,
+                                        null,
                                         executor);
                         return reader;
                     });

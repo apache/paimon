@@ -23,6 +23,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon.common.predicate_json_parser import (
+    _apply_predicate_transform,
     _convert_literal,
     _paimon_type_to_arrow,
     extract_referenced_fields,
@@ -802,3 +803,51 @@ class TestConcatWsAllNull(unittest.TestCase):
         fn = parse_predicate_to_batch_filter(pred_json)
         result = fn(batch).to_pylist()
         self.assertEqual(result, [False, True, False, False])
+
+
+class TestDateExtractTransforms(unittest.TestCase):
+    """YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER / DAY_OF_YEAR,
+    mirroring Java's DateExtractTransform subclasses."""
+
+    def _ts_batch(self):
+        # 2024-01-01 00:00:00 and 2024-07-01 02:24:05 (us), plus null.
+        return pa.RecordBatch.from_pydict({
+            "t": pa.array([1704067200000000, 1719800645000000, None],
+                          type=pa.timestamp("us")),
+        })
+
+    def _apply(self, name, batch, field="t", ftype="TIMESTAMP(6)"):
+        transform = {"name": name,
+                     "fieldRef": {"index": 0, "name": field, "type": ftype}}
+        return _apply_predicate_transform(transform, batch).to_pylist()
+
+    def test_timestamp_parts(self):
+        batch = self._ts_batch()
+        self.assertEqual(self._apply("YEAR", batch), [2024, 2024, None])
+        self.assertEqual(self._apply("MONTH", batch), [1, 7, None])
+        self.assertEqual(self._apply("DAY", batch), [1, 1, None])
+        self.assertEqual(self._apply("HOUR", batch), [0, 2, None])
+        self.assertEqual(self._apply("MINUTE", batch), [0, 24, None])
+        self.assertEqual(self._apply("SECOND", batch), [0, 5, None])
+        self.assertEqual(self._apply("QUARTER", batch), [1, 3, None])
+        self.assertEqual(self._apply("DAY_OF_YEAR", batch), [1, 183, None])
+
+    def test_date_field_starts_at_midnight(self):
+        # epoch day 19723 == 2024-01-01; a DATE has no time, so HOUR is 0.
+        batch = pa.RecordBatch.from_pydict(
+            {"d": pa.array([19723, None], type=pa.date32())})
+        self.assertEqual(self._apply("YEAR", batch, "d", "DATE"), [2024, None])
+        self.assertEqual(self._apply("MONTH", batch, "d", "DATE"), [1, None])
+        self.assertEqual(self._apply("HOUR", batch, "d", "DATE"), [0, None])
+
+    def test_wired_through_a_leaf_filter(self):
+        pred = json.dumps({
+            "kind": "LEAF",
+            "transform": {"name": "MONTH",
+                          "fieldRef": {"index": 0, "name": "t", "type": "TIMESTAMP(6)"}},
+            "function": "EQUAL",
+            "literals": [7],
+        })
+        self.assertEqual(
+            parse_predicate_to_batch_filter(pred)(self._ts_batch()).to_pylist(),
+            [False, True, False])

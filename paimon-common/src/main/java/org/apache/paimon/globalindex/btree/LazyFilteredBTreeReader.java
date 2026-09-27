@@ -65,25 +65,6 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             CacheManager cacheManager,
             long fallbackScanMaxSize,
             long totalRowCount,
-            ExecutorService executor) {
-        this(
-                files,
-                keySerializer,
-                fileReader,
-                cacheManager,
-                fallbackScanMaxSize,
-                totalRowCount,
-                null,
-                executor);
-    }
-
-    public LazyFilteredBTreeReader(
-            List<GlobalIndexIOMeta> files,
-            KeySerializer keySerializer,
-            GlobalIndexFileReader fileReader,
-            CacheManager cacheManager,
-            long fallbackScanMaxSize,
-            long totalRowCount,
             @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);

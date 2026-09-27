@@ -87,6 +87,7 @@ class ESIndexVectorMetricTest {
                         meta -> null,
                         List.of(vectorFile(tempDir, "persisted-l2", "euclidean")),
                         1,
+                        null,
                         null);
         try {
             assertThat(((ESIndexGlobalIndexReader) reader).primaryVectorMetric()).isEqualTo("l2");
@@ -101,7 +102,11 @@ class ESIndexVectorMetricTest {
         ESIndexGlobalIndexer indexer = indexer("cosine");
         GlobalIndexReader first =
                 indexer.createReader(
-                        meta -> null, List.of(vectorFile(tempDir, "first", "euclidean")), 1, null);
+                        meta -> null,
+                        List.of(vectorFile(tempDir, "first", "euclidean")),
+                        1,
+                        null,
+                        null);
         try {
             assertThatThrownBy(
                             () ->
@@ -109,6 +114,7 @@ class ESIndexVectorMetricTest {
                                             meta -> null,
                                             List.of(vectorFile(tempDir, "second", "cosine")),
                                             1,
+                                            null,
                                             null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("different vector metrics")
@@ -175,6 +181,7 @@ class ESIndexVectorMetricTest {
                         meta -> LocalFileIO.create().newInputStream(meta.filePath()),
                         Collections.singletonList(ioMeta),
                         3,
+                        null,
                         null);
         try {
             Optional<ScoredGlobalIndexResult> result =
@@ -216,7 +223,11 @@ class ESIndexVectorMetricTest {
         assertThatThrownBy(
                         () ->
                                 indexer.createReader(
-                                        meta -> null, Collections.singletonList(legacy), 1, null))
+                                        meta -> null,
+                                        Collections.singletonList(legacy),
+                                        1,
+                                        null,
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Legacy es-index metadata");
     }

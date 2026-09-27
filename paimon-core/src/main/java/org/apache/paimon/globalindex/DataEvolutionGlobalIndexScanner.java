@@ -144,7 +144,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
-    /** Groups metadata for both eager readers and lazy plans, without opening index files. */
+    /** Groups metadata for both planning-time readers and reader-side query plans. */
     static Map<Integer, List<IndexMetaFileGroup>> groupIndexFiles(
             Collection<IndexFileMeta> indexFiles) {
         Map<Integer, IndexMetaFileGroup> primaryGroups = new HashMap<>();
@@ -402,7 +402,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     public GlobalIndexResult unindexedRowsForContributingFields(
             Collection<Integer> contributingFieldIds) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        for (Range range : coverage.unindexedRanges(contributingFieldIds)) {
+        for (Range range : coverage.unindexedRanges(contributingFieldIds, null)) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);
@@ -446,6 +446,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                         indexFileReadWrite,
                                                         globalMetas,
                                                         range.count(),
+                                                        null,
                                                         executor),
                                                 range.from,
                                                 range.to),
