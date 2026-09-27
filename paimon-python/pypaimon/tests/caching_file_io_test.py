@@ -25,7 +25,8 @@ import shutil
 import tempfile
 import threading
 import unittest
-from unittest.mock import MagicMock
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import MagicMock, patch
 
 from pypaimon.filesystem.caching_file_io import (
     LocalDiskCacheManager,
@@ -126,6 +127,59 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
             t.join()
 
         self.assertEqual([], errors)
+
+    def test_slow_write_does_not_block_unrelated_hit(self):
+        cache = LocalDiskCacheManager(self.cache_dir, 1024 * 1024)
+        cache.put_block("existing", 0, b"cached")
+        writing = threading.Event()
+        release = threading.Event()
+        real_open = open
+
+        class SlowFile(io.FileIO):
+            def write(self, data):
+                writing.set()
+                if not release.wait(5):
+                    raise AssertionError("Timed out waiting to release write")
+                return super().write(data)
+
+        def open_file(path, mode):
+            return SlowFile(path, mode) if mode == 'wb' else real_open(path, mode)
+
+        with patch('pypaimon.filesystem.caching_file_io.open', side_effect=open_file):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                writer = executor.submit(cache.put_block, "new", 0, b"new data")
+                try:
+                    self.assertTrue(writing.wait(5))
+                    hit = executor.submit(cache.get_block, "existing", 0)
+                    self.assertEqual(b"cached", hit.result(timeout=2))
+                    self.assertFalse(writer.done())
+                finally:
+                    release.set()
+                writer.result(timeout=5)
+        self.assertEqual(b"new data", cache.get_block("new", 0))
+
+    def test_concurrent_same_key_is_published_once(self):
+        cache = LocalDiskCacheManager(self.cache_dir, 1024 * 1024)
+        ready = threading.Barrier(2)
+        entry_size = cache._disk_entry_size
+
+        def wait_for_writers(path):
+            size = entry_size(path)
+            ready.wait(timeout=5)
+            return size
+
+        with patch.object(cache, '_disk_entry_size', side_effect=wait_for_writers):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                writers = [executor.submit(cache.put_block, "same", 0, data)
+                           for data in (b"first", b"second")]
+                for writer in writers:
+                    writer.result(timeout=5)
+        self.assertIn(cache.get_block("same", 0), (b"first", b"second"))
+        self.assertEqual(1, len(cache._entry_index))
+        path = cache._cache_path("same", 0)
+        self.assertEqual(entry_size(path), cache._current_size)
+        files = [name for _, _, names in os.walk(self.cache_dir) for name in names]
+        self.assertEqual([os.path.basename(path)], files)
 
     def test_unlimited_cache_skips_eviction(self):
         cache = LocalDiskCacheManager(self.cache_dir, max_size_bytes=2 ** 63 - 1, block_size=64)

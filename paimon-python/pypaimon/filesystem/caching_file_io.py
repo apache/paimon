@@ -137,27 +137,31 @@ class LocalDiskCacheManager:
 
     def put_block(self, file_path: str, cache_key: _CacheEntryKey, data: bytes) -> None:
         path = self._cache_path(file_path, cache_key)
-        # Keep publication and eviction atomic with respect to other writers.
         with self._lock:
             if path in self._entry_index:
                 return
-            sub_dir = os.path.dirname(path)
-            os.makedirs(sub_dir, exist_ok=True)
-            tmp_path = path + f".tmp.{os.getpid()}.{threading.get_ident()}"
-            try:
-                with open(tmp_path, 'wb') as f:
-                    f.write(data)
-                size = self._disk_entry_size(tmp_path)
+
+        tmp_path = path + f".tmp.{os.getpid()}.{threading.get_ident()}"
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(tmp_path, 'wb') as f:
+                f.write(data)
+            size = self._disk_entry_size(tmp_path)
+            with self._lock:
+                # Another writer may have published this key during the write.
+                if path in self._entry_index:
+                    return
                 os.rename(tmp_path, path)
-            except Exception:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                return
-            self._entry_index[path] = size
-            self._current_size += size
-            self._evict_locked()
+                self._entry_index[path] = size
+                self._current_size += size
+                self._evict_locked()
+        except OSError:
+            return
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     @staticmethod
     def _disk_entry_size(path: str) -> int:
