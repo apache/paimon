@@ -130,12 +130,19 @@ def test_batch_native_write_commits_through_both_committers(
 
 
 @requires_native
-def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog):
+@pytest.mark.parametrize('directory', [None, 'relative', 'absolute', 'uri'])
+def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, directory):
     catalog = native_rest_catalog
+    options = {'file.format': 'parquet', 'write.native.enabled': 'true',
+               'commit.native.enabled': 'true'}
+    if directory is not None:
+        options['data-file.path-directory'] = {
+            'relative': 'data/nested', 'absolute': str(tmp_path / 'relocated'),
+            'uri': (tmp_path / 'relocated').as_uri(),
+        }[directory]
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
         pa.schema([('id', pa.int64()), ('pt', pa.string())]),
-        options={'file.format': 'parquet', 'write.native.enabled': 'true',
-                 'commit.native.enabled': 'true'}, partition_keys=['pt']), False)
+        options=options, partition_keys=['pt']), False)
     table = catalog.get_table('default.t')
     builder = table.new_batch_write_builder()
     writer = builder.new_write()

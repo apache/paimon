@@ -579,7 +579,7 @@ class ExternalPathsIntegrationTest(unittest.TestCase):
             for file_meta in commit_msg.new_files:
                 # External path should be set
                 self.assertIsNotNone(file_meta.external_path)
-                self.assertTrue(file_meta.external_path.startswith("file://"))
+                self.assertTrue(file_meta.external_path.startswith("file:"))
                 self.assertIn(self.external_dir, file_meta.external_path)
 
         table_commit.commit(commit_messages)

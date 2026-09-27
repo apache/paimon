@@ -37,7 +37,6 @@ def _native_row_id_table(table):
             or not table.options.native_write_enabled()
             or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()
-            or table.options.data_file_path_directory() is not None
             or not _RowIdUpdateFileWriter.supports_table(table)
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_write_available()):
