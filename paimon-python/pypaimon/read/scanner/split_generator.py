@@ -97,13 +97,6 @@ class AbstractSplitGenerator(ABC):
         splits = []
         if not packed_files or not file_entries:
             return splits
-        partition = tuple(file_entries[0].partition.values)
-        escaped_partition = False
-        if partition:
-            path_factory = self.table.path_factory()
-            escaped_partition = (path_factory.bucket_path(
-                partition, file_entries[0].bucket, canonical_partition=True)
-                != path_factory.bucket_path(partition, file_entries[0].bucket))
         for file_group in packed_files:
             if use_optimized_path:
                 raw_convertible = True
@@ -112,20 +105,8 @@ class AbstractSplitGenerator(ABC):
             else:
                 raw_convertible = True
 
-            for data_file in file_group:
-                data_file.set_file_path(
-                    self.table.table_path,
-                    file_entries[0].partition,
-                    file_entries[0].bucket,
-                    self.default_part_value,
-                    self.table.options.data_file_path_directory()
-                )
-                if escaped_partition and not data_file.external_path:
-                    canonical_path = canonical_data_file_path(
-                        self.table, partition, file_entries[0].bucket,
-                        data_file.file_name)
-                    if self.table.file_io.exists(canonical_path):
-                        data_file.file_path = canonical_path
+            self._set_data_file_paths(
+                file_group, file_entries[0].partition, file_entries[0].bucket)
 
             if file_group:
                 # Get deletion files for this split
@@ -147,6 +128,25 @@ class AbstractSplitGenerator(ABC):
                 )
                 splits.append(split)
         return splits
+
+    def _set_data_file_paths(self, files, partition: GenericRow, bucket: int):
+        """Resolve Java/Rust escaped paths and legacy Python partition paths."""
+        values = tuple(partition.values)
+        escaped_partition = False
+        if values:
+            path_factory = self.table.path_factory()
+            escaped_partition = (
+                path_factory.bucket_path(values, bucket, canonical_partition=True)
+                != path_factory.bucket_path(values, bucket))
+        for data_file in files:
+            data_file.set_file_path(
+                self.table.table_path, partition, bucket, self.default_part_value,
+                self.table.options.data_file_path_directory())
+            if escaped_partition and not data_file.external_path:
+                canonical_path = canonical_data_file_path(
+                    self.table, values, bucket, data_file.file_name)
+                if self.table.file_io.exists(canonical_path):
+                    data_file.file_path = canonical_path
 
     def _get_deletion_files_for_split(
         self,
