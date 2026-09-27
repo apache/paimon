@@ -29,6 +29,7 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -865,6 +866,40 @@ public class JdbcCatalogTest extends CatalogTestBase {
                 java.nio.file.Paths.get(jdbcCatalog.newDatabasePath(databaseName).toUri());
         assertThat(dir).exists();
         // the table is registered and readable: only the property rows are missing
+        assertThat(jdbcCatalog.listTables(databaseName)).contains("t");
+        assertThat(jdbcCatalog.getTable(identifier)).isNotNull();
+    }
+
+    @Test
+    public void testCreateTablePreservesUnregisteredOnDiskTableOnFailure() throws Exception {
+        // A create-table failure caused by a pre-existing on-disk table (schema file present but
+        // no paimon_tables row) must NOT delete that directory: the state is recoverable via
+        // repairTable, and deleting it on a failed create would destroy the table's data.
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        String databaseName = "reg_fail_db";
+        jdbcCatalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, "t");
+
+        // Seed an on-disk table that is missing from the JDBC catalog. createTable then fails
+        // inside schemaManager.createTable ("schema in filesystem exists") before registration.
+        Path tableLocation = jdbcCatalog.getTableLocation(identifier);
+        new FileSystemSchemaManager(jdbcCatalog.fileIO(), tableLocation)
+                .createTable(Schema.newBuilder().column("k", DataTypes.INT()).build());
+        java.nio.file.Path dir = java.nio.file.Paths.get(tableLocation.toUri());
+        assertThat(dir).exists();
+        assertThat(jdbcCatalog.listTables(databaseName)).doesNotContain("t");
+
+        assertThatThrownBy(
+                        () ->
+                                jdbcCatalog.createTable(
+                                        identifier,
+                                        Schema.newBuilder().column("k", DataTypes.INT()).build(),
+                                        false))
+                .isInstanceOf(RuntimeException.class);
+
+        // the pre-existing directory must survive the failed create and stay recoverable
+        assertThat(dir).exists();
+        jdbcCatalog.repairTable(identifier);
         assertThat(jdbcCatalog.listTables(databaseName)).contains("t");
         assertThat(jdbcCatalog.getTable(identifier)).isNotNull();
     }

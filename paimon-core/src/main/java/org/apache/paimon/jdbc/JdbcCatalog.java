@@ -540,10 +540,14 @@ public class JdbcCatalog extends AbstractCatalog {
 
     private void createTableImplWithLock(Identifier identifier, Schema schema) {
         boolean registered = false;
+        boolean schemaCreated = false;
         try {
             // create table file
             SchemaManager schemaManager = getSchemaManager(identifier);
             TableSchema tableSchema = schemaManager.createTable(schema);
+            // this call created the schema directory; a pre-existing one makes createTable throw
+            // above, so schemaCreated stays false for that case and its directory is left intact
+            schemaCreated = true;
             // Update schema metadata
             Path path = getTableLocation(identifier);
             registered =
@@ -574,10 +578,11 @@ public class JdbcCatalog extends AbstractCatalog {
                         collectTableProperties(tableSchema));
             }
         } catch (Exception e) {
-            // the schema directory may already be committed: without this cleanup a failed
-            // registration leaves it behind and blocks re-creation. Once registered the
-            // table works even if a later step fails, so the directory must stay.
-            if (!registered) {
+            // Clean up only a directory this call created but failed to register (the leaked-dir
+            // case the flag guards). A pre-existing on-disk table (schemaCreated == false, missing
+            // from the catalog and recoverable via repairTable) must survive a failed create, and
+            // once registered the table works even if a later step fails.
+            if (schemaCreated && !registered) {
                 fileIO.deleteDirectoryQuietly(getTableLocation(identifier));
             }
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
