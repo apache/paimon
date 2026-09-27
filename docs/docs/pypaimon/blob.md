@@ -178,11 +178,9 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 
 ## BLOB metadata cache
 
-With `local-cache.enabled=true`, the Python reader's default whitelist is
-`meta,global-index,blob-meta`. `blob-meta` caches exact ranges for BLOB footers,
-row indexes, ARRAY headers/indexes, and MAP headers/keys/indexes, excluding value
-bodies. It shares the local cache's memory or disk budget. Add `data` to cache
-normal data blocks as well. This option applies to the Python reader, not Rust native reads.
+Enable `local-cache.enabled=true` to cache BLOB metadata needed for descriptors,
+including MAP keys, without caching value bodies. `blob-meta` is included in the
+default whitelist and shares the local cache budget. Python reader only.
 
 ## See Also
 
