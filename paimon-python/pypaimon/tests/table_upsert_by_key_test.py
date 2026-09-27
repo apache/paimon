@@ -22,6 +22,7 @@ from unittest import mock
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
@@ -140,6 +141,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
                 _RowIdUpdateFileWriter(table, (), ['id'])
             output_stream.assert_not_called()
 
+    @pytest.mark.python_write
     @mock.patch.object(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 2)
     def test_partial_upsert_streams_original_file_group(self):
         schema = pa.schema([
