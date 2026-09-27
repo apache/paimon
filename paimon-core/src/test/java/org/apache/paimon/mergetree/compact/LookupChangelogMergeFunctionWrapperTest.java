@@ -28,6 +28,7 @@ import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -57,7 +58,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link LookupChangelogMergeFunctionWrapper}. */
 public class LookupChangelogMergeFunctionWrapperTest {
 
-    @org.junit.jupiter.api.Test
+    @Test
     public void testFirstRowAllRetractRecordsWithIgnoreDelete() {
         // 0.7- tables could persist lone retract records into data files; with
         // ignore-delete they are all skipped and the merge result is null, which must
@@ -65,8 +66,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         FirstRowMergeFunctionWrapper function =
                 new FirstRowMergeFunctionWrapper(
                         FirstRowMergeFunction.factory(
-                                org.apache.paimon.options.Options.fromMap(
-                                        Collections.singletonMap("ignore-delete", "true"))),
+                                Options.fromMap(Collections.singletonMap("ignore-delete", "true"))),
                         row -> false);
 
         function.reset();
