@@ -20,8 +20,6 @@ package org.apache.paimon.deletionvectors.append;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
-import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.Path;
@@ -134,15 +132,7 @@ public class AppendDeleteFileMaintainer implements BaseAppendDeleteFileMaintaine
         DeletionFile previous = notifyRemovedDeletionVector(dataFile);
         if (previous != null) {
             DeletionVector stored = dvIndexFile.readDeletionVector(previous);
-            // a stored vector may predate flipping deletion-vectors.bitmap64: normalize it
-            // to the new vector's type so the merge does not crash on mixed state
-            if (stored instanceof BitmapDeletionVector
-                    && deletionVector instanceof Bitmap64DeletionVector) {
-                stored =
-                        Bitmap64DeletionVector.fromBitmapDeletionVector(
-                                (BitmapDeletionVector) stored);
-            }
-            deletionVector.merge(stored);
+            deletionVector = DeletionVector.mergeVectors(deletionVector, stored);
         }
         deletionVectors.put(dataFile, deletionVector);
     }

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -85,6 +86,46 @@ class AppendDeletionFileMaintainerTest {
         assertThat(res).hasSize(2);
         // the old index file is replaced by one holding the merged vector: stored 3
         // deletions plus the fresh one
+        assertThat(res).anyMatch(entry -> entry.kind() == FileKind.DELETE);
+        IndexManifestEntry added =
+                res.stream().filter(entry -> entry.kind() == FileKind.ADD).findAny().get();
+        assertThat(added.indexFile().dvRanges()).containsKey("f1");
+        assertThat(added.indexFile().dvRanges().get("f1").cardinality()).isEqualTo(4);
+    }
+
+    @Test
+    public void testMergeStoredBitmap64IntoBitmap32() throws Exception {
+        // reverse of the case above: write DVs as bitmap64, then flip deletion-vectors.bitmap64
+        // off. A fresh bitmap32 vector must still merge the stored bitmap64 one instead of crashing
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+
+        CommitMessageImpl commitMessage =
+                store.writeDVIndexFiles(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Collections.singletonMap("f1", Arrays.asList(1, 3, 5)));
+        store.commit(commitMessage);
+
+        IndexPathFactory indexPathFactory =
+                store.pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0);
+        Map<String, DeletionFile> dataFileToDeletionFiles =
+                createDeletionFileMapFromIndexFileMetas(
+                        indexPathFactory, commitMessage.newFilesIncrement().newIndexFiles());
+
+        Map<String, String> flipped = new HashMap<>();
+        flipped.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "false");
+        TestAppendFileStore flippedStore = TestAppendFileStore.createAppendStore(tempDir, flipped);
+        AppendDeleteFileMaintainer dvIFMaintainer =
+                flippedStore.createDVIFMaintainer(BinaryRow.EMPTY_ROW, dataFileToDeletionFiles);
+
+        BitmapDeletionVector fresh = new BitmapDeletionVector();
+        fresh.delete(7);
+        dvIFMaintainer.notifyNewDeletionVector("f1", fresh);
+
+        List<IndexManifestEntry> res = dvIFMaintainer.persist();
+        assertThat(res).hasSize(2);
         assertThat(res).anyMatch(entry -> entry.kind() == FileKind.DELETE);
         IndexManifestEntry added =
                 res.stream().filter(entry -> entry.kind() == FileKind.ADD).findAny().get();

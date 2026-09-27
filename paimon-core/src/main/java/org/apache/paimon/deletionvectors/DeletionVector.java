@@ -197,6 +197,27 @@ public interface DeletionVector extends DeletionVectorJudger {
         }
     }
 
+    /**
+     * Merges {@code stored} into {@code fresh} and returns the vector holding the union.
+     *
+     * <p>{@code deletion-vectors.bitmap64} can be flipped on an existing table, so a freshly
+     * created vector and a previously stored one may not share the same bitmap width. When they
+     * differ, the {@link BitmapDeletionVector} side is promoted to {@link Bitmap64DeletionVector}
+     * so the merge runs at the wider format instead of {@link #merge} throwing on the type
+     * mismatch. A bitmap64 result stays readable under a bitmap32 table because vectors are
+     * dispatched by magic number on read.
+     */
+    static DeletionVector mergeVectors(DeletionVector fresh, DeletionVector stored) {
+        if (fresh instanceof Bitmap64DeletionVector && stored instanceof BitmapDeletionVector) {
+            stored = Bitmap64DeletionVector.fromBitmapDeletionVector((BitmapDeletionVector) stored);
+        } else if (fresh instanceof BitmapDeletionVector
+                && stored instanceof Bitmap64DeletionVector) {
+            fresh = Bitmap64DeletionVector.fromBitmapDeletionVector((BitmapDeletionVector) fresh);
+        }
+        fresh.merge(stored);
+        return fresh;
+    }
+
     /** Interface to create {@link DeletionVector}. */
     interface Factory {
         Optional<DeletionVector> create(String fileName) throws IOException;
