@@ -1138,10 +1138,10 @@ class CoreOptions:
     LOCAL_CACHE_WHITELIST: ConfigOption[str] = (
         ConfigOptions.key("local-cache.whitelist")
         .string_type()
-        .default_value("meta,global-index,blob-meta")
+        .default_value("meta,global-index")
         .with_description(
             "Comma-separated list of file types to cache. "
-            "Supported values: meta, global-index, bucket-index, data, file-index, blob-meta."
+            "Supported values: meta, global-index, bucket-index, data, file-index."
         )
     )
 

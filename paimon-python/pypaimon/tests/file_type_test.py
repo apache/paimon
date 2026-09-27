@@ -84,7 +84,7 @@ class FileTypeClassifyTest(unittest.TestCase):
 
     def test_data_files(self):
         self.assertEqual(FileType.DATA, FileType.classify("data-abc.orc"))
-        self.assertEqual(FileType.DATA, FileType.classify("data-abc.parquet"))
+        self.assertEqual(FileType.PARQUET_DATA, FileType.classify("data-abc.parquet"))
         self.assertEqual(FileType.DATA, FileType.classify("unknown-file"))
 
     def test_temp_file_unwrap(self):

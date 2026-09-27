@@ -25,8 +25,7 @@ import shutil
 import tempfile
 import threading
 import unittest
-from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from pypaimon.filesystem.caching_file_io import (
     LocalDiskCacheManager,
@@ -87,8 +86,7 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
 
         # Simulate restart: new cache instance on same directory
         cache2 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
-        self.assertEqual(cache1._current_size, cache2._current_size)
-        self.assertGreaterEqual(cache2._current_size, 8192)
+        self.assertEqual(300, cache2._current_size)
         self.assertEqual(b"x" * 100, cache2.get_block("f", 0))
         self.assertEqual(b"y" * 200, cache2.get_block("f", 1))
 
@@ -127,93 +125,6 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
             t.join()
 
         self.assertEqual([], errors)
-
-    def test_slow_write_does_not_block_unrelated_hit(self):
-        cache = LocalDiskCacheManager(self.cache_dir, 1024 * 1024)
-        cache.put_block("existing", 0, b"cached")
-        writing = threading.Event()
-        release = threading.Event()
-        real_open = open
-
-        class SlowFile(io.FileIO):
-            def write(self, data):
-                writing.set()
-                if not release.wait(5):
-                    raise AssertionError("Timed out waiting to release write")
-                return super().write(data)
-
-        def open_file(path, mode):
-            return SlowFile(path, mode) if mode == 'wb' else real_open(path, mode)
-
-        with patch('pypaimon.filesystem.caching_file_io.open', side_effect=open_file):
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                writer = executor.submit(cache.put_block, "new", 0, b"new data")
-                try:
-                    self.assertTrue(writing.wait(5))
-                    hit = executor.submit(cache.get_block, "existing", 0)
-                    self.assertEqual(b"cached", hit.result(timeout=2))
-                    self.assertFalse(writer.done())
-                finally:
-                    release.set()
-                writer.result(timeout=5)
-        self.assertEqual(b"new data", cache.get_block("new", 0))
-
-    def test_concurrent_same_key_is_published_once(self):
-        cache = LocalDiskCacheManager(self.cache_dir, 1024 * 1024)
-        ready = threading.Barrier(2)
-        entry_size = cache._disk_entry_size
-
-        def wait_for_writers(path):
-            size = entry_size(path)
-            ready.wait(timeout=5)
-            return size
-
-        with patch.object(cache, '_disk_entry_size', side_effect=wait_for_writers):
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                writers = [executor.submit(cache.put_block, "same", 0, data)
-                           for data in (b"first", b"second")]
-                for writer in writers:
-                    writer.result(timeout=5)
-        self.assertIn(cache.get_block("same", 0), (b"first", b"second"))
-        self.assertEqual(1, len(cache._entry_index))
-        path = cache._cache_path("same", 0)
-        self.assertEqual(entry_size(path), cache._current_size)
-        files = [name for _, _, names in os.walk(self.cache_dir) for name in names]
-        self.assertEqual([os.path.basename(path)], files)
-
-    def test_slow_eviction_allows_hits_and_same_key_republication(self):
-        cache = LocalDiskCacheManager(self.cache_dir, 8192)
-        cache.put_block("old", 0, b"old")
-        cache.put_block("keep", 0, b"cached")
-        deleting = threading.Event()
-        release = threading.Event()
-        unlink = os.unlink
-
-        def slow_unlink(path):
-            if path.endswith('.evicted') and not deleting.is_set():
-                deleting.set()
-                if not release.wait(5):
-                    raise AssertionError("Timed out waiting to release deletion")
-            return unlink(path)
-
-        with patch('pypaimon.filesystem.caching_file_io.os.unlink', side_effect=slow_unlink):
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                writer = executor.submit(cache.put_block, "new", 0, b"new")
-                try:
-                    self.assertTrue(deleting.wait(5))
-                    hit = executor.submit(cache.get_block, "keep", 0)
-                    self.assertEqual(b"cached", hit.result(timeout=2))
-                    replacement = executor.submit(cache.put_block, "old", 0, b"replacement")
-                    replacement.result(timeout=2)
-                    self.assertFalse(writer.done())
-                finally:
-                    release.set()
-                writer.result(timeout=5)
-        self.assertEqual(b"replacement", cache.get_block("old", 0))
-        self.assertLessEqual(cache._current_size, 8192)
-        files = [name for _, _, names in os.walk(self.cache_dir) for name in names]
-        self.assertEqual(2, len(files))
-        self.assertFalse(any(name.endswith('.evicted') for name in files))
 
     def test_unlimited_cache_skips_eviction(self):
         cache = LocalDiskCacheManager(self.cache_dir, max_size_bytes=2 ** 63 - 1, block_size=64)
@@ -425,6 +336,31 @@ class CachingFileIOTest(unittest.TestCase):
         result = caching_io.new_input_stream("global-index-uuid.index")
         self.assertNotIsInstance(result, CachingInputStream)
 
+    def test_parquet_only_cache_and_data_compatibility(self):
+        from pypaimon.filesystem.caching_file_io import LocalMemoryCacheManager
+        from pypaimon.utils.file_type import FileType
+
+        for disk in (False, True):
+            for whitelist in ('meta,global-index', 'parquet-data', 'data'):
+                for name in ('data.parquet', 'data.blob', 'data.orc', 'data.parquet.index'):
+                    with self.subTest(disk=disk, whitelist=whitelist, name=name):
+                        with tempfile.TemporaryDirectory() as directory:
+                            cache = (LocalDiskCacheManager(directory, 1024, block_size=4) if disk
+                                     else LocalMemoryCacheManager(1024, block_size=4))
+                            delegate = self._make_delegate({name: b'abcdefgh'})
+                            caching_io = CachingFileIO(
+                                delegate, cache, FileType.parse_whitelist(whitelist))
+                            cached = ((whitelist == 'parquet-data' and name.endswith('.parquet'))
+                                      or (whitelist == 'data' and not name.endswith('.index')))
+                            for _ in range(2):
+                                with caching_io.new_input_stream(name) as stream:
+                                    stream.seek(1)
+                                    self.assertEqual(b'bcdefg', stream.read(6))
+                            self.assertEqual(1 if cached else 2,
+                                             delegate.new_input_stream.call_count)
+                            if not cached:
+                                delegate.get_file_size.assert_not_called()
+
     def test_data_file_not_cached(self):
         data = b"data content"
         delegate = self._make_delegate({"data-abc.orc": data})
@@ -581,7 +517,7 @@ class ConfigOptionsTest(unittest.TestCase):
         self.assertIsNone(opts.local_cache_dir())
         self.assertIsNone(opts.local_cache_max_size())
         self.assertEqual(1 * 1024 * 1024, opts.local_cache_block_size().get_bytes())
-        self.assertEqual("meta,global-index,blob-meta", opts.local_cache_whitelist())
+        self.assertEqual("meta,global-index", opts.local_cache_whitelist())
 
     def test_local_cache_options_custom(self):
         from pypaimon.common.options import Options

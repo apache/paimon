@@ -31,17 +31,17 @@ class FileType(Enum):
     - META: snapshot, schema, manifest, manifest sidecar, statistics, tag, changelog metadata,
             hint files, _SUCCESS, consumer, service files
     - DATA: data files and any unrecognized files (default)
+    - PARQUET_DATA: Parquet data files
     - BUCKET_INDEX: bucket level index files (Hash, DV)
     - GLOBAL_INDEX: table level global index files (btree, lumina, full-text)
     - FILE_INDEX: data-file index files (bloom filter, bitmap, etc.)
-    - BLOB_META: reader-selected metadata ranges within BLOB files
     """
     META = "META"
     DATA = "DATA"
+    PARQUET_DATA = "PARQUET_DATA"
     BUCKET_INDEX = "BUCKET_INDEX"
     GLOBAL_INDEX = "GLOBAL_INDEX"
     FILE_INDEX = "FILE_INDEX"
-    BLOB_META = "BLOB_META"
 
     def is_index(self) -> bool:
         return self in (FileType.BUCKET_INDEX, FileType.GLOBAL_INDEX, FileType.FILE_INDEX)
@@ -86,6 +86,9 @@ class FileType(Enum):
             if parent == "changelog":
                 return FileType.META
 
+        if name.endswith(".parquet"):
+            return FileType.PARQUET_DATA
+
         return FileType.DATA
 
     @staticmethod
@@ -95,8 +98,8 @@ class FileType(Enum):
             "global-index": FileType.GLOBAL_INDEX,
             "bucket-index": FileType.BUCKET_INDEX,
             "data": FileType.DATA,
+            "parquet-data": FileType.PARQUET_DATA,
             "file-index": FileType.FILE_INDEX,
-            "blob-meta": FileType.BLOB_META,
         }
         result = set()
         for name in whitelist_str.split(","):
@@ -106,7 +109,7 @@ class FileType(Enum):
             elif name:
                 logger.warning(
                     "Unknown local-cache.whitelist value '%s'. "
-                    "Supported values: meta, global-index, bucket-index, data, file-index, blob-meta.",
+                    "Supported values: meta, global-index, bucket-index, data, parquet-data, file-index.",
                     name,
                 )
         return result

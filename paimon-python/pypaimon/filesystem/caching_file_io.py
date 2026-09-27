@@ -22,38 +22,21 @@ Provides a CachingFileIO wrapper that transparently caches remote file reads
 at block granularity. If a cache directory is configured, disk cache is used;
 otherwise an in-memory LRU cache is used. Files are classified by FileType and
 only cacheable types in the whitelist are cached; others are read directly from
-the delegate FileIO. BLOB metadata can be cached as exact reader-selected ranges.
+the delegate FileIO.
 """
 
 import hashlib
 import os
-import sys
 import threading
-import uuid
 from collections import OrderedDict
-from io import UnsupportedOperation
-from typing import Optional, Tuple, Union
+from typing import Optional
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
 
-_CacheEntryKey = Union[int, Tuple[str, int, int]]
-# Bound Python index overhead and the number of cache files, even with an unlimited byte budget.
-_MAX_CACHE_ENTRIES = 65536
-
-
-def _memory_entry_size(key, data):
-    # Conservatively count referenced objects plus OrderedDict bookkeeping.
-    path, entry_key = key
-    size = sys.getsizeof(key) + sys.getsizeof(path) + sys.getsizeof(entry_key)
-    if isinstance(entry_key, tuple):
-        size += sum(sys.getsizeof(part) for part in entry_key)
-    return max(512, size + sys.getsizeof(data) + 128)
-
-
 class LocalMemoryCacheManager:
-    """In-memory block/range cache with LRU eviction."""
+    """Block-level in-memory cache with LRU eviction."""
 
     def __init__(self, max_size_bytes: int, block_size: int = 1 * 1024 * 1024):
         self._max_size_bytes = max_size_bytes
@@ -67,28 +50,26 @@ class LocalMemoryCacheManager:
     def block_size(self) -> int:
         return self._block_size
 
-    def get_block(self, file_path: str, cache_key: _CacheEntryKey) -> Optional[bytes]:
-        key = (file_path, cache_key)
+    def get_block(self, file_path: str, block_index: int) -> Optional[bytes]:
+        key = (file_path, block_index)
         with self._lock:
             data = self._cache.get(key)
             if data is not None:
                 self._cache.move_to_end(key)
             return data
 
-    def put_block(self, file_path: str, cache_key: _CacheEntryKey, data: bytes) -> None:
-        key = (file_path, cache_key)
-        size = _memory_entry_size(key, data)
-        if size > self._max_size_bytes:
-            return
+    def put_block(self, file_path: str, block_index: int, data: bytes) -> None:
+        key = (file_path, block_index)
         with self._lock:
             if key in self._cache:
                 return
-            self._current_size += size
+            self._current_size += len(data)
             self._cache[key] = data
-            while self._cache and (self._current_size > self._max_size_bytes
-                                   or len(self._cache) > _MAX_CACHE_ENTRIES):
-                evicted_key, evicted = self._cache.popitem(last=False)
-                self._current_size -= _memory_entry_size(evicted_key, evicted)
+            while (self._max_size_bytes < (2 ** 63 - 1)
+                   and self._current_size > self._max_size_bytes
+                   and self._cache):
+                _, evicted = self._cache.popitem(last=False)
+                self._current_size -= len(evicted)
 
     def get_file_size(self, file_path: str) -> int:
         return self._file_size_cache.get(file_path, -1)
@@ -98,7 +79,7 @@ class LocalMemoryCacheManager:
 
 
 class LocalDiskCacheManager:
-    """Local disk block/range cache with LRU eviction."""
+    """Block-level local disk cache with LRU eviction."""
 
     def __init__(self, cache_dir: str, max_size_bytes: int,
                  block_size: int = 1 * 1024 * 1024):
@@ -111,21 +92,21 @@ class LocalDiskCacheManager:
         # LRU-ordered index: cache_path -> size. OrderedDict with move_to_end for access order.
         self._entry_index: OrderedDict = OrderedDict()
         os.makedirs(cache_dir, exist_ok=True)
-        self._scan_and_populate_index()
+        self._current_size = self._scan_and_populate_index()
 
     @property
     def block_size(self) -> int:
         return self._block_size
 
-    def _cache_path(self, file_path: str, cache_key: _CacheEntryKey) -> str:
-        key = f"{file_path}:{cache_key}"
+    def _cache_path(self, file_path: str, block_index: int) -> str:
+        key = f"{file_path}:{block_index}"
         h = hashlib.sha256(key.encode('utf-8')).hexdigest()
         prefix = h[:2]
         sub_dir = os.path.join(self._cache_dir, prefix)
         return os.path.join(sub_dir, h)
 
-    def get_block(self, file_path: str, cache_key: _CacheEntryKey) -> Optional[bytes]:
-        path = self._cache_path(file_path, cache_key)
+    def get_block(self, file_path: str, block_index: int) -> Optional[bytes]:
+        path = self._cache_path(file_path, block_index)
         with self._lock:
             if path not in self._entry_index:
                 return None
@@ -140,94 +121,69 @@ class LocalDiskCacheManager:
                     self._current_size -= size
             return None
 
-    def put_block(self, file_path: str, cache_key: _CacheEntryKey, data: bytes) -> None:
-        if max(len(data), 4096) > self._max_size_bytes:
-            return
-        path = self._cache_path(file_path, cache_key)
+    def put_block(self, file_path: str, block_index: int, data: bytes) -> None:
+        path = self._cache_path(file_path, block_index)
+
         with self._lock:
             if path in self._entry_index:
                 return
 
+        sub_dir = os.path.dirname(path)
+        os.makedirs(sub_dir, exist_ok=True)
+
         tmp_path = path + f".tmp.{os.getpid()}.{threading.get_ident()}"
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(tmp_path, 'wb') as f:
                 f.write(data)
-            size = self._disk_entry_size(tmp_path)
-            if size > self._max_size_bytes:
-                return
-            with self._lock:
-                # Another writer may have published this key during the write.
-                if path in self._entry_index:
-                    return
-                os.rename(tmp_path, path)
-                self._entry_index[path] = size
-                self._current_size += size
-                evicted = self._evict_locked()
-            self._delete_evicted(evicted)
-        except OSError:
-            return
-        finally:
+            os.rename(tmp_path, path)
+        except Exception:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+            return
 
-    @staticmethod
-    def _disk_entry_size(path: str) -> int:
-        stat = os.stat(path)
-        # st_blocks is in 512-byte units. Keep a minimum charge on platforms
-        # without allocation information and for sparse/empty files.
-        return max(stat.st_size, getattr(stat, 'st_blocks', 0) * 512,
-                   getattr(stat, 'st_blksize', 4096), 4096)
+        need_evict = False
+        with self._lock:
+            self._entry_index[path] = len(data)
+            self._current_size += len(data)
+            need_evict = (self._max_size_bytes < (2 ** 63 - 1)
+                          and self._current_size > self._max_size_bytes)
+        if need_evict:
+            self._evict()
 
-    def _evict_locked(self):
-        evicted = []
-        while (self._entry_index
-               and (self._current_size > self._max_size_bytes
-                    or len(self._entry_index) > _MAX_CACHE_ENTRIES)):
-            path, size = self._entry_index.popitem(last=False)
-            # Detach the old file before unlocking, so deletion cannot remove a
-            # newly published entry for the same key.
-            retired = os.path.join(os.path.dirname(path), uuid.uuid4().hex + '.evicted')
-            try:
-                os.rename(path, retired)
-            except FileNotFoundError:
-                pass
-            except OSError:
-                self._entry_index[path] = size
-                break
-            else:
-                evicted.append((retired, size))
-            self._current_size -= size
-        return evicted
+    def _evict(self) -> None:
+        to_delete = []
+        with self._lock:
+            if self._current_size <= self._max_size_bytes:
+                return
+            while self._entry_index and self._current_size > self._max_size_bytes:
+                path, size = self._entry_index.popitem(last=False)
+                self._current_size -= size
+                to_delete.append((path, size))
 
-    def _delete_evicted(self, evicted) -> None:
-        for path, size in evicted:
+        for path, size in to_delete:
             try:
                 os.unlink(path)
-            except FileNotFoundError:
-                pass
             except OSError:
-                # Keep failed deletions accounted for and eligible for retry.
                 with self._lock:
                     self._entry_index[path] = size
                     self._current_size += size
 
-    def _scan_and_populate_index(self) -> None:
+    def _scan_and_populate_index(self) -> int:
+        total = 0
         for dirpath, _, filenames in os.walk(self._cache_dir):
             for fn in filenames:
                 if '.tmp.' in fn:
                     continue
                 fp = os.path.join(dirpath, fn)
                 try:
-                    size = self._disk_entry_size(fp)
+                    size = os.path.getsize(fp)
                     self._entry_index[fp] = size
-                    self._current_size += size
-                    # Bound the index while scanning an existing cache directory.
-                    self._delete_evicted(self._evict_locked())
+                    total += size
                 except OSError:
                     pass
+        return total
 
     def get_file_size(self, file_path: str) -> int:
         return self._file_size_cache.get(file_path, -1)
@@ -294,14 +250,6 @@ class CachingInputStream:
 
         self._pos = end
         return bytes(result)
-
-    def readinto(self, buffer) -> int:
-        view = memoryview(buffer).cast('B')
-        if view.readonly:
-            raise TypeError("readinto() requires a writable buffer")
-        data = self.read(len(view))
-        view[:len(data)] = data
-        return len(data)
 
     def read_at(self, nbytes: int, offset: int) -> bytes:
         """Position-based read. Does not change the cursor. Thread-safe."""
@@ -377,54 +325,6 @@ class CachingInputStream:
         return False
 
 
-class BlobMetadataInputStream(CachingInputStream):
-    """Cache only explicitly marked ranges; ordinary reads bypass the cache."""
-
-    def read(self, size=-1) -> bytes:
-        if size is None or size < 0:
-            size = self._get_file_size() - self._pos
-        data = self.read_at(size, self._pos)
-        self._pos += len(data)
-        return data
-
-    def readinto(self, buffer) -> Optional[int]:
-        view = memoryview(buffer).cast('B')
-        if view.readonly:
-            raise TypeError("readinto() requires a writable buffer")
-        if not view:
-            return 0
-        with self._io_lock:
-            stream = self._get_remote_stream()
-            readinto = getattr(stream, 'readinto', None)
-            if callable(readinto):
-                stream.seek(self._pos)
-                try:
-                    count = readinto(view)
-                except (UnsupportedOperation, NotImplementedError):
-                    pass
-                else:
-                    if count is not None:
-                        self._pos += count
-                    return count
-        return super().readinto(view)
-
-    def read_at(self, nbytes: int, offset: int) -> bytes:
-        return self._read_remote(offset, nbytes) if nbytes > 0 else b''
-
-    def read_blob_metadata(self, size: int) -> bytes:
-        if size <= 0:
-            return b''
-        # Tuple keys cannot collide with integer block indexes, in memory or on disk.
-        key = ('blob-meta', self._pos, size)
-        data = self._cache.get_block(self._file_path, key)
-        if data is None or len(data) != size:
-            data = self._read_remote(self._pos, size)
-            if len(data) == size:
-                self._cache.put_block(self._file_path, key, data)
-        self._pos += len(data)
-        return data
-
-
 class CachingFileIO(FileIO):
     """FileIO wrapper that caches reads at block granularity.
 
@@ -437,7 +337,7 @@ class CachingFileIO(FileIO):
         self._delegate = delegate
         self._cache = cache
         if whitelist is None:
-            self._whitelist = {FileType.META, FileType.GLOBAL_INDEX, FileType.BLOB_META}
+            self._whitelist = {FileType.META, FileType.GLOBAL_INDEX}
         else:
             self._whitelist = whitelist
 
@@ -498,12 +398,11 @@ class CachingFileIO(FileIO):
 
     def new_input_stream(self, path: str):
         file_type = FileType.classify(path)
-        if self._cache is not None and not FileType.is_mutable(path):
-            if file_type in self._whitelist:
-                return CachingInputStream(self._delegate, path, self._cache)
-            if FileType.BLOB_META in self._whitelist and path.endswith('.blob'):
-                return BlobMetadataInputStream(self._delegate, path, self._cache)
-        return self._delegate.new_input_stream(path)
+        eligible = (file_type in self._whitelist
+                    or (file_type == FileType.PARQUET_DATA and FileType.DATA in self._whitelist))
+        if self._cache is None or not eligible or FileType.is_mutable(path):
+            return self._delegate.new_input_stream(path)
+        return CachingInputStream(self._delegate, path, self._cache)
 
     def new_output_stream(self, path: str):
         return self._delegate.new_output_stream(path)

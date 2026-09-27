@@ -176,12 +176,6 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 `VIDEOFRM`, or blob-view magic header). This mirrors Java's
 `Blob.fromBytes(...)`.
 
-## BLOB metadata cache
-
-Enable `local-cache.enabled=true` to cache BLOB metadata needed for descriptors,
-including MAP keys, without caching value bodies. `blob-meta` is included in the
-default whitelist and shares the local cache budget. Python reader only.
-
 ## See Also
 
 - [Blob Storage](../multimodal-table/blob) — concept, storage modes,
