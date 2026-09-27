@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.FallbackKey;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -644,16 +645,25 @@ final class SchemaManagerUtils {
             newOptions.put(SEQUENCE_FIELD.key(), String.join(",", newSequenceFields));
         }
 
-        // clustering columns rename
-        String clusteringColumnsStr = options.get(CLUSTERING_COLUMNS.key());
-        if (!StringUtils.isNullOrWhitespaceOnly(clusteringColumnsStr)) {
-            List<String> clusteringColumns =
-                    Arrays.stream(clusteringColumnsStr.split(","))
-                            .map(String::trim)
-                            .collect(Collectors.toList());
-            List<String> newClusteringColumns =
-                    applyNotNestedColumnRename(clusteringColumns, renameMappings);
-            newOptions.put(CLUSTERING_COLUMNS.key(), String.join(",", newClusteringColumns));
+        // clustering columns rename; also cover the fallback key(s) (e.g. the deprecated
+        // sink.clustering.by-columns) so a table configured via the old key still follows the
+        // rename instead of keeping a stale column name the canonical reader would resolve
+        List<String> clusteringColumnKeys = new ArrayList<>();
+        clusteringColumnKeys.add(CLUSTERING_COLUMNS.key());
+        for (FallbackKey fallbackKey : CLUSTERING_COLUMNS.fallbackKeys()) {
+            clusteringColumnKeys.add(fallbackKey.getKey());
+        }
+        for (String clusteringColumnKey : clusteringColumnKeys) {
+            String clusteringColumnsStr = options.get(clusteringColumnKey);
+            if (!StringUtils.isNullOrWhitespaceOnly(clusteringColumnsStr)) {
+                List<String> clusteringColumns =
+                        Arrays.stream(clusteringColumnsStr.split(","))
+                                .map(String::trim)
+                                .collect(Collectors.toList());
+                List<String> newClusteringColumns =
+                        applyNotNestedColumnRename(clusteringColumns, renameMappings);
+                newOptions.put(clusteringColumnKey, String.join(",", newClusteringColumns));
+            }
         }
 
         // case 2: the option key is composed of certain fixed prefixes, suffixes, and the field

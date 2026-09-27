@@ -100,6 +100,19 @@ public class SchemaManagerUtilsTest {
     }
 
     @Test
+    public void testClusteringColumnsFallbackKeyFollowsRename() {
+        Map<String, String> options = options("sink.clustering.by-columns", "c, d");
+
+        Map<String, String> rewritten =
+                SchemaManagerUtils.applyRenameColumnsToOptions(
+                        options, Collections.singletonList(SchemaChange.renameColumn("c", "c2")));
+
+        // the deprecated fallback key must follow the rename too, otherwise the canonical
+        // reader (which resolves the fallback) sees a column name that no longer exists
+        assertThat(rewritten).containsEntry("sink.clustering.by-columns", "c2,d");
+    }
+
+    @Test
     public void testSequenceGroupValueEntriesMatchRenameTrimmed() {
         Map<String, String> options = options("fields.x.sequence-group", "a, b");
 
