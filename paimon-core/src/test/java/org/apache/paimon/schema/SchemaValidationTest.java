@@ -348,6 +348,38 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testDescriptorBlobWithVectorSchemaValidation() {
+        // A descriptor blob is serialized inline into the normal file, so a
+        // (descriptor-blob + vector) table still has a normal anchor file and must not be
+        // rejected as all-dedicated; only the vector column lands in a dedicated file here.
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        options.put(CoreOptions.FILE_COMPRESSION.key(), "none");
+        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "v");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "v", DataTypes.BLOB()),
+                        new DataField(1, "e", DataTypes.VECTOR(4, DataTypes.FLOAT())));
+
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testMapBlobSchemaValidation() {
         List<DataField> fields =
                 Arrays.asList(

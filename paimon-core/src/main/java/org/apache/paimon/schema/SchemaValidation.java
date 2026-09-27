@@ -1691,8 +1691,12 @@ public class SchemaValidation {
         // mixing BLOB and VECTOR columns could satisfy both while having no normal column
         // at all. With no normal column the commit has no anchor file to assign first row
         // ids from, and every commit fails with "blobStart ... should be less than start".
-        if (!blobNames.isEmpty() || !vectorStoreNames.isEmpty()) {
-            Set<String> dedicatedNames = new HashSet<>(blobNames);
+        // Only columns whose bytes land in a dedicated blob file count here; a descriptor
+        // or view blob is stored inline in the normal file and is a valid anchor.
+        Set<String> blobFileNames =
+                fieldNamesInBlobFile(schema.logicalRowType(), options.blobInlineField());
+        if (!blobFileNames.isEmpty() || !vectorStoreNames.isEmpty()) {
+            Set<String> dedicatedNames = new HashSet<>(blobFileNames);
             dedicatedNames.addAll(vectorStoreNames);
             checkArgument(
                     fields.size() > dedicatedNames.size(),
