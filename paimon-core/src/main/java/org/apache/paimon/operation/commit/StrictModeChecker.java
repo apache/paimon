@@ -154,10 +154,12 @@ public class StrictModeChecker {
         if (indexManifest.equals(prevIndexManifest)) {
             return false;
         }
-        // Only index entries added or replaced by this snapshot's commit conflict;
-        // entries inherited from earlier snapshots were already covered when the
-        // commit that wrote them was itself checked, like the data check which
-        // only reads the snapshot's delta.
+        // The index delta (current \ previous) considers only entries this commit
+        // added or replaced, never removals. Entries inherited from earlier snapshots
+        // were already covered when the commit that wrote them was itself checked. A
+        // pure index-entry removal in a partition is not missed either: it always
+        // carries a data-file delta in the same partition, which the data-partition
+        // check (run first) already catches.
         Set<IndexManifestEntry> previousEntries =
                 prevIndexManifest == null
                         ? Collections.emptySet()
