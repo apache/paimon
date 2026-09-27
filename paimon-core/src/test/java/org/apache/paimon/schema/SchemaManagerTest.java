@@ -1908,4 +1908,43 @@ public class SchemaManagerTest {
                     .doesNotThrowAnyException();
         }
     }
+
+    @Test
+    public void testChangelogMetadataFieldPrefixIsImmutable() {
+        String key = CoreOptions.CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX.key();
+        Map<String, String> options = new HashMap<>();
+        options.put(key, "__internal__");
+
+        assertThatThrownBy(
+                        () ->
+                                SchemaManager.checkAlterTableOption(
+                                        options, key, "__internal__", "__event__"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(key);
+        assertThatThrownBy(() -> SchemaManager.checkResetTableOption(options, key))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(key);
+    }
+
+    @Test
+    public void testRenameChangelogMetadataSourceColumn() throws Exception {
+        Map<String, String> metadataOptions = new HashMap<>();
+        metadataOptions.put(
+                CoreOptions.CHANGELOG_PRODUCER.key(),
+                CoreOptions.ChangelogProducer.LOOKUP.toString());
+        metadataOptions.put(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(), "f2, f1");
+        Schema metadataSchema =
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, metadataOptions, "");
+        retryArtificialException(() -> manager.createTable(metadataSchema));
+
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.renameColumn("f2", "renamed_f2")));
+
+        TableSchema latest = retryArtificialException(() -> manager.latest()).get();
+        assertThat(latest.options())
+                .containsEntry(
+                        CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(),
+                        "renamed_f2,f1");
+        assertThat(latest.logicalRowType().getField("renamed_f2").id()).isEqualTo(2);
+    }
 }

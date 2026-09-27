@@ -80,9 +80,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     ) {
       rowType = SpecialFields.rowTypeWithRowTracking(rowType)
     }
-    if (
-      !coreOptions.changelogExposeFieldAsMetadata().isEmpty && table.isInstanceOf[FileStoreTable]
-    ) {
+    if (!coreOptions.changelogEventMetadataFields().isEmpty && table.isInstanceOf[FileStoreTable]) {
       rowType = ChangelogEventMetadataTable.computeExtendedRowType(
         table.asInstanceOf[FileStoreTable],
         rowType)

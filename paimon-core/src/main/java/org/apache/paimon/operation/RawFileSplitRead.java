@@ -125,7 +125,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
         this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
-        this.metadataPreserveColumns = coreOptions.changelogExposeFieldAsMetadata();
+        this.metadataPreserveColumns = coreOptions.changelogEventMetadataFields();
         this.metadataFieldPrefix = coreOptions.changelogMetadataFieldPrefix();
         this.changelogExtraValueFields = createChangelogExtraValueFields(schema, coreOptions);
         this.readRowType = readTypeWithMetadataDependencies(rowType);
@@ -446,8 +446,10 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         Arrays.fill(mapping, -1);
         boolean hasMapping = false;
         List<String> fieldNames = rowType.getFieldNames();
-        for (String preserveColumn : metadataPreserveColumns) {
-            int metadataIndex = fieldNames.indexOf(metadataFieldPrefix + preserveColumn);
+        for (int i = 0; i < metadataPreserveColumns.size(); i++) {
+            String preserveColumn = metadataPreserveColumns.get(i);
+            int metadataIndex =
+                    rowType.getFieldIndexByFieldId(changelogExtraValueFields.get(i).id());
             int physicalIndex = fieldNames.indexOf(preserveColumn);
             if (metadataIndex >= 0 && physicalIndex >= 0) {
                 mapping[metadataIndex] = physicalIndex;
@@ -459,7 +461,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private static List<DataField> createChangelogExtraValueFields(
             TableSchema schema, CoreOptions options) {
-        return ChangelogEventMetadata.extraValueFields(schema.logicalRowType(), options);
+        return ChangelogEventMetadata.storageValueFields(schema.logicalRowType(), options);
     }
 
     private FileRecordReader<InternalRow> applyMetadataFallbackAndOuterProjection(

@@ -185,7 +185,7 @@ public class DataTableSource extends BaseDataTableSource
             metadata.put(SpecialFields.ROW_ID.name(), DataTypes.BIGINT().notNull());
         }
 
-        // Event metadata from changelog-producer.expose-field-as-metadata
+        // Event metadata from changelog-producer.event-metadata-fields
         List<String> preserveColumns = eventPreserveColumns();
         if (!preserveColumns.isEmpty() && table instanceof FileStoreTable) {
             org.apache.paimon.types.RowType valueType =
@@ -216,7 +216,7 @@ public class DataTableSource extends BaseDataTableSource
     }
 
     private List<String> eventPreserveColumns() {
-        return CoreOptions.fromMap(table.options()).changelogExposeFieldAsMetadata();
+        return CoreOptions.fromMap(table.options()).changelogEventMetadataFields();
     }
 
     private List<String> eventMetadataFieldNames() {
