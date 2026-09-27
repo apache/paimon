@@ -353,7 +353,8 @@ case class PaimonFormatTable(table: FormatTable)
           orderedSpec(spec),
           onlyValueInPath,
           location,
-          table.catalogContext())
+          table.catalogContext(),
+          table.defaultPartName())
         .toString
     } catch {
       case error: IllegalArgumentException =>
@@ -411,7 +412,8 @@ case class PaimonFormatTable(table: FormatTable)
       new Path(table.location()),
       table.fullName(),
       onlyValueInPath,
-      table.catalogContext())
+      table.catalogContext(),
+      table.defaultPartName())
 
     val bySpec = mutable.LinkedHashMap.empty[Map[String, String], Partition]
     registry.asScala.foreach {
@@ -539,11 +541,17 @@ case class PaimonFormatTable(table: FormatTable)
   private def resolvePartitionPathWithinTable(
       orderedSpec: util.LinkedHashMap[String, String],
       onlyValueInPath: Boolean): Path = {
-    PartitionPathUtils.validatePartitionSpecForPath(orderedSpec, onlyValueInPath)
+    PartitionPathUtils.validatePartitionSpecForPath(
+      orderedSpec,
+      onlyValueInPath,
+      table.defaultPartName())
     val tablePath = new Path(table.location())
     val partitionPath = new Path(
       tablePath,
-      PartitionPathUtils.generatePartitionPathUtil(orderedSpec, onlyValueInPath)
+      PartitionPathUtils.generatePartitionPathUtil(
+        orderedSpec,
+        onlyValueInPath,
+        table.defaultPartName())
     )
     val normalizedTable = tablePath.toUri.normalize().getPath
     val tablePrefix = if (normalizedTable.endsWith("/")) normalizedTable else normalizedTable + "/"

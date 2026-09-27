@@ -75,7 +75,8 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
       new Path(v2Table.table.location()),
       v2Table.name(),
       CoreOptions.fromMap(v2Table.table.options()).formatTablePartitionOnlyValueInPath(),
-      v2Table.table.catalogContext()
+      v2Table.table.catalogContext(),
+      v2Table.table.defaultPartName()
     )
     val registeredPartitions = registry.filter(
       partition =>
