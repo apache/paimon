@@ -124,6 +124,20 @@ public class IndexManifestFileHandlerTest {
         assertThat(indexManifestFile.read(manifest2))
                 .containsExactlyInAnyOrder(firstDefinition, secondDefinition);
 
+        // INDEX ON (a, b) covering rows [50, 150]: a different definition of the same index
+        // field coexists even when its row range overlaps the (a) definition's [0, 100]
+        IndexManifestEntry overlappingDifferentDefinition =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        globalIndexFile("def-ab-overlap", 50, 150, 1, new int[] {2}));
+        String manifest3 =
+                handler.write(manifest2, Collections.singletonList(overlappingDifferentDefinition));
+        assertThat(indexManifestFile.read(manifest3))
+                .containsExactlyInAnyOrder(
+                        firstDefinition, secondDefinition, overlappingDifferentDefinition);
+
         // the same definition still conflicts on overlapping row ranges
         IndexManifestEntry overlappingSameDefinition =
                 new IndexManifestEntry(
@@ -134,7 +148,7 @@ public class IndexManifestFileHandlerTest {
         assertThatThrownBy(
                         () ->
                                 handler.write(
-                                        manifest2,
+                                        manifest3,
                                         Collections.singletonList(overlappingSameDefinition)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("overlapping row range");
