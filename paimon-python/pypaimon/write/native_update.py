@@ -111,6 +111,7 @@ def _supported_upsert_key_type(data_type):
         pa.types.is_boolean, pa.types.is_integer, pa.types.is_string,
         pa.types.is_large_string, pa.types.is_binary, pa.types.is_large_binary,
         pa.types.is_fixed_size_binary, pa.types.is_date, pa.types.is_decimal,
+        pa.types.is_time, pa.types.is_timestamp,
     ))
 
 

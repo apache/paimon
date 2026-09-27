@@ -79,7 +79,7 @@ def test_sequence_validation_precedes_native_selection(tmp_path, streaming, sequ
 
 @pytest.mark.parametrize('type_,order,supported', [
     (pa.int64(), 'ascending', True),
-    (pa.int64(), 'descending', False),
+    (pa.int64(), 'descending', True),
     (pa.float32(), 'ascending', False),
     (pa.float64(), 'ascending', False),
 ])
