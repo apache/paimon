@@ -37,12 +37,13 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ContinuousCompactorStartingScanner}. */
 public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
 
     @Test
-    public void testScanSkipsExpiredSnapshots() throws Exception {
+    public void testScanSkipsGenuinelyExpiredSnapshots() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -54,24 +55,68 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
         write.write(rowData(1, 10, 101L));
         write.compact(binaryRow(1), 0, true);
         commit.commit(1, write.prepareCommit(true, 1));
-        // commit 2: snapshots 4 (append) + 5 (compact)
+        // commit 2: snapshot 4 (append)
         write.write(rowData(1, 10, 103L));
-        write.compact(binaryRow(1), 0, true);
         commit.commit(2, write.prepareCommit(true, 2));
+        // commit 3: snapshot 5 (append)
+        write.write(rowData(1, 10, 104L));
+        commit.commit(3, write.prepareCommit(true, 3));
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(1);
 
-        // delete the latest compact snapshot behind the manager's back, as a concurrent
-        // expiry would: the scanner must skip the gap and fall back to the earlier
-        // compact instead of failing
+        // Genuine expiry removes the OLDEST snapshot and advances the earliest bound. After the
+        // oldest snapshot is gone the earliest snapshot id becomes 2, so the walk starts above the
+        // expired region and must still find the compact snapshot 3.
         java.nio.file.Files.delete(
-                java.nio.file.Paths.get(tempDir.toString(), "snapshot", "snapshot-5"));
+                java.nio.file.Paths.get(tempDir.toString(), "snapshot", "snapshot-1"));
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(2);
 
         ContinuousCompactorStartingScanner scanner =
                 new ContinuousCompactorStartingScanner(snapshotManager);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(4);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testScanSurfacesMissingNonExpiredSnapshot() throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // commit 0: snapshot 1 (append)
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        // commit 1: snapshots 2 (append) + 3 (compact)
+        write.write(rowData(1, 10, 101L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+        // commit 2: snapshot 4 (append)
+        write.write(rowData(1, 10, 103L));
+        commit.commit(2, write.prepareCommit(true, 2));
+        // commit 3: snapshot 5 (append)
+        write.write(rowData(1, 10, 104L));
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(1);
+
+        // Delete snapshot 4 while the earliest stays 1: the walk reaches the gap before the compact
+        // snapshot 3, and the missing snapshot's id (4) is still >= earliest, so it should still
+        // exist. The scanner must surface it rather than silently skip past it.
+        java.nio.file.Files.delete(
+                java.nio.file.Paths.get(tempDir.toString(), "snapshot", "snapshot-4"));
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(1);
+
+        ContinuousCompactorStartingScanner scanner =
+                new ContinuousCompactorStartingScanner(snapshotManager);
+        assertThatThrownBy(() -> scanner.scan(snapshotReader))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("does not exist");
 
         write.close();
         commit.close();

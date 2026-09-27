@@ -26,8 +26,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.FileNotFoundException;
-
 /** {@link StartingScanner} used internally for stand-alone streaming compact job sources. */
 public class ContinuousCompactorStartingScanner extends AbstractStartingScanner {
 
@@ -58,18 +56,18 @@ public class ContinuousCompactorStartingScanner extends AbstractStartingScanner 
             return new NoSnapshot();
         }
 
-        for (long id = latestSnapshotId; id >= earliestSnapshotId; id--) {
-            Snapshot snapshot;
-            try {
-                snapshot = snapshotManager.tryGetSnapshot(id);
-            } catch (FileNotFoundException e) {
-                // expired concurrently by another job — skip like pickOrLatest does
-                continue;
-            }
-            if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
-                LOG.debug("Found latest compact snapshot {}, reading from the next snapshot.", id);
-                return new NextSnapshot(id + 1);
-            }
+        // Walk snapshots from latest to earliest for the newest compact snapshot. The safe
+        // traversal skips a snapshot whose file has gone missing only when it is genuinely
+        // expired (its id has dropped below the current earliest); a snapshot that should still
+        // exist is surfaced instead of being silently swallowed.
+        Snapshot compactSnapshot =
+                snapshotManager.traversalSnapshotsFromLatestSafely(
+                        snapshot -> snapshot.commitKind() == Snapshot.CommitKind.COMPACT);
+        if (compactSnapshot != null) {
+            LOG.debug(
+                    "Found latest compact snapshot {}, reading from the next snapshot.",
+                    compactSnapshot.id());
+            return new NextSnapshot(compactSnapshot.id() + 1);
         }
 
         if (latestInitialSnapshot) {
