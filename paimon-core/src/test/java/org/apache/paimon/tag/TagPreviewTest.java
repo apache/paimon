@@ -115,6 +115,35 @@ public class TagPreviewTest extends PrimaryKeyTableTestBase {
         commit.close();
     }
 
+    @Test
+    public void testTimeTravelResolvesAutoTagDespiteManualOnlyGroup() throws Exception {
+        TagPreview preview = create();
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
+        dynamicOptions.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
+        TableCommitImpl commit =
+                table.copy(dynamicOptions).newCommit(commitUser).ignoreEmptyCommit(false);
+
+        // snapshot 1 keeps an auto-format tag, snapshot 2 keeps only a manually named tag
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-19T12:12:00")));
+        table.createTag("2023-07-18", 1);
+        table.createTag("my-manual-tag", 2);
+
+        // push the watermark past the request and expire snapshots 1 and 2, so the snapshot
+        // traversal finds nothing and the tags() fallback runs. The surviving auto tag on
+        // snapshot 1 must resolve even though snapshot 2's group holds only a manual tag: on
+        // master that manual-only group made toOneAutoTag throw and poisoned the whole max().
+        for (int i = 0; i < 5; i++) {
+            commit.commit(new ManifestCommittable(0, utcMills("2023-07-21T12:12:00")));
+        }
+
+        assertThat(preview.timeTravel(table, "2023-07-19"))
+                .containsAllEntriesOf(singletonMap(SCAN_TAG_NAME.key(), "2023-07-18"));
+
+        commit.close();
+    }
+
     private TagPreview create() {
         Options options = new Options();
         options.set(METASTORE_TAG_TO_PARTITION_PREVIEW, TagCreationMode.WATERMARK);
