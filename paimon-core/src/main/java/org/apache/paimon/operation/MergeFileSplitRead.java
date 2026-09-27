@@ -180,7 +180,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         // physical fields while reading whenever a metadata field was requested. The outer read
         // projection removes these internal dependencies after the reader has populated the
         // metadata columns.
-        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+        List<String> preserveColumns = options.changelogEventMetadataFields();
         if (!preserveColumns.isEmpty()) {
             List<String> readFieldNames = adjustedReadType.getFieldNames();
             List<DataField> extraFields = new ArrayList<>();

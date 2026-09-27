@@ -48,7 +48,7 @@ class ChangelogEventMetadataTest {
                                 valueType.getField("event_ts")));
         Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
-        options.set(CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA, "event_ts");
+        options.set(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS, "event_ts");
         CoreOptions coreOptions = new CoreOptions(options);
 
         RowType extended =
@@ -73,7 +73,7 @@ class ChangelogEventMetadataTest {
                                 new DataField(2, "event_ts", DataTypes.BIGINT())));
         Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
-        options.set(CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA, "event_ts");
+        options.set(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS, "event_ts");
         CoreOptions coreOptions = new CoreOptions(options);
 
         RowType extended =
@@ -81,5 +81,52 @@ class ChangelogEventMetadataTest {
 
         assertThat(extended.getField("__internal__event_ts").id()).isEqualTo(4);
         assertThat(RowType.currentHighestFieldId(extended.getFields())).isEqualTo(4);
+    }
+
+    @Test
+    void testStorageFieldIdentityIsStableAcrossColumnRename() {
+        RowType originalValueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "event_ts", DataTypes.BIGINT())));
+        Options originalOptions = new Options();
+        originalOptions.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        originalOptions.set(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS, "event_ts");
+        originalOptions.set(CoreOptions.CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX, "__event__");
+
+        RowType renamedValueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "event_time", DataTypes.BIGINT())));
+        Options renamedOptions = new Options();
+        renamedOptions.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        renamedOptions.set(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS, "event_time");
+        renamedOptions.set(CoreOptions.CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX, "__event__");
+
+        DataField originalPublicField =
+                ChangelogEventMetadata.extraValueFields(
+                                originalValueType, new CoreOptions(originalOptions))
+                        .get(0);
+        DataField renamedPublicField =
+                ChangelogEventMetadata.extraValueFields(
+                                renamedValueType, new CoreOptions(renamedOptions))
+                        .get(0);
+        DataField originalStorageField =
+                ChangelogEventMetadata.storageValueFields(
+                                originalValueType, new CoreOptions(originalOptions))
+                        .get(0);
+        DataField renamedStorageField =
+                ChangelogEventMetadata.storageValueFields(
+                                renamedValueType, new CoreOptions(renamedOptions))
+                        .get(0);
+
+        assertThat(originalPublicField.name()).isEqualTo("__event__event_ts");
+        assertThat(renamedPublicField.name()).isEqualTo("__event__event_time");
+        assertThat(originalPublicField.id()).isEqualTo(renamedPublicField.id());
+        assertThat(originalStorageField.name()).isEqualTo("__event__field_id_1");
+        assertThat(renamedStorageField.name()).isEqualTo(originalStorageField.name());
+        assertThat(renamedStorageField.id()).isEqualTo(originalStorageField.id());
     }
 }

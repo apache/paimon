@@ -28,9 +28,12 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /** Shared validation and row-type construction for changelog event metadata fields. */
 public final class ChangelogEventMetadata {
@@ -45,7 +48,7 @@ public final class ChangelogEventMetadata {
      * and do not emit the appended values.
      */
     public static void validate(RowType valueType, CoreOptions options) {
-        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+        List<String> preserveColumns = options.changelogEventMetadataFields();
         if (preserveColumns.isEmpty()) {
             return;
         }
@@ -54,7 +57,7 @@ public final class ChangelogEventMetadata {
             throw new IllegalArgumentException(
                     String.format(
                             "Option '%s' can only be used when '%s' is '%s', but it is '%s'.",
-                            CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(),
+                            CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(),
                             CoreOptions.CHANGELOG_PRODUCER.key(),
                             ChangelogProducer.LOOKUP,
                             options.changelogProducer()));
@@ -63,13 +66,15 @@ public final class ChangelogEventMetadata {
         Set<String> valueFieldNames = new HashSet<>(valueType.getFieldNames());
         Set<String> preservedColumns = new HashSet<>();
         Set<String> metadataFieldNames = new HashSet<>();
+        Map<String, String> metadataFieldSources = new HashMap<>();
+        Map<String, String> storageFieldSources = new HashMap<>();
         for (String preserveColumn : preserveColumns) {
             if (!preservedColumns.add(preserveColumn)) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Column '%s' is specified more than once in '%s'.",
                                 preserveColumn,
-                                CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key()));
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key()));
             }
 
             if (!valueFieldNames.contains(preserveColumn)) {
@@ -77,60 +82,102 @@ public final class ChangelogEventMetadata {
                         String.format(
                                 "Column '%s' specified in '%s' not found in value type. Available columns: %s",
                                 preserveColumn,
-                                CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(),
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(),
                                 valueType.getFieldNames()));
             }
 
+            DataField physicalField = valueType.getField(preserveColumn);
             String metadataFieldName = metadataFieldName(preserveColumn, options);
             if (valueFieldNames.contains(metadataFieldName)) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Metadata field '%s' created by '%s' conflicts with an existing value column.",
                                 metadataFieldName,
-                                CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key()));
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key()));
             }
             if (SpecialFields.isSystemField(metadataFieldName)) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Metadata field '%s' created by '%s' conflicts with a system field.",
                                 metadataFieldName,
-                                CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key()));
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key()));
             }
             if (!metadataFieldNames.add(metadataFieldName)) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Metadata field '%s' is created more than once by '%s'.",
                                 metadataFieldName,
-                                CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key()));
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key()));
+            }
+
+            String storageFieldName = storageMetadataFieldName(physicalField, options);
+            if (valueFieldNames.contains(storageFieldName)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Storage metadata field '%s' created by '%s' "
+                                        + "conflicts with an existing value column.",
+                                storageFieldName,
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key()));
+            }
+            if (SpecialFields.isSystemField(storageFieldName)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Storage metadata field '%s' created by '%s' "
+                                        + "conflicts with a system field.",
+                                storageFieldName,
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key()));
+            }
+            if (storageFieldSources.put(storageFieldName, preserveColumn) != null) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Storage metadata field '%s' is created more than once by '%s'.",
+                                storageFieldName,
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key()));
+            }
+            metadataFieldSources.put(metadataFieldName, preserveColumn);
+        }
+
+        for (Map.Entry<String, String> metadataField : metadataFieldSources.entrySet()) {
+            String storageSource = storageFieldSources.get(metadataField.getKey());
+            if (storageSource != null && !storageSource.equals(metadataField.getValue())) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Metadata field '%s' created by '%s' conflicts with the storage "
+                                        + "metadata field for column '%s'.",
+                                metadataField.getKey(),
+                                CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(),
+                                storageSource));
             }
         }
     }
 
-    /** Returns the nullable value fields appended to a changelog value row. */
+    /** Returns the nullable public metadata fields appended to a table row. */
     public static List<DataField> extraValueFields(RowType valueType, CoreOptions options) {
         validate(valueType, options);
-        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
-        if (preserveColumns.isEmpty()) {
-            return Collections.emptyList();
-        }
+        return metadataValueFields(
+                valueType,
+                options,
+                physicalField -> metadataFieldName(physicalField.name(), options));
+    }
 
-        int nextId = RowType.currentHighestFieldId(valueType.getFields()) + 1;
-        List<DataField> extraFields = new ArrayList<>(preserveColumns.size());
-        for (String preserveColumn : preserveColumns) {
-            DataField physicalField = valueType.getField(preserveColumn);
-            extraFields.add(
-                    new DataField(
-                            nextId++,
-                            metadataFieldName(preserveColumn, options),
-                            physicalField.type().copy(true)));
-        }
-        return extraFields;
+    /**
+     * Returns the nullable fields used to store event metadata in changelog files.
+     *
+     * <p>Storage names use the configured prefix and source field ID, so they remain stable when
+     * the source column is renamed.
+     */
+    public static List<DataField> storageValueFields(RowType valueType, CoreOptions options) {
+        validate(valueType, options);
+        return metadataValueFields(
+                valueType,
+                options,
+                physicalField -> storageMetadataFieldName(physicalField, options));
     }
 
     /** Returns the physical value-field positions copied into event metadata columns. */
     @Nullable
     public static int[] preserveFieldIndices(RowType valueType, CoreOptions options) {
-        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+        List<String> preserveColumns = options.changelogEventMetadataFields();
         if (preserveColumns.isEmpty()) {
             return null;
         }
@@ -151,7 +198,16 @@ public final class ChangelogEventMetadata {
      */
     public static RowType appendMetadataFields(
             RowType baseRowType, RowType valueType, CoreOptions options) {
-        List<DataField> extraFields = extraValueFields(valueType, options);
+        return appendFields(baseRowType, extraValueFields(valueType, options));
+    }
+
+    /** Appends the internal storage metadata fields to a row type. */
+    public static RowType appendStorageMetadataFields(
+            RowType baseRowType, RowType valueType, CoreOptions options) {
+        return appendFields(baseRowType, storageValueFields(valueType, options));
+    }
+
+    private static RowType appendFields(RowType baseRowType, List<DataField> extraFields) {
         if (extraFields.isEmpty()) {
             return baseRowType;
         }
@@ -177,8 +233,33 @@ public final class ChangelogEventMetadata {
         return new RowType(fields);
     }
 
-    /** Returns the generated field name for a preserved physical field. */
+    /** Returns the public metadata field name for a preserved physical field. */
     public static String metadataFieldName(String preserveColumn, CoreOptions options) {
         return options.changelogMetadataFieldPrefix() + preserveColumn;
+    }
+
+    /** Returns the internal changelog storage name for a preserved physical field. */
+    private static String storageMetadataFieldName(DataField physicalField, CoreOptions options) {
+        return options.changelogMetadataFieldPrefix() + "field_id_" + physicalField.id();
+    }
+
+    private static List<DataField> metadataValueFields(
+            RowType valueType, CoreOptions options, Function<DataField, String> metadataName) {
+        List<String> preserveColumns = options.changelogEventMetadataFields();
+        if (preserveColumns.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        int nextId = RowType.currentHighestFieldId(valueType.getFields()) + 1;
+        List<DataField> extraFields = new ArrayList<>(preserveColumns.size());
+        for (String preserveColumn : preserveColumns) {
+            DataField physicalField = valueType.getField(preserveColumn);
+            extraFields.add(
+                    new DataField(
+                            nextId++,
+                            metadataName.apply(physicalField),
+                            physicalField.type().copy(true)));
+        }
+        return extraFields;
     }
 }

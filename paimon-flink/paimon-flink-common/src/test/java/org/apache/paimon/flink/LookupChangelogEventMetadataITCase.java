@@ -43,7 +43,7 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         + "'bucket'='1', "
                         + "'changelog-producer'='lookup', "
                         + "'sequence.field'='event_ts', "
-                        + "'changelog-producer.expose-field-as-metadata'='event_ts')");
+                        + "'changelog-producer.event-metadata-fields'='event_ts')");
 
         // The metadata column models an external sink populated from an event timestamp. The
         // physical event_ts column remains available to normal Flink operators, while writetime
@@ -76,7 +76,7 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         + "'changelog-producer'='lookup', "
                         + "'sequence.field'='event_ts', "
                         + "'changelog-producer.metadata-field-prefix'='__event__', "
-                        + "'changelog-producer.expose-field-as-metadata'='event_ts')");
+                        + "'changelog-producer.event-metadata-fields'='event_ts')");
 
         BlockingIterator<Row, Row> iterator =
                 streamSqlBlockIter(
@@ -108,7 +108,7 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         + "'bucket'='1', "
                         + "'changelog-producer'='lookup', "
                         + "'sequence.field'='event_ts', "
-                        + "'changelog-producer.expose-field-as-metadata'='event_ts')");
+                        + "'changelog-producer.event-metadata-fields'='event_ts')");
 
         BlockingIterator<Row, Row> iterator =
                 streamSqlBlockIter("SELECT id, event_ts, payload, writetime FROM nested_source");
@@ -139,7 +139,7 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                         + "'bucket'='1', "
                         + "'changelog-producer'='lookup', "
                         + "'sequence.field'='event_ts', "
-                        + "'changelog-producer.expose-field-as-metadata'='event_ts')");
+                        + "'changelog-producer.event-metadata-fields'='event_ts')");
 
         // A table created without a Flink metadata alias stores only its physical columns. Verify
         // that Flink can read that schema before registering a metadata alias.

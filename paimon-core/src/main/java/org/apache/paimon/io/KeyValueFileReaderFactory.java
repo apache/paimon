@@ -388,19 +388,20 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         protected int[] createMetadataFallbackMapping() {
             if (changelogExtraValueFields == null
                     || changelogExtraValueFields.isEmpty()
-                    || options.changelogExposeFieldAsMetadata().isEmpty()) {
+                    || options.changelogEventMetadataFields().isEmpty()) {
                 return null;
             }
 
             int[] mapping = new int[readValueType.getFieldCount()];
             java.util.Arrays.fill(mapping, -1);
             List<String> readFieldNames = readValueType.getFieldNames();
-            List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+            List<String> preserveColumns = options.changelogEventMetadataFields();
             for (int i = 0; i < changelogExtraValueFields.size(); i++) {
                 if (i >= preserveColumns.size()) {
                     break;
                 }
-                int metadataIndex = readFieldNames.indexOf(changelogExtraValueFields.get(i).name());
+                int metadataIndex =
+                        readValueType.getFieldIndexByFieldId(changelogExtraValueFields.get(i).id());
                 int valueIndex = readFieldNames.indexOf(preserveColumns.get(i));
                 if (metadataIndex >= 0 && valueIndex >= 0) {
                     mapping[metadataIndex] = valueIndex;
@@ -420,7 +421,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             List<DataField> readValueFields = new ArrayList<>(readValueType.getFields());
             if (changelogExtraValueFields != null) {
                 for (DataField extraField : changelogExtraValueFields) {
-                    if (!readValueType.containsField(extraField.name())) {
+                    if (readValueType.getFieldIndexByFieldId(extraField.id()) < 0) {
                         readValueFields.add(extraField);
                     }
                 }
