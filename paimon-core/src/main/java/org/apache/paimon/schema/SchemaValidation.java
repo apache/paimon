@@ -38,6 +38,7 @@ import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapWithKeyTimeAggFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -1612,8 +1613,44 @@ public class SchemaValidation {
                         FieldAggregator.class.getClassLoader(),
                         FieldAggregatorFactory.class,
                         aggFuncName);
+                if (FieldMergeMapWithKeyTimeAggFactory.NAME.equals(aggFuncName)) {
+                    validateMergeMapWithKeyTimeTsField(
+                            schema.logicalRowType().getFields().get(i).type(), options, fieldName);
+                }
             }
         }
+    }
+
+    /**
+     * The {@code merge_map_with_keytime} aggregator reads the ts field as a string and compares it
+     * lexicographically; a non-string ts field would be read as raw string bits and silently retain
+     * the wrong map entry. Reject it here at DDL rather than when the merge function is built, so
+     * an existing table with such a schema still opens. The structural checks (MAP of ROW with at
+     * least two fields) stay in the factory; here we only guard the resolvable case.
+     */
+    private static void validateMergeMapWithKeyTimeTsField(
+            DataType fieldType, CoreOptions options, String field) {
+        if (!(fieldType instanceof MapType)) {
+            return;
+        }
+        DataType valueType = ((MapType) fieldType).getValueType();
+        if (!(valueType instanceof RowType)) {
+            return;
+        }
+        RowType rowType = (RowType) valueType;
+        if (rowType.getFieldCount() < 2) {
+            return;
+        }
+        int tsFieldIndex =
+                FieldMergeMapWithKeyTimeAggFactory.resolveTsFieldIndex(rowType, options, field);
+        DataType tsType = rowType.getFields().get(tsFieldIndex).type();
+        checkArgument(
+                tsType.getTypeRoot() == DataTypeRoot.VARCHAR
+                        || tsType.getTypeRoot() == DataTypeRoot.CHAR,
+                "Timestamp field '%s' for field '%s' must be STRING but was '%s'.",
+                rowType.getFieldNames().get(tsFieldIndex),
+                field,
+                tsType);
     }
 
     private static void validateRowTracking(TableSchema schema, CoreOptions options) {

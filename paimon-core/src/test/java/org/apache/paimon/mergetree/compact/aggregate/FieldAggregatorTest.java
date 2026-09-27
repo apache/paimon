@@ -2874,43 +2874,33 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMergeMapWithKeyTimeAggRejectsNonStringTsField() {
-        // the merge reads the ts field as a string and compares lexicographically; a
-        // TIMESTAMP (or any non-string) ts field would be read as raw string bits and
-        // silently retain the wrong entry, so the factory must fail fast
+    public void testFieldMergeMapWithKeyTimeAggBuildIgnoresTsFieldType() {
+        // the ts-field type check moved to DDL (SchemaValidation); building the aggregator for an
+        // existing table must not throw, so a table whose ts field is non-string still opens
+        FieldMergeMapWithKeyTimeAggFactory factory = new FieldMergeMapWithKeyTimeAggFactory();
+
         MapType timestampTs =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "ts", DataTypes.TIMESTAMP())));
+        assertThat(factory.create(timestampTs, CoreOptions.fromMap(new HashMap<>()), "f"))
+                .isNotNull();
 
-        FieldMergeMapWithKeyTimeAggFactory factory = new FieldMergeMapWithKeyTimeAggFactory();
-        assertThatThrownBy(
-                        () ->
-                                factory.create(
-                                        timestampTs, CoreOptions.fromMap(new HashMap<>()), "f"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Timestamp field 'ts' for field 'f' must be STRING but was 'TIMESTAMP(6)'.");
-
-        // explicitly-named ts field is validated too
         MapType namedTs =
                 DataTypes.MAP(
                         DataTypes.STRING(),
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "ts", DataTypes.INT())));
-        assertThatThrownBy(
-                        () ->
-                                factory.create(
-                                        namedTs,
-                                        CoreOptions.fromMap(
-                                                Collections.singletonMap(
-                                                        "fields.f.ts-field", "ts")),
-                                        "f"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Timestamp field 'ts' for field 'f' must be STRING but was 'INT'.");
+        assertThat(
+                        factory.create(
+                                namedTs,
+                                CoreOptions.fromMap(
+                                        Collections.singletonMap("fields.f.ts-field", "ts")),
+                                "f"))
+                .isNotNull();
     }
 
     @Test

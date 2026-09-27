@@ -99,6 +99,57 @@ class SchemaValidationTest {
         validateTableSchema(new TableSchema(1, fields, 10, partitions, emptyList(), options, ""));
     }
 
+    private TableSchema mergeMapWithKeyTimeSchema(DataType tsType, Map<String, String> extra) {
+        Map<String, String> options = new HashMap<>(extra);
+        options.put(CoreOptions.MERGE_ENGINE.key(), "aggregation");
+        options.put(BUCKET.key(), String.valueOf(-1));
+        options.put("fields.f1.aggregate-function", "merge_map_with_keytime");
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT().notNull()),
+                        new DataField(
+                                1,
+                                "f1",
+                                DataTypes.MAP(
+                                        DataTypes.STRING(),
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(0, "value", DataTypes.STRING()),
+                                                DataTypes.FIELD(1, "ts", tsType)))));
+        return new TableSchema(1, fields, 10, emptyList(), singletonList("f0"), options, "");
+    }
+
+    @Test
+    public void testMergeMapWithKeyTimeRejectsNonStringTsFieldAtDdl() {
+        // DDL must reject a non-string ts field: the aggregator reads it as a string and would
+        // otherwise silently retain the wrong map entry
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mergeMapWithKeyTimeSchema(
+                                                DataTypes.TIMESTAMP(), new HashMap<>())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Timestamp field 'ts' for field 'f1' must be STRING but was 'TIMESTAMP(6)'.");
+
+        // an explicitly configured ts-field is resolved the same way as the aggregator
+        Map<String, String> tsFieldOption = new HashMap<>();
+        tsFieldOption.put("fields.f1.ts-field", "ts");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mergeMapWithKeyTimeSchema(DataTypes.INT(), tsFieldOption)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Timestamp field 'ts' for field 'f1' must be STRING but was 'INT'.");
+
+        // a string ts field passes DDL validation
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        mergeMapWithKeyTimeSchema(
+                                                DataTypes.STRING(), new HashMap<>())))
+                .doesNotThrowAnyException();
+    }
+
     @Test
     public void testOnlyTimestampMillis() {
         Map<String, String> options = new HashMap<>();
