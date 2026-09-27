@@ -20,6 +20,7 @@ import functools
 import re
 import struct
 import threading
+from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
@@ -68,7 +69,29 @@ from pypaimon.data.variant_shredding import (
 
 _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
-_Path = Tuple[Tuple[str, object], ...]
+
+
+class VariantPathSegment:
+    """A path segment for variant get: object key or array index access.
+
+    Mirrors Java's ``VariantPathSegment`` with its ``ObjectExtraction`` and
+    ``ArrayExtraction`` subclasses.
+    """
+
+
+@dataclass(frozen=True)
+class ObjectExtraction(VariantPathSegment):
+    """A path segment for object extraction."""
+    key: str
+
+
+@dataclass(frozen=True)
+class ArrayExtraction(VariantPathSegment):
+    """A path segment for array extraction."""
+    index: int
+
+
+_Path = Tuple[VariantPathSegment, ...]
 _SLOW_PATH_ROWS = 64
 # Bound the dominant temporary allocation during batch structure matching.
 _STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
@@ -93,14 +116,14 @@ def _parse_path(path: str) -> _Path:
     while pos < len(path):
         match = _INDEX_PATTERN.match(path, pos)
         if match is not None:
-            segments.append(('index', int(match.group(1))))
+            segments.append(ArrayExtraction(int(match.group(1))))
         else:
             match = _KEY_PATTERN.match(path, pos)
             if match is None:
                 raise ValueError(f"Invalid VARIANT path: {path}")
             key = next(value for value in match.groups()
                        if value is not None)
-            segments.append(('key', key))
+            segments.append(ObjectExtraction(key))
         pos = match.end()
     return tuple(segments)
 
@@ -464,7 +487,7 @@ def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
 
 @functools.lru_cache(maxsize=256)
 def _compile_paths(paths: Tuple[_Path, ...]):
-    nodes = [(None, None, None)]
+    nodes = [(None, None)]
     node_by_edge = {}
     results = []
     for path in paths:
@@ -475,7 +498,7 @@ def _compile_paths(paths: Tuple[_Path, ...]):
             if node is None:
                 node = len(nodes)
                 node_by_edge[edge] = node
-                nodes.append((parent,) + segment)
+                nodes.append((parent, segment))
             parent = node
         results.append(parent)
     return tuple(nodes), tuple(results)
@@ -493,18 +516,19 @@ def _path_positions(
     _validate_metadata_version(metadata)
     key_ids = (
         _cached_metadata_key_ids(bytes(metadata))
-        if any(kind == 'key' for _, kind, _ in nodes[1:]) else {}
+        if any(isinstance(segment, ObjectExtraction)
+               for _, segment in nodes[1:]) else {}
     )
     bounds = [(0, len(value))]
-    for parent_node, kind, segment in nodes[1:]:
+    for parent_node, segment in nodes[1:]:
         parent = bounds[parent_node]
         if parent is None:
             bounds.append(None)
             continue
         parent_pos, parent_end = parent
         basic_type = value[parent_pos] & 0x3
-        if kind == 'key':
-            key_id = key_ids.get(segment)
+        if isinstance(segment, ObjectExtraction):
+            key_id = key_ids.get(segment.key)
             if key_id is None or basic_type != _OBJECT:
                 bounds.append(None)
                 continue
@@ -523,10 +547,10 @@ def _path_positions(
                 continue
             size, data_start, offsets, _ = _checked_array_layout(
                 value, parent_pos, parent_end)
-            if segment >= size:
+            if segment.index >= size:
                 bounds.append(None)
                 continue
-            slot = segment
+            slot = segment.index
             child_start = data_start + offsets[slot]
             child_end = data_start + offsets[slot + 1]
         if _checked_value_size(value, child_start, child_end) != (
@@ -553,15 +577,15 @@ def _replace_path(
     if not path:
         return replacement
 
-    kind, segment = path[0]
-    if kind == 'key':
+    segment = path[0]
+    if isinstance(segment, ObjectExtraction):
         if (value[pos] & 0x3) != _OBJECT:
             raise ValueError("VARIANT path expects an object")
         if key_ids is None:
             key_ids = _metadata_key_ids(metadata)
-        key_id = key_ids.get(segment)
+        key_id = key_ids.get(segment.key)
         if key_id is None:
-            raise ValueError(f"VARIANT path does not exist: {segment}")
+            raise ValueError(f"VARIANT path does not exist: {segment.key}")
         size, id_size, id_start, data_start, offsets, _ = (
             _checked_object_layout(value, pos, value_end))
         ids = [
@@ -571,7 +595,7 @@ def _replace_path(
         try:
             slot = ids.index(key_id)
         except ValueError:
-            raise ValueError(f"VARIANT path does not exist: {segment}")
+            raise ValueError(f"VARIANT path does not exist: {segment.key}")
         ordered_offsets = sorted(offsets)
         end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
         children = []
@@ -590,14 +614,15 @@ def _replace_path(
         raise ValueError("VARIANT path expects an array")
     size, data_start, offsets, _ = _checked_array_layout(
         value, pos, value_end)
-    if segment >= size:
-        raise ValueError(f"VARIANT array index does not exist: {segment}")
+    if segment.index >= size:
+        raise ValueError(
+            f"VARIANT array index does not exist: {segment.index}")
     children = []
     for i in range(size):
         child_pos = data_start + offsets[i]
         child_end = data_start + offsets[i + 1]
         child = value[child_pos:child_end]
-        if i == segment:
+        if i == segment.index:
             child = _replace_path(
                 value, metadata, child_pos, path[1:], replacement,
                 child_end, key_ids)
@@ -807,7 +832,8 @@ def _vectorized_path_positions(
     _validate_metadata_version(first_metadata)
     key_ids = (
         _cached_metadata_key_ids(first_metadata)
-        if any(kind == 'key' for _, kind, _ in nodes[1:]) else {}
+        if any(isinstance(segment, ObjectExtraction)
+               for _, segment in nodes[1:]) else {}
     )
     row_offsets = values.numpy_offsets()
     if len(valid_rows) == len(values.array):
@@ -822,7 +848,7 @@ def _vectorized_path_positions(
     limits = [row_ends - row_starts]
 
     try:
-        for parent_node, kind, segment in nodes[1:]:
+        for parent_node, segment in nodes[1:]:
             parent = positions[parent_node]
             if parent is None:
                 positions.append(None)
@@ -836,10 +862,10 @@ def _vectorized_path_positions(
             headers = data[absolute_parent]
             type_info = (headers >> 2).astype(np.int64, copy=False)
 
-            if kind == 'key':
+            if isinstance(segment, ObjectExtraction):
                 if np.any((headers & 0x3) != _OBJECT):
                     return None
-                key_id = key_ids.get(segment)
+                key_id = key_ids.get(segment.key)
                 if key_id is None:
                     positions.append(None)
                     limits.append(None)
@@ -890,7 +916,7 @@ def _vectorized_path_positions(
                 size = _checked_array_layout(
                     first_value, int(parent[0]),
                     int(limits[parent_node][0]))[0]
-                if segment >= size:
+                if segment.index >= size:
                     return None
                 size_widths = np.where(
                     ((type_info >> 2) & 0x1) != 0, _U32_SIZE, 1)
@@ -900,7 +926,7 @@ def _vectorized_path_positions(
                     data, absolute_parent + 1, size_widths)
                 if np.any(sizes != size):
                     return None
-                slot = segment
+                slot = segment.index
                 successor_slot = slot + 1
                 offset_widths = (type_info & 0x3) + 1
                 offset_starts = absolute_parent + 1 + size_widths
@@ -1631,7 +1657,7 @@ def _flat_object_layout(value):
 def _flat_object_get_chunk(chunk, values, parsed):
     """Look up wide, top-level object fields together instead of per path."""
     if (len(parsed) < 2
-            or any(len(path) != 1 or path[0][0] != 'key'
+            or any(len(path) != 1 or not isinstance(path[0], ObjectExtraction)
                    for _, path, _ in parsed)):
         return None
 
@@ -1670,7 +1696,7 @@ def _flat_object_get_chunk(chunk, values, parsed):
         key_ids = _cached_metadata_key_ids(row_metadata)
         targets = {}
         for index, (_, path, _) in enumerate(parsed):
-            key_id = key_ids.get(path[0][1])
+            key_id = key_ids.get(path[0].key)
             if key_id is not None:
                 targets.setdefault(key_id, []).append(index)
 
@@ -2125,8 +2151,8 @@ def _apply_edits(
                 field_id: index for index, field_id in enumerate(ids)
             }
             edits_by_slot = {}
-            for (_, segment), child_edits in descend.items():
-                slot = slot_by_id[key_ids[segment]]
+            for segment, child_edits in descend.items():
+                slot = slot_by_id[key_ids[segment.key]]
                 edits_by_slot[slot] = child_edits
             children = []
             child_tokens = []
@@ -2159,8 +2185,8 @@ def _apply_edits(
             size, data_start, offsets, _ = _checked_array_layout(
                 value, node_pos, value_end)
             edits_by_index = {
-                segment: child_edits
-                for (_, segment), child_edits in descend.items()
+                segment.index: child_edits
+                for segment, child_edits in descend.items()
             }
             children = []
             child_tokens = []
@@ -2436,7 +2462,7 @@ def _set_chunk(chunk, values, parsed, global_row):
             if index in insert_set:
                 edits.append((
                     parsed_path, 'insert',
-                    key_ids[parsed_path[-1][1]], payload))
+                    key_ids[parsed_path[-1].key], payload))
             else:
                 if validated_positions is not None:
                     provider.validate_source(
@@ -2470,7 +2496,8 @@ def _set_chunk(chunk, values, parsed, global_row):
             if parent_pos is None:
                 raise ValueError(
                     f"VARIANT parent path does not exist: {path}")
-            if not parsed_path or parsed_path[-1][0] != 'key':
+            if not parsed_path or not isinstance(
+                    parsed_path[-1], ObjectExtraction):
                 raise ValueError(
                     "VARIANT array index insertion is not supported: "
                     + path)
@@ -2489,7 +2516,7 @@ def _set_chunk(chunk, values, parsed, global_row):
             continue
         first_metadata = bytes(metadata_values.view(int(rows[0])))
         insert_keys = tuple(
-            parsed[index][1][-1][1] for index in insert_indices)
+            parsed[index][1][-1].key for index in insert_indices)
         metadata_key_ids = _cached_metadata_key_ids(first_metadata)
         source_metadata_size = len(metadata_key_ids)
         rebuild_validation_size = (
@@ -2542,7 +2569,7 @@ def _set_chunk(chunk, values, parsed, global_row):
             else:
                 batches = _encoded_payload_batches(
                     live_rows, provider, global_row)
-            key_name = parsed[insert_index][1][-1][1]
+            key_name = parsed[insert_index][1][-1].key
             output_metadata_size = len(
                 new_metadata if new_metadata is not None
                 else first_metadata)
@@ -2604,7 +2631,8 @@ def _set_chunk(chunk, values, parsed, global_row):
             if parent_pos is None:
                 raise ValueError(
                     f"VARIANT parent path does not exist: {path}")
-            if not parsed_path or parsed_path[-1][0] != 'key':
+            if not parsed_path or not isinstance(
+                    parsed_path[-1], ObjectExtraction):
                 raise ValueError(
                     "VARIANT array index insertion is not supported: "
                     + path)
@@ -2612,7 +2640,7 @@ def _set_chunk(chunk, values, parsed, global_row):
                 raise ValueError(
                     f"VARIANT parent path is not an object: {path}")
             insert_set.add(index)
-            insert_keys.append(parsed_path[-1][1])
+            insert_keys.append(parsed_path[-1].key)
         metadata_key_ids = _cached_metadata_key_ids(row_metadata)
         source_metadata_size = len(metadata_key_ids)
         rebuild_validation_size = (

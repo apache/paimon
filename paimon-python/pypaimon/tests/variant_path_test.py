@@ -27,6 +27,8 @@ from pypaimon.data._variant_binary import _primitive_header
 from pypaimon.data.generic_variant import _DOUBLE, GenericVariant
 from pypaimon.data.variant_path import (
     _checked_object_layout,
+    ArrayExtraction,
+    ObjectExtraction,
     _compile_paths,
     _metadata_cache,
     _metadata_key_ids,
@@ -243,16 +245,18 @@ class TestVariantGet(unittest.TestCase):
                 return super().__getitem__(item)
 
         paths = (
-            NoSlicePath((('key', 'root'), ('index', 0), ('key', 'left'))),
-            NoSlicePath((('key', 'root'), ('index', 0), ('key', 'right'))),
+            NoSlicePath((ObjectExtraction('root'), ArrayExtraction(0),
+                         ObjectExtraction('left'))),
+            NoSlicePath((ObjectExtraction('root'), ArrayExtraction(0),
+                         ObjectExtraction('right'))),
         )
 
         nodes, results = _compile_paths(paths)
 
         self.assertEqual(len(nodes), 5)
         self.assertEqual(results, (3, 4))
-        self.assertEqual(nodes[3], (2, 'key', 'left'))
-        self.assertEqual(nodes[4], (2, 'key', 'right'))
+        self.assertEqual(nodes[3], (2, ObjectExtraction('left')))
+        self.assertEqual(nodes[4], (2, ObjectExtraction('right')))
 
     def test_metadata_cache_is_bounded_and_released(self):
         column = _variants([
