@@ -63,12 +63,9 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     sequence_fields = table.options.sequence_field()
-    if table.is_primary_key_table and sequence_fields:
-        # The native writer currently sorts sequence fields ascending and
-        # does not implement Java's NaN/signed-zero ordering.
-        if (not table.options.sequence_field_sort_order_is_ascending()
-                or any(pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
-            return None
+    if (table.is_primary_key_table and any(
+            pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
+        return None
     if (not native_write_available()
             # Rust does not produce the optional random-access .row sidecars.
             or (table.options.data_evolution_enabled()
