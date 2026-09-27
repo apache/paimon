@@ -88,7 +88,7 @@ public class SparkE2eTest extends E2eReaderTestBase {
                                 + "  'bucket' = '1',"
                                 + "  'changelog-producer' = 'lookup',"
                                 + "  'sequence.field' = 'event_ts',"
-                                + "  'changelog-producer.expose-field-as-metadata' = 'event_ts'"
+                                + "  'changelog-producer.event-metadata-fields' = 'event_ts'"
                                 + ");",
                         "INSERT INTO " + table + " VALUES (1, 10, 50);",
                         "INSERT INTO " + table + " VALUES (1, 20, 100);"));

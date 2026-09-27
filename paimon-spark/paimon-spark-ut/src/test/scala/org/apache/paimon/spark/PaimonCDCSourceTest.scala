@@ -230,7 +230,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
                      |  'bucket'='1',
                      |  'changelog-producer' = 'lookup',
                      |  'sequence.field' = 'event_ts',
-                     |  'changelog-producer.expose-field-as-metadata' = 'event_ts',
+                     |  'changelog-producer.event-metadata-fields' = 'event_ts',
                      |  'changelog-producer.metadata-field-prefix' = '__event__')
                      |""".stripMargin)
 
@@ -296,7 +296,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
                     |  'bucket' = '1',
                     |  'changelog-producer' = 'lookup',
                     |  'sequence.field' = 'event_ts',
-                    |  'changelog-producer.expose-field-as-metadata' = 'event_ts')
+                    |  'changelog-producer.event-metadata-fields' = 'event_ts')
                     |""".stripMargin)
 
         // Positional writes must not require the generated metadata field as an input column.

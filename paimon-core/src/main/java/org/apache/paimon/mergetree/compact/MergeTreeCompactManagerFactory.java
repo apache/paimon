@@ -138,9 +138,10 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
 
         ChangelogEventMetadata.validate(valueType, options);
         if (options.changelogProducer() == ChangelogProducer.LOOKUP
-                && !options.changelogExposeFieldAsMetadata().isEmpty()) {
+                && !options.changelogEventMetadataFields().isEmpty()) {
             writerFactoryBuilder.withChangelogValueType(
-                    ChangelogEventMetadata.appendMetadataFields(valueType, valueType, options));
+                    ChangelogEventMetadata.appendStorageMetadataFields(
+                            valueType, valueType, options));
         }
     }
 

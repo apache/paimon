@@ -52,7 +52,7 @@ abstract class PaimonSparkTableBase(val table: Table)
   override lazy val schema: org.apache.spark.sql.types.StructType = {
     val baseRowType = table.rowType()
     val extendedRowType = table match {
-      case fst: FileStoreTable if !coreOptions.changelogExposeFieldAsMetadata().isEmpty =>
+      case fst: FileStoreTable if !coreOptions.changelogEventMetadataFields().isEmpty =>
         ChangelogEventMetadataTable.computeExtendedRowType(fst, baseRowType)
       case _ => baseRowType
     }
