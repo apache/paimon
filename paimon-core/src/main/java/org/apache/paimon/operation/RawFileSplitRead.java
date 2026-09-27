@@ -448,8 +448,11 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         List<String> fieldNames = rowType.getFieldNames();
         for (int i = 0; i < metadataPreserveColumns.size(); i++) {
             String preserveColumn = metadataPreserveColumns.get(i);
+            int metadataFieldId = changelogExtraValueFields.get(i).id();
             int metadataIndex =
-                    rowType.getFieldIndexByFieldId(changelogExtraValueFields.get(i).id());
+                    rowType.containsField(metadataFieldId)
+                            ? rowType.getFieldIndexByFieldId(metadataFieldId)
+                            : -1;
             int physicalIndex = fieldNames.indexOf(preserveColumn);
             if (metadataIndex >= 0 && physicalIndex >= 0) {
                 mapping[metadataIndex] = physicalIndex;
