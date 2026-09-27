@@ -400,8 +400,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 if (i >= preserveColumns.size()) {
                     break;
                 }
+                int metadataFieldId = changelogExtraValueFields.get(i).id();
                 int metadataIndex =
-                        readValueType.getFieldIndexByFieldId(changelogExtraValueFields.get(i).id());
+                        readValueType.containsField(metadataFieldId)
+                                ? readValueType.getFieldIndexByFieldId(metadataFieldId)
+                                : -1;
                 int valueIndex = readFieldNames.indexOf(preserveColumns.get(i));
                 if (metadataIndex >= 0 && valueIndex >= 0) {
                     mapping[metadataIndex] = valueIndex;
@@ -421,7 +424,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             List<DataField> readValueFields = new ArrayList<>(readValueType.getFields());
             if (changelogExtraValueFields != null) {
                 for (DataField extraField : changelogExtraValueFields) {
-                    if (readValueType.getFieldIndexByFieldId(extraField.id()) < 0) {
+                    if (!readValueType.containsField(extraField.id())) {
                         readValueFields.add(extraField);
                     }
                 }
