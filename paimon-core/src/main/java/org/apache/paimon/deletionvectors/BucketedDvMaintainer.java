@@ -87,7 +87,7 @@ public class BucketedDvMaintainer {
     public void mergeNewDeletion(String fileName, DeletionVector deletionVector) {
         DeletionVector old = deletionVectors.get(fileName);
         if (old != null) {
-            deletionVector.merge(old);
+            deletionVector = DeletionVector.mergeVectors(deletionVector, old);
         }
         deletionVectors.put(fileName, deletionVector);
         modified = true;

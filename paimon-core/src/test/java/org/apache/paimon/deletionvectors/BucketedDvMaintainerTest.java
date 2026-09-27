@@ -283,6 +283,52 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(dvs.get("f3").getCardinality()).isEqualTo(2);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testMergeNewDeletionAcrossBitmap64Flip(boolean initialBitmap64) {
+        // write a stored dv under one bitmap64 setting, then flip the option and merge a fresh
+        // vector of the opposite type into it: the merge must not crash on the type mismatch
+        initIndexHandler(initialBitmap64);
+        BucketedDvMaintainer.Factory factory1 = BucketedDvMaintainer.factory(fileHandler);
+        BucketedDvMaintainer dvMaintainer1 = factory1.create(partition, 0, new HashMap<>());
+        dvMaintainer1.notifyNewDeletion("f1", 1);
+        dvMaintainer1.notifyNewDeletion("f1", 3);
+        commitIndexFile(dvMaintainer1.writeDeletionVectorsIndex().get());
+
+        initIndexHandler(!initialBitmap64);
+        BucketedDvMaintainer.Factory factory2 = BucketedDvMaintainer.factory(fileHandler);
+        List<IndexFileMeta> indexFiles =
+                fileHandler.scan(
+                        table.latestSnapshot().get(), DELETION_VECTORS_INDEX, partition, 0);
+        BucketedDvMaintainer dvMaintainer2 = factory2.create(partition, 0, indexFiles);
+
+        DeletionVector fresh = createDeletionVector(!initialBitmap64);
+        fresh.delete(5);
+        dvMaintainer2.mergeNewDeletion("f1", fresh);
+
+        DeletionVector merged = dvMaintainer2.deletionVectorOf("f1").get();
+        assertThat(merged.isDeleted(1)).isTrue();
+        assertThat(merged.isDeleted(3)).isTrue();
+        assertThat(merged.isDeleted(5)).isTrue();
+        assertThat(merged.getCardinality()).isEqualTo(3);
+    }
+
+    private void commitIndexFile(IndexFileMeta file) {
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        1,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(file),
+                                Collections.emptyList()));
+        table.newBatchWriteBuilder().newCommit().commit(Collections.singletonList(commitMessage));
+    }
+
     private DeletionVector createDeletionVector(boolean bitmap64) {
         return bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
     }
