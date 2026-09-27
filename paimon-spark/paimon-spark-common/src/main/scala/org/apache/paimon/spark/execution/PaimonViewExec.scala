@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.catalog.SupportView
-import org.apache.paimon.spark.catalyst.analysis.PaimonViewCycleChecker
+import org.apache.paimon.spark.catalyst.analysis.PaimonViewDependencyChecker
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.view.View
 
@@ -68,7 +68,7 @@ case class CreatePaimonViewExec(
     // Note: for replace just drop then create, this operation is non-atomic.
     if (replace) {
       // The analyzed plan has already expanded referenced views, so validate the original SQL text.
-      new PaimonViewCycleChecker(spark).validate(catalog, ident, queryText)
+      new PaimonViewDependencyChecker(spark).validate(catalog, ident, queryText)
       catalog.dropView(ident, true)
     }
 

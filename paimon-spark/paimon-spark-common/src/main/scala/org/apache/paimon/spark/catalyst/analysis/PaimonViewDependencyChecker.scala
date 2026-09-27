@@ -33,7 +33,7 @@ import java.util.Locale
 import scala.collection.mutable
 
 /** Checks Paimon view dependencies for cycles and excessive nesting. */
-private[spark] class PaimonViewCycleChecker(spark: SparkSession) extends PaimonLookupCatalog {
+private[spark] class PaimonViewDependencyChecker(spark: SparkSession) extends PaimonLookupCatalog {
 
   protected lazy val catalogManager = spark.sessionState.catalogManager
 
