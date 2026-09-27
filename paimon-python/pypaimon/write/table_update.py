@@ -306,7 +306,7 @@ class TableUpdate:
             from pypaimon.write.native_update import create_native_predicate_update
             try:
                 native = create_native_predicate_update(
-                    self.table, self.commit_user, list(assignments.keys()), predicate)
+                    self.table, self.commit_user, predicate)
             except Exception as error:
                 logger.debug('Native predicate update preparation failed: %s', error)
             else:
