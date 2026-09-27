@@ -546,10 +546,8 @@ class RESTTableReadWriteTest(RESTBaseTest):
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 8, "Should have 8 rows")
 
-        df = ray_dataset.to_pandas()
-        expect = pd.DataFrame(self.raw_data)
-        pd.testing.assert_frame_equal(df.sort_values(by='user_id').reset_index(drop=True),
-                                      expect.sort_values(by='user_id').reset_index(drop=True))
+        actual = pa.concat_tables(ray.get(ray_dataset.to_arrow_refs()))
+        self.assertEqual(actual.sort_by('user_id'), self.expected.sort_by('user_id'))
 
     def test_ray_data_write_and_read(self):
         if not ray.is_initialized():
@@ -587,15 +585,8 @@ class RESTTableReadWriteTest(RESTBaseTest):
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 3, "Should have 3 rows")
 
-        df = ray_dataset.to_pandas()
-        expected_df = pd.DataFrame({
-            'id': [1, 2, 3],
-            'name': ['Alice', 'Bob', 'Charlie'],
-            'value': [100, 200, 300],
-        })
-        expected_df['id'] = expected_df['id'].astype('int32')
-        pd.testing.assert_frame_equal(df.sort_values(by='id').reset_index(drop=True),
-                                      expected_df.sort_values(by='id').reset_index(drop=True))
+        actual = pa.concat_tables(ray.get(ray_dataset.to_arrow_refs()))
+        self.assertEqual(actual.sort_by('id'), test_data.sort_by('id'))
 
     def test_write_wide_table_large_data(self):
         logging.basicConfig(level=logging.INFO)

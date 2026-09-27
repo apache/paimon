@@ -34,7 +34,7 @@ class BuildInfoTest(unittest.TestCase):
         self.assertRegex(
             build_info.full_version(),
             r"^python-{}-(UNKNOWN|[0-9a-f]{{40}})$".format(
-                re.escape(build_info._source_version())),
+                re.escape(build_info.package_version())),
         )
 
     def test_embedded_full_version(self):
@@ -106,9 +106,10 @@ class BuildInfoTest(unittest.TestCase):
             embedded_file = os.path.join(extracted, "pypaimon", "_full_version")
             with open(embedded_file, "r") as full_version_file:
                 embedded = full_version_file.read().strip()
+            self.assertTrue(embedded.endswith("-" + upstream_commit))
             self.assertEqual(
-                "python-{}-{}".format(build_info._source_version(), upstream_commit),
-                embedded,
+                "pypaimon-{}".format(embedded[len("python-"):].rsplit("-", 1)[0]),
+                top_level,
             )
 
             downstream_commit = self._init_git_repository(extracted, "downstream")

@@ -27,7 +27,6 @@ permissions:
 env:
   JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
-  LUMINA_DATA_VERSION: 0.1.0
 
 
 jobs:
@@ -95,19 +94,26 @@ jobs:
       - name: Verify Python version
         run: python --version
 
-      - name: Verify requirements.txt dependencies can be installed
+      - name: Verify Python distributions
+        run: |
+          # Build tools and legacy Flake8 require incompatible importlib-metadata versions.
+          python -m venv "${RUNNER_TEMP}/paimon-packaging"
+          "${RUNNER_TEMP}/paimon-packaging/bin/python" -m pip install --upgrade pip setuptools wheel packaging tomli build
+          "${RUNNER_TEMP}/paimon-packaging/bin/python" paimon-python/dev/test_packaging.py
+
+      - name: Verify core package dependencies can be installed
         shell: bash
         run: |
           cd paimon-python
           python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || {
-            echo "ERROR: Failed to resolve dependencies from dev/requirements.txt"
+          python -m pip install . --target "$TEMP_DIR" || {
+            echo "ERROR: Failed to install core PyPaimon dependencies"
             rm -rf "$TEMP_DIR"
             exit 1
           }
           rm -rf "$TEMP_DIR"
-          echo "✓ dev/requirements.txt can be resolved on this Python"
+          echo "✓ Core PyPaimon dependencies resolve on this Python"
 
       - name: Build Java
         run: |
@@ -118,57 +124,20 @@ jobs:
       - name: Install Python dependencies
         shell: bash
         run: |
-          df -h
-          if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
-            python -m pip install --upgrade pip==21.3.1
-            python --version
-            python -m pip install --no-cache-dir pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 datasketches==4.1.0 2>&1 >/dev/null
-            python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
-          elif [[ "${{ matrix.python-version }}" == "3.7" ]]; then
-            # 3.7 installs the version-pinned set declared for 3.7 in dev/requirements.txt.
-            # ray/lance/daft/torch have no 3.7 wheels; those tests are importorskip-ed (as on 3.6.15).
-            python -m pip install --upgrade pip
-            python -m pip install -r paimon-python/dev/requirements.txt
-            python -m pip install flake8==4.0.1 'pytest~=7.0' py4j==0.10.9.9 parameterized==0.9.0 datasketches==4.1.0
-            python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
+          python -m pip install --upgrade pip
+          if python -c "import sys; sys.exit(0 if sys.version_info < (3, 8) else 1)"; then
+            # Old pip has no --group; read the same TOML with the compatibility bridge.
+            python -m pip install tomli
+            python paimon-python/dev/install.py legacy
           else
-            python -m pip install --upgrade pip
-            pip install torch --index-url https://download.pytorch.org/whl/cpu
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 'isal>=1.8,<2' zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 pylance==0.39.0 cramjam pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 'daft>=0.7.6' 'datafusion>=54,<55' datasketches
-            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)"; then
-              python -m pip install pyarrow==24.0.0 numpy==2.4.6 pandas==2.3.3 flake8==7.1.2
-            else
-              python -m pip install pyarrow==16.0.0 numpy==1.24.3 pandas==2.0.3 flake8==4.0.1
-            fi
-            python -m pip install 'h5py>=3,<4' Pillow
-            python -c "import h5py; print('h5py', h5py.__version__)"
-            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"; then
-              python -m pip install './paimon-python[rosbag]'
-              python -c "import rosbags; print('rosbags installed')"
-            fi
+            python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+            dependency_group=dev
             if [[ "${{ matrix.python-version }}" == "3.10" ]]; then
-              python -m pip install './paimon-python[lerobot,video]'
-              python -c "import datasets, lerobot; print('datasets', datasets.__version__, 'lerobot', lerobot.__version__)"
+              dependency_group=torch
             fi
-
-            # Required by SQL tests; native planner tests run against main below.
-            python -m pip install pypaimon-rust
-            if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
-              # Run the RoboMIND pipeline tests with synthetic local HDF5 data.
-              python -m pip install "./paimon-python[sql]"
-            fi
-            python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
-            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
-              # Vortex requires pyarrow >= 17, while Pypaimon requires pyarrow < 20 and != 19.
-              python -m pip install vortex-data==0.70.0 pyarrow==18.1.0
-            fi
-            python -m pip install 'paimon-mosaic>=0.1.0'
-            if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
-              python -m pip check
-            fi
+            python -m pip install -e ./paimon-python --group "./paimon-python/pyproject.toml:${dependency_group}"
           fi
-          python -m pip install 'oss2>=2.18,<3'
-          df -h
+          python -m pip check
 
       - name: Run lint-python.sh
         shell: bash
@@ -204,13 +173,7 @@ jobs:
       - name: Install Python test dependencies
         run: |
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install "./paimon-python[sql,rosbag]" \
-            readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 \
-            ray==2.54.0 fastavro==1.11.1 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 \
-            pylance==0.39.0 'pytest~=7.0' py4j==0.10.9.9 parameterized==0.9.0 \
-            'daft>=0.7.6' datasketches pyarrow==18.1.0 numpy==1.24.3 pandas==2.0.3 \
-            'h5py>=3,<4' Pillow 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' \
-            vortex-data==0.70.0 'paimon-mosaic>=0.1.0'
+          python -m pip install -e ./paimon-python --group ./paimon-python/pyproject.toml:dev
           python -m pip check
 
       - name: Verify native wheel provenance
@@ -262,21 +225,20 @@ jobs:
         run: python --version
 
       - name: Install Python dependencies
-        shell: bash
         run: |
-            python -m pip install --upgrade pip
-            pip install torch --index-url https://download.pytorch.org/whl/cpu
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 datasketches 'datasets>=4,<4.1'
-            python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ./paimon-python --group ./paimon-python/pyproject.toml:torch
+          python -m pip check
       - name: Run lint-python.sh
         shell: bash
         run: |
           chmod +x paimon-python/dev/lint-python.sh
           ./paimon-python/dev/lint-python.sh -i pytest_torch
 
-  # One job: check dev/requirements.txt on each Python version in sequence, then Ray version test on 3.10.
+  # Check core installation across Python versions, then basic Ray compatibility on 3.10.
   compatibility:
-    name: Requirements and Ray compatibility
+    name: Package and Ray compatibility
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
@@ -289,71 +251,71 @@ jobs:
             build-essential git curl cmake \
             && sudo rm -rf /var/lib/apt/lists/*
 
-      - name: Verify dev/requirements.txt on Python 3.8
+      - name: Verify core installation on Python 3.8
         uses: actions/setup-python@v5
         with:
           python-version: '3.8'
-      - name: Resolve requirements (3.8)
+      - name: Install core package (3.8)
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.8"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ Core package OK on Python 3.8"
 
-      - name: Verify dev/requirements.txt on Python 3.9
+      - name: Verify core installation on Python 3.9
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      - name: Resolve requirements (3.9)
+      - name: Install core package (3.9)
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.9"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ Core package OK on Python 3.9"
 
-      - name: Verify dev/requirements.txt on Python 3.10
+      - name: Verify core installation on Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Resolve requirements (3.10)
+      - name: Install core package (3.10)
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.10"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ Core package OK on Python 3.10"
 
-      - name: Verify dev/requirements.txt on Python 3.11
+      - name: Verify core installation on Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Resolve requirements (3.11)
+      - name: Install core package (3.11)
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.11"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ Core package OK on Python 3.11"
 
-      - name: Verify dev/requirements.txt on Python 3.12
+      - name: Verify core installation on Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Resolve requirements (3.12)
+      - name: Install core package (3.12)
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.12"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ Core package OK on Python 3.12"
 
-      - name: Verify dev/requirements.txt on Python 3.13
+      - name: Verify core installation on Python 3.13
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Resolve requirements (3.13)
+      - name: Install core package (3.13)
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.13"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ Core package OK on Python 3.13"
 
       - name: Setup Python 3.10 for Ray test
         uses: actions/setup-python@v5
@@ -362,13 +324,10 @@ jobs:
       - name: Install base Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install --no-cache-dir \
-            pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 \
-            fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 \
-            numpy==1.24.3 pandas==2.0.3 cramjam pytest~=7.0 py4j==0.10.9.9 requests \
-            parameterized==0.9.0 packaging datasketches
-          python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # Use only test tools here: the dev group's Ray >=2.50 floor is for full-feature tests.
+          python -m pip install './paimon-python[ray,oss,lumina,vindex,full-text,theta-sketch]' \
+            --group ./paimon-python/pyproject.toml:test
       - name: Test Ray version compatibility
         run: |
           cd paimon-python

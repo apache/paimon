@@ -16,12 +16,12 @@
 # under the License.
 
 import os
-import re
+import runpy
 import subprocess
 
 _UNKNOWN = "UNKNOWN"
 _FULL_VERSION_FILE = os.path.join(os.path.dirname(__file__), "_full_version")
-_SETUP_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "setup.py")
+_VERSION_FILE = os.path.join(os.path.dirname(__file__), "_version.py")
 
 
 def _repository_root():
@@ -33,36 +33,33 @@ def _repository_root():
     return python_root
 
 
-def git_commit_id():
-    """Return the current Paimon Git revision without discovering an outer repo."""
+def _git_output(args):
     repository_root = _repository_root()
     env = os.environ.copy()
     env["GIT_CEILING_DIRECTORIES"] = os.path.dirname(repository_root)
     try:
         return subprocess.check_output(
-            ["git", "-C", repository_root, "rev-parse", "HEAD"],
+            ["git", "-C", repository_root] + args,
             stderr=subprocess.DEVNULL,
             env=env,
         ).decode("utf-8").strip()
     except Exception:
-        return _UNKNOWN
+        return None
+
+
+def git_commit_id():
+    """Return the current Paimon Git revision without discovering an outer repo."""
+    return _git_output(["rev-parse", "HEAD"]) or _UNKNOWN
 
 
 def _source_version():
     try:
-        with open(_SETUP_FILE, "r") as setup_file:
-            match = re.search(
-                r'^VERSION = ["\']([^"\']+)["\']$',
-                setup_file.read(),
-                re.MULTILINE,
-            )
-            return None if match is None else match.group(1)
+        return runpy.run_path(_VERSION_FILE)["VERSION"]
     except OSError:
         return None
 
 
-def _load_full_version():
-    """Return the embedded full version, or derive it from the checkout."""
+def _embedded_full_version():
     try:
         with open(_FULL_VERSION_FILE, "r") as full_version_file:
             value = full_version_file.read().strip()
@@ -70,7 +67,28 @@ def _load_full_version():
                 return value
     except OSError:
         pass
+    return None
+
+
+def package_version():
+    """Resolve one version for metadata, sdist and wheel, even outside Git."""
+    embedded = _embedded_full_version()
+    if embedded:
+        return embedded[len("python-"):].rsplit("-", 1)[0]
     version = _source_version()
+    if version and version.endswith(".dev"):
+        # Commit date, rather than build date, keeps source rebuilds stable.
+        date = _git_output(["log", "-1", "--format=%cd", "--date=format:%Y%m%d"])
+        return version + (date or "0")
+    return version
+
+
+def _load_full_version():
+    """Return the embedded full version, or derive it from the checkout."""
+    embedded = _embedded_full_version()
+    if embedded:
+        return embedded
+    version = package_version()
     return (
         _UNKNOWN
         if version is None
