@@ -34,12 +34,14 @@ class FileType(Enum):
     - BUCKET_INDEX: bucket level index files (Hash, DV)
     - GLOBAL_INDEX: table level global index files (btree, lumina, full-text)
     - FILE_INDEX: data-file index files (bloom filter, bitmap, etc.)
+    - BLOB_META: reader-selected metadata ranges within BLOB files
     """
     META = "META"
     DATA = "DATA"
     BUCKET_INDEX = "BUCKET_INDEX"
     GLOBAL_INDEX = "GLOBAL_INDEX"
     FILE_INDEX = "FILE_INDEX"
+    BLOB_META = "BLOB_META"
 
     def is_index(self) -> bool:
         return self in (FileType.BUCKET_INDEX, FileType.GLOBAL_INDEX, FileType.FILE_INDEX)
@@ -94,6 +96,7 @@ class FileType(Enum):
             "bucket-index": FileType.BUCKET_INDEX,
             "data": FileType.DATA,
             "file-index": FileType.FILE_INDEX,
+            "blob-meta": FileType.BLOB_META,
         }
         result = set()
         for name in whitelist_str.split(","):
@@ -103,7 +106,7 @@ class FileType(Enum):
             elif name:
                 logger.warning(
                     "Unknown local-cache.whitelist value '%s'. "
-                    "Supported values: meta, global-index, bucket-index, data, file-index.",
+                    "Supported values: meta, global-index, bucket-index, data, file-index, blob-meta.",
                     name,
                 )
         return result

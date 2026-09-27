@@ -52,7 +52,9 @@ The cache classifies files by path. Set `local-cache.whitelist` to select the fi
 | DATA | data | Data files (ORC, Parquet, etc.) | No |
 | FILE_INDEX | file-index | Data-file level bloom filter, bitmap | No |
 
-The default whitelist is `meta,global-index`. The mutable `LATEST` and `EARLIEST` hint files bypass
+The default whitelist is `meta,global-index`. The Python reader additionally includes
+`blob-meta`, which caches exact BLOB metadata ranges rather than whole data blocks; see
+[Python BLOB metadata cache](../pypaimon/blob.md#blob-metadata-cache). The mutable `LATEST` and `EARLIEST` hint files bypass
 the cache even though they are classified as metadata.
 
 ## Enable Cache

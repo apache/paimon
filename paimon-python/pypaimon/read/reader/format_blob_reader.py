@@ -387,7 +387,7 @@ class FormatBlobReader(RecordBatchReader):
 
         # Seek to header: last 5 bytes
         f.seek(self._file_size - 5)
-        header = f.read(5)
+        header = BlobRecordIterator._read_fully_from(f, 5, metadata=True)
 
         if len(header) != 5:
             raise IOError("Invalid blob file: cannot read header")
@@ -401,7 +401,7 @@ class FormatBlobReader(RecordBatchReader):
 
         # Read index data
         f.seek(self._file_size - 5 - index_length)
-        index_bytes = f.read(index_length)
+        index_bytes = BlobRecordIterator._read_fully_from(f, index_length, metadata=True)
 
         if len(index_bytes) != index_length:
             raise IOError("Invalid blob file: cannot read index")
@@ -543,7 +543,7 @@ class BlobRecordIterator:
             close_stream = True
         try:
             stream.seek(position)
-            header = self._read_fully_from(stream, self.ARRAY_HEADER_SIZE)
+            header = self._read_fully_from(stream, self.ARRAY_HEADER_SIZE, metadata=True)
             if len(header) != self.ARRAY_HEADER_SIZE:
                 raise IOError("Invalid ARRAY<BLOB> payload: cannot read header")
             magic, version, element_count = struct.unpack('<IBI', header)
@@ -558,7 +558,7 @@ class BlobRecordIterator:
             element_data_start = position + self.ARRAY_HEADER_SIZE
             index_length_position = payload_end - self.ARRAY_INDEX_LENGTH_SIZE
             stream.seek(index_length_position)
-            index_length_bytes = self._read_fully_from(stream, self.ARRAY_INDEX_LENGTH_SIZE)
+            index_length_bytes = self._read_fully_from(stream, self.ARRAY_INDEX_LENGTH_SIZE, metadata=True)
             if len(index_length_bytes) != self.ARRAY_INDEX_LENGTH_SIZE:
                 raise IOError("Invalid ARRAY<BLOB> payload: cannot read index length")
             index_length = struct.unpack('<I', index_length_bytes)[0]
@@ -574,7 +574,7 @@ class BlobRecordIterator:
 
             element_index_start = index_length_position - index_length
             stream.seek(element_index_start)
-            index_bytes = self._read_fully_from(stream, index_length)
+            index_bytes = self._read_fully_from(stream, index_length, metadata=True)
             if len(index_bytes) != index_length:
                 raise IOError("Invalid ARRAY<BLOB> payload: cannot read element index")
             self._validate_array_element_index(index_bytes)
@@ -645,7 +645,7 @@ class BlobRecordIterator:
             close_stream = True
         try:
             stream.seek(position)
-            header = self._read_fully_from(stream, self.MAP_HEADER_SIZE)
+            header = self._read_fully_from(stream, self.MAP_HEADER_SIZE, metadata=True)
             if len(header) != self.MAP_HEADER_SIZE:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read header")
             magic, version, entry_count = struct.unpack('<IBI', header)
@@ -661,7 +661,7 @@ class BlobRecordIterator:
             index_lengths_position = payload_end - self.MAP_INDEX_LENGTHS_SIZE
             stream.seek(index_lengths_position)
             index_length_bytes = self._read_fully_from(
-                stream, self.MAP_INDEX_LENGTHS_SIZE
+                stream, self.MAP_INDEX_LENGTHS_SIZE, metadata=True
             )
             if len(index_length_bytes) != self.MAP_INDEX_LENGTHS_SIZE:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read index lengths")
@@ -678,7 +678,7 @@ class BlobRecordIterator:
             stream.seek(key_index_start)
             # The two indexes are adjacent; read both without touching BLOB values.
             index_bytes = self._read_fully_from(
-                stream, key_index_length + value_index_length)
+                stream, key_index_length + value_index_length, metadata=True)
             key_index_bytes = index_bytes[:key_index_length]
             if len(key_index_bytes) != key_index_length:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read key index")
@@ -707,7 +707,7 @@ class BlobRecordIterator:
             )
 
             stream.seek(data_start)
-            key_data = self._read_fully_from(stream, key_data_length)
+            key_data = self._read_fully_from(stream, key_data_length, metadata=True)
             if len(key_data) != key_data_length:
                 raise IOError("Invalid MAP<X, BLOB> payload: cannot read key data")
             keys = []
@@ -866,10 +866,13 @@ class BlobRecordIterator:
         return self._read_fully_from(self.input_stream, length)
 
     @staticmethod
-    def _read_fully_from(stream, length: int) -> bytes:
+    def _read_fully_from(stream, length: int, metadata: bool = False) -> bytes:
+        read = stream.read
+        if metadata and callable(getattr(type(stream), 'read_blob_metadata', None)):
+            read = stream.read_blob_metadata
         data = bytearray()
         while len(data) < length:
-            chunk = stream.read(length - len(data))
+            chunk = read(length - len(data))
             if not chunk:
                 break
             data.extend(chunk)

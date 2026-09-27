@@ -492,7 +492,7 @@ class ConfigOptionsTest(unittest.TestCase):
         self.assertIsNone(opts.local_cache_dir())
         self.assertIsNone(opts.local_cache_max_size())
         self.assertEqual(1 * 1024 * 1024, opts.local_cache_block_size().get_bytes())
-        self.assertEqual("meta,global-index", opts.local_cache_whitelist())
+        self.assertEqual("meta,global-index,blob-meta", opts.local_cache_whitelist())
 
     def test_local_cache_options_custom(self):
         from pypaimon.common.options import Options

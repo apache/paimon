@@ -22,21 +22,24 @@ Provides a CachingFileIO wrapper that transparently caches remote file reads
 at block granularity. If a cache directory is configured, disk cache is used;
 otherwise an in-memory LRU cache is used. Files are classified by FileType and
 only cacheable types in the whitelist are cached; others are read directly from
-the delegate FileIO.
+the delegate FileIO. BLOB metadata can be cached as exact reader-selected ranges.
 """
 
 import hashlib
 import os
 import threading
 from collections import OrderedDict
-from typing import Optional
+from typing import Optional, Tuple, Union
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
 
+_CacheEntryKey = Union[int, Tuple[str, int, int]]
+
+
 class LocalMemoryCacheManager:
-    """Block-level in-memory cache with LRU eviction."""
+    """In-memory block/range cache with LRU eviction."""
 
     def __init__(self, max_size_bytes: int, block_size: int = 1 * 1024 * 1024):
         self._max_size_bytes = max_size_bytes
@@ -50,7 +53,7 @@ class LocalMemoryCacheManager:
     def block_size(self) -> int:
         return self._block_size
 
-    def get_block(self, file_path: str, block_index: int) -> Optional[bytes]:
+    def get_block(self, file_path: str, block_index: _CacheEntryKey) -> Optional[bytes]:
         key = (file_path, block_index)
         with self._lock:
             data = self._cache.get(key)
@@ -58,7 +61,7 @@ class LocalMemoryCacheManager:
                 self._cache.move_to_end(key)
             return data
 
-    def put_block(self, file_path: str, block_index: int, data: bytes) -> None:
+    def put_block(self, file_path: str, block_index: _CacheEntryKey, data: bytes) -> None:
         key = (file_path, block_index)
         with self._lock:
             if key in self._cache:
@@ -79,7 +82,7 @@ class LocalMemoryCacheManager:
 
 
 class LocalDiskCacheManager:
-    """Block-level local disk cache with LRU eviction."""
+    """Local disk block/range cache with LRU eviction."""
 
     def __init__(self, cache_dir: str, max_size_bytes: int,
                  block_size: int = 1 * 1024 * 1024):
@@ -98,14 +101,14 @@ class LocalDiskCacheManager:
     def block_size(self) -> int:
         return self._block_size
 
-    def _cache_path(self, file_path: str, block_index: int) -> str:
+    def _cache_path(self, file_path: str, block_index: _CacheEntryKey) -> str:
         key = f"{file_path}:{block_index}"
         h = hashlib.sha256(key.encode('utf-8')).hexdigest()
         prefix = h[:2]
         sub_dir = os.path.join(self._cache_dir, prefix)
         return os.path.join(sub_dir, h)
 
-    def get_block(self, file_path: str, block_index: int) -> Optional[bytes]:
+    def get_block(self, file_path: str, block_index: _CacheEntryKey) -> Optional[bytes]:
         path = self._cache_path(file_path, block_index)
         with self._lock:
             if path not in self._entry_index:
@@ -121,7 +124,7 @@ class LocalDiskCacheManager:
                     self._current_size -= size
             return None
 
-    def put_block(self, file_path: str, block_index: int, data: bytes) -> None:
+    def put_block(self, file_path: str, block_index: _CacheEntryKey, data: bytes) -> None:
         path = self._cache_path(file_path, block_index)
 
         with self._lock:
@@ -325,6 +328,33 @@ class CachingInputStream:
         return False
 
 
+class BlobMetadataInputStream(CachingInputStream):
+    """Cache only explicitly marked ranges; ordinary reads bypass the cache."""
+
+    def read(self, size=-1) -> bytes:
+        if size is None or size < 0:
+            size = self._get_file_size() - self._pos
+        data = self.read_at(size, self._pos)
+        self._pos += len(data)
+        return data
+
+    def read_at(self, nbytes: int, offset: int) -> bytes:
+        return self._read_remote(offset, nbytes) if nbytes > 0 else b''
+
+    def read_blob_metadata(self, size: int) -> bytes:
+        if size <= 0:
+            return b''
+        # Tuple keys cannot collide with integer block indexes, in memory or on disk.
+        key = ('blob-meta', self._pos, size)
+        data = self._cache.get_block(self._file_path, key)
+        if data is None or len(data) != size:
+            data = self._read_remote(self._pos, size)
+            if len(data) == size:
+                self._cache.put_block(self._file_path, key, data)
+        self._pos += len(data)
+        return data
+
+
 class CachingFileIO(FileIO):
     """FileIO wrapper that caches reads at block granularity.
 
@@ -337,7 +367,7 @@ class CachingFileIO(FileIO):
         self._delegate = delegate
         self._cache = cache
         if whitelist is None:
-            self._whitelist = {FileType.META, FileType.GLOBAL_INDEX}
+            self._whitelist = {FileType.META, FileType.GLOBAL_INDEX, FileType.BLOB_META}
         else:
             self._whitelist = whitelist
 
@@ -398,9 +428,12 @@ class CachingFileIO(FileIO):
 
     def new_input_stream(self, path: str):
         file_type = FileType.classify(path)
-        if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
-            return self._delegate.new_input_stream(path)
-        return CachingInputStream(self._delegate, path, self._cache)
+        if self._cache is not None and not FileType.is_mutable(path):
+            if file_type in self._whitelist:
+                return CachingInputStream(self._delegate, path, self._cache)
+            if FileType.BLOB_META in self._whitelist and path.endswith('.blob'):
+                return BlobMetadataInputStream(self._delegate, path, self._cache)
+        return self._delegate.new_input_stream(path)
 
     def new_output_stream(self, path: str):
         return self._delegate.new_output_stream(path)

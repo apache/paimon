@@ -176,6 +176,14 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 `VIDEOFRM`, or blob-view magic header). This mirrors Java's
 `Blob.fromBytes(...)`.
 
+## BLOB metadata cache
+
+With `local-cache.enabled=true`, the Python reader's default whitelist is
+`meta,global-index,blob-meta`. `blob-meta` caches exact ranges for BLOB footers,
+row indexes, ARRAY headers/indexes, and MAP headers/keys/indexes, excluding value
+bodies. It shares the local cache's memory or disk budget. Add `data` to cache
+normal data blocks as well. This option applies to the Python reader, not Rust native reads.
+
 ## See Also
 
 - [Blob Storage](../multimodal-table/blob) — concept, storage modes,
