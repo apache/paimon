@@ -171,21 +171,28 @@ public class LocalOrphanFilesCleanTest {
                     }
                 };
 
-        int baseline = threadCount();
         Assertions.assertThatThrownBy(
                         () ->
                                 LocalOrphanFilesClean.executeDatabaseOrphanFiles(
                                         catalog, "db", null, 0L, 1, true))
                 .hasMessageContaining("listing failed");
-        // the pool threads terminate once shutdownNow runs; poll briefly for it
-        for (int i = 0; i < 100 && threadCount() > baseline; i++) {
+        // the named pool threads terminate once shutdownNow runs; poll briefly for it
+        for (int i = 0; i < 100 && orphanCleanThreadCount() > 0; i++) {
             Thread.sleep(50);
         }
-        Assertions.assertThat(threadCount()).isLessThanOrEqualTo(baseline);
+        Assertions.assertThat(orphanCleanThreadCount()).isEqualTo(0);
     }
 
-    private static int threadCount() {
-        return Thread.getAllStackTraces().keySet().size();
+    /** Count only the threads created by the {@code executeDatabaseOrphanFiles} pool. */
+    private static long orphanCleanThreadCount() {
+        return Thread.getAllStackTraces().keySet().stream()
+                .filter(
+                        thread ->
+                                thread.getName()
+                                        .startsWith(
+                                                LocalOrphanFilesClean
+                                                        .DATABASE_ORPHAN_CLEAN_THREAD_PREFIX))
+                .count();
     }
 
     @Test

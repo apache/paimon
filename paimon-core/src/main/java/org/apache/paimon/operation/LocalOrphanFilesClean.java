@@ -45,8 +45,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -65,6 +67,13 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
  * use distributed one. See `FlinkOrphanFilesClean` and `SparkOrphanFilesClean`.
  */
 public class LocalOrphanFilesClean extends OrphanFilesClean {
+
+    /**
+     * Name prefix for the threads that run the per-table cleans in {@link
+     * #executeDatabaseOrphanFiles}. Naming the pool threads aids debugging and lets tests identify
+     * this pool's threads without relying on a global thread count.
+     */
+    static final String DATABASE_ORPHAN_CLEAN_THREAD_PREFIX = "paimon-orphan-clean-db-";
 
     private final ThreadPoolExecutor executor;
 
@@ -319,7 +328,9 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         catalog, databaseName, tableName, olderThanMillis, parallelism, dryRun);
 
         ExecutorService executorService =
-                Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                Executors.newFixedThreadPool(
+                        Runtime.getRuntime().availableProcessors(),
+                        databaseOrphanCleanThreadFactory());
         List<Future<CleanOrphanFilesResult>> tasks = new ArrayList<>(tableCleans.size());
         for (LocalOrphanFilesClean clean : tableCleans) {
             tasks.add(executorService.submit(clean::clean));
@@ -344,5 +355,22 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             executorService.shutdownNow();
         }
         return new CleanOrphanFilesResult(deletedFileCount, deletedFileTotalLenInBytes);
+    }
+
+    /**
+     * A thread factory equivalent to {@link Executors#defaultThreadFactory()} (non-daemon, normal
+     * priority) but naming its threads with {@link #DATABASE_ORPHAN_CLEAN_THREAD_PREFIX}.
+     */
+    private static ThreadFactory databaseOrphanCleanThreadFactory() {
+        AtomicInteger threadIndex = new AtomicInteger(0);
+        return runnable -> {
+            Thread thread =
+                    new Thread(
+                            runnable,
+                            DATABASE_ORPHAN_CLEAN_THREAD_PREFIX + threadIndex.getAndIncrement());
+            thread.setDaemon(false);
+            thread.setPriority(Thread.NORM_PRIORITY);
+            return thread;
+        };
     }
 }
