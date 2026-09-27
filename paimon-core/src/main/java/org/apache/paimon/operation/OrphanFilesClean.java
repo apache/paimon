@@ -109,9 +109,9 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     protected List<String> validBranches() {
-        // branch managers may return a list that must stay unchanged: the REST manager
-        // serves a cached/shared empty list for tables without branches, and adding the
-        // main branch to it would either fail or poison the cached instance
+        // The branch manager may return an immutable list (the REST branch manager returns
+        // Collections.emptyList() for a branchless table), so copy it before adding the main
+        // branch.
         List<String> branches = new ArrayList<>(table.branchManager().branches());
 
         List<String> abnormalBranches = new ArrayList<>();

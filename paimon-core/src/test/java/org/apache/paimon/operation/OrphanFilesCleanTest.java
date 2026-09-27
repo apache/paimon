@@ -95,11 +95,7 @@ public class OrphanFilesCleanTest {
                         FileStoreTable.class, org.mockito.AdditionalAnswers.delegatesTo(real));
         org.mockito.Mockito.doReturn(branchManager).when(table).branchManager();
 
-        java.lang.reflect.Method method =
-                LocalOrphanFilesClean.class.getSuperclass().getDeclaredMethod("validBranches");
-        method.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        List<String> valid = (List<String>) method.invoke(new LocalOrphanFilesClean(table));
+        List<String> valid = new LocalOrphanFilesClean(table).validBranches();
 
         assertThat(valid).containsExactly("main");
     }
