@@ -239,3 +239,50 @@ def test_blob_readinto(tmp_path, whitelist):
         assert cache._current_size == 0  # readinto must not cache value bodies.
     else:
         assert cache._current_size > 0
+
+
+@pytest.mark.parametrize('support', ['direct', 'missing', 'unsupported'])
+def test_blob_readinto_delegates_without_caching(tmp_path, support):
+    from pypaimon.table.row.blob import BlobRef
+
+    calls = {'read': 0, 'readinto': 0}
+
+    class CountingStream(io.BytesIO):
+        def read(self, size=-1):
+            calls['read'] += 1
+            return super().read(size)
+
+        def readinto(self, buffer):
+            calls['readinto'] += 1
+            if support == 'unsupported':
+                raise io.UnsupportedOperation('readinto')
+            # Exercise a short read and cursor updates.
+            return super().readinto(memoryview(buffer)[:2])
+
+    remote = CountingStream(b'abcdefgh')
+    if support == 'missing':
+        remote.readinto = None
+    delegate = LocalFileIO(str(tmp_path), Options({}))
+    options = Options({'local-cache.enabled': 'true'})
+    cache = CachingFileIO.create_cache_manager(options)
+    file_io = CachingFileIO.wrap_with_caching_if_needed(delegate, options, cache)
+    blob = BlobRef(file_io, BlobDescriptor('data.blob', 1, 4))
+    with patch.object(delegate, 'new_input_stream', return_value=remote):
+        with blob.new_input_stream() as stream:
+            buf = bytearray(b'----')
+            if support == 'direct':
+                assert stream.readinto(buf) == 2
+                assert buf == b'bc--'
+                assert stream.tell() == 2
+                assert stream.readinto(memoryview(buf)[2:]) == 2
+                assert calls == {'read': 0, 'readinto': 2}
+            else:
+                assert stream.readinto(buf) == 4
+                assert calls['read'] > 0
+            assert buf == b'bcde'
+            assert stream.tell() == 4
+            assert stream.readinto(buf) == 0
+            stream.seek(0)
+            assert stream.readinto(memoryview(buf)[:2]) == 2
+            assert stream.tell() == 2
+    assert cache._current_size == 0

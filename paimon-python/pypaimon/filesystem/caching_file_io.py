@@ -30,6 +30,7 @@ import os
 import sys
 import threading
 from collections import OrderedDict
+from io import UnsupportedOperation
 from typing import Optional, Tuple, Union
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
@@ -357,6 +358,27 @@ class BlobMetadataInputStream(CachingInputStream):
         data = self.read_at(size, self._pos)
         self._pos += len(data)
         return data
+
+    def readinto(self, buffer) -> Optional[int]:
+        view = memoryview(buffer).cast('B')
+        if view.readonly:
+            raise TypeError("readinto() requires a writable buffer")
+        if not view:
+            return 0
+        with self._io_lock:
+            stream = self._get_remote_stream()
+            readinto = getattr(stream, 'readinto', None)
+            if callable(readinto):
+                stream.seek(self._pos)
+                try:
+                    count = readinto(view)
+                except (UnsupportedOperation, NotImplementedError):
+                    pass
+                else:
+                    if count is not None:
+                        self._pos += count
+                    return count
+        return super().readinto(view)
 
     def read_at(self, nbytes: int, offset: int) -> bytes:
         return self._read_remote(offset, nbytes) if nbytes > 0 else b''
