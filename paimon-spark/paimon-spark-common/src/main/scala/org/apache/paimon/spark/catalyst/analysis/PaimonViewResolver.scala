@@ -40,24 +40,31 @@ case class PaimonViewResolver(spark: SparkSession)
 
   protected lazy val catalogManager = spark.sessionState.catalogManager
 
-  override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
-    case u @ UnresolvedRelation(parts @ CatalogAndIdentifier(catalog: SupportView, ident), _, _) =>
-      try {
-        val view = catalog.loadView(ident)
-        createViewRelation(parts, view)
-      } catch {
-        case _: ViewNotExistException =>
-          u
-      }
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    val cycleChecker = new PaimonViewCycleChecker(spark)
+    plan.resolveOperatorsDown {
+      case u @ UnresolvedRelation(
+            parts @ CatalogAndIdentifier(catalog: SupportView, ident),
+            _,
+            _) =>
+        try {
+          val view = catalog.loadView(ident)
+          cycleChecker.validate(catalog, ident, view.query(SupportView.DIALECT))
+          createViewRelation(parts, view)
+        } catch {
+          case _: ViewNotExistException =>
+            u
+        }
 
-    case u @ UnresolvedTableOrView(CatalogAndIdentifier(catalog: SupportView, ident), _, _) =>
-      try {
-        catalog.loadView(ident)
-        ResolvedPaimonView(catalog, ident)
-      } catch {
-        case _: ViewNotExistException =>
-          u
-      }
+      case u @ UnresolvedTableOrView(CatalogAndIdentifier(catalog: SupportView, ident), _, _) =>
+        try {
+          catalog.loadView(ident)
+          ResolvedPaimonView(catalog, ident)
+        } catch {
+          case _: ViewNotExistException =>
+            u
+        }
+    }
   }
 
   private def createViewRelation(nameParts: Seq[String], view: View): LogicalPlan = {

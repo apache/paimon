@@ -19,9 +19,11 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.catalog.SupportView
+import org.apache.paimon.spark.catalyst.analysis.PaimonViewCycleChecker
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.view.View
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
 import org.apache.spark.sql.catalyst.util.{escapeSingleQuotedString, quoteIfNeeded, StringUtils}
@@ -33,6 +35,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
 case class CreatePaimonViewExec(
+    spark: SparkSession,
     catalog: SupportView,
     ident: Identifier,
     queryText: String,
@@ -62,8 +65,10 @@ case class CreatePaimonViewExec(
     // Apply column aliases and comments to the view schema
     val finalSchema = applyColumnAliasesAndComments(viewSchema, columnAliases, columnComments)
 
-    // Note: for replace just drop then create ,this operation is non-atomic.
+    // Note: for replace just drop then create, this operation is non-atomic.
     if (replace) {
+      // The analyzed plan has already expanded referenced views, so validate the original SQL text.
+      new PaimonViewCycleChecker(spark).validate(catalog, ident, queryText)
       catalog.dropView(ident, true)
     }
 
