@@ -148,12 +148,16 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                         .build();
         RecordReader<InternalRow> reader =
                 store.newDataEvolutionRead().withReadType(readWriteType).createReader(dataSplit);
-        AppendFileStoreWrite storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
-        storeWrite.withWriteType(readWriteType);
-        storeWrite.withFileSource(FileSource.COMPACT);
-        RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
+        @Nullable AppendFileStoreWrite storeWrite = null;
+        @Nullable RecordWriter<InternalRow> writer = null;
         List<DataFileMeta> writeResult = new ArrayList<>();
         try (RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+            // create the store write inside the try so a newWrite/createWriter failure still
+            // closes the reader; the reader closes first, then the writer and store write
+            storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
+            storeWrite.withWriteType(readWriteType);
+            storeWrite.withFileSource(FileSource.COMPACT);
+            writer = storeWrite.createWriter(partition, 0);
             for (Range range : outputRanges) {
                 for (long remaining = range.count(); remaining > 0; remaining--) {
                     checkArgument(iterator.hasNext(), "Missing rows in normal compaction input.");
@@ -168,15 +172,19 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
             }
             checkArgument(!iterator.hasNext(), "Unexpected extra rows in normal compaction input.");
         } finally {
-            // close even when compaction fails, otherwise the writer's open files and
-            // write buffers leak; a close failure must not mask the original exception
+            // close even when compaction fails, otherwise the reader, the writer's open files
+            // and write buffers leak; a close failure must not mask the original exception
             try {
-                writer.close();
+                if (writer != null) {
+                    writer.close();
+                }
             } catch (Exception e) {
                 LOG.warn("Failed to close compaction writer.", e);
             }
             try {
-                storeWrite.close();
+                if (storeWrite != null) {
+                    storeWrite.close();
+                }
             } catch (Exception e) {
                 LOG.warn("Failed to close compaction store write.", e);
             }

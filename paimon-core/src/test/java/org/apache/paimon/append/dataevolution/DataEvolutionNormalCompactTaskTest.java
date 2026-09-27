@@ -29,6 +29,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.AppendFileStoreWrite;
+import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -41,6 +42,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -51,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,6 +61,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -69,7 +73,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
@@ -661,6 +667,74 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         // must be closed
         verify(spiedStoreWrite).close();
         verify(spiedWriter).close();
+    }
+
+    @Test
+    public void testReaderClosedWhenStoreWriteCreationFails() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        for (int round = 0; round < 2; round++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int i = 0; i < ROW_COUNT; i++) {
+                    write.write(
+                            GenericRow.of(
+                                    BinaryString.fromString("p0"),
+                                    i + round * ROW_COUNT,
+                                    BinaryString.fromString("f1_" + i + "_" + round)));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+        List<ManifestEntry> entries = table.store().newScan().plan().files();
+        assertThat(entries).hasSize(2);
+        entries.sort(java.util.Comparator.comparing(e -> e.file().nonNullFirstRowId()));
+        List<DataFileMeta> compactBefore =
+                Arrays.asList(entries.get(0).file(), entries.get(1).file());
+
+        AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
+        // Wrap the reader so the test can observe its close(), then fail store-write creation
+        // right after the reader is created: the reader is created before the writer, so the
+        // old code leaked it when newWrite threw.
+        AtomicBoolean readerClosed = new AtomicBoolean(false);
+        DataEvolutionSplitRead spiedRead = spy(store.newDataEvolutionRead());
+        doAnswer(
+                        invocation -> {
+                            @SuppressWarnings("unchecked")
+                            RecordReader<InternalRow> real =
+                                    (RecordReader<InternalRow>) invocation.callRealMethod();
+                            return new RecordReader<InternalRow>() {
+                                @Override
+                                public RecordReader.RecordIterator<InternalRow> readBatch()
+                                        throws IOException {
+                                    return real.readBatch();
+                                }
+
+                                @Override
+                                public void close() throws IOException {
+                                    readerClosed.set(true);
+                                    real.close();
+                                }
+                            };
+                        })
+                .when(spiedRead)
+                .createReader(any(Split.class));
+        AppendOnlyFileStore spiedStore = spy(store);
+        doReturn(spiedRead).when(spiedStore).newDataEvolutionRead();
+        RuntimeException failure = new RuntimeException("newWrite failed");
+        doThrow(failure).when(spiedStore).newWrite(anyString());
+        FileStoreTable spiedCopy = spy(table);
+        doReturn(spiedStore).when(spiedCopy).store();
+        FileStoreTable spiedTable = spy(table);
+        doReturn(spiedCopy).when(spiedTable).copy(anyMap());
+
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(entries.get(0).partition(), compactBefore);
+        assertThatThrownBy(() -> task.doCompact(spiedTable, "reader-close-on-failure"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("newWrite failed");
+        assertThat(readerClosed).isTrue();
     }
 
     private FileStoreTable createBlobSegmentsTable() throws Exception {
