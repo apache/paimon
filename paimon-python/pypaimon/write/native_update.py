@@ -78,18 +78,9 @@ def _native_update_paths_supported(table):
     return True
 
 
-def _native_update_table(table, columns=None):
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    selected = schema.names if columns is None else columns
-    if any(pa.types.is_nested(schema.field(name).type)
-           for name in selected if name in schema.names):
-        return None
-    return _native_row_id_table(table)
-
-
 def create_native_update(table, commit_user, columns):
     """Use the public core updater for direct and grouped row-ID updates."""
-    native_table = _native_update_table(table, columns)
+    native_table = _native_row_id_table(table)
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
@@ -102,7 +93,7 @@ def create_native_update(table, commit_user, columns):
 
 def create_native_update_by_row_id(table, commit_user, commit_identifier):
     """Create a core updater sharing one snapshot across incremental calls."""
-    native_table = _native_update_table(table)
+    native_table = _native_row_id_table(table)
     if native_table is None:
         return None
     if commit_identifier == BATCH_COMMIT_IDENTIFIER:
@@ -120,6 +111,7 @@ def _supported_upsert_key_type(data_type):
         pa.types.is_boolean, pa.types.is_integer, pa.types.is_string,
         pa.types.is_large_string, pa.types.is_binary, pa.types.is_large_binary,
         pa.types.is_fixed_size_binary, pa.types.is_date, pa.types.is_decimal,
+        pa.types.is_time, pa.types.is_timestamp,
     ))
 
 
@@ -130,8 +122,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         return None
     fields = table.table_schema.fields
     schema = PyarrowFieldParser.from_paimon_schema(fields)
-    if (any(not _supported_upsert_key_type(schema.field(key).type) for key in set(keys + table.partition_keys))
-            or any(pa.types.is_nested(schema.field(name).type) for name in columns)):
+    if any(not _supported_upsert_key_type(schema.field(key).type) for key in set(keys + table.partition_keys)):
         return None
     if not isinstance(data, pa.Table):
         # Missing fields retain their row-object semantics on the fallback
@@ -154,12 +145,8 @@ def create_native_upsert(table, commit_user, data, keys, columns):
     return NativeTableUpsert(table, writer, keys, data)
 
 
-def create_native_predicate_update(table, commit_user, columns, predicate):
+def create_native_predicate_update(table, commit_user, predicate):
     """Prepare a public core operation before any assignment can run."""
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    if any(pa.types.is_nested(schema.field(name).type)
-           for name in columns if name in schema.names):
-        return None
     native_table = _native_row_id_table(table)
     if native_table is None:
         return None
