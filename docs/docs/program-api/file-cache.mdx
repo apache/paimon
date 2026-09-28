@@ -126,14 +126,15 @@ The Java snippet is a method-body fragment; declare or handle the catalog except
 | `local-cache.dir` | String | (none) | Directory for storing cached blocks on disk. If not configured, memory cache is used. |
 | `local-cache.max-size` | MemorySize | See below | Maximum cached block bytes per cache manager. Least recently used blocks are evicted when the limit is exceeded. |
 | `local-cache.block-size` | MemorySize | 1 mb | Block size for caching. Files are logically divided into fixed-size blocks and cached independently. |
-| `local-cache.whitelist` | String | meta,global-index | Comma-separated list of file types to cache. Supported values: `meta`, `global-index`, `bucket-index`, `data`, `file-index`; Python also supports `parquet-data`. |
+| `local-cache.whitelist` | String | meta,global-index | Comma-separated list of file types to cache. Supported values: `meta`, `global-index`, `bucket-index`, `data`, `file-index`. |
+| `local-cache.exclude-extensions` | String | (empty) | Comma-separated file extensions to bypass, even when whitelisted. Supported in PyPaimon and paimon-rust. |
 
 When `local-cache.max-size` is omitted, Java has no configured size limit. PyPaimon uses a 256 MiB
 memory limit or a 10 GiB disk limit. Set the option explicitly when you want the same limit across
 clients. The limit accounts for cached block bytes, not all reader buffers or process memory.
 
-For PyPaimon, use `meta,global-index,parquet-data` to cache Parquet without BLOB bodies.
-`data` still includes all data formats.
+Use `local-cache.whitelist=meta,global-index,data` with `local-cache.exclude-extensions=blob`
+to cache data files except BLOB bodies.
 
 ## How It Works
 

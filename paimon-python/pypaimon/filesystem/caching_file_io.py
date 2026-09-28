@@ -26,6 +26,7 @@ the delegate FileIO.
 """
 
 import hashlib
+import io
 import os
 import threading
 from collections import OrderedDict
@@ -192,18 +193,32 @@ class LocalDiskCacheManager:
         self._file_size_cache[file_path] = size
 
 
-class CachingInputStream:
+class CachingInputStream(io.RawIOBase):
     """Wraps a remote stream with block-level caching."""
 
-    def __init__(self, file_io, file_path: str, cache):
+    def __init__(self, file_io, file_path: str, cache, file_size=None):
         self._file_io = file_io
         self._stream = None
         self._file_path = file_path
-        self._file_size = -1
+        self._file_size = -1 if file_size is None else file_size
         self._cache = cache
+        if file_size is not None:
+            cache.put_file_size(file_path, file_size)
         self._pos = 0
         self._io_lock = threading.Lock()
         self._remote_supports_pread = None
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def readinto(self, buffer):
+        view = memoryview(buffer).cast('B')
+        data = self.read(len(view))
+        view[:len(data)] = data
+        return len(data)
 
     def _get_file_size(self) -> int:
         if self._file_size == -1:
@@ -316,6 +331,7 @@ class CachingInputStream:
         if self._stream is not None:
             self._stream.close()
             self._stream = None
+        super().close()
 
     def __enter__(self):
         return self
@@ -333,9 +349,13 @@ class CachingFileIO(FileIO):
     fall through to the delegate directly.
     """
 
-    def __init__(self, delegate: FileIO, cache, whitelist=None):
+    def __init__(self, delegate: FileIO, cache, whitelist=None, excluded_extensions=None):
         self._delegate = delegate
         self._cache = cache
+        self._excluded_extensions = {
+            value.strip().lstrip('.').lower()
+            for value in (excluded_extensions or '').split(',') if value.strip().lstrip('.')
+        }
         if whitelist is None:
             self._whitelist = {FileType.META, FileType.GLOBAL_INDEX}
         else:
@@ -390,19 +410,25 @@ class CachingFileIO(FileIO):
         whitelist = FileType.parse_whitelist(opts.local_cache_whitelist())
         if not whitelist:
             return file_io
-        return CachingFileIO(file_io, cache, whitelist)
+        return CachingFileIO(
+            file_io, cache, whitelist, opts.local_cache_exclude_extensions())
 
     @property
     def properties(self):
         return self._delegate.properties
 
-    def new_input_stream(self, path: str):
+    def _is_cacheable(self, path: str):
         file_type = FileType.classify(path)
-        eligible = (file_type in self._whitelist
-                    or (file_type == FileType.PARQUET_DATA and FileType.DATA in self._whitelist))
-        if self._cache is None or not eligible or FileType.is_mutable(path):
+        extension = os.path.basename(path).rsplit('.', 1)[-1].lower()
+        return (self._cache is not None
+                and file_type in self._whitelist
+                and extension not in self._excluded_extensions
+                and not FileType.is_mutable(path))
+
+    def new_input_stream(self, path: str, file_size=None):
+        if not self._is_cacheable(path):
             return self._delegate.new_input_stream(path)
-        return CachingInputStream(self._delegate, path, self._cache)
+        return CachingInputStream(self._delegate, path, self._cache, file_size)
 
     def new_output_stream(self, path: str):
         return self._delegate.new_output_stream(path)
