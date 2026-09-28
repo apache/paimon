@@ -195,11 +195,11 @@ class LocalDiskCacheManager:
 class CachingInputStream:
     """Wraps a remote stream with block-level caching."""
 
-    def __init__(self, file_io, file_path: str, cache):
+    def __init__(self, file_io, file_path: str, cache, file_size=None):
         self._file_io = file_io
         self._stream = None
         self._file_path = file_path
-        self._file_size = -1
+        self._file_size = file_size if file_size is not None and file_size > 0 else -1
         self._cache = cache
         self._pos = 0
         self._io_lock = threading.Lock()
@@ -396,11 +396,11 @@ class CachingFileIO(FileIO):
     def properties(self):
         return self._delegate.properties
 
-    def new_input_stream(self, path: str):
+    def new_input_stream(self, path: str, file_size=None):
         file_type = FileType.classify(path)
         if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
             return self._delegate.new_input_stream(path)
-        return CachingInputStream(self._delegate, path, self._cache)
+        return CachingInputStream(self._delegate, path, self._cache, file_size)
 
     def new_output_stream(self, path: str):
         return self._delegate.new_output_stream(path)
@@ -471,3 +471,9 @@ class CachingFileIO(FileIO):
 
     def close(self):
         self._delegate.close()
+
+
+def open_input_stream_with_known_size(file_io, path, file_size):
+    if isinstance(file_io, CachingFileIO) and file_size is not None and file_size > 0:
+        return file_io.new_input_stream(path, file_size=file_size)
+    return file_io.new_input_stream(path)
