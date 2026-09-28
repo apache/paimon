@@ -32,9 +32,9 @@ import org.apache.paimon.oss.OSSFileIO;
 import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 
-import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests {@link RESTTokenFileIO} over a real {@link OSSFileIO} against a local catalog and OSS. */
@@ -44,11 +44,9 @@ public class RESTTokenFileIOOnOSSTest {
     @Test
     public void testOpenStreamPicksUpRefreshedTokenAfterCacheEviction() throws Exception {
         try (FakeRESTAndOSSServer server = new FakeRESTAndOSSServer()) {
-            // the first token enters the refresh window five seconds from now
-            long firstExpiresAt =
-                    System.currentTimeMillis() + TOKEN_EXPIRATION_SAFE_TIME_MILLIS + 5000;
-            server.addToken("ak-1", firstExpiresAt);
-            server.addToken("ak-2", firstExpiresAt + TOKEN_EXPIRATION_SAFE_TIME_MILLIS * 4);
+            long now = System.currentTimeMillis();
+            server.addToken("ak-1", now + Duration.ofHours(2).toMillis());
+            server.addToken("ak-2", now + Duration.ofHours(4).toMillis());
             Options options = server.catalogOptions();
             options.set("fs.oss.multipart.download.size", "1024");
             options.set("fs.oss.multipart.download.threads", "1");
@@ -66,12 +64,12 @@ public class RESTTokenFileIOOnOSSTest {
 
                 RESTTokenFileIO.invalidateFileIOCache();
                 System.gc();
-                while (System.currentTimeMillis()
-                        < firstExpiresAt - TOKEN_EXPIRATION_SAFE_TIME_MILLIS + 100) {
-                    Thread.sleep(100);
-                }
+                // 30 minutes left is inside the refresh window
+                RESTTokenRefresher.clockOffsetMillis = Duration.ofMinutes(90).toMillis();
                 in.seek(3000);
                 in.read(new byte[1024]);
+            } finally {
+                RESTTokenRefresher.clockOffsetMillis = 0;
             }
 
             List<String> authorizations = server.ossGetAuthorizations();
