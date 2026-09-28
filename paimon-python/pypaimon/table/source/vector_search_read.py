@@ -827,8 +827,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         if table.num_rows == 0:
             return [DictBasedScoredIndexResult({}) for _ in range(n)]
 
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
+        metric = self._search_metric(index_type)
 
         return _raw_batch_search_from_arrow(
             table, self._vector_column.name, self._query_vectors, metric, self._limit)
