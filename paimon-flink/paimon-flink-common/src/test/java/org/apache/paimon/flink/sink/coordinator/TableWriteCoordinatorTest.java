@@ -326,9 +326,6 @@ class TableWriteCoordinatorTest extends TableTestBase {
                         .primaryKey("pt", "k")
                         .partitionKeys("pt")
                         .option(CoreOptions.BUCKET.key(), String.valueOf(tableBuckets))
-                        .option(
-                                CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED.key(),
-                                Boolean.TRUE.toString())
                         .build();
         catalog.createTable(identifier, schema, false);
         FileStoreTable table = getTable(identifier);
@@ -357,6 +354,9 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         // Reload the table and create coordinator
         FileStoreTable freshTable = getTable(identifier);
+        Options options = new Options(freshTable.options());
+        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, true);
+        freshTable = freshTable.copy(freshTable.schema().copy(options.toMap()));
         TableWriteCoordinator coordinator = new TableWriteCoordinator(freshTable);
 
         BinaryRow partitionA = partitionRow(1);
