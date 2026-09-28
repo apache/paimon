@@ -70,12 +70,14 @@ class RESTTokenRefresherTest {
                 .thenThrow(new IllegalStateException("REST server unavailable"))
                 .thenReturn(response("second", hours(4)));
         RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(30)));
+        // past half of its lifetime, so it is due for a reload
+        now.addAndGet(Duration.ofMinutes(20).toMillis());
 
         assertThat(refresher.token().token()).containsEntry("k", "first");
         assertThat(refresher.token().token()).containsEntry("k", "first");
         verify(api, times(1)).loadTableToken(identifier);
 
-        now.addAndGet(RESTTokenRefresher.RETRY_INTERVAL_MILLIS);
+        now.addAndGet(RESTTokenRefresher.RELOAD_INTERVAL_MILLIS);
         assertThat(refresher.token().token()).containsEntry("k", "second");
         verify(api, times(2)).loadTableToken(identifier);
     }
@@ -92,6 +94,7 @@ class RESTTokenRefresherTest {
                             return response("second", hours(4));
                         });
         RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(30)));
+        now.addAndGet(Duration.ofMinutes(20).toMillis());
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             Future<RESTToken> reloading = executor.submit(refresher::token);
@@ -105,6 +108,23 @@ class RESTTokenRefresherTest {
             release.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void testShortLivedTokenIsReusedUntilHalfOfItsLifetime() {
+        when(api.loadTableToken(identifier))
+                .thenAnswer(invocation -> response("next", Duration.ofMinutes(30)));
+        RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(30)));
+
+        now.addAndGet(Duration.ofMinutes(16).toMillis());
+        for (int i = 0; i < 20; i++) {
+            assertThat(refresher.token().token()).containsEntry("k", "next");
+        }
+        verify(api, times(1)).loadTableToken(identifier);
+
+        now.addAndGet(Duration.ofMinutes(16).toMillis());
+        refresher.token();
+        verify(api, times(2)).loadTableToken(identifier);
     }
 
     @Test
@@ -153,7 +173,7 @@ class RESTTokenRefresherTest {
 
     private GetTableTokenResponse response(String value, Duration lifetime) {
         return new GetTableTokenResponse(
-                Collections.singletonMap("k", value), NOW + lifetime.toMillis());
+                Collections.singletonMap("k", value), now.get() + lifetime.toMillis());
     }
 
     private static Duration hours(int hours) {

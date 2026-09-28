@@ -48,6 +48,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -68,7 +69,7 @@ public class RESTTokenFileIO implements FileIO {
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
 
-    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
+    private static final Cache<DelegateKey, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .maximumSize(1000)
                     .expireAfterAccess(10, TimeUnit.HOURS)
@@ -118,6 +119,9 @@ public class RESTTokenFileIO implements FileIO {
     // the latest token from REST Server, serializable in order to avoid loading token from the REST
     // Server again after serialization
     private volatile RESTToken token;
+
+    // The table and catalog options a delegate refreshes its token with, computed once.
+    private transient volatile DelegateContext delegateContext;
 
     public RESTTokenFileIO(
             CatalogContext catalogContext, RESTApi apiInstance, Identifier identifier, Path path) {
@@ -252,13 +256,16 @@ public class RESTTokenFileIO implements FileIO {
                             + "REST credential lifetime after refresh.");
         }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
+        // A delegate reloads its token as a table and a catalog user, so it is shared only
+        // with callers that have the same ones.
+        DelegateKey key = new DelegateKey(currentToken, delegateContext());
+        FileIO fileIO = FILE_IO_CACHE.getIfPresent(key);
         if (fileIO != null) {
             return new FileIOWithToken(fileIO, currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
+            fileIO = FILE_IO_CACHE.getIfPresent(key);
             if (fileIO != null) {
                 return new FileIOWithToken(fileIO, currentToken);
             }
@@ -275,7 +282,7 @@ public class RESTTokenFileIO implements FileIO {
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
             fileIO = FileIO.get(path, context);
-            FILE_IO_CACHE.put(currentToken, fileIO);
+            FILE_IO_CACHE.put(key, fileIO);
             return new FileIOWithToken(fileIO, currentToken);
         }
     }
@@ -309,6 +316,68 @@ public class RESTTokenFileIO implements FileIO {
                         < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
     }
 
+    /** The table and catalog options that a delegate reloads its token with. */
+    private static final class DelegateContext {
+
+        private final Identifier table;
+        private final Map<String, String> catalogOptions;
+        private final int hash;
+
+        private DelegateContext(Identifier table, Map<String, String> catalogOptions) {
+            this.table = table;
+            this.catalogOptions = catalogOptions;
+            this.hash = Objects.hash(table, catalogOptions);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof DelegateContext)) {
+                return false;
+            }
+            DelegateContext that = (DelegateContext) o;
+            return hash == that.hash
+                    && table.equals(that.table)
+                    && catalogOptions.equals(that.catalogOptions);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+    }
+
+    /** Cache key of a delegate: its token and the context it reloads the token with. */
+    private static final class DelegateKey {
+
+        private final RESTToken token;
+        private final DelegateContext context;
+
+        private DelegateKey(RESTToken token, DelegateContext context) {
+            this.token = token;
+            this.context = context;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof DelegateKey)) {
+                return false;
+            }
+            DelegateKey that = (DelegateKey) o;
+            return token.equals(that.token) && context.equals(that.context);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * token.hashCode() + context.hashCode();
+        }
+    }
+
     private static class FileIOWithToken {
 
         private final FileIO fileIO;
@@ -335,6 +404,15 @@ public class RESTTokenFileIO implements FileIO {
                 new RESTToken(
                         mergeTokenWithCatalogOptions(response.getToken()),
                         response.getExpiresAtMillis());
+    }
+
+    private DelegateContext delegateContext() {
+        DelegateContext context = delegateContext;
+        if (context == null) {
+            context = new DelegateContext(tokenIdentifier(), catalogContext.options().toMap());
+            delegateContext = context;
+        }
+        return context;
     }
 
     private Identifier tokenIdentifier() {
