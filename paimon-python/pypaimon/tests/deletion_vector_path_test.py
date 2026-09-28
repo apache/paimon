@@ -128,7 +128,8 @@ def test_delete_paths_preserve_repeated_deletes_and_historical_reads(tmp_path, p
         else:
             expected = Path(table.table_path) / 'index' / file.file_name
         assert expected.is_file()
-        assert file.external_path == ('file://' + str(expected) if 'external' in layout else None)
+        assert file.external_path == (('file:' if layout == 'bucket-external' else 'file://')
+                                      + str(expected) if 'external' in layout else None)
         # Obsolete locations with the same name must never shadow canonical or
         # explicit paths. Invalid bytes make a wrong-path read fail observably.
         if layout != 'table':

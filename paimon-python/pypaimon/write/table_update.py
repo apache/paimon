@@ -683,7 +683,6 @@ class TableUpdate:
         splits = scan.plan_for_write().splits()
         if (splits
                 and self.table.options.native_write_enabled()
-                and self.table.options.data_file_path_directory() is None
                 and not any(isinstance(split, QueryAuthSplit)
                             for split in splits)):
             try:

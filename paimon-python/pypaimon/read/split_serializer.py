@@ -36,6 +36,7 @@ from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import (
     GenericRow, GenericRowDeserializer, GenericRowSerializer)
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.path import to_file_io_path
 from pypaimon.utils.range import Range
 
 # Frame magics/versions, mirroring the Rust/Java constants.
@@ -654,7 +655,8 @@ def _datafilemeta_from_row(row_bytes: bytes, bucket_path: str, arity: int,
         write_cols_sequences=(
             _decode_non_null_long_array(g(20)) if arity >= 21 else None),
     )
-    meta.file_path = external_path if external_path else "%s/%s" % (bucket_path.rstrip('/'), file_name)
+    meta.file_path = external_path if external_path else to_file_io_path(
+        "%s/%s" % (bucket_path.rstrip('/'), file_name))
     return meta
 
 
@@ -691,7 +693,7 @@ def _read_deletion_list(r: _Reader) -> Optional[List[Optional[DeletionFile]]]:
         path = r.java_utf()
         offset, length, cardinality = r.i64(), r.i64(), r.i64()
         result.append(DeletionFile(
-            dv_index_path=path,
+            dv_index_path=to_file_io_path(path),
             offset=offset,
             length=length,
             cardinality=None if cardinality == -1 else cardinality,
