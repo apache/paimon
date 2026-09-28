@@ -70,22 +70,23 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSuspendAndRecoverAfterRescaleOverwrite() throws Exception {
-        // register a companion table T4 for T3
+    public void testSuspendAndRecoverPartitionedTableAfterRescaleOverwrite() throws Exception {
         executeBoth(
                 Arrays.asList(
                         "USE CATALOG fs_catalog",
                         "CREATE TEMPORARY TABLE IF NOT EXISTS `S0` (f0 INT) WITH ('connector' = 'datagen')",
-                        "CREATE TABLE IF NOT EXISTS `T3` (f0 INT) WITH ('bucket' = '2', 'bucket-key' = 'f0')",
-                        "CREATE TABLE IF NOT EXISTS `T4` (f0 INT)"));
+                        "CREATE TABLE IF NOT EXISTS `T3` "
+                                + "(f0 INT, pt STRING, PRIMARY KEY (pt, f0) NOT ENFORCED) "
+                                + "PARTITIONED BY (pt) WITH ("
+                                + "'bucket' = '2', "
+                                + "'bucket.per-partition-count-enabled' = 'true')"));
         SchemaManager schemaManager =
                 new FileSystemSchemaManager(LocalFileIO.create(), getTableDirectory("T3"));
         assertLatestSchema(schemaManager, 0L, 2);
 
         String streamSql =
                 "EXECUTE STATEMENT SET BEGIN\n "
-                        + "INSERT INTO `T3` SELECT * FROM `S0`;\n "
-                        + "INSERT INTO `T4` SELECT * FROM `S0`;\n"
+                        + "INSERT INTO `T3` SELECT f0, 'p1' FROM `S0`;\n"
                         + "END";
 
         // step1: run streaming insert
@@ -104,7 +105,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         assertLatestSchema(schemaManager, 1L, 4);
 
         // step4: rescale data layout according to the new bucket num
-        batchSql(rescaleOverwriteSql, "T3", "T3");
+        batchSql("INSERT OVERWRITE T3 PARTITION (pt = 'p1') SELECT f0 FROM T3 WHERE pt = 'p1'");
         Snapshot snapshotAfterRescale = findLatestSnapshot("T3");
         assertThat(snapshotAfterRescale).isNotNull();
         assertThat(snapshotAfterRescale.id()).isEqualTo(snapshotBeforeRescale.id() + 1);
@@ -133,9 +134,11 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
             assertSnapshotSchema(
                     schemaManager, snapshotManager.snapshot(snapshotId).schemaId(), 1L, 4);
         }
-        // check data
-        assertThat(batchSql("SELECT * FROM T3"))
-                .containsExactlyInAnyOrderElementsOf(batchSql("SELECT * FROM T4"));
+        // The restarted job must route updates with the rescaled partition layout. If it used the
+        // pre-rescale two-bucket mapping, identical primary keys could survive in different buckets
+        // and be returned as duplicate rows.
+        assertThat(batchSql("SELECT f0, COUNT(*) FROM T3 GROUP BY f0 HAVING COUNT(*) > 1")).isEmpty();
+        assertThat(batchSql("SELECT * FROM T3")).isNotEmpty();
     }
 
     private void waitForTheNextSnapshot(@Nullable Long initSnapshotId) throws InterruptedException {

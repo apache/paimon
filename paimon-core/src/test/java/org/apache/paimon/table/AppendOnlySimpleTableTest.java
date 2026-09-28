@@ -158,6 +158,57 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testBucketedAppendTableWriteWithInit() throws Exception {
+        innerTestBucketedAppendTableWriteInit(true);
+    }
+
+    @Test
+    public void testBucketedAppendTableWriteNoInit() throws Exception {
+        innerTestBucketedAppendTableWriteInit(false);
+    }
+
+    public void innerTestBucketedAppendTableWriteInit(boolean ordered) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 2);
+                            options.set(BUCKET_KEY, "a");
+                            options.set(WRITE_ONLY, true);
+                            options.set(BUCKET_APPEND_ORDERED, ordered);
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        // 1. first write
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(write.prepareCommit());
+        }
+
+        // 2. delete all manifests
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        List<ManifestFileMeta> manifests =
+                manifestList.readAllManifests(table.latestSnapshot().get());
+        for (ManifestFileMeta manifest : manifests) {
+            manifestFile.delete(manifest.fileName());
+        }
+
+        // 3. check new write
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            if (ordered) {
+                assertThatThrownBy(() -> write.write(rowData(1, 10, 100L)))
+                        .hasMessageContaining("Failed to restore existing files")
+                        .hasRootCauseInstanceOf(java.io.FileNotFoundException.class);
+            } else {
+                // no exception
+                write.write(rowData(1, 10, 100L));
+            }
+        }
+    }
+
+    @Test
     public void testBucketedAppendOrderedSequenceNumbers() throws Exception {
         innerTestBucketedAppendSequenceNumbers(true);
     }

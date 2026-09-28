@@ -89,9 +89,10 @@ Please note that
 - **Streaming jobs must be restarted after rescaling a partition.** The per-partition bucket mapping
   is loaded once when the streaming job starts (from the manifest files at that point in time). If a
   partition is rescaled while the streaming job is running, the job will continue routing rows using
-  the old bucket count for that partition, which can cause rows to land in wrong buckets and lead to
-  data correctness issues. The recommended workflow is: suspend the streaming job with a savepoint →
-  perform the rescale overwrite → restart from the savepoint.
+  the old bucket count for that partition. The writer detects the stale routing bucket count when it
+  restores the partition's new layout and fails the job before it can write incorrectly routed data.
+  The required workflow is: suspend the streaming job with a savepoint → perform the rescale overwrite
+  → restart from the savepoint.
 
 
 ## Use Case
