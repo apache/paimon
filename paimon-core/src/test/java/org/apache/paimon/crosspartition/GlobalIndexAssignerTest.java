@@ -244,6 +244,63 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
+    public void testLateBootstrapKeyDoesNotOverwriteAssignedKey() throws Exception {
+        // with unaligned checkpoints an input ROW can be processed before a late KEY_PART for the
+        // same primary key arrives; the newer input must win, the late bootstrap state must not
+        // overwrite the freshly assigned index entry
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
+        List<List<Integer>> output = new ArrayList<>();
+        assigner.open(
+                0,
+                null,
+                ioManager(),
+                2,
+                0,
+                (row, bucket) ->
+                        output.add(
+                                Arrays.asList(
+                                        row.getInt(0), row.getInt(1), row.getInt(2), bucket)));
+
+        assigner.endBoostrap(false);
+        // input ROW for pk=1 in partition 9 is processed first: registers keyIndex[1]=(pt=9, 0)
+        assigner.processInput(GenericRow.of(9, 1, 1));
+        // a KEY_PART for the same pk=1 carrying the stale pre-checkpoint location (pt=2, bucket=2)
+        // arrives late: (pk, pt, bucket). It must not overwrite the freshly assigned entry
+        assigner.bootstrapKey(GenericRow.of(1, 2, 2));
+        // a later same-pk record in partition 9 must still route to its assigned bucket (0),
+        // proving keyIndex still points at the input location, not the stale bootstrap one
+        assigner.processInput(GenericRow.of(9, 1, 5));
+
+        assertThat(output)
+                .containsExactly(Arrays.asList(9, 1, 1, 0), Arrays.asList(9, 1, 5, 0));
+        assigner.close();
+    }
+
+    @Test
+    public void testLateBootstrapKeyRegistersAndRetractsOldPartition() throws Exception {
+        // a late KEY_PART arriving before any same-pk input must register the pre-checkpoint
+        // location, so a following cross-partition input retracts the old row instead of
+        // leaving a cross-partition duplicate -- this pins the late-key keyIndex.put itself
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
+        List<Pair<InternalRow, Integer>> output = new ArrayList<>();
+        assigner.open(
+                0, null, ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
+
+        assigner.endBoostrap(false);
+        // late KEY_PART registers keyIndex[pk=1]=(pt=2, bucket=2): (pk, pt, bucket)
+        assigner.bootstrapKey(GenericRow.of(1, 2, 2));
+        // a cross-partition input for the same pk must see the registered old location (pt=2)
+        // and retract it before assigning the new partition (pt=9)
+        assigner.processInput(GenericRow.of(9, 1, 5));
+
+        Assertions.assertThat(output)
+                .containsExactly(
+                        Pair.of(GenericRow.ofKind(RowKind.DELETE, 2, 1, 5), 2),
+                        Pair.of(GenericRow.of(9, 1, 5), 0));
+        assigner.close();
+    }
+
+    @Test
     public void testBootstrapRecords() throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<List<Integer>> output = new ArrayList<>();

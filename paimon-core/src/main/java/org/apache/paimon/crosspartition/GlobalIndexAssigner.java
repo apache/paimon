@@ -195,9 +195,12 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
             bootstrapKeys.write(
                     GenericRow.of(
                             keyIndex.serializeKey(key), keyIndex.serializeValue(partAndBucket)));
-        } else {
+        } else if (keyIndex.get(key) == null) {
             // with unaligned checkpoints the bootstrap can end on the barrier while KEY_PART
-            // records are still queued: register the key directly instead of crashing
+            // records are still queued: register a late key directly instead of crashing, but
+            // only when no input record has already assigned it -- a newer input must win over
+            // the bootstrapped (pre-checkpoint) state, otherwise this stale put would leave
+            // keyIndex pointing at a bucket that no longer holds the record
             keyIndex.put(key, partAndBucket);
         }
     }
