@@ -20,12 +20,12 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.fs.CredentialsSupplierRegistry;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTTokenRefresher;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.ReflectionUtils;
 import org.apache.paimon.utils.SensitiveConfigUtils;
@@ -137,10 +137,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     private Options hadoopOptions;
     private boolean allowCache = true;
-    @Nullable private String credentialsSupplierId;
 
-    // Keeps the supplier alive until the file systems created here have picked it up.
-    @Nullable private transient Supplier<Map<String, String>> credentialsSupplier;
+    // Catalog options for RESTTokenCredentialsProvider when the options name a REST catalog table.
+    @Nullable private Map<String, String> restTokenOptions;
 
     @Override
     public boolean isObjectStore() {
@@ -149,12 +148,12 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     @Override
     public void configure(CatalogContext context) {
-        String supplierId = context.options().get(CredentialsSupplierRegistry.SUPPLIER_ID);
-        credentialsSupplier =
-                supplierId == null ? null : CredentialsSupplierRegistry.get(supplierId);
-        credentialsSupplierId = credentialsSupplier == null ? null : supplierId;
-        // The file system is bound to the supplier, so it must not be shared through the cache.
-        allowCache = context.options().get(FILE_IO_ALLOW_CACHE) && credentialsSupplierId == null;
+        restTokenOptions =
+                RESTTokenRefresher.isConfigured(context.options())
+                        ? context.options().toMap()
+                        : null;
+        // The file system refreshes a table's token, so it must not be shared through the cache.
+        allowCache = context.options().get(FILE_IO_ALLOW_CACHE) && restTokenOptions == null;
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -208,12 +207,16 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                     // retrieve props from the file, which comes at a high cost
                     Configuration hadoopConf = new Configuration(SHARED_CONFIG);
                     hadoopOptions.toMap().forEach(hadoopConf::set);
-                    if (credentialsSupplierId != null) {
+                    if (restTokenOptions != null) {
                         hadoopConf.set(
                                 OSS_CREDENTIALS_PROVIDER,
-                                RegisteredCredentialsProvider.class.getName());
-                        hadoopConf.set(
-                                CredentialsSupplierRegistry.SUPPLIER_ID, credentialsSupplierId);
+                                RESTTokenCredentialsProvider.class.getName());
+                        restTokenOptions.forEach(
+                                (key, value) ->
+                                        hadoopConf.set(
+                                                RESTTokenCredentialsProvider.CATALOG_OPTIONS_PREFIX
+                                                        + key,
+                                                value));
                     }
                     URI fsUri = path.toUri();
                     if (scheme == null && authority == null) {
