@@ -87,6 +87,16 @@ public class OSSRetryStrategyTest {
     }
 
     @Test
+    public void testDisabledFallsBackToSdkRetry() {
+        throttledCompletes = 1;
+        OSSFileIO fileIO = fileIO(10, false);
+
+        assertThatThrownBy(() -> writeMultipartFile(fileIO))
+                .hasStackTraceContaining("QpsLimitExceeded");
+        assertThat(completeCalls).hasValue(1);
+    }
+
+    @Test
     public void testThrottledDeleteObjectsIsRetried() throws Exception {
         throttledDeletes = 1;
         Path path = new Path("oss://bucket/dir/file");
@@ -163,7 +173,12 @@ public class OSSRetryStrategyTest {
     }
 
     private OSSFileIO fileIO(int maxAttempts) {
+        return fileIO(maxAttempts, true);
+    }
+
+    private OSSFileIO fileIO(int maxAttempts, boolean enhancedRetry) {
         Options options = new Options();
+        options.set("fs.oss.enhanced-retry.enabled", String.valueOf(enhancedRetry));
         options.set("fs.oss.endpoint", "http://127.0.0.1:" + server.getAddress().getPort());
         options.set("fs.oss.accessKeyId", "ak");
         options.set("fs.oss.accessKeySecret", "sk");

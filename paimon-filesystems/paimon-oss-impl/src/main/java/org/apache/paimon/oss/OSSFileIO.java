@@ -91,6 +91,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
      * from the host it signs, which the server rejects with SignatureDoesNotMatch.
      */
     private static final String OSS_CNAME_ENABLED = "fs.oss.cname.enabled";
+
+    /** Set to false to use the OSS SDK default retry instead of {@link OSSRetryStrategy}. */
+    private static final String OSS_ENHANCED_RETRY_ENABLED = "fs.oss.enhanced-retry.enabled";
+
     // Paimon OSS SSE keys, mapping 1:1 to the OSS headers; they take precedence over hadoop's
     // server-side-encryption-algorithm.
     /** SSE method -> x-oss-server-side-encryption (AES256 / KMS / SM4). */
@@ -213,7 +217,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                         throw new UncheckedIOException(e);
                     }
 
-                    setRetryStrategy(fs);
+                    if (hadoopOptions.getBoolean(OSS_ENHANCED_RETRY_ENABLED, true)) {
+                        setRetryStrategy(fs);
+                    }
 
                     if (hadoopOptions.getBoolean(OSS_SECOND_LEVEL_DOMAIN_ENABLED, false)) {
                         enableSecondLevelDomain(fs);
