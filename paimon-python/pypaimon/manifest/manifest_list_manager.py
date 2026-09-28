@@ -21,7 +21,7 @@ from typing import List, Optional
 import fastavro
 
 from pypaimon.filesystem.caching_file_io import (
-    CachingInputStream, open_input_stream_with_known_size)
+    CachingInputStream, _open_input_stream_with_known_size)
 from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -76,7 +76,7 @@ class ManifestListManager:
         manifest_files = []
 
         manifest_list_path = f"{self.manifest_path}/{manifest_list_name}"
-        with open_input_stream_with_known_size(
+        with _open_input_stream_with_known_size(
                 self.file_io, manifest_list_path, file_size) as input_stream:
             avro_bytes = input_stream.read()
             if (isinstance(input_stream, CachingInputStream) and file_size is not None

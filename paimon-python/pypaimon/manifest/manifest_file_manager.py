@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover - supported fastavro versions provide th
 from datetime import datetime
 
 from pypaimon.filesystem.caching_file_io import (
-    CachingInputStream, open_input_stream_with_known_size)
+    CachingInputStream, _open_input_stream_with_known_size)
 from pypaimon.manifest.manifest_sidecar import (
     Query, read_sidecar, read_selected_bytes,
 )
@@ -216,7 +216,7 @@ class ManifestFileManager:
             avro_bytes = read_selected_bytes(
                 self.file_io, manifest_file_path, selected_blocks, file_size)
         else:
-            with open_input_stream_with_known_size(
+            with _open_input_stream_with_known_size(
                     self.file_io, manifest_file_path, file_size) as input_stream:
                 avro_bytes = input_stream.read()
                 if (isinstance(input_stream, CachingInputStream) and file_size is not None

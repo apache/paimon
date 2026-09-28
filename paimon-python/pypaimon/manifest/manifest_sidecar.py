@@ -28,7 +28,7 @@ from typing import Tuple
 
 from pyarrow import ArrowCancelled
 
-from pypaimon.filesystem.caching_file_io import open_input_stream_with_known_size
+from pypaimon.filesystem.caching_file_io import _open_input_stream_with_known_size
 from pypaimon.utils.range import Range
 from pypaimon.table.row.generic_row import GenericRowSerializer, GenericRowDeserializer
 
@@ -513,7 +513,7 @@ def read_selected_bytes(file_io, manifest_path, selected, file_size=None):
     must not be stored in a cache keyed by the complete manifest.
     """
     data = bytearray(selected.header)
-    with open_input_stream_with_known_size(file_io, manifest_path, file_size) as stream:
+    with _open_input_stream_with_known_size(file_io, manifest_path, file_size) as stream:
         block_position = 0
         while block_position < len(selected.blocks):
             block = selected.blocks[block_position]

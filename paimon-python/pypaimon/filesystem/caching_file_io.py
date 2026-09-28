@@ -396,7 +396,10 @@ class CachingFileIO(FileIO):
     def properties(self):
         return self._delegate.properties
 
-    def new_input_stream(self, path: str, file_size=None):
+    def new_input_stream(self, path: str):
+        return self._new_input_stream_with_known_size(path, None)
+
+    def _new_input_stream_with_known_size(self, path: str, file_size):
         file_type = FileType.classify(path)
         if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
             return self._delegate.new_input_stream(path)
@@ -473,7 +476,7 @@ class CachingFileIO(FileIO):
         self._delegate.close()
 
 
-def open_input_stream_with_known_size(file_io, path, file_size):
+def _open_input_stream_with_known_size(file_io, path, file_size):
     if isinstance(file_io, CachingFileIO) and file_size is not None and file_size > 0:
-        return file_io.new_input_stream(path, file_size=file_size)
+        return file_io._new_input_stream_with_known_size(path, file_size)
     return file_io.new_input_stream(path)
