@@ -28,6 +28,7 @@ from pypaimon.filesystem.caching_file_io import CachingFileIO, LocalMemoryCacheM
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.manifest_sidecar import Block, Selection, read_selected_bytes
 from pypaimon.schema.schema import Schema
+from pypaimon.write.commit.commit_scanner import CommitScanner
 
 
 @pytest.mark.parametrize('disk', [False, True])
@@ -66,6 +67,19 @@ def test_scan_uses_manifest_sizes_without_file_status(tmp_path, disk):
         splits = fresh_table.new_read_builder().new_scan().plan().splits()
     assert splits
     assert fresh_table.new_read_builder().new_read().to_arrow(splits).column('v').to_pylist() == [1, 2, 3]
+    assert not [call for call in get_size.call_args_list
+                if '/manifest/' in call[0][0]]
+
+    # Conflict retries read raw delta manifests through CommitScanner.
+    retry_catalog = FileSystemCatalog(Options(options))
+    retry_table = retry_catalog.get_table('default.t')
+    retry_delegate = retry_table.file_io._delegate
+    scanner = CommitScanner(retry_table, ManifestListManager(retry_table))
+    with patch.object(retry_delegate, 'get_file_size',
+                      wraps=retry_delegate.get_file_size) as get_size:
+        entries = scanner.read_incremental_raw_entries_from_changed_partitions(
+            snapshot, [])
+    assert entries
     assert not [call for call in get_size.call_args_list
                 if '/manifest/' in call[0][0]]
 

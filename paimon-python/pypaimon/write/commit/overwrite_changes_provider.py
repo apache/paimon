@@ -110,7 +110,8 @@ class OverwriteChangesProvider:
         # snapshots are applied instead of being discarded by FileScanner.
         entries = []
         for manifest_file in delta_manifests:
-            for entry in manifest_file_manager.read(manifest_file.file_name):
+            for entry in manifest_file_manager.read(
+                    manifest_file.file_name, file_size=manifest_file.file_size):
                 if (self.partition_filter is not None
                         and not self.partition_filter.test(entry.partition)):
                     continue

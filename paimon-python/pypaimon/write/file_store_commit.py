@@ -891,7 +891,8 @@ class FileStoreCommit:
                         for manifest in self.manifest_list_manager.read_delta(
                                 snapshot):
                             entries.extend(self.manifest_file_manager.read(
-                                manifest.file_name, drop_stats=False))
+                                manifest.file_name, drop_stats=False,
+                                file_size=manifest.file_size))
                         path_factory = self.table.path_factory()
                         for entry in entries:
                             file = entry.file
