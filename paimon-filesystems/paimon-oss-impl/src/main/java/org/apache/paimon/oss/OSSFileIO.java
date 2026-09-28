@@ -213,6 +213,8 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                         throw new UncheckedIOException(e);
                     }
 
+                    setRetryStrategy(fs);
+
                     if (hadoopOptions.getBoolean(OSS_SECOND_LEVEL_DOMAIN_ENABLED, false)) {
                         enableSecondLevelDomain(fs);
                     }
@@ -303,6 +305,15 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         } catch (Exception e) {
             LOG.error("Failed to enable second level domain.", e);
             throw new RuntimeException("Failed to enable second level domain.", e);
+        }
+    }
+
+    /** Replace the SDK retry strategy, which never retries CompleteMultipartUpload on 503. */
+    private static void setRetryStrategy(AliyunOSSFileSystem fs) {
+        try {
+            getOssClient(fs).getClientConfiguration().setRetryStrategy(new OSSRetryStrategy());
+        } catch (Exception e) {
+            LOG.warn("Failed to set the OSS retry strategy, keeping the SDK default.", e);
         }
     }
 
