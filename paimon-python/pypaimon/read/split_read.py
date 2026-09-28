@@ -287,7 +287,7 @@ class SplitRead(ABC):
             read_paimon_predicate = None
 
         # Use external_path if available, otherwise use file_path
-        file_path = file.external_path if file.external_path else file.file_path
+        file_path = file.physical_path()
         file_format = format_identifier(os.path.basename(file_path))
 
         batch_size = self.table.options.read_batch_size()
@@ -607,12 +607,7 @@ class SplitRead(ABC):
 
     @staticmethod
     def _aligned_extra_file_path(file: DataFileMeta, extra_file: str) -> str:
-        if "://" in extra_file or extra_file.startswith("/"):
-            return extra_file
-        file_path = file.external_path if file.external_path else file.file_path
-        if not file_path or "/" not in file_path:
-            return extra_file
-        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
+        return file.aligned_file_path(extra_file)
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))
@@ -1751,7 +1746,7 @@ class DataEvolutionSplitRead(SplitRead):
             if not row_indices:
                 return None
 
-        file_path = file.external_path if file.external_path else file.file_path
+        file_path = file.physical_path()
         blob_parallelism = self._blob_parallelism
         return FormatBlobReader(
             self.table.file_io,
