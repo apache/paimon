@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -48,6 +49,9 @@ public class RESTTokenRefresher {
 
     // After a failed refresh, keep using the current token this long before trying again.
     static final long RETRY_INTERVAL_MILLIS = 10_000L;
+
+    // Shifts the clock of refreshers that providers create from options, for tests only.
+    @VisibleForTesting static volatile long clockOffsetMillis;
 
     private final Options catalogOptions;
     private final Identifier identifier;
@@ -140,6 +144,6 @@ public class RESTTokenRefresher {
     }
 
     long currentTimeMillis() {
-        return System.currentTimeMillis();
+        return System.currentTimeMillis() + clockOffsetMillis;
     }
 }
