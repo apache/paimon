@@ -271,8 +271,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         // proving keyIndex still points at the input location, not the stale bootstrap one
         assigner.processInput(GenericRow.of(9, 1, 5));
 
-        assertThat(output)
-                .containsExactly(Arrays.asList(9, 1, 1, 0), Arrays.asList(9, 1, 5, 0));
+        assertThat(output).containsExactly(Arrays.asList(9, 1, 1, 0), Arrays.asList(9, 1, 5, 0));
         assigner.close();
     }
 
