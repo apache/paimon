@@ -152,9 +152,44 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bloomOptions("f2", null));
         assertMergedGroup(table);
 
-        // a merged group is never row filtered, but the rows it returns must stay aligned
+        // A non-bitmap index cannot select rows, but the merged fields must stay aligned.
         List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)));
         assertThat(rows).hasSize(ROW_COUNT);
+        assertAligned(rows);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexSelectsMatchingRowsOnly() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)));
+        assertThat(rows).hasSize(1);
+        assertRow(rows.get(0), 50);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexIntersectsFieldSelections() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap_intersect", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        Predicate filter = PredicateBuilder.and(equalF1(f1(50)), equalF2(f2(50)));
+        List<InternalRow> rows = readWithFilter(table, filter);
+        assertThat(rows).hasSize(1);
+        assertRow(rows.get(0), 50);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexPreservesOrSelection() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap_or", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        Predicate filter = PredicateBuilder.or(equalF2(f2(50)), equalF2(f2(51)));
+        List<InternalRow> rows = readWithFilter(table, filter);
+        assertThat(rows).extracting(row -> row.getInt(0)).containsExactlyInAnyOrder(50, 51);
         assertAligned(rows);
     }
 
@@ -579,11 +614,12 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertThat(latest.fileIO().delete(anchorPath, false)).isTrue();
 
         // The deleted row is the only bitmap hit in the second merged group. The missing anchor
-        // file therefore proves that the group was skipped before any union reader opened it.
+        // file therefore proves that the group was skipped before any union reader opened it;
+        // the first group contributes its matching row through the shared bitmap selection.
         RowType readType =
                 rowTypeWithRowId(rowType()).project(SpecialFields.ROW_ID.name(), "f1", "f2");
         List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
-        assertThat(rowIds(rows)).containsExactlyElementsOf(rowIds(0, ROW_COUNT));
+        assertThat(rowIds(rows)).containsExactly(50L);
 
         FileStoreTable neighbour = createTable("merged_bitmap_dv_neighbour", options);
         writeSplitColumns(neighbour, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
