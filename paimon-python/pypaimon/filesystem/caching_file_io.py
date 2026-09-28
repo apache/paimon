@@ -419,7 +419,8 @@ class CachingFileIO(FileIO):
 
     def _is_cacheable(self, path: str):
         file_type = FileType.classify(path)
-        extension = os.path.basename(path).rsplit('.', 1)[-1].lower()
+        stem, _, extension = os.path.basename(path).rpartition('.')
+        extension = extension.lower() if stem else ''
         return (self._cache is not None
                 and file_type in self._whitelist
                 and extension not in self._excluded_extensions

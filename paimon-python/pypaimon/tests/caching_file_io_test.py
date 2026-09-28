@@ -336,6 +336,14 @@ class CachingFileIOTest(unittest.TestCase):
         result = caching_io.new_input_stream("global-index-uuid.index")
         self.assertNotIsInstance(result, CachingInputStream)
 
+    def test_extension_exclusion_does_not_match_extensionless_filename(self):
+        from pypaimon.utils.file_type import FileType
+        delegate = self._make_delegate({'snapshot-1': b'snap'})
+        cache = LocalDiskCacheManager(self.cache_dir, 1024, block_size=4)
+        caching_io = CachingFileIO(delegate, cache, {FileType.META}, 'snapshot-1')
+        with caching_io.new_input_stream('snapshot-1') as stream:
+            self.assertIsInstance(stream, CachingInputStream)
+
     def test_data_cache_excludes_blob_extension(self):
         from pypaimon.filesystem.caching_file_io import LocalMemoryCacheManager
         from pypaimon.utils.file_type import FileType
