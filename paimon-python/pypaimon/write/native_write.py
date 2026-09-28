@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
-from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
+from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field, is_blob_type
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
@@ -81,7 +81,10 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             or not _native_map_layouts_supported(table, schema)
             # Rust cannot encode these partition keys yet.
             or not _native_partition_types_supported(schema, table.partition_keys)
-            or any(is_blob_file_field(field) for field in table.table_schema.fields)):
+            # Native dedicated files currently support top-level scalar Blob fields.
+            or table.options.video_frame_fields()
+            or any(is_blob_file_field(field) and not is_blob_type(field.type)
+                   for field in table.table_schema.fields)):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -169,6 +172,10 @@ class NativeTableWrite:
     def write_row(self, row):
         if self._python_writer is not None:
             return self._python_writer.write_row(row)
+        if any(is_blob_file_field(field) for field in self.table.table_schema.fields):
+            # Select the row-aware writer from the first row, including byte
+            # values: later rows may provide custom Blob streams or URI readers.
+            return self._switch_to_python().write_row(row)
         values = row_to_named_values(row, self.table.table_schema.fields)
         names = list(self.table.field_names)
         self.write_arrow_batch(row_values_to_arrow_table(
