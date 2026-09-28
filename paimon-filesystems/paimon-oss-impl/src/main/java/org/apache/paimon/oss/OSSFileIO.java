@@ -308,7 +308,7 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         }
     }
 
-    /** Replace the SDK retry strategy, which never retries CompleteMultipartUpload on 503. */
+    /** Retry every request of this file system, so writes and deletes ride out OSS throttling. */
     private static void setRetryStrategy(AliyunOSSFileSystem fs) {
         try {
             getOssClient(fs).getClientConfiguration().setRetryStrategy(new OSSRetryStrategy());

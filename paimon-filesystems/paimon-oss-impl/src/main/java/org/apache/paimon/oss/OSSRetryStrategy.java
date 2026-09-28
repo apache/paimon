@@ -32,8 +32,8 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Retries throttling (429, 503 QpsLimitExceeded), 5xx and network errors on every OSS request. Once
- * set on the client configuration it also covers the POSTs the SDK never retries.
+ * Retry strategy for every OSS request of {@link OSSFileIO}, so closing a data file or deleting
+ * files survives throttling (QpsLimitExceeded), 5xx and network errors instead of failing the job.
  */
 class OSSRetryStrategy extends RetryStrategy {
 
@@ -66,7 +66,7 @@ class OSSRetryStrategy extends RetryStrategy {
         return response != null && RETRYABLE_STATUS.contains(response.getStatusCode());
     }
 
-    /** Capped exponential backoff with jitter, so throttled writers do not retry in lockstep. */
+    /** Capped exponential backoff with jitter, so parallel writers of a table spread retries. */
     @Override
     public long getPauseDelay(int retries) {
         long delay = Math.min(MAX_DELAY_MILLIS, BASE_DELAY_MILLIS << Math.min(retries, 16));
