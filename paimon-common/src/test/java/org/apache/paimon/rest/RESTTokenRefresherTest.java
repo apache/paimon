@@ -26,6 +26,10 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.Collections;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,12 +81,43 @@ class RESTTokenRefresherTest {
     }
 
     @Test
-    void testFailsWhenTheTokenExpiredAndRefreshFails() {
+    void testOtherCallersKeepTheValidTokenWhileOneReloads() throws Exception {
+        CountDownLatch loading = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(api.loadTableToken(identifier))
+                .thenAnswer(
+                        invocation -> {
+                            loading.countDown();
+                            release.await();
+                            return response("second", hours(4));
+                        });
+        RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(30)));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<RESTToken> reloading = executor.submit(refresher::token);
+            loading.await();
+
+            // does not wait for the reload in progress
+            assertThat(refresher.token().token()).containsEntry("k", "first");
+            release.countDown();
+            assertThat(reloading.get().token()).containsEntry("k", "second");
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testExpiredTokenFailsFastWithinTheRetryInterval() {
         when(api.loadTableToken(identifier))
                 .thenThrow(new IllegalStateException("REST server unavailable"));
         RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(-1)));
 
         assertThatThrownBy(refresher::token).hasMessageContaining("REST server unavailable");
+        assertThatThrownBy(refresher::token)
+                .hasMessageContaining("reloading it failed")
+                .hasRootCauseMessage("REST server unavailable");
+        verify(api, times(1)).loadTableToken(identifier);
     }
 
     @Test

@@ -28,6 +28,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.concurrent.locks.ReentrantLock;
+
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 
 /**
@@ -47,7 +49,7 @@ public class RESTTokenRefresher {
     /** Expiration of the token already present in the options. */
     public static final String EXPIRES_AT_MILLIS = "data-token.expires-at-millis";
 
-    // After a failed refresh, keep using the current token this long before trying again.
+    // After a failed reload, wait this long before asking the catalog again.
     static final long RETRY_INTERVAL_MILLIS = 10_000L;
 
     // Shifts the clock of refreshers that providers create from options, for tests only.
@@ -55,10 +57,14 @@ public class RESTTokenRefresher {
 
     private final Options catalogOptions;
     private final Identifier identifier;
+    private final ReentrantLock lock = new ReentrantLock();
 
-    @Nullable private RESTApi api;
     @Nullable private volatile RESTToken token;
+
+    // Guarded by lock.
+    @Nullable private RESTApi api;
     private long nextAttemptMillis;
+    @Nullable private RuntimeException lastFailure;
 
     RESTTokenRefresher(
             Options catalogOptions,
@@ -97,38 +103,63 @@ public class RESTTokenRefresher {
         return new RESTTokenRefresher(options, identifier, null, token);
     }
 
-    /** Returns the current token, loading a new one when it is about to expire. */
+    /** Returns the current token, reloading it from the catalog when it is about to expire. */
     public RESTToken token() {
         RESTToken current = token;
         if (current != null && !expiresSoon(current)) {
             return current;
         }
-        synchronized (this) {
-            current = token;
-            if (current != null && !expiresSoon(current)) {
+        // While the token is still valid, one caller reloads it and the others keep using it.
+        if (isValid(current)) {
+            if (!lock.tryLock()) {
                 return current;
             }
-            long now = currentTimeMillis();
-            boolean usable = current != null && now < current.expireAtMillis();
-            if (usable && now < nextAttemptMillis) {
-                return current;
-            }
-            try {
-                RESTToken loaded = load();
-                token = loaded;
-                return loaded;
-            } catch (RuntimeException e) {
-                if (!usable) {
-                    throw e;
-                }
-                nextAttemptMillis = now + RETRY_INTERVAL_MILLIS;
-                LOG.warn(
-                        "Failed to refresh the data token of {}, keeping the current one.",
-                        identifier,
-                        e);
-                return current;
-            }
+        } else {
+            lock.lock();
         }
+        try {
+            return reload();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private RESTToken reload() {
+        RESTToken current = token;
+        if (current != null && !expiresSoon(current)) {
+            return current;
+        }
+        boolean valid = isValid(current);
+        long now = currentTimeMillis();
+        if (now < nextAttemptMillis) {
+            if (valid) {
+                return current;
+            }
+            throw new IllegalStateException(
+                    "The data token of " + identifier + " expired and reloading it failed.",
+                    lastFailure);
+        }
+        try {
+            RESTToken loaded = load();
+            token = loaded;
+            lastFailure = null;
+            return loaded;
+        } catch (RuntimeException e) {
+            lastFailure = e;
+            nextAttemptMillis = now + RETRY_INTERVAL_MILLIS;
+            if (!valid) {
+                throw e;
+            }
+            LOG.warn(
+                    "Failed to reload the data token of {}, keeping the current one.",
+                    identifier,
+                    e);
+            return current;
+        }
+    }
+
+    private boolean isValid(@Nullable RESTToken token) {
+        return token != null && currentTimeMillis() < token.expireAtMillis();
     }
 
     private boolean expiresSoon(RESTToken token) {
@@ -140,7 +171,10 @@ public class RESTTokenRefresher {
             api = new RESTApi(catalogOptions, false);
         }
         GetTableTokenResponse response = api.loadTableToken(identifier);
-        return new RESTToken(response.getToken(), response.getExpiresAtMillis());
+        // Layered over the catalog options, the same way RESTTokenFileIO builds its delegate.
+        return new RESTToken(
+                RESTUtil.merge(catalogOptions.toMap(), response.getToken()),
+                response.getExpiresAtMillis());
     }
 
     long currentTimeMillis() {
