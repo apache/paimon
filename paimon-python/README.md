@@ -161,12 +161,17 @@ finally:
 The native writer returns ordinary PyPaimon commit messages, so the Python
 committer also works when `commit.native.enabled` is false. Batch overwrite and
 reusable stream writers retain the builder's commit user and identifier. Native
-write is currently limited to Parquet tables without BLOB fields or
-data-evolution mode, on the same filesystem/JDBC publication route as native
-commit. Writer methods requiring Python's specialized path select the Python
+write supports Parquet append, primary-key and data-evolution tables without
+BLOB fields or optional data-evolution row sidecars, on the same filesystem/JDBC
+publication route as native commit. Writer methods requiring Python's specialized path select the Python
 writer before native data is written. If the runtime or table route is
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
+
+Native writes honor `data-file.path-directory` and the configured
+`data-file.external-paths` strategy. Existing files keep their recorded locations
+when the write destinations change. Python and native readers and committers
+can exchange these files, including external data files and their index sidecars.
 
 Both native options are disabled by default.
 

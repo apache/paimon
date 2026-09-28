@@ -70,7 +70,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             # Rust does not produce the optional random-access .row sidecars.
             or (table.options.data_evolution_enabled()
                 and table.options.data_evolution_row_sidecar_enabled())
-            or table.options.data_file_external_paths()
             or table.bucket_mode() not in (BucketMode.HASH_FIXED,
                                            BucketMode.BUCKET_UNAWARE)
             or (table.options.deletion_vectors_enabled()
