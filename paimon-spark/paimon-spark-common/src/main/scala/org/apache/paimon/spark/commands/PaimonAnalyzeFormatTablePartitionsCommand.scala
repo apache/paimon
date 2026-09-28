@@ -20,7 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.fs.Path
-import org.apache.paimon.partition.PartitionStatistics
+import org.apache.paimon.partition.{Partition, PartitionStatistics}
 import org.apache.paimon.spark.catalyst.analysis.PaimonResolvePartitionSpec
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -34,7 +34,7 @@ import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.unsafe.types.UTF8String
 
-import java.util.{Collections, List => JList, Map => JMap, Objects}
+import java.util.{Collections, List => JList, Objects}
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.ListMap
@@ -107,9 +107,9 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
         if (noScan) {
           // One listing request per partition is all NOSCAN reports, cheap enough to take here.
           new FormatTablePartitionStatsCollector(v2Table.table, false, parallelism)
-            .collect(partitions.asJava)
+            .collectPartitions(registeredPartitions.asJava)
         } else {
-          measureOnExecutors(sparkSession, partitions, parallelism)
+          measureOnExecutors(sparkSession, registeredPartitions, parallelism)
         }
       v2Table.partitionManager
         .createPartitions(partitions.asJava, true, statistics, true, null)
@@ -128,7 +128,7 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
    */
   private def measureOnExecutors(
       sparkSession: SparkSession,
-      partitions: List[JMap[String, String]],
+      partitions: List[Partition],
       parallelism: Int): JList[PartitionStatistics] = {
     val effectiveParallelism = math.max(1, parallelism)
     val tasks = math.min(effectiveParallelism, partitions.size)
@@ -147,7 +147,7 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
             work
               .map(_._2)
               .iterator
-              .zip(collector.collect(work.map(_._1).asJava).asScala.iterator)
+              .zip(collector.collectPartitions(work.map(_._1).asJava).asScala.iterator)
           }
       }
       .collect()

@@ -87,20 +87,21 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                         ? options.formatTableCommitPublishThreadNum()
                         : 1;
         return new FormatTableCommit(
-                table.location(),
-                table.partitionKeys(),
-                table.fileIO(),
-                formatTablePartitionOnlyValueInPath,
-                table.defaultPartName(),
-                overwrite,
-                Identifier.fromString(table.fullName()),
-                staticPartition,
-                syncHiveUri,
-                table.catalogContext(),
-                table.partitionManager(),
-                options.dynamicPartitionOverwrite(),
-                cleanupThreadNum,
-                publishThreadNum);
+                        table.location(),
+                        table.partitionKeys(),
+                        table.fileIO(),
+                        formatTablePartitionOnlyValueInPath,
+                        table.defaultPartName(),
+                        overwrite,
+                        Identifier.fromString(table.fullName()),
+                        staticPartition,
+                        syncHiveUri,
+                        table.catalogContext(),
+                        table.partitionManager(),
+                        options.dynamicPartitionOverwrite(),
+                        cleanupThreadNum,
+                        publishThreadNum)
+                .withFileFormat(FormatTablePartitionOptions.fileFormat(table.options(), null));
     }
 
     @Override

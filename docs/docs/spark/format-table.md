@@ -112,5 +112,34 @@ change the table's managed/external ownership.
 
 ## Writes and Maintenance
 
+### Partition File Formats
+
+Catalog-managed partitions can override the table's `file.format` through the partition `options`
+map in the Catalog API or REST `partitionOptions` request. For example, an ORC partition of a
+Parquet table can be registered with `{"file.format": "orc"}`. A compatible catalog also applies
+an explicit format update to an existing partition while preserving its other options.
+
+The effective format is the partition's explicit value, then the table's value, then the default
+`parquet`. An absent partition option inherits the table format; an empty or invalid value is an
+error. Supported formats match Format Table's table-level formats: ORC, Parquet, CSV, TEXT, JSON
+and MOSAIC, with the same schema and dependency requirements. Other format settings, such as CSV
+delimiters, come from the table. All files within one partition must use its effective format.
+
+The shared Paimon reader uses this metadata in both Spark and Flink. A partition can specify both
+`path` and `file.format`. Directory-discovered partitions and Spark's `engine` implementation do
+not use these overrides. Updating an option describes the existing files; it does not convert them.
+
+Writers continue to use the table's write format. Appending to a partition registered with a
+different format fails before files are published. Overwrite replaces the targeted partitions
+using the write format and updates `file.format` only when an existing partition override differs
+from that format. Appends and overwrites that already match the effective partition format leave
+the format option unchanged; partitions without an override continue to inherit the table format.
+Changing only the table's default does not convert existing data: register the actual format of
+partitions that would otherwise inherit the new default before changing it. All readers and writers
+of a mixed table, and its catalog provider, must support partition file formats.
+
+`ANALYZE TABLE` chooses the statistics reader per partition. Formats without footer row counts
+leave the row count unknown. The existing restriction on analyzing custom locations still applies.
+
 See [SQL Writes](./sql-write#insert-overwrite) for overwrite behavior and
 [TRUNCATE TABLE](./sql-write#truncate-table) for how data, registrations, and statistics are updated.

@@ -85,6 +85,10 @@ public interface FormatTablePartitionManager extends Serializable {
      * and may split the request into catalog-sized batches; each batch is atomic, the whole call is
      * not.
      *
+     * <p>A partition's {@code file.format} overrides the table format. Supplying it explicitly
+     * updates that partition's format; omitting it preserves the stored override. A catalog must
+     * reject additive statistics whose supplied format differs from the registered format.
+     *
      * <p>This is the method an implementation provides, so that none can report nothing by
      * accident: a decorator that forwards only the two-argument form would otherwise drop every
      * report and leave the caller no way to notice.

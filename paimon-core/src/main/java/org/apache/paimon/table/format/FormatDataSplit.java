@@ -40,6 +40,7 @@ public class FormatDataSplit implements Split {
     private final List<FileMeta> files;
     @Nullable private final BinaryRow partition;
     private final boolean useCatalogContextFileIO;
+    @Nullable private final String fileFormat;
 
     public FormatDataSplit(List<FileMeta> files, @Nullable BinaryRow partition) {
         this(files, partition, false);
@@ -47,9 +48,18 @@ public class FormatDataSplit implements Split {
 
     public FormatDataSplit(
             List<FileMeta> files, @Nullable BinaryRow partition, boolean useCatalogContextFileIO) {
+        this(files, partition, useCatalogContextFileIO, null);
+    }
+
+    public FormatDataSplit(
+            List<FileMeta> files,
+            @Nullable BinaryRow partition,
+            boolean useCatalogContextFileIO,
+            @Nullable String fileFormat) {
         this.files = files;
         this.partition = partition;
         this.useCatalogContextFileIO = useCatalogContextFileIO;
+        this.fileFormat = fileFormat;
     }
 
     public List<FileMeta> files() {
@@ -67,6 +77,14 @@ public class FormatDataSplit implements Split {
      */
     public boolean useCatalogContextFileIO() {
         return useCatalogContextFileIO;
+    }
+
+    /**
+     * The planned format, or null for splits serialized before partition formats were supported.
+     */
+    @Nullable
+    public String fileFormat() {
+        return fileFormat;
     }
 
     /** Total bytes to read for this split, i.e. the sum of {@link FileMeta#readSize()}. */
@@ -99,13 +117,14 @@ public class FormatDataSplit implements Split {
         }
         FormatDataSplit that = (FormatDataSplit) o;
         return useCatalogContextFileIO == that.useCatalogContextFileIO
+                && Objects.equals(fileFormat, that.fileFormat)
                 && Objects.equals(files, that.files)
                 && Objects.equals(partition, that.partition);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(files, partition, useCatalogContextFileIO);
+        return Objects.hash(files, partition, useCatalogContextFileIO, fileFormat);
     }
 
     /**

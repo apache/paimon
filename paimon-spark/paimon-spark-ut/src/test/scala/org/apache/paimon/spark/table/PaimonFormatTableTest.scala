@@ -28,7 +28,60 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.connector.catalog.TableCatalog
 
+import scala.collection.JavaConverters._
+
 class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
+
+  test("PaimonFormatTable: partition file formats survive reads statistics and overwrite") {
+    val tableName = "partition_file_formats"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (id INT, pt STRING) USING parquet PARTITIONED BY (pt) " +
+        "TBLPROPERTIES ('metastore.partitioned-table'='true', 'format-table.implementation'='paimon')")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      spark
+        .sql("SELECT 1 AS id")
+        .write
+        .format("orc")
+        .save(new Path(table.location(), "pt=old").toString)
+      spark.sql("SELECT 2 AS id").write.parquet(new Path(table.location(), "pt=new").toString)
+      val specs = Seq(Map("pt" -> "old").asJava, Map("pt" -> "new").asJava).asJava
+      table
+        .partitionManager()
+        .createPartitions(
+          specs,
+          false,
+          null,
+          false,
+          Seq(Map("file.format" -> "orc").asJava, Map.empty[String, String].asJava).asJava)
+      checkAnswer(sql(s"SELECT id, pt FROM $tableName"), Seq(Row(1, "old"), Row(2, "new")))
+      checkAnswer(sql(s"SELECT id FROM $tableName WHERE pt='old' AND id=1"), Seq(Row(1)))
+      sql(s"ANALYZE TABLE $tableName COMPUTE STATISTICS")
+      assert(
+        table.partitionManager().listPartitionsByNames(specs).asScala.forall(_.recordCount() == 1))
+      sql(s"INSERT INTO $tableName PARTITION (pt='new') VALUES (4)")
+      sql(s"INSERT OVERWRITE $tableName PARTITION (pt='new') VALUES (5)")
+      sql(s"INSERT INTO $tableName PARTITION (pt='created') VALUES (6)")
+      val inheritedSpecs = Seq(specs.get(1), Map("pt" -> "created").asJava).asJava
+      assert(
+        table
+          .partitionManager()
+          .listPartitionsByNames(inheritedSpecs)
+          .asScala
+          .forall(partition => Option(partition.options()).forall(_.isEmpty)))
+      sql(s"INSERT OVERWRITE $tableName PARTITION (pt='old') VALUES (3)")
+      checkAnswer(
+        sql(s"SELECT id, pt FROM $tableName"),
+        Seq(Row(3, "old"), Row(5, "new"), Row(6, "created")))
+      assert(
+        table
+          .partitionManager()
+          .listPartitionsByNames(Seq(specs.get(0)).asJava)
+          .get(0)
+          .options()
+          .get("file.format") == "parquet")
+    }
+  }
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()

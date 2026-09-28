@@ -18,12 +18,20 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.RESTCatalogITCaseBase;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.rest.RESTToken;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -32,12 +40,86 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for format table. */
 public class FormatTableITCase extends RESTCatalogITCaseBase {
+
+    @Test
+    public void testPartitionFileFormats() throws Exception {
+        String tableName = "partition_file_formats";
+        sql(
+                "CREATE TABLE %s (id INT, pt STRING) PARTITIONED BY (pt) WITH "
+                        + "('type'='format-table','file.format'='parquet','metastore.partitioned-table'='true')",
+                tableName);
+        setDataToken(tableName);
+        FormatTable table =
+                (FormatTable)
+                        flinkCatalog().catalog().getTable(Identifier.create("default", tableName));
+        String[] formats = {"orc", "parquet"};
+        String[] values = {"old", "new"};
+        for (int i = 0; i < formats.length; i++) {
+            Path file = new Path(table.location(), "pt=" + values[i] + "/data." + formats[i]);
+            table.fileIO().mkdirs(file.getParent());
+            try (PositionOutputStream out = table.fileIO().newOutputStream(file, false)) {
+                FormatWriter writer =
+                        FileFormat.fileFormat(
+                                        new CoreOptions(
+                                                Collections.singletonMap(
+                                                        "file.format", formats[i])))
+                                .createWriterFactory(
+                                        RowType.builder().field("id", DataTypes.INT()).build())
+                                .create(out, "none");
+                writer.addElement(GenericRow.of(i + 1));
+                writer.close();
+            }
+        }
+        List<Map<String, String>> specs =
+                Arrays.asList(
+                        Collections.singletonMap("pt", "old"),
+                        Collections.singletonMap("pt", "new"));
+        table.partitionManager()
+                .createPartitions(
+                        specs,
+                        false,
+                        null,
+                        false,
+                        Arrays.asList(
+                                Collections.singletonMap("file.format", "orc"),
+                                Collections.emptyMap()));
+        assertThat(sql("SELECT id, pt FROM %s", tableName))
+                .containsExactlyInAnyOrder(Row.of(1, "old"), Row.of(2, "new"));
+        assertThat(sql("SELECT id FROM %s WHERE pt='old' AND id=1", tableName))
+                .containsExactly(Row.of(1));
+        sql("INSERT INTO %s PARTITION (pt='new') VALUES (4)", tableName);
+        sql("INSERT OVERWRITE %s PARTITION (pt='new') VALUES (5)", tableName);
+        sql("INSERT INTO %s PARTITION (pt='created') VALUES (6)", tableName);
+        assertThat(
+                        table.partitionManager()
+                                .listPartitionsByNames(
+                                        Arrays.asList(
+                                                specs.get(1),
+                                                Collections.singletonMap("pt", "created"))))
+                .hasSize(2)
+                .allSatisfy(partition -> assertThat(partition.options()).isNullOrEmpty());
+        sql("INSERT OVERWRITE %s PARTITION (pt='old') VALUES (3)", tableName);
+        assertThat(sql("SELECT id, pt FROM %s", tableName))
+                .containsExactlyInAnyOrder(
+                        Row.of(3, "old"), Row.of(5, "new"), Row.of(6, "created"));
+        assertThat(
+                        table.partitionManager()
+                                .listPartitionsByNames(Collections.singletonList(specs.get(0)))
+                                .get(0)
+                                .options())
+                .containsEntry("file.format", "parquet");
+        sql("DROP TABLE %s", tableName);
+    }
 
     @Test
     public void testDiffFormat() {
