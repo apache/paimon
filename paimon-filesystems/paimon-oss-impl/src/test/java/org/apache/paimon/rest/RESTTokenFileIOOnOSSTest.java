@@ -47,16 +47,7 @@ public class RESTTokenFileIOOnOSSTest {
             long now = System.currentTimeMillis();
             server.addToken("ak-1", now + Duration.ofHours(2).toMillis());
             server.addToken("ak-2", now + Duration.ofHours(4).toMillis());
-            Options options = server.catalogOptions();
-            options.set("fs.oss.multipart.download.size", "1024");
-            options.set("fs.oss.multipart.download.threads", "1");
-            RESTTokenFileIO fileIO =
-                    new RESTTokenFileIO(
-                            CatalogContext.create(
-                                    options, new Configuration(false), new PluginOSSLoader(), null),
-                            null,
-                            Identifier.create("db", "table"),
-                            new Path("oss://bucket/table"));
+            RESTTokenFileIO fileIO = restTokenFileIO(server, "table");
 
             try (SeekableInputStream in =
                     fileIO.newInputStream(new Path("oss://bucket/table/data"))) {
@@ -76,6 +67,42 @@ public class RESTTokenFileIOOnOSSTest {
             assertThat(authorizations.get(0)).contains("ak-1");
             assertThat(authorizations.get(authorizations.size() - 1)).contains("ak-2");
         }
+    }
+
+    /** A stream reloads the token of its own table, even when another table got the same one. */
+    @Test
+    public void testStreamReloadsTheTokenOfItsOwnTable() throws Exception {
+        try (FakeRESTAndOSSServer server = new FakeRESTAndOSSServer()) {
+            server.addToken("ak-1", System.currentTimeMillis() + Duration.ofHours(2).toMillis());
+            RESTTokenFileIO tableA = restTokenFileIO(server, "table_a");
+            RESTTokenFileIO tableB = restTokenFileIO(server, "table_b");
+
+            tableA.exists(new Path("oss://bucket/table_a/data"));
+            try (SeekableInputStream in =
+                    tableB.newInputStream(new Path("oss://bucket/table_b/data"))) {
+                in.read(new byte[1024]);
+                RESTTokenRefresher.clockOffsetMillis = Duration.ofMinutes(90).toMillis();
+                in.seek(3000);
+                in.read(new byte[1024]);
+            } finally {
+                RESTTokenRefresher.clockOffsetMillis = 0;
+            }
+
+            List<String> paths = server.tokenRequestPaths();
+            assertThat(paths.get(paths.size() - 1)).endsWith("/tables/table_b/token");
+        }
+    }
+
+    private static RESTTokenFileIO restTokenFileIO(FakeRESTAndOSSServer server, String table) {
+        Options options = server.catalogOptions();
+        options.set("fs.oss.multipart.download.size", "1024");
+        options.set("fs.oss.multipart.download.threads", "1");
+        return new RESTTokenFileIO(
+                CatalogContext.create(
+                        options, new Configuration(false), new PluginOSSLoader(), null),
+                null,
+                Identifier.create("db", table),
+                new Path("oss://bucket/" + table));
     }
 
     /** Wraps {@link OSSFileIO} the way the OSS plugin does, including its no-op close. */

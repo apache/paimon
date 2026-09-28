@@ -264,6 +264,39 @@ class RESTTokenFileIOTest {
     }
 
     @Test
+    void testDelegateIsSharedOnlyBySameTableAndCatalogOptions() throws IOException {
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(invocation -> mock(FileIO.class));
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        // every table and user gets the same token
+        when(api.loadTableToken(any()))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                System.currentTimeMillis() + Duration.ofHours(2).toMillis()));
+        Options userA = new Options();
+        userA.set("token", "user-a");
+        Options userB = new Options();
+        userB.set("token", "user-b");
+
+        FileIO delegate = restTokenFileIO(userA, loader, api, "table_a").fileIO();
+
+        assertThat(restTokenFileIO(userA, loader, api, "table_a").fileIO()).isSameAs(delegate);
+        assertThat(restTokenFileIO(userA, loader, api, "table_b").fileIO()).isNotSameAs(delegate);
+        assertThat(restTokenFileIO(userB, loader, api, "table_a").fileIO()).isNotSameAs(delegate);
+    }
+
+    private static RESTTokenFileIO restTokenFileIO(
+            Options options, FileIOLoader loader, RESTApi api, String table) {
+        return new RESTTokenFileIO(
+                CatalogContext.create(options, loader, null),
+                api,
+                Identifier.create("db", table),
+                new Path("oss://bucket/" + table));
+    }
+
+    @Test
     void testFileIOCreationFailureSurfacesAsCheckedIOException() throws IOException {
         Path tableRoot = new Path("resttoken-broken://bucket/table");
         // the loader's access check fails, so FileIO.get cannot produce an inner FileIO

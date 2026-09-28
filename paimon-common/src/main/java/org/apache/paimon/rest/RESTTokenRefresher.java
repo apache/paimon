@@ -49,8 +49,8 @@ public class RESTTokenRefresher {
     /** Expiration of the token already present in the options. */
     public static final String EXPIRES_AT_MILLIS = "data-token.expires-at-millis";
 
-    // After a failed reload, wait this long before asking the catalog again.
-    static final long RETRY_INTERVAL_MILLIS = 10_000L;
+    // A reloaded token is kept at least this long, and a failed reload is retried after it.
+    static final long RELOAD_INTERVAL_MILLIS = 10_000L;
 
     // Shifts the clock of refreshers that providers create from options, for tests only.
     @VisibleForTesting static volatile long clockOffsetMillis;
@@ -59,7 +59,7 @@ public class RESTTokenRefresher {
     private final Identifier identifier;
     private final ReentrantLock lock = new ReentrantLock();
 
-    @Nullable private volatile RESTToken token;
+    @Nullable private volatile CachedToken cached;
 
     // Guarded by lock.
     @Nullable private RESTApi api;
@@ -74,7 +74,7 @@ public class RESTTokenRefresher {
         this.catalogOptions = catalogOptions;
         this.identifier = identifier;
         this.api = api;
-        this.token = token;
+        this.cached = token == null ? null : new CachedToken(token, currentTimeMillis());
     }
 
     /** Names the table and the expiration of the merged token, so a refresher can be created. */
@@ -105,14 +105,15 @@ public class RESTTokenRefresher {
 
     /** Returns the current token, reloading it from the catalog when it is about to expire. */
     public RESTToken token() {
-        RESTToken current = token;
-        if (current != null && !expiresSoon(current)) {
-            return current;
+        CachedToken current = cached;
+        long now = currentTimeMillis();
+        if (current != null && now < current.reloadAtMillis) {
+            return current.token;
         }
         // While the token is still valid, one caller reloads it and the others keep using it.
-        if (isValid(current)) {
+        if (current != null && now < current.token.expireAtMillis()) {
             if (!lock.tryLock()) {
-                return current;
+                return current.token;
             }
         } else {
             lock.lock();
@@ -125,15 +126,15 @@ public class RESTTokenRefresher {
     }
 
     private RESTToken reload() {
-        RESTToken current = token;
-        if (current != null && !expiresSoon(current)) {
-            return current;
-        }
-        boolean valid = isValid(current);
+        CachedToken current = cached;
         long now = currentTimeMillis();
+        if (current != null && now < current.reloadAtMillis) {
+            return current.token;
+        }
+        boolean valid = current != null && now < current.token.expireAtMillis();
         if (now < nextAttemptMillis) {
             if (valid) {
-                return current;
+                return current.token;
             }
             throw new IllegalStateException(
                     "The data token of " + identifier + " expired and reloading it failed.",
@@ -141,12 +142,12 @@ public class RESTTokenRefresher {
         }
         try {
             RESTToken loaded = load();
-            token = loaded;
+            cached = new CachedToken(loaded, now);
             lastFailure = null;
             return loaded;
         } catch (RuntimeException e) {
             lastFailure = e;
-            nextAttemptMillis = now + RETRY_INTERVAL_MILLIS;
+            nextAttemptMillis = now + RELOAD_INTERVAL_MILLIS;
             if (!valid) {
                 throw e;
             }
@@ -154,16 +155,8 @@ public class RESTTokenRefresher {
                     "Failed to reload the data token of {}, keeping the current one.",
                     identifier,
                     e);
-            return current;
+            return current.token;
         }
-    }
-
-    private boolean isValid(@Nullable RESTToken token) {
-        return token != null && currentTimeMillis() < token.expireAtMillis();
-    }
-
-    private boolean expiresSoon(RESTToken token) {
-        return token.expireAtMillis() - currentTimeMillis() < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
     }
 
     private RESTToken load() {
@@ -179,5 +172,21 @@ public class RESTTokenRefresher {
 
     long currentTimeMillis() {
         return System.currentTimeMillis() + clockOffsetMillis;
+    }
+
+    /** A token and the time to reload it, before it expires but not right after it arrived. */
+    private static final class CachedToken {
+
+        private final RESTToken token;
+        private final long reloadAtMillis;
+
+        private CachedToken(RESTToken token, long now) {
+            long expiresAt = token.expireAtMillis();
+            // Ahead of expiry by the safe time, or by half the time left when that is shorter.
+            long ahead = Math.min(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, (expiresAt - now) / 2);
+            this.token = token;
+            this.reloadAtMillis =
+                    Math.min(expiresAt, Math.max(expiresAt - ahead, now + RELOAD_INTERVAL_MILLIS));
+        }
     }
 }

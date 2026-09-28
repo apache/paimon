@@ -59,10 +59,10 @@ public class RESTTokenCredentialsProviderTest {
     }
 
     @Test
-    public void testLoadsANewTokenFromTheCatalogWhenTheCurrentOneIsAboutToExpire() {
+    public void testLoadsANewTokenFromTheCatalogOnceTheCurrentOneExpired() {
         server.addToken("ak-2", System.currentTimeMillis() + Duration.ofHours(4).toMillis());
         RESTTokenCredentialsProvider provider =
-                provider(tableOptions("ak-1", Duration.ofMinutes(30)));
+                provider(tableOptions("ak-1", Duration.ofMinutes(-1)));
 
         assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
         int requests = server.tokenRequests();

@@ -44,6 +44,7 @@ public class FakeRESTAndOSSServer implements AutoCloseable {
     private final HttpServer server;
     private final List<GetTableTokenResponse> tokens = new ArrayList<>();
     private final AtomicInteger tokenRequests = new AtomicInteger();
+    private final List<String> tokenRequestPaths = Collections.synchronizedList(new ArrayList<>());
     private final List<String> ossGetAuthorizations =
             Collections.synchronizedList(new ArrayList<>());
 
@@ -82,6 +83,10 @@ public class FakeRESTAndOSSServer implements AutoCloseable {
         return tokenRequests.get();
     }
 
+    public List<String> tokenRequestPaths() {
+        return tokenRequestPaths;
+    }
+
     public List<String> ossGetAuthorizations() {
         return ossGetAuthorizations;
     }
@@ -96,6 +101,7 @@ public class FakeRESTAndOSSServer implements AutoCloseable {
     }
 
     private void handleToken(HttpExchange exchange) throws IOException {
+        tokenRequestPaths.add(exchange.getRequestURI().getPath());
         int index = tokenRequests.getAndIncrement();
         GetTableTokenResponse token = tokens.get(Math.min(index, tokens.size() - 1));
         byte[] body = RESTApi.toJson(token).getBytes(StandardCharsets.UTF_8);
