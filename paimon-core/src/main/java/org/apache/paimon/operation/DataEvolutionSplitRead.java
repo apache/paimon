@@ -235,16 +235,39 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 // No need to merge fields, just create a single file reader
                 suppliers.add(
                         () -> {
+                            DataFileMeta file = needMergeFiles.get(0);
+                            FileIndexResult fileIndexResult =
+                                    evaluateFileIndex(filters, file, dataFilePathFactory);
+                            if (fileIndexResult != null && !fileIndexResult.remain()) {
+                                return new EmptyFileRecordReader<>();
+                            }
                             DeletionVectorWithRange deletionVector =
                                     readDeletionVector(needMergeFiles, deletionVectorFactory);
+                            if (fileIndexResult != null
+                                    && deletionVector != null
+                                    && !deletionVector.deletionVector.isEmpty()) {
+                                fileIndexResult =
+                                        FileIndexEvaluator.intersectDeletionVector(
+                                                fileIndexResult,
+                                                file,
+                                                deletionVector.deletionVector,
+                                                deletionVectorOffset(
+                                                        file.nonNullRowIdRange(),
+                                                        rowRanges,
+                                                        deletionVector));
+                                if (!fileIndexResult.remain()) {
+                                    return new EmptyFileRecordReader<>();
+                                }
+                            }
                             return createFileReader(
                                     partition,
                                     dataFilePathFactory,
-                                    needMergeFiles.get(0),
+                                    file,
                                     filters,
                                     rowRanges,
                                     readRowType,
-                                    deletionVector);
+                                    deletionVector,
+                                    fileIndexResult);
                         });
 
             } else {
@@ -659,6 +682,27 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
+        return createFileReader(
+                partition,
+                dataFilePathFactory,
+                file,
+                filters,
+                rowRanges,
+                readRowType,
+                deletionVector,
+                null);
+    }
+
+    private FileRecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFilePathFactory dataFilePathFactory,
+            DataFileMeta file,
+            @Nullable List<Predicate> filters,
+            List<Range> rowRanges,
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable FileIndexResult precomputedFileIndexResult)
+            throws IOException {
         FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
         String formatIdentifier = readTarget.formatIdentifier;
         long schemaId = file.schemaId();
@@ -680,8 +724,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                 formatBuilder(readRowType, fileFilters, nestedFieldEnabled)
                                         .build(formatIdentifier, schema, dataSchema));
 
-        FileIndexResult fileIndexResult = null;
-        if (fileIndexReadEnabled) {
+        FileIndexResult fileIndexResult = precomputedFileIndexResult;
+        if (fileIndexResult == null && fileIndexReadEnabled) {
             DeletionVector dv = deletionVector == null ? null : deletionVector.deletionVector;
             long fileOffset =
                     dv == null || dv.isEmpty()
@@ -831,6 +875,30 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
         return true;
+    }
+
+    @Nullable
+    private FileIndexResult evaluateFileIndex(
+            @Nullable List<Predicate> filters,
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory)
+            throws IOException {
+        if (!fileIndexReadEnabled) {
+            return null;
+        }
+
+        long schemaId = file.schemaId();
+        TableSchema dataSchema = schemaId == schema.id() ? schema : schemaFetcher.apply(schemaId);
+        List<Predicate> fileFilters = fileFilters(filters, file);
+        return FileIndexEvaluator.evaluate(
+                fileIO,
+                dataSchema,
+                devolveFilters(fileFilters, dataSchema),
+                null,
+                null,
+                dataFilePathFactory,
+                file,
+                null);
     }
 
     /**
