@@ -20,8 +20,8 @@
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 
 from pypaimon.common.options.core_options import CoreOptions
@@ -744,40 +744,12 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
         index_type = _vector_index_type(splits)
         search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(splits, snapshot)
-
-        max_workers = min(self._index_thread_num, len(splits))
-        if len(splits) == 1:
-            # Single split: no thread pool overhead.
-            result = self._eval_sync(
-                splits[0].row_range_start, splits[0].row_range_end,
-                splits[0].vector_index_files, query_vector,
-                search_limit, pre_filters[0] if pre_filters else None,
-            )
-            merged_scores = {}
-            if result is not None:
-                score_getter = result.score_getter()
-                for row_id in result.results():
-                    merged_scores[row_id] = score_getter(row_id)
-        else:
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {
-                    pool.submit(
-                        self._eval_sync,
-                        split.row_range_start, split.row_range_end,
-                        split.vector_index_files, query_vector,
-                        search_limit,
-                        None if not pre_filters else pre_filters[i],
-                    ): i
-                    for i, split in enumerate(splits)
-                }
-                merged_scores = {}
-                for future in as_completed(futures):
-                    split_result = future.result()
-                    if split_result is not None:
-                        score_getter = split_result.score_getter()
-                        for row_id in split_result.results():
-                            if row_id not in merged_scores:
-                                merged_scores[row_id] = score_getter(row_id)
+        merged_scores = {}
+        with closing(self._search_index_splits(
+                splits, query_vector, search_limit, pre_filters)) as results:
+            for split_result in results:
+                _merge_index_scores(merged_scores, split_result)
+                del split_result
 
         indexed = DictBasedScoredIndexResult(merged_scores).top_k(search_limit)
         return self._maybe_rerank_indexed_result(
@@ -803,47 +775,17 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         if not index_splits and not raw_splits:
             return [GlobalIndexResult.create_empty() for _ in range(n)]
 
-        # One native batch call per INDEX split (all query vectors at once),
-        # passing that split's pre-filter. Each future returns n per-query results.
         index_type = _vector_index_type(index_splits)
         search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(index_splits, snapshot)
-
-        max_workers = min(self._index_thread_num, len(index_splits)) if index_splits else 0
-        if len(index_splits) == 1:
-            split = index_splits[0]
-            split_results_list = [self._eval_batch_sync(
-                split.row_range_start, split.row_range_end,
-                split.vector_index_files, self._query_vectors,
-                search_limit, pre_filters[0] if pre_filters else None,
-            )]
-        elif len(index_splits) > 1:
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {
-                    pool.submit(
-                        self._eval_batch_sync,
-                        split.row_range_start, split.row_range_end,
-                        split.vector_index_files, self._query_vectors,
-                        search_limit,
-                        None if not pre_filters else pre_filters[i],
-                    ): i
-                    for i, split in enumerate(index_splits)
-                }
-                split_results_list = [future.result() for future in as_completed(futures)]
-        else:
-            split_results_list = []
-
-        # Merge each query vector's indexed results across index splits.
         merged_scores = [{} for _ in range(n)]
-        for split_results in split_results_list:
-            for i in range(n):
-                split_result = split_results[i]
-                if split_result is None:
-                    continue
-                score_getter = split_result.score_getter()
-                for row_id in split_result.results():
-                    if row_id not in merged_scores[i]:
-                        merged_scores[i][row_id] = score_getter(row_id)
+        with closing(self._search_index_splits(
+                index_splits, self._query_vectors, search_limit,
+                pre_filters, batch=True)) as results:
+            for split_results in results:
+                for i in range(n):
+                    _merge_index_scores(merged_scores[i], split_results[i])
+                del split_results
 
         indexed_results = [
             DictBasedScoredIndexResult(merged_scores[i]).top_k(search_limit)
@@ -856,8 +798,8 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         raw_pre_filter = self._raw_pre_filter(raw_splits, snapshot)
         raw_ranges = _raw_row_ranges(raw_splits)
         raw_index_type = _raw_search_index_type(raw_splits)
-        raw_results = self._read_batch_raw_search(
-            raw_ranges, raw_pre_filter, self._query_vectors, raw_index_type,
+        raw_results = self._read_raw_batch_search(
+            raw_ranges, raw_pre_filter, raw_index_type,
             snapshot=snapshot)
 
         results = []
@@ -867,38 +809,29 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
 
     def _read_raw_batch_search(self, raw_row_ranges, pre_filter,
                                index_type=None, snapshot=None):
-        """Scan raw rows once, keeping a separate top-k heap for each query."""
-        heaps = [[] for _ in self._query_vectors]
-        raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
-        if not raw_row_ranges or not heaps:
-            return [_scored_result(heap) for heap in heaps]
-
-        table_read, splits = self._plan_raw_read(raw_row_ranges, True, snapshot)
-        metric = self._search_metric(index_type)
-        workers = min(len(splits), table_read._resolve_parallelism(None, len(splits)))
-        if workers <= 1:
-            return self._score_raw_splits(table_read, splits, metric)
-
-        # Keep only one streaming reader and Q top-k heaps per worker, even
-        # when the plan contains many splits. Each split is scanned once.
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(
-                self._score_raw_splits, table_read, splits[i::workers], metric)
-                for i in range(workers)]
-            for future in futures:
-                for heap, result in zip(heaps, future.result()):
-                    score_getter = result.score_getter()
-                    for row_id in result.results():
-                        _offer_score(heap, self._limit, row_id, score_getter(row_id))
-        return [_scored_result(heap) for heap in heaps]
-
-    def _score_raw_splits(self, table_read, splits, metric):
         from pypaimon.read.table_read import _ClosableArrowBatchReader
 
+        raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
+        n = len(self._query_vectors)
+        if not raw_row_ranges:
+            return [DictBasedScoredIndexResult({}) for _ in range(n)]
+
+        import pyarrow as pa
+        table_read, splits = self._plan_raw_read(raw_row_ranges, True, snapshot)
         reader, batches = table_read._new_arrow_batch_reader(splits)
-        # Close the underlying iterator as well if scoring fails mid-batch.
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-            return self._score_raw_batch_queries(batch_reader, metric)
+            collected = [b for b in batch_reader]
+        if not collected:
+            return [DictBasedScoredIndexResult({}) for _ in range(n)]
+        table = pa.Table.from_batches(collected)
+        if table.num_rows == 0:
+            return [DictBasedScoredIndexResult({}) for _ in range(n)]
+
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+
+        return _raw_batch_search_from_arrow(
+            table, self._vector_column.name, self._query_vectors, metric, self._limit)
 
     def _score_raw_batch_queries(self, batches, metric):
         heaps = [[] for _ in self._query_vectors]
@@ -924,23 +857,6 @@ def _merge_index_scores(merged_scores, result):
     for row_id in result.results():
         if row_id not in merged_scores:
             merged_scores[row_id] = score_getter(row_id)
-
-    def _read_batch_raw_search(self, raw_row_ranges, pre_filter, query_vectors,
-                               index_type=None, snapshot=None):
-        raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
-        n = len(query_vectors)
-        if not raw_row_ranges:
-            return [DictBasedScoredIndexResult({}) for _ in range(n)]
-
-        table = self._read_raw_arrow(raw_row_ranges, True, snapshot)
-        if table is None or table.num_rows == 0:
-            return [DictBasedScoredIndexResult({}) for _ in range(n)]
-
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
-
-        return _raw_batch_search_from_arrow(
-            table, self._vector_column.name, query_vectors, metric, self._limit)
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):
@@ -1371,6 +1287,7 @@ def _raw_search_from_arrow(arrow_table, vector_column_name, query_vector,
                            metric, limit, score_candidates=None):
     """Vectorized raw search directly from Arrow table (avoids Python list intermediary)."""
     import numpy as np
+    import pyarrow as pa
     import pyarrow.compute as pc
 
     row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
@@ -1382,6 +1299,19 @@ def _raw_search_from_arrow(arrow_table, vector_column_name, query_vector,
         arrow_table = arrow_table.filter(valid_mask)
         row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
         vectors_col = arrow_table.column(vector_column_name)
+
+    # Filter by score_candidates at Arrow level to avoid ragged-array issues
+    # when non-candidate rows have mismatched dimensions.
+    if score_candidates is not None:
+        candidate_set = set(score_candidates)
+        candidate_mask = pc.is_in(row_ids_col, pa.array(
+            list(candidate_set), type=row_ids_col.type))
+        arrow_table = arrow_table.filter(candidate_mask)
+        row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
+        vectors_col = arrow_table.column(vector_column_name)
+
+    if arrow_table.num_rows == 0:
+        return DictBasedScoredIndexResult({})
 
     # Try fast path: fixed-size list → direct numpy reshape.
     row_id_array = row_ids_col.to_numpy()
@@ -1395,13 +1325,13 @@ def _raw_search_from_arrow(arrow_table, vector_column_name, query_vector,
         dim = vectors_arr.type.list_size
         if dim is not None and flat is not None:
             stored_matrix = flat.to_numpy(zero_copy_only=False).reshape(-1, dim).astype(
-                np.float32)
+                np.float64)
         else:
-            stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float32)
+            stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float64)
     except (AttributeError, TypeError, ValueError):
-        stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float32)
+        stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float64)
 
-    query_np = np.asarray(query_vector, dtype=np.float32)
+    query_np = np.asarray(query_vector, dtype=np.float64)
 
     if stored_matrix.ndim < 2 or stored_matrix.shape[0] == 0:
         return DictBasedScoredIndexResult({})
@@ -1411,20 +1341,11 @@ def _raw_search_from_arrow(arrow_table, vector_column_name, query_vector,
             "Query vector dimension mismatch: expected %d, got %d"
             % (stored_matrix.shape[1], query_np.shape[0]))
 
-    # Handle null vectors and score_candidates filtering.
-    if score_candidates is not None:
-        candidate_set = set(score_candidates)
-        mask = np.array([rid in candidate_set for rid in row_id_array], dtype=bool)
-        # Also mask null vectors (check for any NaN row).
-        null_mask = ~np.isnan(stored_matrix).any(axis=1)
-        mask = mask & null_mask
-        row_id_array = row_id_array[mask]
-        stored_matrix = stored_matrix[mask]
-    else:
-        null_mask = ~np.isnan(stored_matrix).any(axis=1)
-        if not null_mask.all():
-            row_id_array = row_id_array[null_mask]
-            stored_matrix = stored_matrix[null_mask]
+    # Filter NaN vectors (from variable-length lists that got padded).
+    null_mask = ~np.isnan(stored_matrix).any(axis=1)
+    if not null_mask.all():
+        row_id_array = row_id_array[null_mask]
+        stored_matrix = stored_matrix[null_mask]
 
     if len(row_id_array) == 0:
         return DictBasedScoredIndexResult({})
@@ -1535,15 +1456,15 @@ def _raw_batch_search_from_arrow(arrow_table, vector_column_name, query_vectors,
         dim = vectors_arr.type.list_size
         if dim is not None and flat is not None:
             stored_matrix = flat.to_numpy(zero_copy_only=False).reshape(-1, dim).astype(
-                np.float32)
+                np.float64)
         else:
-            stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float32)
+            stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float64)
     except (AttributeError, TypeError, ValueError):
-        stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float32)
+        stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float64)
 
     query_matrix = np.array(
         [q if isinstance(q, np.ndarray) else list(q) for q in query_vectors],
-        dtype=np.float32)
+        dtype=np.float64)
 
     n = len(query_vectors)
 

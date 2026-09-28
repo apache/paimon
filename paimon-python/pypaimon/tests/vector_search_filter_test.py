@@ -2926,7 +2926,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
                 query_vectors=[[1.0], [2.0]], filter_=None)
             raw_result = DictBasedScoredIndexResult({8: 0.9})
             with mock.patch.object(
-                    reader, "_read_batch_raw_search",
+                    reader, "_read_raw_batch_search",
                     return_value=[raw_result, raw_result]) as raw_read:
                 results = reader.read_batch([split, raw])
 
