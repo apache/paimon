@@ -137,7 +137,8 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         // The restarted job must route updates with the rescaled partition layout. If it used the
         // pre-rescale two-bucket mapping, identical primary keys could survive in different buckets
         // and be returned as duplicate rows.
-        assertThat(batchSql("SELECT f0, COUNT(*) FROM T3 GROUP BY f0 HAVING COUNT(*) > 1")).isEmpty();
+        assertThat(batchSql("SELECT f0, COUNT(*) FROM T3 GROUP BY f0 HAVING COUNT(*) > 1"))
+                .isEmpty();
         assertThat(batchSql("SELECT * FROM T3")).isNotEmpty();
     }
 
