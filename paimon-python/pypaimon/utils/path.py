@@ -43,8 +43,11 @@ def _normalize(path):
         else:
             components.append(component)
     normalized = ('/' if path.startswith('/') else '') + '/'.join(components)
-    if _WINDOWS and _has_drive(normalized) and len(normalized) == 3 and path != normalized:
+    if (_WINDOWS and normalized.startswith('/') and _has_drive(normalized)
+            and len(normalized) == 3 and path != normalized):
         normalized += '/'
+    elif not normalized.startswith('/') and ':' in normalized.split('/')[0]:
+        normalized = './' + normalized
     return normalized
 
 
@@ -90,7 +93,7 @@ def resolve_path(parent, child):
     else:
         scheme, authority = parent_scheme, parent_authority
         path = (parent_path.rstrip('/') + '/' + child_path
-                if parent_path or scheme or authority else child_path)
+                if parent_path or (child_path and (scheme or authority)) else child_path)
     path = _normalize(path)
     if not scheme and not authority:
         if _WINDOWS and _has_drive(path):
@@ -98,3 +101,17 @@ def resolve_path(parent, child):
         elif not path.startswith('/') and ':' in path.split('/')[0]:
             path = './' + path
     return scheme + authority + path
+
+
+def to_file_io_path(path):
+    """Keep literal Java file-path characters from being decoded as a URL."""
+    if not path.startswith('file:') or not any(char in path for char in '%?#'):
+        return path
+    _, authority, local_path = _parts(path)
+    if authority and authority != '//localhost':
+        if not (_WINDOWS and authority.endswith(':')):
+            return authority + local_path
+        local_path = authority[1:] + local_path
+    if _WINDOWS and _has_drive(local_path):
+        local_path = local_path.lstrip('/')
+    return local_path

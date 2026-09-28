@@ -22,7 +22,7 @@ import struct
 from abc import ABC, abstractmethod
 from typing import List
 
-from pypaimon.utils.path import resolve_path
+from pypaimon.utils.path import resolve_path, to_file_io_path
 
 
 class ExternalPathProvider(ABC):
@@ -73,7 +73,7 @@ class RoundRobinExternalPathProvider(ExternalPathProvider):
 
         external_base = self._external_table_paths[self._position]
         if self._relative_bucket_path:
-            return resolve_path(resolve_path(external_base, self._relative_bucket_path), file_name)
+            return to_file_io_path(resolve_path(resolve_path(external_base, self._relative_bucket_path), file_name))
         else:
             return f"{external_base.rstrip('/')}/{file_name}"
 
@@ -108,7 +108,7 @@ class EntropyInjectExternalPathProvider(ExternalPathProvider):
             self._position = 0
 
         external_base = self._external_table_paths[self._position]
-        return resolve_path(external_base, file_path_with_hash)
+        return to_file_io_path(resolve_path(external_base, file_path_with_hash))
 
     def _compute_hash(self, file_name: str) -> str:
         hash_int = _murmur3_32(file_name.encode('utf-8'))
@@ -153,7 +153,7 @@ class WeightedExternalPathProvider(ExternalPathProvider):
             index = len(self._external_table_paths) - 1
         selected_base = self._external_table_paths[index]
         if self._relative_bucket_path:
-            return resolve_path(resolve_path(selected_base, self._relative_bucket_path), file_name)
+            return to_file_io_path(resolve_path(resolve_path(selected_base, self._relative_bucket_path), file_name))
         else:
             return f"{selected_base.rstrip('/')}/{file_name}"
 

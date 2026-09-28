@@ -18,6 +18,7 @@
 """Java-compatible data directories across Python and Rust execution."""
 
 from contextlib import ExitStack
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,7 +40,8 @@ def _table(tmp_path, mode='append', directory='relative', native=True, partition
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('db', True)
     directories = {'relative': 'data/nested', 'normalized': 'data//discard/../nested/.',
-                   'absolute': str(tmp_path / 'relocated'), 'uri': (tmp_path / 'relocated').as_uri()}
+                   'absolute': str(tmp_path / 'relocated'), 'uri': (tmp_path / 'relocated').as_uri(),
+                   'literal_uri': 'file:' + str(tmp_path / 'data%2Fwith space?#fragment')}
     options = {'data-file.path-directory': directories[directory],
                'write.native.enabled': str(native).lower()}
     if mode == 'pk':
@@ -105,7 +107,9 @@ def _read(table, native_scan, native_read, streaming=False, snapshot=None):
     return result.sort_by('id').to_pylist()
 
 
-@pytest.mark.parametrize('directory', ['relative', 'normalized', 'absolute', 'uri'])
+@pytest.mark.parametrize('directory', [
+    'relative', 'normalized', 'absolute', 'uri',
+    pytest.param('literal_uri', marks=pytest.mark.skipif(os.name == 'nt', reason='POSIX file names'))])
 @pytest.mark.parametrize('mode', ['append', 'pk', 'evolution'])
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('partitioned', [False, True])
@@ -115,6 +119,9 @@ def test_data_directory_interoperability(tmp_path, directory, mode, native, part
     _write(table, data, native)
     _write(table, pa.table({'id': [4], 'pt': ['b'], 'value': [40]}, schema=_SCHEMA), native,
            streaming=True, identifier=2)
+    if directory == 'literal_uri':
+        assert (tmp_path / 'data%2Fwith space?#fragment').is_dir()
+        assert not (tmp_path / 'data').exists()
     expected = data.to_pylist() + [{'id': 4, 'pt': 'b', 'value': 40}]
     for planner in (False, True):
         for reader in (False, True):
@@ -124,7 +131,34 @@ def test_data_directory_interoperability(tmp_path, directory, mode, native, part
     assert not (Path(table.table_path) / 'bucket-0').exists()
 
 
-@pytest.mark.parametrize('directory', ['relative', 'normalized', 'absolute', 'uri'])
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX file names')
+@pytest.mark.parametrize('strategy', ['round-robin', 'entropy-inject', 'weight-robin'])
+def test_literal_data_directory_with_external_paths(tmp_path, strategy):
+    table = _table(tmp_path, directory='literal_uri', native=False, extra={
+        'data-file.external-paths': ','.join((tmp_path / name).as_uri() for name in ['first', 'second']),
+        'data-file.external-paths.strategy': strategy,
+        'data-file.external-paths.weights': '1,2',
+    })
+    data = pa.table({'id': [1], 'pt': ['a'], 'value': [10]}, schema=_SCHEMA)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(data)
+        messages = writer.prepare_commit()
+        assert all(file.external_path for message in messages for file in message.new_files)
+        commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+    assert (tmp_path / 'data%2Fwith space?#fragment').is_dir()
+    for planner in (False, True):
+        for reader in (False, True):
+            assert _read(table, planner, reader) == data.to_pylist()
+
+
+@pytest.mark.parametrize('directory', [
+    'relative', 'normalized', 'absolute', 'uri',
+    pytest.param('literal_uri', marks=pytest.mark.skipif(os.name == 'nt', reason='POSIX file names'))])
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('bucket_indexes', [False, True])
 def test_data_directory_updates_deletes_history_and_abort(tmp_path, directory, native, bucket_indexes):

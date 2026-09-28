@@ -145,8 +145,10 @@ class DataFileMeta:
             self, table_path: str, partition: GenericRow, bucket: int,
             default_part_value: str = "__DEFAULT_PARTITION__",
             data_file_path_directory: Optional[str] = None):
-        from pypaimon.utils.path import resolve_path
+        from pypaimon.utils.path import resolve_path, to_file_io_path
         path_builder = resolve_path(table_path, data_file_path_directory)
+        if data_file_path_directory is not None:
+            path_builder = to_file_io_path(path_builder)
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
             part_value = default_part_value if _is_null_or_whitespace_only(field_value) else str(field_value)

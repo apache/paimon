@@ -22,7 +22,7 @@ from typing import List, Optional, Tuple
 
 from pypaimon.casting.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.common.external_path_provider import ExternalPathProvider
-from pypaimon.utils.path import resolve_path
+from pypaimon.utils.path import resolve_path, to_file_io_path
 from pypaimon.schema.data_types import DataType
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import _is_ltz_type, _normalize_ltz, _parse_type_precision_scale
@@ -162,7 +162,8 @@ class FileStorePathFactory:
         return f"{self._root}/{self.STATISTICS_PATH}"
 
     def data_file_path(self) -> str:
-        return resolve_path(self._root, self.data_file_path_directory)
+        path = resolve_path(self._root, self.data_file_path_directory)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def relative_bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         if canonical_partition and partition:
@@ -240,7 +241,8 @@ class FileStorePathFactory:
 
     def bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         relative_path = self.relative_bucket_path(partition, bucket, canonical_partition)
-        return resolve_path(self._root, relative_path)
+        path = resolve_path(self._root, relative_path)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def create_external_path_provider(
         self, partition: Tuple, bucket: int

@@ -168,6 +168,8 @@ if __name__ == "__main__":
     ('/t', '..', '/'),
     ('/t', '../../data', '/../data'),
     ('s3://bucket/', 'data', 's3://bucket/data'),
+    ('s3://bucket', '.', 's3://bucket'),
+    ('s3://bucket', 'x/..', 's3://bucket'),
     ('warehouse', 'a/../b:c', 'warehouse/b:c'),
     ('memory:/t', 'a/../../b', 'memory:/b'),
     ('/t', '///data', '/data'),
@@ -178,11 +180,15 @@ if __name__ == "__main__":
     ('s3://bucket/t', '//other:9000/data', 's3://other:9000/data'),
     ('//host:8020/table', '//other/data', '//other/data'),
     ('relative', '../b:c', './b:c'),
+    ('relative', '../a:bb', './a:bb'),
+    ('relative', '../b:c/x', './b:c/x'),
     ('file:/t', 'file:/data', 'file:/data'),
 ])
-def test_path_resolution_matches_java(parent, child, expected):
-    from pypaimon.utils.path import resolve_path
-    assert resolve_path(parent, child) == expected
+@pytest.mark.parametrize('windows', [False, True])
+def test_path_resolution_matches_java(monkeypatch, parent, child, expected, windows):
+    import pypaimon.utils.path as paths
+    monkeypatch.setattr(paths, '_WINDOWS', windows)
+    assert paths.resolve_path(parent, child) == expected
 
 
 def test_empty_path_is_rejected():
@@ -208,6 +214,12 @@ def test_data_directory_cannot_change_on_table_copy(tmp_path, stored, requested)
 
 
 @pytest.mark.parametrize('parent,child,expected', [
+    ('relative', '../b:c', './b:c'),
+    ('relative', '../a:bb', './a:bb'),
+    ('relative', '../b:c/x', './b:c/x'),
+    ('warehouse/t', 'data/../../../b:c', './b:c'),
+    ('.', 'a/../b:c', './b:c'),
+    ('s3://bucket', '.', 's3://bucket'),
     (r'C:\warehouse\table', '../data', 'C:/warehouse/data'),
     (r'C:\warehouse\table', r'..\data', 'C:/warehouse/data'),
     ('C:/warehouse/table', '/data', '/data'),
@@ -222,3 +234,21 @@ def test_windows_paths_match_java(monkeypatch, parent, child, expected):
     import pypaimon.utils.path as paths
     monkeypatch.setattr(paths, '_WINDOWS', True)
     assert paths.resolve_path(parent, child) == expected
+
+
+@pytest.mark.parametrize('windows,path,expected', [
+    (False, 'file:/tmp/data%2Fwith space?#part', '/tmp/data%2Fwith space?#part'),
+    (False, 'file:///tmp/data%20', '/tmp/data%20'),
+    (False, 'file://localhost/tmp/data%20', '/tmp/data%20'),
+    (False, 'file://host/share/data%20', '//host/share/data%20'),
+    (True, 'file:/C:/data%20', 'C:/data%20'),
+    (True, 'file://C:/data%20', 'C:/data%20'),
+    (True, 'file://host/share/data%20', '//host/share/data%20'),
+    (False, '/tmp/data%2F?#', '/tmp/data%2F?#'),
+    (False, 's3://bucket/data%2F?#', 's3://bucket/data%2F?#'),
+    (False, 'file:/tmp/plain', 'file:/tmp/plain'),
+])
+def test_file_io_paths_keep_literal_characters(monkeypatch, windows, path, expected):
+    import pypaimon.utils.path as paths
+    monkeypatch.setattr(paths, '_WINDOWS', windows)
+    assert paths.to_file_io_path(path) == expected
