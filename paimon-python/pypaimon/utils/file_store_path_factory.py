@@ -288,7 +288,7 @@ class FileStorePathFactory:
     def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
         """Resolve an existing bucket index, including the legacy Python DV layout."""
         if index_file.external_path:
-            return index_file.external_path
+            return to_file_io_path(index_file.external_path)
         legacy_path = f"{self.index_path()}/{index_file.file_name}"
         if not self.index_file_in_data_file_dir:
             return legacy_path

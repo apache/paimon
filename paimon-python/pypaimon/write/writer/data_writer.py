@@ -198,16 +198,12 @@ class DataWriter(ABC):
     def _delete_committed_files(self, file_metas: List[DataFileMeta]):
         for file_meta in file_metas:
             try:
-                path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
-                if path_to_delete:
-                    path_str = str(path_to_delete)
-                    self.file_io.delete_quietly(path_str)
-                for extra_file in file_meta.extra_files:
-                    self.file_io.delete_quietly(self._aligned_extra_file_path(file_meta, extra_file))
+                for path_to_delete in file_meta.collect_files():
+                    self.file_io.delete_quietly(path_to_delete)
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
-                path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
+                path_to_delete = file_meta.physical_path()
                 logger.warning(f"Failed to delete file {path_to_delete} during abort: {e}")
 
     @abstractmethod
@@ -511,12 +507,7 @@ class DataWriter(ABC):
 
     @staticmethod
     def _aligned_extra_file_path(file_meta: DataFileMeta, extra_file: str) -> str:
-        if "://" in extra_file or extra_file.startswith("/"):
-            return extra_file
-        file_path = file_meta.external_path if file_meta.external_path else file_meta.file_path
-        if not file_path or "/" not in file_path:
-            return extra_file
-        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
+        return file_meta.aligned_file_path(extra_file)
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:
