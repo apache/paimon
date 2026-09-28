@@ -37,6 +37,11 @@ public class OSSLoader implements FileIOLoader {
 
     private static final String OSS_CLASS = "org.apache.paimon.oss.OSSFileIO";
 
+    private static final String ENDPOINT = "fs.oss.endpoint";
+    private static final String ACCESS_KEY_ID = "fs.oss.accessKeyId";
+    private static final String ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
+    private static final String CREDENTIALS_PROVIDER = "fs.oss.credentials.provider";
+
     // Singleton lazy initialization
 
     private static PluginLoader loader;
@@ -57,9 +62,10 @@ public class OSSLoader implements FileIOLoader {
     @Override
     public List<String[]> requiredOptions() {
         List<String[]> options = new ArrayList<>();
-        options.add(new String[] {"fs.oss.endpoint"});
-        options.add(new String[] {"fs.oss.accessKeyId", "fs.oss.credentials.provider"});
-        options.add(new String[] {"fs.oss.accessKeySecret", "fs.oss.credentials.provider"});
+        options.add(new String[] {ENDPOINT});
+        // Each entry lists alternatives: a credentials provider can replace the access keys.
+        options.add(new String[] {ACCESS_KEY_ID, CREDENTIALS_PROVIDER});
+        options.add(new String[] {ACCESS_KEY_SECRET, CREDENTIALS_PROVIDER});
         return options;
     }
 

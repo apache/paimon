@@ -148,8 +148,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     @Override
     public void configure(CatalogContext context) {
+        // Only a constant is read here, so an older paimon-common without the class still works.
         restTokenOptions =
-                RESTTokenRefresher.isConfigured(context.options())
+                context.options().containsKey(RESTTokenRefresher.DATABASE)
                         ? context.options().toMap()
                         : null;
         // The file system refreshes a table's token, so it must not be shared through the cache.

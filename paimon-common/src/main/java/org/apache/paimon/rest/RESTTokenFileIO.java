@@ -266,7 +266,7 @@ public class RESTTokenFileIO implements FileIO {
             Options options = catalogContext.options();
             options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
-            // Lets a FileIO that supports it, such as OSS, refresh this token by itself.
+            // Record whose data token the delegate holds, so it can reload it from the catalog.
             RESTTokenRefresher.configure(options, tokenIdentifier(), currentToken.expireAtMillis());
             CatalogContext context =
                     CatalogContext.create(
