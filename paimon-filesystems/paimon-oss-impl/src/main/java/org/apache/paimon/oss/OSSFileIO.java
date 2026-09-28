@@ -164,6 +164,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                 }
             }
         }
+        // A user-set hadoop-aliyun prefix wins over Paimon's unified User-Agent.
+        if (!hadoopOptions.containsKey(OSSUserAgent.PREFIX)) {
+            hadoopOptions.set(OSSUserAgent.PREFIX, OSSUserAgent.prefix(context.options()));
+        }
     }
 
     @Override
