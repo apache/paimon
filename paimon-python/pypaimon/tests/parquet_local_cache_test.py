@@ -17,6 +17,7 @@
 
 from unittest.mock import patch
 
+import fastavro
 import pyarrow as pa
 import pyarrow.orc as orc
 import pyarrow.parquet as pq
@@ -25,6 +26,7 @@ import pytest
 from pypaimon.common.options import Options
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.format_pyarrow_reader import (
     FormatPyArrowReader, _reset_file_format_dataset_cache,
 )
@@ -103,3 +105,40 @@ def test_known_parquet_size_avoids_source_stat(tmp_path):
         delegate, opts, CachingFileIO.create_cache_manager(opts))
     with patch.object(delegate, 'get_file_size', side_effect=AssertionError('source stat')):
         assert _read(file_io, str(path), 'parquet', None, path.stat().st_size) == [1, 2, 3]
+
+
+@pytest.mark.parametrize('disk', [False, True])
+def test_avro_reader_uses_block_cache(tmp_path, disk):
+    path = tmp_path / 'data.avro'
+    schema = {'type': 'record', 'name': 'row',
+              'fields': [{'name': 'v', 'type': 'int'}]}
+    with path.open('wb') as output:
+        fastavro.writer(output, schema, [{'v': 1}, {'v': 2}, {'v': 3}])
+
+    opts = Options({'local-cache.enabled': 'true', 'local-cache.block-size': '64 b',
+                    'local-cache.whitelist': 'data',
+                    'local-cache.exclude-extensions': 'blob'})
+    if disk:
+        opts.data['local-cache.dir'] = str(tmp_path / 'cache')
+    delegate = LocalFileIO(catalog_options=opts)
+    file_io = CachingFileIO.wrap_with_caching_if_needed(
+        delegate, opts, CachingFileIO.create_cache_manager(opts))
+
+    def read():
+        reader = FormatAvroReader(file_io, path.as_uri(), ['v'],
+                                  [DataField(0, 'v', AtomicType('INT'))], None, batch_size=2)
+        values = []
+        try:
+            while True:
+                batch = reader.read_arrow_batch()
+                if batch is None:
+                    return values
+                values.extend(batch.column(0).to_pylist())
+        finally:
+            reader.close()
+
+    assert read() == [1, 2, 3]
+    path.unlink()
+    with patch.object(delegate, 'new_input_stream', side_effect=AssertionError('source read')):
+        with patch.object(delegate, 'get_file_size', side_effect=AssertionError('source stat')):
+            assert read() == [1, 2, 3]
