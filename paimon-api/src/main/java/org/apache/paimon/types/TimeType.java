@@ -23,13 +23,14 @@ import org.apache.paimon.annotation.Public;
 import java.util.Objects;
 
 /**
- * Data type of time WITHOUT time zone consisting of {@code hour:minute:second[.fractional]}.
- * Compared to the SQL standard, leap seconds (23:59:60 and 23:59:61) are not supported as the
- * semantics are closer to {@link java.time.LocalTime}. A time WITH time zone is not provided.
+ * Data type of time WITHOUT time zone consisting of {@code hour:minute:second[.fractional]} with up
+ * to nanosecond precision and values ranging from {@code 00:00:00.000000000} to {@code
+ * 23:59:59.999999999}. Compared to the SQL standard, leap seconds (23:59:60 and 23:59:61) are not
+ * supported as the semantics are closer to {@link java.time.LocalTime}. A time WITH time zone is
+ * not provided.
  *
- * <p>Values are represented as the number of milliseconds of the day, which is why the supported
- * precision is limited to {@link #MAX_PRECISION}. A conversion from and to {@code int} describes
- * the number of milliseconds of the day.
+ * <p>A conversion from and to {@code int} describes the number of milliseconds of the day. A
+ * conversion from and to {@code long} describes the number of nanoseconds of the day.
  *
  * @since 0.4.0
  */
@@ -40,13 +41,7 @@ public final class TimeType extends DataType {
 
     public static final int MIN_PRECISION = 0;
 
-    /**
-     * Maximum supported precision. Time values are stored as milliseconds of the day in an {@code
-     * int} (4 bytes) throughout the stack - the internal row representation, the row serializer and
-     * the Parquet {@code TIME_MILLIS} logical type - so at most 3 fractional digits are
-     * representable. A higher precision is rejected instead of being silently rounded away.
-     */
-    public static final int MAX_PRECISION = 3;
+    public static final int MAX_PRECISION = 9;
 
     public static final int DEFAULT_PRECISION = 0;
 
