@@ -642,7 +642,9 @@ class SplitRead(ABC):
             read_predicate = (trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
                               if schema_id == self.table.table_schema.id else None)
             read_arrow_predicate = (
-                read_predicate.to_arrow()
+                read_predicate.to_arrow(
+                    PyarrowFieldParser.from_paimon_schema(schema_fields)
+                )
                 if read_predicate and self._arrow_filter_pushdown_enabled
                 else None
             )
