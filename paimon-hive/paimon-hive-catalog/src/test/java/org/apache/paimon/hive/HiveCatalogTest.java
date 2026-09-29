@@ -305,7 +305,8 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCreateExternalTableWithSchemelessLocation() throws Exception {
+    public void testCreateExternalTableWithSchemelessLocation(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
         // A `LOCATION '/path'` without a scheme must resolve against the default filesystem rather
         // than silently falling back to FileIO's local implementation, which would write the
         // schema files to the driver's local disk on a cluster.
@@ -314,7 +315,7 @@ public class HiveCatalogTest extends CatalogTestBase {
         catalog.createDatabase(databaseName, false);
         Identifier identifier = Identifier.create(databaseName, tableName);
 
-        String schemelessLocation = "/data/external/" + tableName;
+        String schemelessLocation = tempDir.resolve(tableName).toString();
         Schema schema =
                 new Schema(
                         Lists.newArrayList(
