@@ -244,13 +244,41 @@ class FileStorePathFactory:
         path = resolve_path(self._root, relative_path)
         return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
+    def _data_file_partition(self, partition: Tuple) -> Tuple:
+        if not self.legacy_partition_name or not self.partition_types or not partition:
+            return partition
+
+        date_indexes = [
+            index
+            for index, data_type in enumerate(self.partition_types)
+            if str(data_type).split('(', 1)[0].split()[0] == 'DATE'
+        ]
+        if not date_indexes:
+            return partition
+
+        data_partition = list(partition)
+        for index in date_indexes:
+            value = partition[index]
+            if not _is_null_or_whitespace_only(value):
+                data_partition[index] = str((value - date(1970, 1, 1)).days)
+        return tuple(data_partition)
+
+    def data_file_relative_bucket_path(self, partition: Tuple, bucket: int) -> str:
+        """生成新数据文件使用的分区路径，并兼容历史非 DATE 格式。"""
+        return self.relative_bucket_path(
+            self._data_file_partition(partition), bucket)
+
+    def data_file_bucket_path(self, partition: Tuple, bucket: int) -> str:
+        """生成新数据文件使用的完整 bucket 路径。"""
+        return self.bucket_path(self._data_file_partition(partition), bucket)
+
     def create_external_path_provider(
         self, partition: Tuple, bucket: int
     ) -> Optional[ExternalPathProvider]:
         if not self.external_paths:
             return None
 
-        relative_bucket_path = self.relative_bucket_path(partition, bucket)
+        relative_bucket_path = self.data_file_relative_bucket_path(partition, bucket)
         return ExternalPathProvider.create(
             self.external_path_strategy,
             self.external_paths,
@@ -274,7 +302,7 @@ class FileStorePathFactory:
             # Python data directories historically use str(value) without
             # escaping. Record the actual location when Java renders it
             # differently, so its readers can find the DV beside those files.
-            return (f"{self.bucket_path(partition, bucket)}/{file_name}",
+            return (f"{self.data_file_bucket_path(partition, bucket)}/{file_name}",
                     self._partition_path_requires_explicit_location(partition))
         factory = self.global_index_path_factory()
         return factory.to_path(file_name), factory.is_external_path()

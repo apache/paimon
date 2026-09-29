@@ -91,7 +91,7 @@ class TestAbortCommitMessages(unittest.TestCase):
 
     def test_reconstructs_local_path_after_wire_decode(self):
         table = Mock()
-        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
+        table.path_factory.return_value.data_file_bucket_path.return_value = '/table/p=1/bucket-0'
         file = self._file_meta()
         message = CommitMessage((1,), 0, [file])
         _abort_commit_messages(table, [message])
@@ -100,7 +100,7 @@ class TestAbortCommitMessages(unittest.TestCase):
 
     def test_reconstructs_aligned_sidecars_after_wire_decode(self):
         table = Mock()
-        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
+        table.path_factory.return_value.data_file_bucket_path.return_value = '/table/p=1/bucket-0'
         file = self._file_meta(extra_files=['data.parquet.index'])
         _abort_commit_messages(table, [CommitMessage((1,), 0, [file])])
         self.assertEqual(table.file_io.delete_quietly.call_args_list, [

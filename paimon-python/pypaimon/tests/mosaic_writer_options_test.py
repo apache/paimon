@@ -43,6 +43,9 @@ class _PathFactory:
     def bucket_path(self, partition, bucket):
         return self._bucket_path
 
+    def data_file_bucket_path(self, partition, bucket):
+        return self._bucket_path
+
 
 class _FileIO:
     def __init__(self):

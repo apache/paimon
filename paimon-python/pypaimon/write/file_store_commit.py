@@ -93,7 +93,7 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                      + list(message.compact_changelog_files)):
             path = None
             try:
-                bucket_path = None if file.physical_path() else table.path_factory().bucket_path(
+                bucket_path = None if file.physical_path() else table.path_factory().data_file_bucket_path(
                     tuple(message.partition), message.bucket)
                 for path in file.collect_files(bucket_path):
                     table.file_io.delete_quietly(path)
@@ -895,7 +895,7 @@ class FileStoreCommit:
                         for entry in entries:
                             file = entry.file
                             file.file_path = file.physical_path() if file.external_path else "%s/%s" % (
-                                path_factory.bucket_path(
+                                path_factory.data_file_bucket_path(
                                     tuple(entry.partition.values),
                                     entry.bucket,
                                 ).rstrip("/"),
