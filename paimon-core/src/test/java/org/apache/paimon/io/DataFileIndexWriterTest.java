@@ -24,6 +24,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -65,6 +67,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -226,6 +229,64 @@ public class DataFileIndexWriterTest {
         }
     }
 
+    @Test
+    public void testNestedMapIndexWritersReceiveDataFile() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(contextRecordingColumns(), "m[k1],m[k2]");
+        Identifier identifier = Identifier.create("db", "map_table");
+
+        try (FileSystemCatalog catalog =
+                new FileSystemCatalog(fileIO, new Path(tempFile.toString()))) {
+            catalog.createDatabase("db", false);
+            catalog.createTable(
+                    identifier,
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("m", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()))
+                            .options(options)
+                            .build(),
+                    false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            List<GenericMap> maps =
+                    Arrays.asList(
+                            stringIntMap("k1", 1, "k2", 2),
+                            stringIntMap("k2", 3),
+                            null,
+                            stringIntMap("k1", 4));
+            writeRows(table, maps.size(), i -> GenericRow.of(i, maps.get(i)));
+
+            List<ManifestEntry> entries = table.store().newScan().plan().files();
+            assertThat(entries).hasSize(1);
+            ManifestEntry entry = entries.get(0);
+            Path path =
+                    table.store()
+                            .pathFactory()
+                            .createDataFilePathFactory(entry.partition(), entry.bucket())
+                            .toPath(entry.file());
+
+            // one writer per nested key, each counting missing keys and null maps as nulls
+            List<RecordedWriter> writers =
+                    ContextRecordingFileIndexerFactory.recorded().get(path.toString());
+            assertThat(writers).hasSize(2);
+            assertThat(writers)
+                    .allSatisfy(
+                            writer ->
+                                    assertThat(writer.schemaId).isEqualTo(entry.file().schemaId()));
+            assertThat(writers)
+                    .extracting(writer -> writer.values)
+                    .containsExactlyInAnyOrder(
+                            Arrays.asList(1, null, null, 4), Arrays.asList(2, 3, null, null));
+        }
+    }
+
+    private static GenericMap stringIntMap(Object... keyValues) {
+        Map<Object, Object> map = new HashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            map.put(BinaryString.fromString((String) keyValues[i]), keyValues[i + 1]);
+        }
+        return new GenericMap(map);
+    }
+
     private static String contextRecordingColumns() {
         return CoreOptions.FILE_INDEX
                 + "."
@@ -253,7 +314,7 @@ public class DataFileIndexWriterTest {
     private static List<ManifestEntry> assertIndexWritersMatchDataFiles(
             FileStoreTable table, int indexedField) throws IOException {
         String tableLocation = table.location().toString();
-        Map<String, RecordedWriter> recorded =
+        Map<String, List<RecordedWriter>> recorded =
                 ContextRecordingFileIndexerFactory.recorded().entrySet().stream()
                         .filter(e -> e.getKey().startsWith(tableLocation))
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
@@ -267,8 +328,9 @@ public class DataFileIndexWriterTest {
                             .pathFactory()
                             .createDataFilePathFactory(entry.partition(), entry.bucket())
                             .toPath(file);
-            RecordedWriter writer = recorded.get(path.toString());
-            assertThat(writer).as("index writer of %s", path).isNotNull();
+            List<RecordedWriter> writers = recorded.get(path.toString());
+            assertThat(writers).as("index writers of %s", path).hasSize(1);
+            RecordedWriter writer = writers.get(0);
             assertThat(writer.schemaId).isEqualTo(file.schemaId());
             assertThat(writer.values)
                     .containsExactlyElementsOf(readIntField(table, entry, indexedField));

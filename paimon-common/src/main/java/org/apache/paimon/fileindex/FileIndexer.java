@@ -33,9 +33,9 @@ public interface FileIndexer {
     FileIndexWriter createWriter();
 
     /**
-     * Creates a writer for the data file described by the context. Rows are passed to the writer in
-     * the order they are written to the data file. Override this method if the index needs to know
-     * which data file it is built for.
+     * Creates a writer for one index of the data file described by the context. The writer receives
+     * the indexed value of every row of the data file, including nulls, in row order. Override this
+     * method if the index needs to know which data file it is built for.
      */
     default FileIndexWriter createWriter(FileIndexWriterContext context) {
         return createWriter();

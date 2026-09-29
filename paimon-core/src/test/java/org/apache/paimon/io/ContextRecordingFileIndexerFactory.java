@@ -31,24 +31,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * A {@link FileIndexerFactory} for tests which records, for each data file, the context and the
- * values its writer receives.
+ * values received by each of its writers.
  */
 public class ContextRecordingFileIndexerFactory implements FileIndexerFactory {
 
     public static final String IDENTIFIER = "context-recording";
 
     /** Recorded writers, keyed by the data file path. */
-    private static final Map<String, RecordedWriter> RECORDED = new ConcurrentHashMap<>();
+    private static final Map<String, List<RecordedWriter>> RECORDED = new ConcurrentHashMap<>();
 
-    public static Map<String, RecordedWriter> recorded() {
+    public static Map<String, List<RecordedWriter>> recorded() {
         return RECORDED;
-    }
-
-    public static void reset() {
-        RECORDED.clear();
     }
 
     @Override
@@ -68,7 +65,10 @@ public class ContextRecordingFileIndexerFactory implements FileIndexerFactory {
             @Override
             public FileIndexWriter createWriter(FileIndexWriterContext context) {
                 RecordedWriter recorded = new RecordedWriter(context.schemaId());
-                RECORDED.put(context.dataFilePath().toString(), recorded);
+                RECORDED.computeIfAbsent(
+                                context.dataFilePath().toString(),
+                                k -> new CopyOnWriteArrayList<>())
+                        .add(recorded);
                 return new FileIndexWriter() {
 
                     @Override

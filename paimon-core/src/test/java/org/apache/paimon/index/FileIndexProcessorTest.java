@@ -382,9 +382,10 @@ public class FileIndexProcessorTest {
                         .pathFactory()
                         .createDataFilePathFactory(entry.partition(), entry.bucket())
                         .toPath(entry.file());
-        RecordedWriter writer =
+        List<RecordedWriter> writers =
                 ContextRecordingFileIndexerFactory.recorded().get(dataFile.toString());
-        assertThat(writer).isNotNull();
+        assertThat(writers).hasSize(1);
+        RecordedWriter writer = writers.get(0);
         assertThat(writer.schemaId).isEqualTo(0L);
         assertThat(writer.values).containsExactly(10, 20, 30);
     }

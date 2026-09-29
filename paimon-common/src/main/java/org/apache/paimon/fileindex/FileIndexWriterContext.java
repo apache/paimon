@@ -36,7 +36,7 @@ public class FileIndexWriterContext {
         return dataFilePath;
     }
 
-    /** Id of the schema the data file is written with. */
+    /** Id of the table schema the data file is written with. */
     public long schemaId() {
         return schemaId;
     }
