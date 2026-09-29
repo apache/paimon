@@ -874,7 +874,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertThat(partition.recordCount()).isZero();
         assertThat(partition.fileSizeInBytes()).isZero();
         assertThat(partition.fileCount()).isZero();
-        assertThat(partition.options()).isEqualTo(partitionOptions);
+        Map<String, String> expectedOptions = new HashMap<>(partitionOptions);
+        if (operation.equals("overwrite")) {
+            expectedOptions.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        }
+        assertThat(partition.options()).isEqualTo(expectedOptions);
     }
 
     @Test
