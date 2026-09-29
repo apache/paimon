@@ -1647,6 +1647,14 @@ def _flat_object_get_chunk(chunk, values, parsed):
     # Keep the vectorized reader for narrow objects or a few requested keys.
     if first_size * len(parsed) < 1024:
         return None
+    # For multi-row float batches, the existing reader vectorizes across rows.
+    # Its per-path cost wins over per-row lookup on modest object widths.
+    if (len(valid_rows) >= _SLOW_PATH_ROWS
+            and all(pa.types.is_float32(data_type)
+                    or pa.types.is_float64(data_type)
+                    for _, _, data_type in parsed)
+            and (first_size < 256 or first_size * len(parsed) < 4096)):
+        return None
 
     metadata = _BinaryValues(chunk.field(1))
     decoded = [[None] * len(chunk) for _ in parsed]
@@ -1848,8 +1856,10 @@ def variant_to_pylist(column, fields: Sequence[str]):
             next_indices = np.searchsorted(
                 ordered_offsets, starts, side='right')
             ends = ordered_offsets[next_indices]
-            headers = np.frombuffer(value, dtype=np.uint8)[
-                data_start + starts]
+            # Encoded offsets may be uint8/uint16. Adding data_start before
+            # widening can wrap or raise for otherwise valid objects.
+            absolute_starts = starts.astype(np.intp, copy=False) + data_start
+            headers = np.frombuffer(value, dtype=np.uint8)[absolute_starts]
             basic_types = headers & 0x3
             type_infos = headers >> 2
             fixed_sizes = _FAST_CHILD_SIZES[type_infos]

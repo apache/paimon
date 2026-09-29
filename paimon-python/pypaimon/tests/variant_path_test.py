@@ -32,6 +32,7 @@ from pypaimon.data.variant_path import (
     _metadata_key_ids,
     _path_positions,
     _rebuilt_offsets,
+    _vectorized_get_chunk,
     variant_get,
     variant_to_pylist,
     variant_replace,
@@ -199,8 +200,40 @@ class TestVariantToPylist(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
             variant_to_pylist(column, ['a'])
 
+    def test_selected_offsets_cross_encoded_integer_width(self):
+        for count, value in ((100, None), (128, None), (5362, 1.5)):
+            with self.subTest(count=count):
+                name = 'field%04d' % (count - 1)
+                variant = GenericVariant.from_python({
+                    'field%04d' % index: value for index in range(count)
+                })
+                column = GenericVariant.to_arrow_array([variant])
+                self.assertEqual(
+                    variant_to_pylist(column, [name]), [{name: value}])
+
 
 class TestVariantGet(unittest.TestCase):
+
+    def test_medium_float_batch_keeps_vectorized_reader(self):
+        column = _variants([
+            {'field%03d' % i: float(i + row) for i in range(128)}
+            for row in range(128)
+        ])
+        paths = {'$.field%03d' % i: pa.float64() for i in range(16)}
+        vectorized_results = []
+
+        def track_vectorized(*args):
+            result = _vectorized_get_chunk(*args)
+            vectorized_results.append(result is not None)
+            return result
+
+        with patch('pypaimon.data.variant_path._vectorized_get_chunk',
+                   side_effect=track_vectorized):
+            result = variant_get(column, paths)
+
+        self.assertEqual(vectorized_results, [True])
+        self.assertEqual(result['$.field000'].to_pylist(),
+                         [float(row) for row in range(128)])
 
     def test_compile_paths_builds_trie_without_prefix_slices(self):
         class NoSlicePath(tuple):
