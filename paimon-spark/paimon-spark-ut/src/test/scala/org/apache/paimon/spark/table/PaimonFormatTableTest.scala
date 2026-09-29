@@ -62,13 +62,14 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
       sql(s"INSERT INTO $tableName PARTITION (pt='new') VALUES (4)")
       sql(s"INSERT OVERWRITE $tableName PARTITION (pt='new') VALUES (5)")
       sql(s"INSERT INTO $tableName PARTITION (pt='created') VALUES (6)")
-      val inheritedSpecs = Seq(specs.get(1), Map("pt" -> "created").asJava).asJava
-      assert(
+      val writtenSpecs = Seq(specs.get(1), Map("pt" -> "created").asJava).asJava
+      val writtenPartitions =
         table
           .partitionManager()
-          .listPartitionsByNames(inheritedSpecs)
-          .asScala
-          .forall(partition => Option(partition.options()).forall(_.isEmpty)))
+          .listPartitionsByNames(writtenSpecs)
+      assert(writtenPartitions.size() == 2)
+      assert(writtenPartitions.get(0).options().get("file.format") == "parquet")
+      assert(Option(writtenPartitions.get(1).options()).forall(_.isEmpty))
       sql(s"INSERT OVERWRITE $tableName PARTITION (pt='old') VALUES (3)")
       checkAnswer(
         sql(s"SELECT id, pt FROM $tableName"),

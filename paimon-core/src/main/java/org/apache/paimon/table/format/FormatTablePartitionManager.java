@@ -86,7 +86,8 @@ public interface FormatTablePartitionManager extends Serializable {
      * not.
      *
      * <p>A partition's {@code file.format} overrides the table format. Supplying it explicitly
-     * updates that partition's format; omitting it preserves the stored override. A catalog must
+     * updates that partition's format even when {@code ignoreIfExists=true}; omitting it preserves
+     * the stored override. The format and statistics are updated in the same batch. A catalog must
      * reject additive statistics whose supplied format differs from the registered format.
      *
      * <p>This is the method an implementation provides, so that none can report nothing by

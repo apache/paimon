@@ -106,8 +106,11 @@ public class FormatTableITCase extends RESTCatalogITCaseBase {
                                         Arrays.asList(
                                                 specs.get(1),
                                                 Collections.singletonMap("pt", "created"))))
-                .hasSize(2)
-                .allSatisfy(partition -> assertThat(partition.options()).isNullOrEmpty());
+                .satisfiesExactly(
+                        overwritten ->
+                                assertThat(overwritten.options())
+                                        .containsEntry("file.format", "parquet"),
+                        appended -> assertThat(appended.options()).isNullOrEmpty());
         sql("INSERT OVERWRITE %s PARTITION (pt='old') VALUES (3)", tableName);
         assertThat(sql("SELECT id, pt FROM %s", tableName))
                 .containsExactlyInAnyOrder(

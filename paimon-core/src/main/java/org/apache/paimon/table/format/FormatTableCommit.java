@@ -223,9 +223,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 markPublishedTargetsToPreserveOnAbort(messages);
                 throw failure;
             }
-            Set<Map<String, String>> formatUpdates = new HashSet<>();
             List<Partition> targetPartitions =
-                    prepareCatalogManagedCommit(messages, writtenPartitionSpecs, formatUpdates);
+                    prepareCatalogManagedCommit(messages, writtenPartitionSpecs);
 
             Set<Map<String, String>> partitionSpecs = new LinkedHashSet<>();
             Set<Map<String, String>> reportTargetSpecs = new LinkedHashSet<>();
@@ -329,7 +328,7 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             if (reportsStatistics && overwrite) {
                 reportPartitions(
-                        reportTargetSpecs, statisticsByPartition, commitTime, true, formatUpdates);
+                        reportTargetSpecs, statisticsByPartition, commitTime, true, fileFormat);
             } else if (partitionManager != null && !partitionSpecs.isEmpty()) {
                 // Register an append before reporting its additive statistics. Registration is
                 // idempotent, so a failed multi-batch call can roll back every file from this
@@ -362,11 +361,7 @@ public class FormatTableCommit implements BatchTableCommit {
                 if (reportsStatistics && !statisticsByPartition.isEmpty()) {
                     try {
                         reportPartitions(
-                                partitionSpecs,
-                                statisticsByPartition,
-                                commitTime,
-                                false,
-                                Collections.emptySet());
+                                partitionSpecs, statisticsByPartition, commitTime, false, null);
                     } catch (RuntimeException statisticsFailure) {
                         LOG.warn(
                                 "Committed data for format table {}, but failed to report append "
@@ -425,28 +420,21 @@ public class FormatTableCommit implements BatchTableCommit {
 
     /** Loads the registry rows this operation needs before any table mutation. */
     private List<Partition> prepareCatalogManagedCommit(
-            List<TwoPhaseCommitMessage> messages,
-            Set<Map<String, String>> writtenPartitionSpecs,
-            Set<Map<String, String>> formatUpdates) {
+            List<TwoPhaseCommitMessage> messages, Set<Map<String, String>> writtenPartitionSpecs) {
         if (partitionManager == null || partitionKeys == null || partitionKeys.isEmpty()) {
             return Collections.emptyList();
         }
 
         try {
             List<Partition> targetPartitions = loadCommitTargetPartitions(writtenPartitionSpecs);
-            for (Partition partition : targetPartitions) {
-                if (!overwrite
-                        && FormatTablePartitionPathResolver.customLocation(partition) != null) {
-                    throw unsupportedCustomLocation("Writing", partition);
-                }
-                String partitionFormat =
-                        FormatTablePartitionOptions.fileFormatOverride(partition.options());
-                if (partitionFormat != null && !partitionFormat.equals(fileFormat)) {
-                    if (overwrite) {
-                        if (fileFormat != null) {
-                            formatUpdates.add(partition.spec());
-                        }
-                    } else {
+            if (!overwrite) {
+                for (Partition partition : targetPartitions) {
+                    if (FormatTablePartitionPathResolver.customLocation(partition) != null) {
+                        throw unsupportedCustomLocation("Writing", partition);
+                    }
+                    String partitionFormat =
+                            FormatTablePartitionOptions.fileFormatOverride(partition.options());
+                    if (partitionFormat != null && !partitionFormat.equals(fileFormat)) {
                         throw new UnsupportedOperationException(
                                 "Cannot append files in format "
                                         + fileFormat
@@ -473,21 +461,14 @@ public class FormatTableCommit implements BatchTableCommit {
             Set<Map<String, String>> writtenPartitionSpecs) {
         if (overwrite) {
             if (staticPartitions == null || staticPartitions.isEmpty()) {
-                if (!replacesOnlyWrittenPartitions()) {
-                    return loadPartitionRegistry();
-                }
-                if (fileFormat == null) {
-                    return Collections.emptyList();
-                }
-            } else {
-                LinkedHashMap<String, String> staticSpec = orderedPartitionPrefix(staticPartitions);
-                if (staticSpec.size() < partitionKeys.size()) {
-                    return loadPartitionsByPrefix(staticSpec);
-                }
-                return fileFormat == null
+                return replacesOnlyWrittenPartitions()
                         ? Collections.emptyList()
-                        : loadPartitionsByNames(Collections.singleton(staticSpec));
+                        : loadPartitionRegistry();
             }
+            LinkedHashMap<String, String> staticSpec = orderedPartitionPrefix(staticPartitions);
+            return staticSpec.size() == partitionKeys.size()
+                    ? Collections.emptyList()
+                    : loadPartitionsByPrefix(staticSpec);
         }
 
         return writtenPartitionSpecs.isEmpty()
@@ -629,7 +610,7 @@ public class FormatTableCommit implements BatchTableCommit {
             Map<Map<String, String>, PartitionStatistics> statisticsByPartition,
             long commitTime,
             boolean replaceStatistics,
-            Set<Map<String, String>> formatUpdates) {
+            @Nullable String writtenFileFormat) {
         // Statistics are matched by spec, not by position: the specs need only be a superset.
         Set<Map<String, String>> specs = new LinkedHashSet<>(targetPartitionSpecs);
         specs.addAll(statisticsByPartition.keySet());
@@ -654,8 +635,10 @@ public class FormatTableCommit implements BatchTableCommit {
                 }
                 Map<String, String> options = new LinkedHashMap<>();
                 options.put(CoreOptions.PATH.key(), partitionPath.toString());
-                if (formatUpdates.contains(spec)) {
-                    options.put(CoreOptions.FILE_FORMAT.key(), fileFormat);
+                if (writtenFileFormat != null) {
+                    // Report the format of the replacement even when the registry previously
+                    // matched it. That earlier value may have changed since the lookup.
+                    options.put(CoreOptions.FILE_FORMAT.key(), writtenFileFormat);
                 }
                 partitionOptions.add(options);
             }
@@ -1366,7 +1349,7 @@ public class FormatTableCommit implements BatchTableCommit {
                         emptied,
                         truncateTime,
                         /* replaceStatistics */ true,
-                        Collections.emptySet());
+                        null);
             } catch (RuntimeException e) {
                 if (failure == null) {
                     throw e;

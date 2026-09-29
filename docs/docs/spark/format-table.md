@@ -116,8 +116,9 @@ change the table's managed/external ownership.
 
 Catalog-managed partitions can override the table's `file.format` through the partition `options`
 map in the Catalog API or REST `partitionOptions` request. For example, an ORC partition of a
-Parquet table can be registered with `{"file.format": "orc"}`. A compatible catalog also applies
-an explicit format update to an existing partition while preserving its other options.
+Parquet table can be registered with `{"file.format": "orc"}`. Catalog implementations supporting
+this feature must also apply an explicit format update to an existing partition, including when
+`ignoreIfExists=true`, while preserving its other options. Omitting the format leaves it unchanged.
 
 The effective format is the partition's explicit value, then the table's value, then the default
 `parquet`. An absent partition option inherits the table format; an empty or invalid value is an
@@ -131,12 +132,17 @@ not use these overrides. Updating an option describes the existing files; it doe
 
 Writers continue to use the table's write format. Appending to a partition registered with a
 different format fails before files are published. Overwrite replaces the targeted partitions
-using the write format and updates `file.format` only when an existing partition override differs
-from that format. Appends and overwrites that already match the effective partition format leave
-the format option unchanged; partitions without an override continue to inherit the table format.
+using the write format and always reports that format with the replacement statistics. This stores
+an explicit `file.format` even when the partition previously inherited the table format. Appends
+leave the format option unchanged, and TRUNCATE preserves the existing format.
 Changing only the table's default does not convert existing data: register the actual format of
 partitions that would otherwise inherit the new default before changing it. All readers and writers
 of a mixed table, and its catalog provider, must support partition file formats.
+
+Overwrites of the same partition must be externally serialized with other writes and format
+metadata changes. The append check does not prevent a concurrent overwrite from changing the
+partition format. Queries running during an overwrite have no snapshot isolation and may observe
+files and metadata from different stages of the overwrite.
 
 `ANALYZE TABLE` chooses the statistics reader per partition. Formats without footer row counts
 leave the row count unknown. The existing restriction on analyzing custom locations still applies.

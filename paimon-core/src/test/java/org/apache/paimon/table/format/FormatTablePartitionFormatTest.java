@@ -279,7 +279,7 @@ class FormatTablePartitionFormatTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testMatchingFormatWritesDoNotReportFormatOptions(boolean overwrite) throws Exception {
+    void testOnlyOverwriteReportsMatchingFormat(boolean overwrite) throws Exception {
         Path location = new Path(tempDir.toUri());
         List<Partition> existing =
                 Arrays.asList(
@@ -309,7 +309,8 @@ class FormatTablePartitionFormatTest {
         if (overwrite) {
             assertThat(reported.get())
                     .hasSize(3)
-                    .allSatisfy(options -> assertThat(options).doesNotContainKey("file.format"));
+                    .allSatisfy(
+                            options -> assertThat(options).containsEntry("file.format", "parquet"));
         } else {
             assertThat(reported.get()).isNull();
         }
@@ -318,6 +319,93 @@ class FormatTablePartitionFormatTest {
         ReadBuilder read = table(location, "parquet", registered).newReadBuilder();
         assertThat(readRows(read, read.newScan().plan().splits()))
                 .containsExactlyInAnyOrder("inherited", "explicit", "created");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testOverwriteReportsFormatWhenRegistryChangesAfterLookup(boolean explicitFormat)
+            throws Exception {
+        Path location = new Path(tempDir.toUri());
+        writeFile(location, "p", "parquet", "old");
+        List<Partition> initial =
+                Collections.singletonList(
+                        partition("p", explicitFormat ? options("parquet") : null));
+        FormatTable table =
+                table(location, "parquet", initial)
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false"));
+        AtomicReference<String> storedFormat =
+                new AtomicReference<>(explicitFormat ? "parquet" : null);
+        when(table.partitionManager().listPartitions(anyMap(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            // The lookup returns its snapshot after another request changes the
+                            // registry. The overwrite must report what it writes regardless.
+                            storedFormat.set("orc");
+                            return initial;
+                        });
+        doAnswer(
+                        invocation -> {
+                            List<Map<String, String>> reportedOptions = invocation.getArgument(4);
+                            if (reportedOptions != null
+                                    && reportedOptions.get(0).containsKey("file.format")) {
+                                storedFormat.set(reportedOptions.get(0).get("file.format"));
+                            }
+                            return null;
+                        })
+                .when(table.partitionManager())
+                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), any());
+
+        BatchWriteBuilder overwrite =
+                table.newBatchWriteBuilder().withOverwrite(Collections.emptyMap());
+        try (BatchTableWrite write = overwrite.newWrite()) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("replacement"), BinaryString.fromString("p")));
+            overwrite.newCommit().commit(write.prepareCommit());
+        }
+        assertThat(storedFormat.get()).isEqualTo("parquet");
+        ReadBuilder read =
+                table(
+                                location,
+                                "parquet",
+                                Collections.singletonList(
+                                        partition("p", options(storedFormat.get()))))
+                        .newReadBuilder();
+        assertThat(readRows(read, read.newScan().plan().splits())).containsExactly("replacement");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testTruncateDoesNotReportWriteFormat(boolean wholeTable) throws Exception {
+        Path location = new Path(tempDir.toUri());
+        writeFile(location, "p", "orc", "old");
+        FormatTable table =
+                table(
+                        location,
+                        "parquet",
+                        Collections.singletonList(partition("p", options("orc"))));
+        AtomicReference<List<Map<String, String>>> reported = new AtomicReference<>();
+        doAnswer(
+                        invocation -> {
+                            reported.set(invocation.getArgument(4));
+                            return null;
+                        })
+                .when(table.partitionManager())
+                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), any());
+        FormatTableCommit commit = (FormatTableCommit) table.newBatchWriteBuilder().newCommit();
+        if (wholeTable) {
+            commit.truncateTable();
+        } else {
+            commit.truncatePartitions(
+                    Collections.singletonList(Collections.singletonMap("pt", "p")));
+        }
+        assertThat(reported.get())
+                .hasSize(1)
+                .allSatisfy(options -> assertThat(options).doesNotContainKey("file.format"));
+        assertThat(FormatTableScan.listDataFiles(table.fileIO(), new Path(location, "pt=p")))
+                .isEmpty();
     }
 
     @ParameterizedTest

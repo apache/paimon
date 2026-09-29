@@ -44,8 +44,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * partitionSpecs} by position; naming the partition's own default directory in {@code path} asks
  * the catalog to put it back there, which needs replacement statistics for that partition. An
  * explicit {@code file.format} sets the partition's format without changing other options; omitting
- * it preserves the stored override. Additive statistics must describe files in the partition's
- * effective format, whereas a replacement may report a new format.
+ * it preserves the stored override. Catalogs supporting partition formats apply explicit format
+ * updates even when {@code ignoreIfExists=true}, together with the statistics in the same batch.
+ * Additive statistics must describe files in the partition's effective format, whereas a
+ * replacement may report a new format.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreatePartitionsRequest implements RESTRequest {
