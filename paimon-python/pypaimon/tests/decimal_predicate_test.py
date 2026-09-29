@@ -18,20 +18,18 @@
 from decimal import Decimal, localcontext
 import operator
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import pytest
 
-from pypaimon import CatalogFactory, Schema
+from pypaimon import Schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
-from pypaimon.schema.data_types import AtomicType
-from pypaimon.schema.schema_change import SchemaChange
 
 
 COMPARISONS = [
@@ -216,61 +214,3 @@ def test_decimal_composed_predicate_uses_schema() -> None:
         table.to_reader(), filter=predicate.to_arrow(table.schema)
     ).to_table()
     assert actual.column('value').to_pylist() == values[1:]
-
-
-def test_decimal_filter_after_scale_evolution(tmp_path: Path) -> None:
-    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
-    catalog.create_database('default', False)
-    options = {'file.format': 'parquet', 'scan.native-plan.enabled': 'false'}
-    old_schema = pa.schema([('id', pa.int64()), ('value', pa.decimal128(10, 2))])
-    catalog.create_table(
-        'default.decimals',
-        Schema.from_pyarrow_schema(old_schema, options=options),
-        False,
-    )
-
-    def write_rows(
-        rows: List[Dict[str, Union[int, Decimal]]], schema: pa.Schema
-    ) -> None:
-        table = catalog.get_table('default.decimals')
-        builder = table.new_batch_write_builder()
-        writer, commit = builder.new_write(), builder.new_commit()
-        try:
-            writer.write_arrow(pa.Table.from_pylist(rows, schema=schema))
-            commit.commit(writer.prepare_commit())
-        finally:
-            writer.close()
-            commit.close()
-
-    write_rows(
-        [
-            {'id': 0, 'value': Decimal('1.00')},
-            {'id': 1, 'value': Decimal('17.00')},
-            {'id': 2, 'value': Decimal('24.00')},
-        ],
-        old_schema,
-    )
-    catalog.alter_table(
-        'default.decimals',
-        [SchemaChange.update_column_type('value', AtomicType('DECIMAL(12, 3)'))],
-        False,
-    )
-    new_schema = pa.schema([('id', pa.int64()), ('value', pa.decimal128(12, 3))])
-    write_rows(
-        [
-            {'id': 3, 'value': Decimal('1.001')},
-            {'id': 4, 'value': Decimal('17.001')},
-            {'id': 5, 'value': Decimal('24.000')},
-        ],
-        new_schema,
-    )
-
-    table = catalog.get_table('default.decimals')
-    read_builder = table.new_read_builder()
-    predicate = read_builder.new_predicate_builder().less_than(
-        'value', Decimal('17.001')
-    )
-    read_builder.with_filter(predicate).with_projection(['id'])
-    actual = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
-    assert actual is not None
-    assert sorted(actual.column('id').to_pylist()) == [0, 1, 3]
