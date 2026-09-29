@@ -41,6 +41,7 @@ class CommitMessage:
     compact_changelog_files: List[DataFileMeta] = field(default_factory=list)
     compact_index_adds: List['IndexManifestEntry'] = field(default_factory=list)
     compact_index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
+    preserve_blob_files_on_abort: bool = False
 
     def is_empty(self):
         return (
