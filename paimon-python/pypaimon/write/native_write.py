@@ -24,6 +24,7 @@ from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field, is_blob_type
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
@@ -115,6 +116,7 @@ class NativeTableWrite:
         self._native_writer = native_writer
         self._python_writer = None
         self._written = False
+        self._prepared_messages = []
         self._schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
 
     def _switch_to_python(self):
@@ -194,7 +196,13 @@ class NativeTableWrite:
             if commit_identifier is not None:
                 raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
             messages = self._native_writer.prepare_commit()
-        return from_native_commit_messages(self.table, messages)
+        messages = from_native_commit_messages(self.table, messages)
+        self._prepared_messages = [message for message in self._prepared_messages
+                                   if message._native_write_pending]
+        for message in messages:
+            message._native_write_pending = True
+        self._prepared_messages.extend(messages)
+        return messages
 
     def close(self):
         if self._python_writer is not None:
@@ -202,9 +210,15 @@ class NativeTableWrite:
         elif self._native_writer is not None:
             self._native_writer.close()
             self._native_writer = None
+        self._prepared_messages.clear()
 
     def abort(self):
         if self._python_writer is not None:
             self._python_writer.abort()
         else:
-            self.close()
+            messages = [message for message in self._prepared_messages
+                        if message._native_write_pending]
+            try:
+                self.close()
+            finally:
+                _abort_commit_messages(self.table, messages)

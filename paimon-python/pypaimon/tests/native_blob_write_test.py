@@ -148,6 +148,110 @@ def test_native_blob_cleanup_includes_completed_groups(tmp_path, external, actio
         writer.close()
 
 
+@pytest.mark.parametrize('external', [False, True])
+@pytest.mark.parametrize('stream', [False, True])
+def test_native_blob_abort_removes_prepared_and_outstanding_files(tmp_path, external, stream):
+    options = {'data-file.path-directory': 'data/nested'}
+    if external:
+        options['data-file.external-paths'] = (tmp_path / 'external').as_uri()
+    table = _table(tmp_path, options)
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        assert isinstance(writer, NativeTableWrite)
+        for identifier in range(1, 3 if stream else 2):
+            writer.write_arrow(_data(identifier * 2))
+            messages = writer.prepare_commit(identifier) if stream else writer.prepare_commit()
+            assert messages
+        assert {path.suffix for path in _physical_files(tmp_path)} == {'.parquet', '.blob', '.index'}
+        writer.write_arrow(_data(6))
+        writer.abort()
+        writer.abort()
+        assert not _physical_files(tmp_path)
+        assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize('external', [False, True])
+def test_native_blob_close_releases_prepared_files_to_committer(tmp_path, external):
+    options = {'data-file.external-paths': (tmp_path / 'external').as_uri()} if external else {}
+    table = _table(tmp_path, options)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(_data())
+        messages = writer.prepare_commit()
+        prepared = _physical_files(tmp_path)
+        assert prepared
+        writer.close()
+        writer.abort()
+        assert _physical_files(tmp_path) == prepared
+        commit.commit(messages)
+        for planner in (False, True):
+            for reader in (False, True):
+                assert _read(table, planner, reader) == _data().to_pylist()
+    finally:
+        writer.close()
+        commit.close()
+
+
+@pytest.mark.parametrize('external', [False, True])
+@pytest.mark.parametrize('commit_native_option', [False, True])
+def test_native_blob_stream_abort_preserves_submitted_files(tmp_path, external, commit_native_option):
+    options = {'commit.native.enabled': str(commit_native_option).lower()}
+    if external:
+        options['data-file.external-paths'] = (tmp_path / 'external').as_uri()
+    table = _table(tmp_path, options)
+    builder = table.new_stream_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(_data())
+        commit.commit(writer.prepare_commit(1), 1)
+        submitted = _physical_files(tmp_path)
+        writer.write_arrow(_data(2))
+        assert writer.prepare_commit(2)
+        writer.write_arrow(_data(4))
+        assert _physical_files(tmp_path) > submitted
+        writer.abort()
+        assert _physical_files(tmp_path) == submitted
+        for planner in (False, True):
+            for reader in (False, True):
+                assert _read(table, planner, reader) == _data().to_pylist()
+    finally:
+        writer.close()
+        commit.close()
+
+
+@pytest.mark.parametrize('published', [False, True])
+def test_native_blob_abort_preserves_files_after_commit_exception(tmp_path, published):
+    table = _table(tmp_path)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(_data())
+        messages = writer.prepare_commit()
+        prepared = _physical_files(tmp_path)
+        original_commit = commit.file_store_commit.commit
+
+        def fail_commit(**kwargs):
+            if published:
+                original_commit(**kwargs)
+            raise RuntimeError('Commit outcome is unknown')
+
+        with patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit):
+            with pytest.raises(RuntimeError, match='Commit outcome is unknown'):
+                commit.commit(messages)
+        writer.abort()
+        assert _physical_files(tmp_path) == prepared
+        assert (table.snapshot_manager().get_latest_snapshot() is not None) == published
+        if published:
+            assert _read(table, True, True) == _data().to_pylist()
+    finally:
+        writer.close()
+        commit.close()
+
+
 class _StreamingBlob(Blob):
     def __init__(self, data):
         self.data = data
