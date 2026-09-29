@@ -113,6 +113,29 @@ class TestVariantSelectFields(unittest.TestCase):
             {'field.000': 0, 'field.127': 127},
         ])
 
+    def test_selects_from_same_metadata_with_different_slots(self):
+        fields = {'field.%03d' % i: float(i) for i in range(128)}
+        metadata = GenericVariant.from_python(fields).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        rows = []
+        for names in (list(fields), list(fields)[10:], list(fields)):
+            value = _build_object_value([
+                (key_ids[name], _encode_scalar_to_value_bytes(
+                    fields[name], pa.float64()))
+                for name in names
+            ])
+            rows.append(GenericVariant(value, metadata))
+
+        result = variant_select_fields(
+            GenericVariant.to_arrow_array(rows),
+            ['field.000', 'field.015'])
+
+        self.assertEqual(result, [
+            {'field.000': 0.0, 'field.015': 15.0},
+            {'field.015': 15.0},
+            {'field.000': 0.0, 'field.015': 15.0},
+        ])
+
     def test_preserves_other_primitive_types(self):
         timestamp = datetime.datetime(2026, 8, 11, 1, 2, 3, 456000)
         fields = {

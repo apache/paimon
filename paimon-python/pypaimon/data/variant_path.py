@@ -1797,6 +1797,7 @@ def variant_select_fields(column, fields: Sequence[str]):
 
     chunks, _, _ = _variant_chunks(column)
     result = []
+    slot_cache = LRUCache(maxsize=64)
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
         metadata = _BinaryValues(chunk.field(1))
@@ -1814,36 +1815,37 @@ def variant_select_fields(column, fields: Sequence[str]):
             key_ids = _cached_metadata_key_ids(row_metadata)
             targets = {key_ids[name]: name for name in names
                        if name in key_ids}
+            (size, id_width, id_start, offset_start, data_start,
+             offsets, _) = _flat_object_layout(value)
+            if data_start + int(offsets[-1]) != len(value):
+                _malformed("trailing bytes after root value")
+            layout = (row_metadata, value[id_start:offset_start],
+                      id_width, tuple(sorted(targets)))
+            selected_slots = slot_cache.get(layout)
+            if selected_slots is None:
+                field_ids = _flat_object_unsigneds(
+                    value, id_start, size, id_width)
+                if len(np.unique(field_ids)) != size:
+                    _malformed("duplicate object field id")
+                selected_slots = tuple(
+                    (slot, targets[int(key_id)])
+                    for slot, key_id in enumerate(field_ids)
+                    if int(key_id) in targets)
+                slot_cache[layout] = selected_slots
             if not targets:
                 result.append({})
                 continue
-
-            def extract(size, id_width, offset_width, id_start,
-                        offset_start, data_start):
-                _require_range(0, data_start, len(value))
-                data_size = _read_unsigned(
-                    value, offset_start + size * offset_width,
-                    offset_width)
-                _require_range(data_start, data_size, len(value))
-                selected = {}
-                for slot in range(size):
-                    key_id = _read_unsigned(
-                        value, id_start + slot * id_width, id_width)
-                    name = targets.get(key_id)
-                    if name is None:
-                        continue
-                    offset = _read_unsigned(
-                        value, offset_start + slot * offset_width,
-                        offset_width)
-                    if offset >= data_size:
-                        _malformed("invalid object offset")
-                    selected[name] = variant._to_python_impl(
-                        value, row_metadata, data_start + offset)
-                    if len(selected) == len(targets):
-                        break
-                return selected
-
-            result.append(_handle_object(value, 0, extract))
+            slots = np.fromiter(
+                (slot for slot, _ in selected_slots),
+                dtype=np.int64, count=len(selected_slots))
+            starts = offsets[slots]
+            if np.any(starts >= offsets[-1]):
+                _malformed("invalid object offset")
+            result.append({
+                name: variant._to_python_impl(
+                    value, row_metadata, data_start + int(offset))
+                for (_, name), offset in zip(selected_slots, starts)
+            })
     return result
 
 
