@@ -26,12 +26,14 @@ import pyarrow.compute as pc
 from pypaimon.data._variant_binary import _primitive_header
 from pypaimon.data.generic_variant import _DOUBLE, GenericVariant
 from pypaimon.data.variant_path import (
+    _checked_object_layout,
     _compile_paths,
     _metadata_cache,
     _metadata_key_ids,
     _path_positions,
     _rebuilt_offsets,
     variant_get,
+    variant_select_fields,
     variant_replace,
 )
 from pypaimon.data.variant_shredding import (
@@ -75,6 +77,73 @@ def _typed_object(fields):
     ])
     return GenericVariant.to_arrow_array([
         GenericVariant(value, metadata)])
+
+
+class TestVariantSelectFields(unittest.TestCase):
+
+    def test_preserves_mixed_types_missing_null_and_literal_names(self):
+        column = _variants([
+            {'state.x': 1, 'child': {'count': 2}, 'nullable': None},
+            {'state.x': 1.5, 'child': [3, 4]},
+            {},
+            None,
+        ])
+
+        result = variant_select_fields(
+            column, ['state.x', 'child', 'nullable', 'absent'])
+
+        self.assertEqual(result, [
+            {'state.x': 1, 'child': {'count': 2}, 'nullable': None},
+            {'state.x': 1.5, 'child': [3, 4]},
+            {},
+            None,
+        ])
+
+    def test_selects_from_wide_objects_and_chunked_arrays(self):
+        first = {'field.%03d' % i: float(i) for i in range(128)}
+        second = {'field.%03d' % i: i for i in range(128)}
+        column = pa.chunked_array([
+            _variants([first]), _variants([second])])
+
+        result = variant_select_fields(
+            column, ['field.000', 'field.127', 'field.000'])
+
+        self.assertEqual(result, [
+            {'field.000': 0.0, 'field.127': 127.0},
+            {'field.000': 0, 'field.127': 127},
+        ])
+
+    def test_preserves_other_primitive_types(self):
+        timestamp = datetime.datetime(2026, 8, 11, 1, 2, 3, 456000)
+        fields = {
+            'flag': (True, pa.bool_()),
+            'text': ('hello', pa.string()),
+            'binary': (b'abc', pa.binary()),
+            'decimal': (Decimal('12.30'), pa.decimal128(4, 2)),
+            'date': (datetime.date(2026, 8, 11), pa.date32()),
+            'timestamp': (timestamp, pa.timestamp('us')),
+        }
+
+        result = variant_select_fields(_typed_object(fields), fields)
+
+        self.assertEqual(result, [
+            {name: value for name, (value, _) in fields.items()}])
+
+    def test_rejects_non_object_root_and_invalid_fields(self):
+        with self.assertRaisesRegex(TypeError, "root must be an object"):
+            variant_select_fields(_variants([[1, 2]]), ['field'])
+        with self.assertRaisesRegex(TypeError, "sequence of field names"):
+            variant_select_fields(_variants([{}]), 'field')
+        with self.assertRaisesRegex(TypeError, "field names must be strings"):
+            variant_select_fields(_variants([{}]), [1])
+
+    def test_rejects_truncated_object(self):
+        variant = GenericVariant.from_python({'field': 123})
+        truncated = GenericVariant(
+            variant.value()[:-1], variant.metadata())
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_select_fields(
+                GenericVariant.to_arrow_array([truncated]), ['field'])
 
 
 class TestVariantGet(unittest.TestCase):
@@ -154,6 +223,130 @@ class TestVariantGet(unittest.TestCase):
 
         self.assertEqual(result['$.velocity.x'].to_pylist(), [1.0, 3.0])
         self.assertEqual(result['$.velocity.y'].to_pylist(), [-2.0, -4.0])
+
+    def test_reads_many_flat_fields_without_repeating_vectorized_scan(self):
+        fields = {'field.%03d' % i: float(i) for i in range(128)}
+        paths = {'$["field.%03d"]' % i: pa.float64()
+                 for i in range(16)}
+        column = _variants([fields, fields])
+
+        with patch(
+                'pypaimon.data.variant_path._vectorized_get_chunk',
+                side_effect=AssertionError(
+                    "wide flat lookup should be shared")):
+            result = variant_get(column, paths)
+
+        for i, path in enumerate(paths):
+            self.assertEqual(result[path].to_pylist(), [float(i), float(i)])
+
+    def test_reads_many_flat_fields_with_exact_primitive_types(self):
+        timestamp = datetime.datetime(2026, 8, 11, 1, 2, 3, 456000)
+        fields = {
+            'field.%03d' % i: (float(i), pa.float64())
+            for i in range(128)
+        }
+        selected = {
+            'flag': (True, pa.bool_()),
+            'count': (123, pa.int64()),
+            'text': ('hello', pa.string()),
+            'binary': (b'abc', pa.binary()),
+            'decimal': (Decimal('12.30'), pa.decimal128(4, 2)),
+            'date': (datetime.date(2026, 8, 11), pa.date32()),
+            'timestamp': (timestamp, pa.timestamp('us')),
+        }
+        fields.update(selected)
+        paths = {'$.%s' % name: data_type
+                 for name, (_, data_type) in selected.items()}
+        paths['$["field.000"]'] = pa.float64()
+
+        with patch(
+                'pypaimon.data.variant_path._vectorized_get_chunk',
+                side_effect=AssertionError(
+                    "wide flat lookup should be shared")):
+            result = variant_get(_typed_object(fields), paths)
+
+        for name, (expected, _) in selected.items():
+            self.assertEqual(result['$.%s' % name].to_pylist(), [expected])
+        self.assertEqual(result['$["field.000"]'].to_pylist(), [0.0])
+
+    def test_reads_many_flat_fields_with_complex_types(self):
+        fields = {'field.%03d' % i: float(i) for i in range(128)}
+        fields.update({
+            'object': {'count': 2, 'flag': True},
+            'array': [1, 2],
+            'map': {'left': 1, 'right': 2},
+        })
+        paths = {'$["field.%03d"]' % i: pa.float64()
+                 for i in range(5)}
+        paths.update({
+            '$.object': pa.struct([
+                ('count', pa.int64()), ('flag', pa.bool_())]),
+            '$.array': pa.list_(pa.int64()),
+            '$.map': pa.map_(pa.string(), pa.int64()),
+        })
+
+        with patch(
+                'pypaimon.data.variant_path._vectorized_get_chunk',
+                side_effect=AssertionError(
+                    "wide flat lookup should be shared")):
+            result = variant_get(_variants([fields]), paths)
+
+        self.assertEqual(result['$.object'].to_pylist(),
+                         [{'count': 2, 'flag': True}])
+        self.assertEqual(result['$.array'].to_pylist(), [[1, 2]])
+        self.assertEqual(result['$.map'].to_pylist(),
+                         [[('left', 1), ('right', 2)]])
+
+    def test_many_flat_fields_keep_missing_null_and_mixed_metadata(self):
+        fields = {'field.%03d' % i: float(i) for i in range(128)}
+        paths = {'$["field.%03d"]' % i: pa.float64()
+                 for i in range(15)}
+        paths['$["maybe.null"]'] = pa.float64()
+        column = _variants([
+            {**fields, 'maybe.null': None},
+            {**fields, 'field.000': None},
+            fields,
+            None,
+        ])
+
+        result = variant_get(column, paths)
+
+        self.assertEqual(
+            result['$["field.000"]'].to_pylist(),
+            [0.0, None, 0.0, None])
+        self.assertEqual(
+            result['$["maybe.null"]'].to_pylist(),
+            [None, None, None, None])
+        self.assertEqual(
+            result['$["field.014"]'].to_pylist(),
+            [14.0, 14.0, 14.0, None])
+
+    def test_many_flat_fields_allow_nonmonotonic_value_offsets(self):
+        fields = {'field.%03d' % i: float(i) for i in range(128)}
+        variant = GenericVariant.from_python(fields)
+        value = variant.value()
+        size, id_width, id_start, data_start, offsets, _ = (
+            _checked_object_layout(value, 0, len(value)))
+        offset_width = ((value[0] >> 2) & 0x3) + 1
+        offset_start = id_start + size * id_width
+        children = [value[data_start + offsets[i]:data_start + offsets[i + 1]]
+                    for i in range(size)]
+        reordered = bytearray(value[:data_start])
+        for i in range(size):
+            new_offset = sum(len(child) for child in children[i + 1:])
+            start = offset_start + i * offset_width
+            reordered[start:start + offset_width] = new_offset.to_bytes(
+                offset_width, 'little')
+        reordered.extend(b''.join(reversed(children)))
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(bytes(reordered), variant.metadata())])
+        paths = {'$["field.%03d"]' % i: pa.float64()
+                 for i in range(16)}
+
+        result = variant_get(column, paths)
+
+        for i, path in enumerate(paths):
+            self.assertEqual(result[path].to_pylist(), [float(i)])
 
     def test_requires_exact_type(self):
         cases = (

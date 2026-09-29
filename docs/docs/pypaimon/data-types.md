@@ -218,6 +218,28 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `TINYINT`, `SM
 
 ## VARIANT Path Updates
 
+### Select object fields for Python
+
+When an application needs a few fields from a wide VARIANT object, use
+`variant_select_fields` on the Arrow column instead of decoding every row's
+complete object:
+
+```python
+from pypaimon.data import variant_select_fields
+
+rows = variant_select_fields(result.column('payload'), ['state.x', 'action.y'])
+# rows[i] is a Python dict of the fields present in row i, or None for SQL NULL.
+```
+
+Field names are literal top-level names, so `state.x` selects a single field
+named `state.x`, not a nested path. The function preserves the encoded Python
+value type in each row; for example, the same field may be an integer in one
+row and a float in another. Missing fields are omitted, while a present VARIANT
+NULL has value `None`. This reduces Python decoding work after the VARIANT
+column is read; it does not reduce Parquet I/O or perform a Paimon scan.
+
+### Read and update typed paths
+
 Read existing paths as Arrow arrays, use Arrow compute, and replace them
 without decoding unrelated fields:
 

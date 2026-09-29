@@ -55,6 +55,7 @@ from pypaimon.data.generic_variant import (
     _MAX_DECIMAL16_PRECISION,
     _PRIMITIVE_FIXED_SIZES,
     GenericVariant,
+    _handle_object,
     _Type,
     _check_variant_sizes,
     _variant_get_type,
@@ -1579,6 +1580,76 @@ def _rowwise_replace_chunk(
         chunk, values, data, data_start, rebuilt_rows)
 
 
+def _flat_object_get_chunk(chunk, values, parsed):
+    """Look up wide, top-level object fields together instead of per path."""
+    if (len(parsed) < 2
+            or any(len(path) != 1 or path[0][0] != 'key'
+                   for _, path, _ in parsed)):
+        return None
+
+    valid_rows = _valid_row_indices(chunk, values, chunk.field(1))
+    if not len(valid_rows):
+        return [pa.nulls(len(chunk), type=data_type)
+                for _, _, data_type in parsed]
+    first_value = values.view(int(valid_rows[0]))
+    if not first_value or (first_value[0] & 0x3) != _OBJECT:
+        return None
+    first_size = _checked_object_layout(first_value, 0, len(first_value))[0]
+    # Keep the vectorized reader for narrow objects or a few requested keys.
+    if first_size * len(parsed) < 1024:
+        return None
+
+    metadata = _BinaryValues(chunk.field(1))
+    decoded = [[None] * len(chunk) for _ in parsed]
+    for row in valid_rows:
+        row = int(row)
+        value = values.view(row)
+        if not value or (value[0] & 0x3) != _OBJECT:
+            return None
+        row_metadata = bytes(metadata.view(row))
+        key_ids = _cached_metadata_key_ids(row_metadata)
+        targets = {}
+        for index, (_, path, _) in enumerate(parsed):
+            key_id = key_ids.get(path[0][1])
+            if key_id is not None:
+                targets.setdefault(key_id, []).append(index)
+
+        size, id_width, id_start, data_start, offsets, end = (
+            _checked_object_layout(value, 0, len(value)))
+        if end != len(value):
+            _malformed("trailing bytes after root value")
+        if not targets:
+            continue
+        slots = {}
+        for slot in range(size):
+            key_id = _read_unsigned(
+                value, id_start + slot * id_width, id_width)
+            if key_id in targets:
+                slots[key_id] = slot
+                if len(slots) == len(targets):
+                    break
+        if not slots:
+            continue
+        ordered_offsets = sorted(offsets)
+        end_by_offset = dict(zip(
+            ordered_offsets, ordered_offsets[1:]))
+        for key_id, slot in slots.items():
+            child_pos, _ = _checked_object_child_bounds(
+                value, data_start, offsets, slot, end_by_offset)
+            for index in targets[key_id]:
+                data_type = parsed[index][2]
+                if (pa.types.is_float32(data_type)
+                        or pa.types.is_float64(data_type)):
+                    decoded[index][row] = _decode_floating(
+                        value, child_pos, data_type)
+                else:
+                    decoded[index][row] = _decode_exact(
+                        value, row_metadata, child_pos, data_type)
+
+    return [pa.array(result, type=data_type)
+            for result, (_, _, data_type) in zip(decoded, parsed)]
+
+
 def _variant_get(column, paths: Mapping[str, pa.DataType]):
     parsed = []
     for path, target_type in paths.items():
@@ -1594,12 +1665,14 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
     result_chunks = {path: [] for path in paths}
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
-        results = _vectorized_get_chunk(
-            chunk,
-            values,
-            parsed_paths,
-            [target_type for _, _, target_type in parsed],
-        )
+        results = _flat_object_get_chunk(chunk, values, parsed)
+        if results is None:
+            results = _vectorized_get_chunk(
+                chunk,
+                values,
+                parsed_paths,
+                [target_type for _, _, target_type in parsed],
+            )
         if results is not None:
             for (path, _, _), result in zip(parsed, results):
                 result_chunks[path].append(result)
@@ -1644,6 +1717,77 @@ def variant_get(column, path, data_type=None):
     if data_type is None:
         raise TypeError("VARIANT data_type must be a PyArrow data type")
     return _variant_get(column, {path: data_type})[path]
+
+
+@_with_metadata_cache
+def variant_select_fields(column, fields: Sequence[str]):
+    """Decode selected top-level VARIANT object fields to Python values.
+
+    This preserves each value's encoded type, even when a field has different
+    types in different rows. A missing field is omitted from its row's dict;
+    a VARIANT null is present with value None, and a SQL null row returns None.
+    Field names are literal names, not VARIANT path expressions.
+    """
+    if isinstance(fields, (str, bytes)):
+        raise TypeError("VARIANT fields must be a sequence of field names")
+    try:
+        names = tuple(dict.fromkeys(fields))
+    except (TypeError, ValueError):
+        raise TypeError(
+            "VARIANT fields must be a sequence of field names") from None
+    if any(not isinstance(name, str) for name in names):
+        raise TypeError("VARIANT field names must be strings")
+
+    chunks, _, _ = _variant_chunks(column)
+    result = []
+    for chunk in chunks:
+        values = _BinaryValues(chunk.field(0))
+        metadata = _BinaryValues(chunk.field(1))
+        valid = set(map(int, _valid_row_indices(
+            chunk, values, chunk.field(1))))
+        for row in range(len(chunk)):
+            if row not in valid:
+                result.append(None)
+                continue
+            value = bytes(values.view(row))
+            row_metadata = bytes(metadata.view(row))
+            if not value or (value[0] & 0x3) != _OBJECT:
+                raise TypeError("VARIANT root must be an object")
+            variant = GenericVariant(value, row_metadata)
+            key_ids = _cached_metadata_key_ids(row_metadata)
+            targets = {key_ids[name]: name for name in names
+                       if name in key_ids}
+            if not targets:
+                result.append({})
+                continue
+
+            def extract(size, id_width, offset_width, id_start,
+                        offset_start, data_start):
+                _require_range(0, data_start, len(value))
+                data_size = _read_unsigned(
+                    value, offset_start + size * offset_width,
+                    offset_width)
+                _require_range(data_start, data_size, len(value))
+                selected = {}
+                for slot in range(size):
+                    key_id = _read_unsigned(
+                        value, id_start + slot * id_width, id_width)
+                    name = targets.get(key_id)
+                    if name is None:
+                        continue
+                    offset = _read_unsigned(
+                        value, offset_start + slot * offset_width,
+                        offset_width)
+                    if offset >= data_size:
+                        _malformed("invalid object offset")
+                    selected[name] = variant._to_python_impl(
+                        value, row_metadata, data_start + offset)
+                    if len(selected) == len(targets):
+                        break
+                return selected
+
+            result.append(_handle_object(value, 0, extract))
+    return result
 
 
 def _paths_overlap(first: _Path, second: _Path) -> bool:
