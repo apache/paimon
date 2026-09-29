@@ -34,6 +34,7 @@ class ResourcePaths:
     BRANCHES = "branches"
     RENAME = "rename"
     FORWARD = "forward"
+    PERMISSIONS = "permissions"
 
     def __init__(self, prefix: str):
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
@@ -139,3 +140,12 @@ class ResourcePaths:
             self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
             self.TABLES, RESTUtil.encode_string(table_name)
         )
+
+    def permissions(self) -> str:
+        return "{}/{}".format(self.base_path, self.PERMISSIONS)
+
+    def grant_permission(self) -> str:
+        return "{}/grant".format(self.permissions())
+
+    def revoke_permission(self) -> str:
+        return "{}/revoke".format(self.permissions())
