@@ -23,14 +23,15 @@ import org.apache.paimon.annotation.Public;
 import java.util.Objects;
 
 /**
- * Data type of time WITHOUT time zone consisting of {@code hour:minute:second[.fractional]} with up
- * to nanosecond precision and values ranging from {@code 00:00:00.000000000} to {@code
- * 23:59:59.999999999}. Compared to the SQL standard, leap seconds (23:59:60 and 23:59:61) are not
- * supported as the semantics are closer to {@link java.time.LocalTime}. A time WITH time zone is
- * not provided.
+ * Data type of time WITHOUT time zone consisting of {@code hour:minute:second[.fractional]}.
+ * Compared to the SQL standard, leap seconds (23:59:60 and 23:59:61) are not supported as the
+ * semantics are closer to {@link java.time.LocalTime}. A time WITH time zone is not provided.
  *
  * <p>A conversion from and to {@code int} describes the number of milliseconds of the day. A
- * conversion from and to {@code long} describes the number of nanoseconds of the day.
+ * conversion from and to {@code long} describes the number of nanoseconds of the day, but the
+ * persisted representation is milliseconds based throughout the stack - the internal row
+ * representation, the row serializer and the Parquet {@code TIME_MILLIS} logical type - so sub
+ * millisecond digits of a precision above 3 are not preserved.
  *
  * @since 0.4.0
  */
