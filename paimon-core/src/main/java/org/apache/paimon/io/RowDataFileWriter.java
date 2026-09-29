@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexWriterContext;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
@@ -83,7 +84,12 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         List<DataFileAuxiliaryWriter> auxiliaryFileWriters = new ArrayList<>();
         Path fileIndexPath = dataFileToFileIndexPath(path);
         DataFileIndexWriter dataFileIndexWriter =
-                DataFileIndexWriter.create(fileIO, fileIndexPath, writeSchema, fileIndexOptions);
+                DataFileIndexWriter.create(
+                        fileIO,
+                        fileIndexPath,
+                        writeSchema,
+                        fileIndexOptions,
+                        new FileIndexWriterContext(path, schemaId));
         if (dataFileIndexWriter != null) {
             auxiliaryFileWriters.add(
                     new DataFileIndexAuxiliaryWriter(dataFileIndexWriter, fileIO, fileIndexPath));

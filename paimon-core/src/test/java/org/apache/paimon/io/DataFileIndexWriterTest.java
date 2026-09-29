@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fileindex.FileIndexFormat;
@@ -33,17 +34,24 @@ import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.ContextRecordingFileIndexerFactory.RecordedWriter;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -55,14 +63,20 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link DataFileIndexWriter}. */
 public class DataFileIndexWriterTest {
@@ -149,6 +163,140 @@ public class DataFileIndexWriterTest {
         assert bitmapExist;
         assert bsiExist;
         assert bloomExists;
+    }
+
+    @Test
+    public void testIndexWritersReceiveDataFileOfAppendTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(contextRecordingColumns(), "k");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "10");
+        Identifier identifier = Identifier.create("db", "append_table");
+
+        try (FileSystemCatalog catalog =
+                new FileSystemCatalog(fileIO, new Path(tempFile.toString()))) {
+            catalog.createDatabase("db", false);
+            catalog.createTable(
+                    identifier,
+                    Schema.newBuilder()
+                            .column("k", DataTypes.INT())
+                            .column("v", DataTypes.INT())
+                            .options(options)
+                            .build(),
+                    false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            // three data files of schema 0 because of the row number limit
+            writeRows(table, 25, i -> GenericRow.of(i, i));
+
+            catalog.alterTable(identifier, SchemaChange.addColumn("w", DataTypes.INT()), false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+            writeRows(table, 5, i -> GenericRow.of(100 + i, i, i));
+
+            List<ManifestEntry> entries = assertIndexWritersMatchDataFiles(table, 0);
+            assertThat(entries).hasSize(4);
+            assertThat(entries.stream().map(entry -> entry.file().schemaId()))
+                    .containsExactlyInAnyOrder(0L, 0L, 0L, 1L);
+        }
+    }
+
+    @Test
+    public void testIndexWritersReceiveDataFileOfPrimaryKeyTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(contextRecordingColumns(), "v");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        Identifier identifier = Identifier.create("db", "pk_table");
+
+        try (FileSystemCatalog catalog =
+                new FileSystemCatalog(fileIO, new Path(tempFile.toString()))) {
+            catalog.createDatabase("db", false);
+            catalog.createTable(
+                    identifier,
+                    Schema.newBuilder()
+                            .column("k", DataTypes.INT())
+                            .column("v", DataTypes.INT())
+                            .primaryKey("k")
+                            .options(options)
+                            .build(),
+                    false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            // written in descending key order, stored in ascending key order
+            writeRows(table, 20, i -> GenericRow.of(19 - i, (19 - i) * 10));
+
+            assertThat(assertIndexWritersMatchDataFiles(table, 1)).isNotEmpty();
+        }
+    }
+
+    private static String contextRecordingColumns() {
+        return CoreOptions.FILE_INDEX
+                + "."
+                + ContextRecordingFileIndexerFactory.IDENTIFIER
+                + "."
+                + CoreOptions.COLUMNS;
+    }
+
+    private static void writeRows(FileStoreTable table, int rowCount, IntFunction<InternalRow> row)
+            throws Exception {
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            for (int i = 0; i < rowCount; i++) {
+                write.write(row.apply(i));
+            }
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+    }
+
+    /**
+     * Checks that every data file of the table had one index writer, which received the path and
+     * schema id of that file and the indexed values in file order.
+     */
+    private static List<ManifestEntry> assertIndexWritersMatchDataFiles(
+            FileStoreTable table, int indexedField) throws IOException {
+        String tableLocation = table.location().toString();
+        Map<String, RecordedWriter> recorded =
+                ContextRecordingFileIndexerFactory.recorded().entrySet().stream()
+                        .filter(e -> e.getKey().startsWith(tableLocation))
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        List<ManifestEntry> entries = table.store().newScan().plan().files();
+        assertThat(recorded).hasSameSizeAs(entries);
+        for (ManifestEntry entry : entries) {
+            DataFileMeta file = entry.file();
+            Path path =
+                    table.store()
+                            .pathFactory()
+                            .createDataFilePathFactory(entry.partition(), entry.bucket())
+                            .toPath(file);
+            RecordedWriter writer = recorded.get(path.toString());
+            assertThat(writer).as("index writer of %s", path).isNotNull();
+            assertThat(writer.schemaId).isEqualTo(file.schemaId());
+            assertThat(writer.values)
+                    .containsExactlyElementsOf(readIntField(table, entry, indexedField));
+        }
+        return entries;
+    }
+
+    private static List<Object> readIntField(FileStoreTable table, ManifestEntry entry, int field)
+            throws IOException {
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(entry.partition())
+                        .withBucket(entry.bucket())
+                        .withBucketPath(
+                                table.store()
+                                        .pathFactory()
+                                        .bucketPath(entry.partition(), entry.bucket())
+                                        .toString())
+                        .withTotalBuckets(entry.totalBuckets())
+                        .withDataFiles(Collections.singletonList(entry.file()))
+                        .rawConvertible(true)
+                        .build();
+        List<Object> values = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                table.newReadBuilder().newRead().createReader(split)) {
+            reader.forEachRemaining(row -> values.add(row.getInt(field)));
+        }
+        return values;
     }
 
     protected void foreachIndexReader(

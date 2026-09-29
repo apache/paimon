@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexWriterContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileIndexWriter;
@@ -134,7 +135,9 @@ public class FileIndexProcessor {
                         newIndexPath,
                         schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols),
                         fileIndexOptions,
-                        schemaInfo.colNameMapping);
+                        schemaInfo.colNameMapping,
+                        new FileIndexWriterContext(
+                                dataFilePathFactory.toPath(dataFileMeta), dataFileMeta.schemaId()));
         if (dataFileIndexWriter != null) {
             // projectedIndexCols index into the file schema. withProjection would re-interpret
             // them against the current table schema, so a schema change that shifts columns (drop

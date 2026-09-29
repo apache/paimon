@@ -26,6 +26,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexWriterContext;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -115,7 +116,11 @@ public class KeyValueClusteringFileWriter
                 CodeGenUtils.newProjection(valueType, options.clusteringColumns());
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
-                        fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+                        fileIO,
+                        dataFileToFileIndexPath(path),
+                        valueType,
+                        fileIndexOptions,
+                        new FileIndexWriterContext(path, schemaId));
 
         Map<Integer, Integer> idToIndex = new HashMap<>(valueType.getFieldCount());
         for (int i = 0; i < valueType.getFieldCount(); i++) {

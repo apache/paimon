@@ -25,6 +25,7 @@ import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.fileindex.FileIndexWriterContext;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -72,7 +73,8 @@ public final class DataFileIndexWriter implements Closeable {
             Path path,
             RowType rowType,
             FileIndexOptions fileIndexOptions,
-            @Nullable Map<String, String> colNameMapping) {
+            @Nullable Map<String, String> colNameMapping,
+            FileIndexWriterContext writerContext) {
         this.fileIO = fileIO;
         this.path = path;
         List<DataField> fields = rowType.getFields();
@@ -123,7 +125,8 @@ public final class DataFileIndexWriter implements Closeable {
                                         mapType.getValueType(),
                                         fileIndexOptions.getMapTopLevelOptions(
                                                 columnName, typeEntry.getKey()),
-                                        index.get(columnName));
+                                        index.get(columnName),
+                                        writerContext);
                         column2maintainers.put(columnName, mapMaintainer);
                     }
                     mapMaintainer.add(entryColumn.getNestedColumnName(), typeEntry.getValue());
@@ -137,7 +140,7 @@ public final class DataFileIndexWriter implements Closeable {
                                                         indexType,
                                                         field.type(),
                                                         typeEntry.getValue())
-                                                .createWriter(),
+                                                .createWriter(writerContext),
                                         InternalRow.createFieldGetter(
                                                 field.type(), index.get(columnName)));
                         column2maintainers.put(columnName, maintainer);
@@ -196,8 +199,12 @@ public final class DataFileIndexWriter implements Closeable {
 
     @Nullable
     public static DataFileIndexWriter create(
-            FileIO fileIO, Path path, RowType rowType, FileIndexOptions fileIndexOptions) {
-        return create(fileIO, path, rowType, fileIndexOptions, null);
+            FileIO fileIO,
+            Path path,
+            RowType rowType,
+            FileIndexOptions fileIndexOptions,
+            FileIndexWriterContext writerContext) {
+        return create(fileIO, path, rowType, fileIndexOptions, null, writerContext);
     }
 
     @Nullable
@@ -206,10 +213,12 @@ public final class DataFileIndexWriter implements Closeable {
             Path path,
             RowType rowType,
             FileIndexOptions fileIndexOptions,
-            @Nullable Map<String, String> colNameMapping) {
+            @Nullable Map<String, String> colNameMapping,
+            FileIndexWriterContext writerContext) {
         return fileIndexOptions.isEmpty()
                 ? null
-                : new DataFileIndexWriter(fileIO, path, rowType, fileIndexOptions, colNameMapping);
+                : new DataFileIndexWriter(
+                        fileIO, path, rowType, fileIndexOptions, colNameMapping, writerContext);
     }
 
     /** File index result. */
@@ -288,6 +297,7 @@ public final class DataFileIndexWriter implements Closeable {
         private final Map<String, org.apache.paimon.fileindex.FileIndexWriter> indexWritersMap;
         private final InternalArray.ElementGetter valueElementGetter;
         private final int position;
+        private final FileIndexWriterContext writerContext;
 
         public MapFileIndexMaintainer(
                 String columnName,
@@ -295,12 +305,14 @@ public final class DataFileIndexWriter implements Closeable {
                 DataType keyType,
                 DataType valueType,
                 Options options,
-                int position) {
+                int position,
+                FileIndexWriterContext writerContext) {
             this.columnName = columnName;
             this.indexType = indexType;
             this.valueType = valueType;
             this.options = options;
             this.position = position;
+            this.writerContext = writerContext;
             this.indexWritersMap = new HashMap<>();
             this.valueElementGetter = InternalArray.createElementGetter(valueType);
 
@@ -345,7 +357,7 @@ public final class DataFileIndexWriter implements Closeable {
                                     indexType,
                                     valueType,
                                     new Options(options.toMap(), nestedOptions.toMap()))
-                            .createWriter());
+                            .createWriter(writerContext));
         }
 
         public String getIndexType() {

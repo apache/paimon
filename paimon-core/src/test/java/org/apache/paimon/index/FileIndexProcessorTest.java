@@ -29,6 +29,8 @@ import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.ContextRecordingFileIndexerFactory;
+import org.apache.paimon.io.ContextRecordingFileIndexerFactory.RecordedWriter;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -316,5 +318,74 @@ public class FileIndexProcessorTest {
                 FileIndexFormat.createReader(fileIO.newInputStream(indexPath), rowType)) {
             assertThat(reader.readAll().keySet()).containsExactly("v");
         }
+    }
+
+    @Test
+    public void testProcessPassesTheIndexedDataFileToWriters() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        FileStoreTable table;
+        try (FileSystemCatalog catalog = new FileSystemCatalog(fileIO, warehouse)) {
+            catalog.createDatabase("mydb", false);
+            catalog.createTable(
+                    identifier,
+                    new Schema(
+                            rowType.getFields(),
+                            Collections.emptyList(),
+                            Collections.singletonList("k"),
+                            options,
+                            ""),
+                    false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(3, 30));
+                write.write(GenericRow.of(1, 10));
+                write.write(GenericRow.of(2, 20));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            // configure the index after the data file is written, which creates schema 1
+            catalog.alterTable(
+                    identifier,
+                    SchemaChange.setOption(
+                            CoreOptions.FILE_INDEX
+                                    + "."
+                                    + ContextRecordingFileIndexerFactory.IDENTIFIER
+                                    + "."
+                                    + CoreOptions.COLUMNS,
+                            "v"),
+                    false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+        }
+
+        List<ManifestEntry> entries = table.store().newScan().plan().files();
+        assertThat(entries).hasSize(1);
+        ManifestEntry entry = entries.get(0);
+        assertThat(entry.file().schemaId()).isEqualTo(0L);
+        assertThat(table.schema().id()).isEqualTo(1L);
+
+        new FileIndexProcessor(table).process(entry.partition(), entry.bucket(), entry);
+
+        Path dataFile =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(entry.partition(), entry.bucket())
+                        .toPath(entry.file());
+        RecordedWriter writer =
+                ContextRecordingFileIndexerFactory.recorded().get(dataFile.toString());
+        assertThat(writer).isNotNull();
+        assertThat(writer.schemaId).isEqualTo(0L);
+        assertThat(writer.values).containsExactly(10, 20, 30);
     }
 }

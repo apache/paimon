@@ -32,6 +32,15 @@ public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
+    /**
+     * Creates a writer for the data file described by the context. Rows are passed to the writer in
+     * the order they are written to the data file. Override this method if the index needs to know
+     * which data file it is built for.
+     */
+    default FileIndexWriter createWriter(FileIndexWriterContext context) {
+        return createWriter();
+    }
+
     FileIndexReader createReader(SeekableInputStream inputStream, int start, int length);
 
     static FileIndexer create(String type, DataType dataType, Options options) {

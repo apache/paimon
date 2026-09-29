@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.RowHelper;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexWriterContext;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -109,7 +110,11 @@ public abstract class KeyValueDataFileWriter
         this.fileSource = fileSource;
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
-                        fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+                        fileIO,
+                        dataFileToFileIndexPath(path),
+                        valueType,
+                        fileIndexOptions,
+                        new FileIndexWriterContext(path, schemaId));
         this.blobReferenceCollector =
                 managedBlobFields.isEmpty()
                         ? null
