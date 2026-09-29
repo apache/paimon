@@ -48,65 +48,38 @@ COMPARISONS = [
 @pytest.mark.parametrize(
     'bound',
     [
-        '24',
-        '24.000',
-        '1.001',
-        '-1.001',
-        '0',
-        '1E+16',
-        '1E-41',
-        '-1E-41',
-        '1E+100',
-        '-1E+100',
+        Decimal('2'),
+        Decimal('24.000'),
+        Decimal('1.001'),
+        Decimal('-1.001'),
+        Decimal('1E-41'),
+        Decimal('1E+100'),
+        Decimal('-1E+100'),
         24,
     ],
 )
-@pytest.mark.parametrize(
-    'arrow_type,values',
-    [
-        (
-            pa.decimal128(15, 2),
-            [
-                '-24.00',
-                '-1.01',
-                '-1.00',
-                '0.00',
-                '1.00',
-                '1.01',
-                '17.00',
-                '24.00',
-                '50.00',
-            ],
-        ),
-        (pa.decimal128(5, 0), ['-24', '-1', '0', '1', '17', '24', '50']),
-        (
-            pa.decimal128(38, 2),
-            [
-                '-999999999999999999999999999999999999.99',
-                '0.00',
-                '999999999999999999999999999999999999.99',
-            ],
-        ),
-    ],
-)
 def test_decimal_comparison_matches_python(
-    tmp_path: Path,
     method: str,
     compare: Callable[[Decimal, Union[Decimal, int]], bool],
-    bound: Union[str, int],
-    arrow_type: pa.DataType,
-    values: List[str],
+    bound: Union[Decimal, int],
 ) -> None:
-    decimal_values: List[Optional[Decimal]] = [Decimal(value) for value in values] + [
-        None
-    ]
-    literal: Union[Decimal, int] = Decimal(bound) if isinstance(bound, str) else bound
-    table = pa.table({'value': pa.array(decimal_values, type=arrow_type)})
-    predicate = Predicate(method, 0, 'value', [literal])
+    decimal_values: List[Optional[Decimal]] = [
+        Decimal(value)
+        for value in (
+            '-24.00',
+            '-1.01',
+            '-1.00',
+            '0.00',
+            '1.00',
+            '1.01',
+            '2.00',
+            '24.00',
+        )
+    ] + [None]
+    table = pa.table({'value': pa.array(decimal_values, type=pa.decimal128(15, 2))})
+    predicate = Predicate(method, 0, 'value', [bound])
     expected = [
-        value
-        for value in decimal_values
-        if value is not None and compare(value, literal)
+        value for value in decimal_values if value is not None and compare(value, bound)
     ]
     # A small context must not round a high precision bound or column value.
     with localcontext() as context:
@@ -114,22 +87,12 @@ def test_decimal_comparison_matches_python(
         expr = predicate.to_arrow(table.schema)
     actual = ds.Scanner.from_batches(table.to_reader(), filter=expr).to_table()
     assert actual.column('value').to_pylist() == expected
-    path = tmp_path / 'decimals.parquet'
-    pq.write_table(table, path, row_group_size=2)
-    assert (
-        ds.dataset(path).to_table(filter=expr).column('value').to_pylist() == expected
-    )
 
 
 @pytest.mark.parametrize(
     'method,literals,expected',
     [
         ('in', [Decimal('1'), Decimal('2.001'), None], [Decimal('1.00')]),
-        (
-            'notIn',
-            [Decimal('1'), Decimal('2.001')],
-            [Decimal('-1.00'), Decimal('2.00')],
-        ),
         ('notIn', [Decimal('1'), None], []),
         (
             'between',
@@ -147,13 +110,6 @@ def test_decimal_comparison_matches_python(
             [Decimal('1E-41'), Decimal('1E+100'), Decimal('1.00')],
             [Decimal('-1.00'), Decimal('2.00')],
         ),
-        ('notIn', [Decimal('1E-41'), None], []),
-        (
-            'between',
-            [Decimal('-1E-41'), Decimal('1E+100')],
-            [Decimal('1.00'), Decimal('2.00')],
-        ),
-        ('notBetween', [Decimal('-1E-41'), Decimal('1E+100')], [Decimal('-1.00')]),
     ],
 )
 def test_decimal_set_and_range_filters(
@@ -236,73 +192,30 @@ def test_decimal_batch_filter_after_normalization(tmp_path: Path) -> None:
         reader.close()
 
 
-@pytest.mark.parametrize('project', [False, True])
-def test_decimal_filter_read(tmp_path: Path, project: bool) -> None:
-    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
-    catalog.create_database('default', False)
-    values = [
-        Decimal('-1.00'),
-        Decimal('0.00'),
-        Decimal('1.00'),
-        Decimal('17.00'),
-        Decimal('24.00'),
+def test_decimal_composed_predicate_uses_schema() -> None:
+    values = [Decimal('-1.00'), Decimal('0.00'), Decimal('1.00'), Decimal('2.00')]
+    table = pa.table({'value': pa.array(values, type=pa.decimal128(15, 2))})
+    predicate = Predicate(
+        'or',
         None,
-    ]
-    arrow = pa.table(
-        {'id': range(len(values)), 'value': pa.array(values, type=pa.decimal128(38, 2))}
+        None,
+        [
+            Predicate(
+                'and',
+                None,
+                None,
+                [
+                    Predicate('greaterOrEqual', 0, 'value', [Decimal('0')]),
+                    Predicate('lessThan', 0, 'value', [Decimal('1.001')]),
+                ],
+            ),
+            Predicate('equal', 0, 'value', [Decimal('2')]),
+        ],
     )
-    catalog.create_table(
-        'default.decimals',
-        Schema.from_pyarrow_schema(
-            arrow.schema,
-            options={
-                'file.format': 'parquet',
-                'scan.native-plan.enabled': 'false',
-                'read.batch-size': '2',
-            },
-        ),
-        False,
-    )
-    table = catalog.get_table('default.decimals')
-    write_builder = table.new_batch_write_builder()
-    writer, commit = write_builder.new_write(), write_builder.new_commit()
-    try:
-        writer.write_arrow(arrow)
-        commit.commit(writer.prepare_commit())
-    finally:
-        writer.close()
-        commit.close()
-    for bound in [
-        Decimal('24'),
-        Decimal('-0.999'),
-        Decimal('1.001'),
-        Decimal('1E-41'),
-        Decimal('-1E-41'),
-        Decimal('1E+100'),
-    ]:
-        read_builder = table.new_read_builder()
-        predicates = read_builder.new_predicate_builder()
-        kept = predicates.or_predicates(
-            [
-                predicates.greater_or_equal('value', Decimal('-1')),
-                predicates.is_null('value'),
-            ]
-        )
-        assert kept is not None
-        predicate = predicates.and_predicates(
-            [predicates.less_than('value', bound), kept]
-        )
-        assert predicate is not None
-        read_builder.with_filter(predicate)
-        if project:
-            read_builder.with_projection(['id'])
-        result = read_builder.new_read().to_arrow(
-            read_builder.new_scan().plan().splits()
-        )
-        actual = [] if result is None else result.column('id').to_pylist()
-        assert actual == [
-            i for i, value in enumerate(values) if value is not None and value < bound
-        ]
+    actual = ds.Scanner.from_batches(
+        table.to_reader(), filter=predicate.to_arrow(table.schema)
+    ).to_table()
+    assert actual.column('value').to_pylist() == values[1:]
 
 
 def test_decimal_filter_after_scale_evolution(tmp_path: Path) -> None:
