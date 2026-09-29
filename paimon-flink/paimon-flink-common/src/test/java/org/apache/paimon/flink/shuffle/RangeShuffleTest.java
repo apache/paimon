@@ -64,7 +64,9 @@ class RangeShuffleTest {
                         Tuple2<Integer, RowData>,
                         Tuple2<Integer, Tuple2<Integer, RowData>>>
                 harness = new TwoInputStreamOperatorTestHarness<>(operator)) {
-            harness.setup(outputType.createSerializer(harness.getExecutionConfig()));
+            harness.setup(
+                    outputType.createSerializer(
+                            harness.getExecutionConfig().getSerializerConfig()));
             harness.open();
             harness.processElement1(new StreamRecord<>(boundaries));
             // Every assignment must respect the range bounds, including randomized assignments
