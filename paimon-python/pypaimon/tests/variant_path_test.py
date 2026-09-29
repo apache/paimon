@@ -168,6 +168,37 @@ class TestVariantToPylist(unittest.TestCase):
             variant_to_pylist(
                 GenericVariant.to_arrow_array([truncated]), ['field'])
 
+    def test_rejects_truncated_selected_child_before_next_field(self):
+        valid = GenericVariant.from_python({'a': 1.0, 'b': 2.0})
+        key_ids = _metadata_key_ids(valid.metadata())
+        value = _build_object_value([
+            (key_ids['a'], bytes([_primitive_header(_DOUBLE)])),
+            (key_ids['b'], _encode_scalar_to_value_bytes(2.0, pa.float64())),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(value, valid.metadata())])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_to_pylist(column, ['a'])
+        self.assertEqual(variant_to_pylist(column, ['b']), [{'b': 2.0}])
+
+    def test_rejects_truncated_nested_selected_child(self):
+        valid = GenericVariant.from_python(
+            {'a': {'nested': 1.0}, 'b': 2.0})
+        key_ids = _metadata_key_ids(valid.metadata())
+        nested = _build_object_value([
+            (key_ids['nested'], bytes([_primitive_header(_DOUBLE)])),
+        ])
+        value = _build_object_value([
+            (key_ids['a'], nested),
+            (key_ids['b'], _encode_scalar_to_value_bytes(2.0, pa.float64())),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(value, valid.metadata())])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_to_pylist(column, ['a'])
+
 
 class TestVariantGet(unittest.TestCase):
 

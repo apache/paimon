@@ -55,7 +55,6 @@ from pypaimon.data.generic_variant import (
     _MAX_DECIMAL16_PRECISION,
     _PRIMITIVE_FIXED_SIZES,
     GenericVariant,
-    _handle_object,
     _Type,
     _check_variant_sizes,
     _variant_get_type,
@@ -77,6 +76,11 @@ _STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
 _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET = 8 * 1024 * 1024
 # Bound per-row Python and NumPy temporaries for tiny payloads.
 _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS = 64 * 1024
+_FAST_CHILD_SIZES = np.asarray([
+    _PRIMITIVE_FIXED_SIZES.get(type_info, 0)
+    if type_info not in (_DECIMAL4, _DECIMAL8, _DECIMAL16) else 0
+    for type_info in range(64)
+], dtype=np.uint8)
 
 
 @functools.lru_cache(maxsize=256)
@@ -1780,7 +1784,7 @@ def variant_get(column, path, data_type=None):
 def variant_to_pylist(column, fields: Sequence[str]):
     """Decode selected top-level VARIANT object fields to Python values.
 
-    This preserves each value's encoded type, even when a field has different
+    Values use their natural Python types, even when a field has different
     types in different rows. A missing field is omitted from its row's dict;
     a VARIANT null is present with value None, and a SQL null row returns None.
     Field names are literal names, not VARIANT path expressions.
@@ -1816,7 +1820,7 @@ def variant_to_pylist(column, fields: Sequence[str]):
             targets = {key_ids[name]: name for name in names
                        if name in key_ids}
             (size, id_width, id_start, offset_start, data_start,
-             offsets, _) = _flat_object_layout(value)
+             offsets, ordered_offsets) = _flat_object_layout(value)
             if data_start + int(offsets[-1]) != len(value):
                 _malformed("trailing bytes after root value")
             layout = (row_metadata, value[id_start:offset_start],
@@ -1841,11 +1845,38 @@ def variant_to_pylist(column, fields: Sequence[str]):
             starts = offsets[slots]
             if np.any(starts >= offsets[-1]):
                 _malformed("invalid object offset")
-            result.append({
-                name: variant._to_python_impl(
-                    value, row_metadata, data_start + int(offset))
-                for (_, name), offset in zip(selected_slots, starts)
-            })
+            next_indices = np.searchsorted(
+                ordered_offsets, starts, side='right')
+            ends = ordered_offsets[next_indices]
+            headers = np.frombuffer(value, dtype=np.uint8)[
+                data_start + starts]
+            basic_types = headers & 0x3
+            type_infos = headers >> 2
+            fixed_sizes = _FAST_CHILD_SIZES[type_infos]
+            is_short_string = basic_types == _SHORT_STR
+            is_fast = (is_short_string
+                       | ((basic_types == _PRIMITIVE) & (fixed_sizes != 0)))
+            expected_sizes = np.where(
+                is_short_string, type_infos + 1, fixed_sizes)
+            if np.any(is_fast & (ends - starts != expected_sizes)):
+                _malformed("child size does not match container offsets")
+            selected = {}
+            for index, ((_, name), offset, end) in enumerate(zip(
+                    selected_slots, starts, ends)):
+                child_pos = data_start + int(offset)
+                if not is_fast[index]:
+                    child_end = data_start + int(end)
+                    if basic_types[index] in (_OBJECT, _ARRAY):
+                        _validate_value_field_ids(
+                            value, child_pos, child_end, len(key_ids))
+                    elif _checked_value_size(
+                            value, child_pos, child_end) != (
+                                child_end - child_pos):
+                        _malformed(
+                            "child size does not match container offsets")
+                selected[name] = variant._to_python_impl(
+                    value, row_metadata, child_pos)
+            result.append(selected)
     return result
 
 

@@ -230,7 +230,7 @@ rows = variant_to_pylist(result.column('payload'), ['state.x', 'action.y'])
 ```
 
 Field names are literal (`state.x` is not a nested path). Missing fields are
-omitted; VARIANT NULL is `None`. Values retain their encoded types, even when
+omitted; VARIANT NULL is `None`. Values use natural Python types, even when
 types differ between rows. This does not reduce Parquet I/O.
 
 ### Read and update typed paths
