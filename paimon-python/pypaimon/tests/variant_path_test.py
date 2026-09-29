@@ -348,6 +348,69 @@ class TestVariantGet(unittest.TestCase):
         for i, path in enumerate(paths):
             self.assertEqual(result[path].to_pylist(), [float(i)])
 
+    def test_many_flat_fields_with_three_byte_offsets(self):
+        fields = {'field.%03d' % i: 'x' * 1024 for i in range(128)}
+        variant = GenericVariant.from_python(fields)
+        offset_width = ((variant.value()[0] >> 2) & 0x3) + 1
+        self.assertEqual(offset_width, 3)
+        paths = {'$["field.%03d"]' % i: pa.string()
+                 for i in range(16)}
+
+        result = variant_get(_variants([fields, fields]), paths)
+
+        for path in paths:
+            self.assertEqual(result[path].to_pylist(), ['x' * 1024] * 2)
+
+    def test_many_flat_fields_same_metadata_different_layouts(self):
+        fields = {'field.%03d' % i: float(i) for i in range(128)}
+        metadata = GenericVariant.from_python(fields).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        rows = []
+        for names in (list(fields), list(fields)[10:], list(fields)):
+            value = _build_object_value([
+                (key_ids[name], _encode_scalar_to_value_bytes(
+                    fields[name], pa.float64()))
+                for name in names
+            ])
+            rows.append(GenericVariant(value, metadata))
+        paths = {'$["field.%03d"]' % i: pa.float64()
+                 for i in range(16)}
+
+        result = variant_get(GenericVariant.to_arrow_array(rows), paths)
+
+        self.assertEqual(result['$["field.000"]'].to_pylist(),
+                         [0.0, None, 0.0])
+        self.assertEqual(result['$["field.015"]'].to_pylist(),
+                         [15.0, 15.0, 15.0])
+
+    def test_many_flat_fields_reject_duplicate_id_and_offset(self):
+        fields = {'field.%03d' % i: float(i) for i in range(128)}
+        variant = GenericVariant.from_python(fields)
+        original = variant.value()
+        size, id_width, id_start, _, _, _ = (
+            _checked_object_layout(original, 0, len(original)))
+        offset_width = ((original[0] >> 2) & 0x3) + 1
+        offset_start = id_start + size * id_width
+        paths = {'$["field.%03d"]' % i: pa.float64()
+                 for i in range(16)}
+
+        duplicate_id = bytearray(original)
+        duplicate_id[id_start + id_width:id_start + 2 * id_width] = (
+            duplicate_id[id_start:id_start + id_width])
+        with self.assertRaisesRegex(ValueError, 'duplicate object field id'):
+            variant_get(GenericVariant.to_arrow_array([
+                GenericVariant(bytes(duplicate_id), variant.metadata())
+            ]), paths)
+
+        duplicate_offset = bytearray(original)
+        duplicate_offset[
+            offset_start + offset_width:offset_start + 2 * offset_width
+        ] = duplicate_offset[offset_start:offset_start + offset_width]
+        with self.assertRaisesRegex(ValueError, 'invalid object offsets'):
+            variant_get(GenericVariant.to_arrow_array([
+                GenericVariant(bytes(duplicate_offset), variant.metadata())
+            ]), paths)
+
     def test_requires_exact_type(self):
         cases = (
             (_float_variants([1.25]), pa.float64()),

@@ -1580,6 +1580,50 @@ def _rowwise_replace_chunk(
         chunk, values, data, data_start, rebuilt_rows)
 
 
+def _flat_object_unsigneds(value, start, count, width):
+    """Read an object header array without creating Python ints per field."""
+    if width in (1, 2, 4):
+        return np.frombuffer(
+            value, dtype=np.dtype('<u%d' % width), count=count,
+            offset=start)
+    raw = np.frombuffer(
+        value, dtype=np.uint8, count=count * 3,
+        offset=start).reshape(count, 3)
+    return (raw[:, 0].astype(np.uint32)
+            | (raw[:, 1].astype(np.uint32) << 8)
+            | (raw[:, 2].astype(np.uint32) << 16))
+
+
+def _flat_object_layout(value):
+    """Validate a root object and read its offsets as a NumPy array."""
+    limit = len(value)
+    _require_range(0, 2, limit)
+    type_info = (value[0] >> 2) & 0x3F
+    size_width = _U32_SIZE if ((type_info >> 4) & 0x1) else 1
+    _require_range(1, size_width, limit)
+    size = _read_unsigned(value, 1, size_width)
+    id_width = ((type_info >> 2) & 0x3) + 1
+    offset_width = (type_info & 0x3) + 1
+    id_start = 1 + size_width
+    offset_start = id_start + size * id_width
+    data_start = offset_start + (size + 1) * offset_width
+    _require_range(0, data_start, limit)
+    offsets = _flat_object_unsigneds(
+        value, offset_start, size + 1, offset_width)
+    end_offset = int(offsets[-1])
+    if size:
+        ordered = np.sort(offsets)
+        if (int(ordered[0]) != 0 or int(ordered[-1]) != end_offset
+                or np.any(np.diff(ordered) == 0)):
+            _malformed("invalid object offsets")
+    else:
+        if end_offset != 0:
+            _malformed("invalid object offsets")
+        ordered = offsets
+    _require_range(data_start, end_offset, limit)
+    return size, id_width, id_start, offset_start, data_start, offsets, ordered
+
+
 def _flat_object_get_chunk(chunk, values, parsed):
     """Look up wide, top-level object fields together instead of per path."""
     if (len(parsed) < 2
@@ -1594,13 +1638,17 @@ def _flat_object_get_chunk(chunk, values, parsed):
     first_value = values.view(int(valid_rows[0]))
     if not first_value or (first_value[0] & 0x3) != _OBJECT:
         return None
-    first_size = _checked_object_layout(first_value, 0, len(first_value))[0]
+    first_size = _checked_object_layout(
+        first_value, 0, len(first_value))[0]
     # Keep the vectorized reader for narrow objects or a few requested keys.
     if first_size * len(parsed) < 1024:
         return None
 
     metadata = _BinaryValues(chunk.field(1))
     decoded = [[None] * len(chunk) for _ in parsed]
+    # Object field IDs may differ across rows, so the key includes the actual
+    # encoded layout as well as the metadata dictionary and requested IDs.
+    slot_cache = LRUCache(maxsize=64)
     for row in valid_rows:
         row = int(row)
         value = values.view(row)
@@ -1614,28 +1662,37 @@ def _flat_object_get_chunk(chunk, values, parsed):
             if key_id is not None:
                 targets.setdefault(key_id, []).append(index)
 
-        size, id_width, id_start, data_start, offsets, end = (
-            _checked_object_layout(value, 0, len(value)))
-        if end != len(value):
+        (size, id_width, id_start, offset_start, data_start,
+         offsets, ordered_offsets) = _flat_object_layout(value)
+        if data_start + int(offsets[-1]) != len(value):
             _malformed("trailing bytes after root value")
+        layout = (row_metadata, bytes(value[id_start:offset_start]),
+                  id_width, tuple(sorted(targets)))
+        slots = slot_cache.get(layout)
+        if slots is None:
+            field_ids = _flat_object_unsigneds(
+                value, id_start, size, id_width)
+            if len(np.unique(field_ids)) != size:
+                _malformed("duplicate object field id")
+            slots = {int(key_id): slot
+                     for slot, key_id in enumerate(field_ids)
+                     if int(key_id) in targets}
+            slot_cache[layout] = slots
         if not targets:
             continue
-        slots = {}
-        for slot in range(size):
-            key_id = _read_unsigned(
-                value, id_start + slot * id_width, id_width)
-            if key_id in targets:
-                slots[key_id] = slot
-                if len(slots) == len(targets):
-                    break
         if not slots:
             continue
-        ordered_offsets = sorted(offsets)
-        end_by_offset = dict(zip(
-            ordered_offsets, ordered_offsets[1:]))
-        for key_id, slot in slots.items():
-            child_pos, _ = _checked_object_child_bounds(
-                value, data_start, offsets, slot, end_by_offset)
+        selected_offsets = offsets[np.fromiter(
+            slots.values(), dtype=np.int64, count=len(slots))]
+        next_indices = np.searchsorted(
+            ordered_offsets, selected_offsets, side='right')
+        for (key_id, _), offset, next_index in zip(
+                slots.items(), selected_offsets, next_indices):
+            child_pos = data_start + int(offset)
+            child_end = data_start + int(ordered_offsets[next_index])
+            if _checked_value_size(value, child_pos, child_end) != (
+                    child_end - child_pos):
+                _malformed("child size does not match container offsets")
             for index in targets[key_id]:
                 data_type = parsed[index][2]
                 if (pa.types.is_float32(data_type)
