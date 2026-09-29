@@ -1777,7 +1777,7 @@ def variant_get(column, path, data_type=None):
 
 
 @_with_metadata_cache
-def variant_select_fields(column, fields: Sequence[str]):
+def variant_to_pylist(column, fields: Sequence[str]):
     """Decode selected top-level VARIANT object fields to Python values.
 
     This preserves each value's encoded type, even when a field has different

@@ -33,7 +33,7 @@ from pypaimon.data.variant_path import (
     _path_positions,
     _rebuilt_offsets,
     variant_get,
-    variant_select_fields,
+    variant_to_pylist,
     variant_replace,
 )
 from pypaimon.data.variant_shredding import (
@@ -79,7 +79,7 @@ def _typed_object(fields):
         GenericVariant(value, metadata)])
 
 
-class TestVariantSelectFields(unittest.TestCase):
+class TestVariantToPylist(unittest.TestCase):
 
     def test_preserves_mixed_types_missing_null_and_literal_names(self):
         column = _variants([
@@ -89,7 +89,7 @@ class TestVariantSelectFields(unittest.TestCase):
             None,
         ])
 
-        result = variant_select_fields(
+        result = variant_to_pylist(
             column, ['state.x', 'child', 'nullable', 'absent'])
 
         self.assertEqual(result, [
@@ -105,7 +105,7 @@ class TestVariantSelectFields(unittest.TestCase):
         column = pa.chunked_array([
             _variants([first]), _variants([second])])
 
-        result = variant_select_fields(
+        result = variant_to_pylist(
             column, ['field.000', 'field.127', 'field.000'])
 
         self.assertEqual(result, [
@@ -126,7 +126,7 @@ class TestVariantSelectFields(unittest.TestCase):
             ])
             rows.append(GenericVariant(value, metadata))
 
-        result = variant_select_fields(
+        result = variant_to_pylist(
             GenericVariant.to_arrow_array(rows),
             ['field.000', 'field.015'])
 
@@ -147,25 +147,25 @@ class TestVariantSelectFields(unittest.TestCase):
             'timestamp': (timestamp, pa.timestamp('us')),
         }
 
-        result = variant_select_fields(_typed_object(fields), fields)
+        result = variant_to_pylist(_typed_object(fields), fields)
 
         self.assertEqual(result, [
             {name: value for name, (value, _) in fields.items()}])
 
     def test_rejects_non_object_root_and_invalid_fields(self):
         with self.assertRaisesRegex(TypeError, "root must be an object"):
-            variant_select_fields(_variants([[1, 2]]), ['field'])
+            variant_to_pylist(_variants([[1, 2]]), ['field'])
         with self.assertRaisesRegex(TypeError, "sequence of field names"):
-            variant_select_fields(_variants([{}]), 'field')
+            variant_to_pylist(_variants([{}]), 'field')
         with self.assertRaisesRegex(TypeError, "field names must be strings"):
-            variant_select_fields(_variants([{}]), [1])
+            variant_to_pylist(_variants([{}]), [1])
 
     def test_rejects_truncated_object(self):
         variant = GenericVariant.from_python({'field': 123})
         truncated = GenericVariant(
             variant.value()[:-1], variant.metadata())
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
-            variant_select_fields(
+            variant_to_pylist(
                 GenericVariant.to_arrow_array([truncated]), ['field'])
 
 
