@@ -25,12 +25,13 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
                                       CreateBranchRequest, CreateDatabaseRequest,
                                       CreateFunctionRequest, CreatePartitionsRequest,
                                       CreateTableRequest, CreateTagRequest,
-                                      ForwardBranchRequest,
-                                      GrantPermissionRequest,
+                                      DropPolicyRequest, ForwardBranchRequest,
+                                      GrantPermissionRequest, PolicyRequest,
                                       RenameBranchRequest, RenameTableRequest,
                                       RevokePermissionRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
+                                       ErrorResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
                                        GetTableResponse,
                                        GetTableTokenResponse, GetTagResponse,
@@ -40,6 +41,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
                                        ListPermissionsResponse,
+                                       ListPoliciesResponse,
                                        CreatePartitionsResponse,
                                        ListPartitionsResponse,
                                        ListTablesResponse, ListTagsResponse,
@@ -51,16 +53,20 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
+from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
 from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
+from pypaimon.management.data_policy import DataPolicy
 from pypaimon.management.list_permissions_request import \
     ListPermissionsRequest
+from pypaimon.management.list_policies_request import ListPoliciesRequest
 from pypaimon.management.permission_assignment import PermissionAssignment
 from pypaimon.management.permission_resource import PermissionResource
+from pypaimon.management.policy_type import PolicyType
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -769,6 +775,44 @@ class RESTApi:
             RevokePermissionRequest(resource, access, principal),
             self.rest_auth_function,
         )
+
+    def list_policies(self, request: ListPoliciesRequest) -> ListPoliciesResponse:
+        query_params = {}
+        if request.get_type() is not None:
+            RESTApi._put_query_parameter(query_params, "type", request.get_type().name)
+        RESTApi._put_query_parameter(query_params, "principal", request.get_principal())
+        RESTApi._put_query_parameter(query_params, "column", request.get_column())
+        if request.get_max_results() is not None:
+            query_params[RESTApi.MAX_RESULTS] = str(request.get_max_results())
+        RESTApi._put_query_parameter(query_params, RESTApi.PAGE_TOKEN, request.get_page_token())
+        return self.client.get_with_params(
+            self.resource_paths.policies(request.get_resource()),
+            query_params,
+            ListPoliciesResponse,
+            self.rest_auth_function,
+        )
+
+    def create_policy(self, policy: DataPolicy) -> None:
+        self.client.post(
+            self.resource_paths.policies(policy.get_resource()),
+            PolicyRequest.from_policy(policy),
+            self.rest_auth_function,
+        )
+
+    def drop_policy(self, resource: PermissionResource, policy_type: PolicyType, principal: str,
+                    column: Optional[str], ignore_if_not_exists: bool) -> None:
+        if resource is None:
+            raise ValueError("resource cannot be null")
+        resource.validate_policy_attachment()
+        try:
+            self.client.post(
+                self.resource_paths.drop_policy(resource),
+                DropPolicyRequest(policy_type, principal, column),
+                self.rest_auth_function,
+            )
+        except NoSuchResourceException as e:
+            if not ignore_if_not_exists or e.resource_type != ErrorResponse.RESOURCE_TYPE_POLICY:
+                raise
 
     @staticmethod
     def _put_query_parameter(query_params: Dict[str, str], name: str, value: Optional[str]):
