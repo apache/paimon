@@ -250,6 +250,38 @@ def test_native_ignore_delete_filters_retractions(tmp_path, engine):
     assert _rows(table, True, engine == 'first-row') == [{'id': 1, 'value': 10, 'op': '+I'}]
 
 
+@pytest.mark.parametrize('engine', ['first-row', 'partial-update', 'aggregation'])
+def test_python_read_of_persisted_retractions(tmp_path, engine):
+    # A file persisted with DELETE / UPDATE_BEFORE rows (written here via the
+    # native writer + rowkind.field, the only way pypaimon can persist real
+    # row kinds) must also be honored by the *Python* read path, not just the
+    # native reader: with ignore-delete the retractions are skipped through
+    # SortMergeReader / merge dispatch. Key 1 keeps its insert; key 2 is
+    # retract-only and must be absent. This is the end-to-end read the merge
+    # function fix exists for -- the Python writer always emits INSERT, so the
+    # fixture has to be persisted natively.
+    schema = pa.schema([('id', pa.int64()), ('value', pa.int64()), ('op', pa.string())])
+    options = {'merge-engine': engine, 'ignore-delete': 'true', 'rowkind.field': 'op'}
+    if engine == 'aggregation':
+        options['fields.value.aggregate-function'] = 'sum'
+    table = _table(tmp_path, schema, True, options)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    assert isinstance(writer, NativeTableWrite)
+    try:
+        writer.write_arrow(pa.Table.from_pylist([
+            {'id': 1, 'value': 10, 'op': '+I'}, {'id': 1, 'value': 99, 'op': '-D'},
+            {'id': 2, 'value': 20, 'op': '-U'},
+        ], schema=schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    # read.native.enabled=false -> the Python reader/merge path handles the
+    # persisted retractions.
+    assert _rows(table, False, engine == 'first-row') == [{'id': 1, 'value': 10, 'op': '+I'}]
+
+
 @pytest.mark.parametrize('chunk_shuffle', [False, True])
 def test_native_data_evolution_partitioned_append_delete_and_time_travel(tmp_path, chunk_shuffle):
     schema = pa.schema([('id', pa.int64()), ('p', pa.string())])
