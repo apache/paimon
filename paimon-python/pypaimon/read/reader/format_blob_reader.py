@@ -16,17 +16,17 @@
 # under the License.
 
 import struct
-from threading import Lock
 from typing import List, Optional, Any, Iterator, BinaryIO
 
 import pyarrow as pa
 import pyarrow.dataset as ds
-from cachetools import LRUCache
 from pyarrow import RecordBatch
 
+from pypaimon.common.blob_index_cache import BlobIndexCache
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
+from pypaimon.common.memory_size import MemorySize
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.video_format_reader import (
     VideoFileMeta,
@@ -45,8 +45,7 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
 
-_BLOB_INDEX_CACHE = LRUCache(maxsize=16)
-_BLOB_INDEX_CACHE_LOCK = Lock()
+_BLOB_INDEX_CACHE = BlobIndexCache(MemorySize.of_mebi_bytes(64))
 
 
 def _decode_blob_index(index_bytes):
@@ -71,8 +70,7 @@ class FormatBlobReader(RecordBatchReader):
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
                  batch_size: int = 1024, row_indices: Optional[Any] = None,
                  blob_parallelism: int = 1, file_size: Optional[int] = None, index_cache=None):
-        self._index_cache = _BLOB_INDEX_CACHE if index_cache is None else index_cache.cache
-        self._index_cache_lock = _BLOB_INDEX_CACHE_LOCK if index_cache is None else index_cache.lock
+        self._index_cache = _BLOB_INDEX_CACHE if index_cache is None else index_cache
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
@@ -376,8 +374,7 @@ class FormatBlobReader(RecordBatchReader):
             )
             return
 
-        with self._index_cache_lock:
-            cached_index = self._index_cache.get(self.file_path)
+        cached_index = self._index_cache.get(self.file_path)
         if cached_index is not None:
             blob_lengths, blob_offsets = cached_index
             self.blob_lengths = list(blob_lengths)
@@ -409,9 +406,7 @@ class FormatBlobReader(RecordBatchReader):
             raise IOError("Invalid blob file: cannot read index")
 
         blob_lengths, blob_offsets = _decode_blob_index(index_bytes)
-        with self._index_cache_lock:
-            if self._index_cache.maxsize > 0:
-                self._index_cache[self.file_path] = blob_lengths, blob_offsets
+        self._index_cache.put(self.file_path, blob_lengths, blob_offsets)
         self.blob_lengths = list(blob_lengths)
         self.blob_offsets = list(blob_offsets)
 

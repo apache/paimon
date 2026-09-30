@@ -22,8 +22,10 @@ from pypaimon.common.options.config import CatalogOptions
 
 class CatalogContext:
     def __init__(self, options: Options, hadoop_conf, prefer_loader, fallback_io_loader):
+        if isinstance(options, dict):
+            options = Options(options)
         self.options = options
-        self.blob_index_cache = BlobIndexCache(options.get(CatalogOptions.CACHE_BLOB_INDEX_MAX_NUM))
+        self.blob_index_cache = BlobIndexCache(options.get(CatalogOptions.CACHE_BLOB_INDEX_MAX_SIZE))
         self.hadoop_conf = hadoop_conf
         self.prefer_io_loader = prefer_loader
         self.fallback_io_loader = fallback_io_loader

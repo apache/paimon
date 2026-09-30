@@ -15,19 +15,76 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import sys
+from collections import namedtuple
 from threading import Lock
 
 from cachetools import LRUCache
 
+from pypaimon.common.memory_size import MemorySize
+
+
+_CachedBlobIndex = namedtuple(
+    "_CachedBlobIndex", ["blob_lengths", "blob_offsets", "size_bytes"]
+)
+_CACHED_ENTRY_OVERHEAD = sys.getsizeof(_CachedBlobIndex((), (), 0))
+_ESTIMATED_INT_SIZE = sys.getsizeof(1 << 60)
+
 
 class BlobIndexCache:
-    """Catalog-owned parsed indexes; workers start with an empty cache."""
+    """Catalog-owned parsed indexes bounded by estimated retained bytes."""
 
-    def __init__(self, capacity):
-        if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 0:
-            raise ValueError("cache.blob-index.max-num must be a non-negative integer")
-        self.cache = LRUCache(maxsize=capacity)
-        self.lock = Lock()
+    def __init__(self, max_size):
+        if not isinstance(max_size, MemorySize):
+            raise ValueError("cache.blob-index.max-size must be a memory size")
+        self.max_size_bytes = max_size.get_bytes()
+        self._cache = LRUCache(
+            maxsize=self.max_size_bytes,
+            getsizeof=lambda entry: entry.size_bytes,
+        )
+        self._lock = Lock()
+
+    def get(self, file_path):
+        if self.max_size_bytes == 0:
+            return None
+        with self._lock:
+            entry = self._cache.get(file_path)
+        if entry is None:
+            return None
+        return entry.blob_lengths, entry.blob_offsets
+
+    def put(self, file_path, blob_lengths, blob_offsets):
+        if self.max_size_bytes == 0:
+            return
+        size_bytes = (
+            sys.getsizeof(file_path)
+            + sys.getsizeof(blob_lengths)
+            + sys.getsizeof(blob_offsets)
+            + _CACHED_ENTRY_OVERHEAD
+            + (len(blob_lengths) + len(blob_offsets)) * _ESTIMATED_INT_SIZE
+        )
+        if size_bytes > self.max_size_bytes:
+            return
+        entry = _CachedBlobIndex(blob_lengths, blob_offsets, size_bytes)
+        with self._lock:
+            self._cache[file_path] = entry
+
+    def __len__(self):
+        with self._lock:
+            return len(self._cache)
+
+    def __contains__(self, file_path):
+        with self._lock:
+            return file_path in self._cache
+
+    def clear(self):
+        with self._lock:
+            self._cache.clear()
+
+    @property
+    def size_bytes(self):
+        with self._lock:
+            return self._cache.currsize
 
     def __reduce__(self):
-        return type(self), (self.cache.maxsize,)
+        return type(self), (MemorySize.of_bytes(self.max_size_bytes),)
