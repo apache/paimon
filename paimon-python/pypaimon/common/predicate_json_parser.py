@@ -407,9 +407,6 @@ def _resolve_transform_input(inp, batch: pa.RecordBatch) -> pa.Array:
     return pa.array([str(inp)] * len(batch), type=pa.string())
 
 
-# PLACEHOLDER_STR_TRANSFORMS_3
-
-
 def _pad(inputs, direction, batch: pa.RecordBatch) -> pa.Array:
     if not isinstance(inputs, list) or len(inputs) != 3:
         raise ValueError(f"PAD takes 3 inputs, got {inputs!r}")

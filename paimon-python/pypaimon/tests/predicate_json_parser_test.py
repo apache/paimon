@@ -886,8 +886,6 @@ class TestStringTransforms(unittest.TestCase):
             ["hello"])
         self.assertEqual(deleted, ["heo"])
 
-    # PLACEHOLDER_TEST_2
-
     def test_overlay_with_and_without_length(self):
         four = self._apply(
             {"name": "OVERLAY", "inputs": [self._field(), "XX", 2, 1]},
