@@ -24,11 +24,13 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.List;
 
 /** A factory to create {@link RecordReader} for file. */
 public interface FormatReaderFactory {
@@ -41,6 +43,17 @@ public interface FormatReaderFactory {
                 String.format(
                         "Format %s does not support create reader with offset and length.",
                         getClass().getName()));
+    }
+
+    /**
+     * Row positions of the file which may satisfy the pushed down filters, computed from file
+     * metadata only, without reading any data. The ranges are sorted, not overlapping and relative
+     * to the start of the file. Returns null when the format can not prune rows this way, callers
+     * then read the whole file.
+     */
+    @Nullable
+    default List<Range> candidateRowRanges(Context context) throws IOException {
+        return null;
     }
 
     /** Context for creating reader. */
@@ -58,6 +71,12 @@ public interface FormatReaderFactory {
         /** Sizer shared by readers that support dynamic read batch sizing. */
         @Nullable
         default ReadBatchSizer readBatchSizer() {
+            return null;
+        }
+
+        /** Cache of file metadata already read for the same file, null when not shared. */
+        @Nullable
+        default FileMetadataCache metadataCache() {
             return null;
         }
     }
