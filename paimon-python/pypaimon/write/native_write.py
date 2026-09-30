@@ -29,7 +29,6 @@ from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
 from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_table
-from pypaimon.write.writer import stats_mode
 
 
 def native_write_available() -> bool:
@@ -61,22 +60,6 @@ def _native_map_layouts_supported(table, schema):
     return True
 
 
-def _pk_value_stats_needs_python(table) -> bool:
-    """Whether a primary-key table must use the Python writer to honor
-    ``metadata.stats-mode``.
-
-    Rust omits value stats for primary-key files, so any mode that records
-    value stats (``counts`` / ``truncate(N)`` / ``full``) cannot be honored
-    on the native route -- it would silently write none. ``none`` matches
-    Rust's output, so it stays native. Append tables are never blocked here:
-    Rust records full value stats, a safe superset of every mode.
-    """
-    if not table.is_primary_key_table:
-        return False
-    kind, _ = stats_mode.parse_stats_mode(table.options.metadata_stats_mode())
-    return stats_mode.value_stats_enabled(kind)
-
-
 def create_native_write(table, commit_user, static_partition=None, stream=False):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
@@ -93,13 +76,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             or (table.options.deletion_vectors_enabled()
                 and table.options.merge_engine() in (MergeEngine.PARTIAL_UPDATE,
                                                      MergeEngine.AGGREGATE))
-            # Rust omits value stats for primary-key files, so it cannot honor
-            # a mode that records any value stats (counts / truncate(N) /
-            # full) -- it would write none. Fall to the Python writer for
-            # those; 'none' matches Rust's output so it stays native. Append
-            # tables are unaffected: Rust records full value stats, a safe
-            # superset of every mode.
-            or _pk_value_stats_needs_python(table)
             or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
             # The native writer does not implement MAP shared-shredding layouts.
