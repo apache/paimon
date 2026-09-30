@@ -201,6 +201,21 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testLatestSnapshotWithExpiredLatestHint() throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        // the LATEST hint was not updated after snapshot 2, and snapshots 1 ~ 4 have been expired
+        for (long id = 5; id <= 10; id++) {
+            fileIO.tryToWriteAtomic(
+                    snapshotManager.snapshotPath(id), createSnapshotWithMillis(id, id).toJson());
+        }
+        snapshotManager.commitLatestHint(2);
+
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
+        assertThat(snapshotManager.latestSnapshot().id()).isEqualTo(10);
+    }
+
+    @Test
     public void testRepairEarliestSnapshot() throws IOException {
         FileIO fileIO = LocalFileIO.create();
         SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));

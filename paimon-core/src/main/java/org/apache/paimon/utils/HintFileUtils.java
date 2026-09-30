@@ -46,8 +46,8 @@ public class HintFileUtils {
         Long snapshotId = readHint(fileIO, LATEST, dir);
         if (snapshotId != null && snapshotId > 0) {
             long nextSnapshot = snapshotId + 1;
-            // it is the latest only there is no next one
-            if (!fileIO.exists(file.apply(nextSnapshot))) {
+            // it is the latest only it exists and there is no next one
+            if (!fileIO.exists(file.apply(nextSnapshot)) && fileIO.exists(file.apply(snapshotId))) {
                 return snapshotId;
             }
         }
