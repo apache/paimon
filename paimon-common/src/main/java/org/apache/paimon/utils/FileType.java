@@ -65,6 +65,12 @@ public enum FileType {
     private static final String INDEX_PREFIX = "index-";
     // keep in sync with ChangelogManager.CHANGELOG_PREFIX
     private static final String CHANGELOG_PREFIX = "changelog-";
+    // keep in sync with ManifestSidecar.SUFFIX
+    private static final String MANIFEST_SIDECAR_SUFFIX = ".avro.sidecar";
+    // keep in sync with IcebergCommitCallback.VERSION_HINT_FILENAME
+    private static final String VERSION_HINT_FILENAME = "version-hint.text";
+    // keep in sync with IcebergCommitCallback.RETIRE_PENDING_FILENAME
+    private static final String RETIRE_PENDING_FILENAME = "retire-pending";
 
     private static final String MANIFEST = "manifest";
     private static final String CHANGELOG_DIR = "changelog";
@@ -84,6 +90,9 @@ public enum FileType {
         for (String name : whitelist.split(",")) {
             name = name.trim();
             switch (name) {
+                case "*":
+                    result.addAll(EnumSet.allOf(FileType.class));
+                    break;
                 case "meta":
                     result.add(META);
                     break;
@@ -103,7 +112,8 @@ public enum FileType {
                     if (!name.isEmpty()) {
                         LOG.warn(
                                 "Unknown local-cache.whitelist value '{}'. "
-                                        + "Supported values: meta, global-index, bucket-index, data, file-index.",
+                                        + "Supported values: meta, global-index, bucket-index, data, file-index, "
+                                        + "or * for all of them.",
                                 name);
                     }
                     break;
@@ -114,7 +124,11 @@ public enum FileType {
 
     /** Returns {@code true} if the file is mutable and should not be cached. */
     public static boolean isMutable(Path filePath) {
-        String name = unwrapTempFileName(filePath.getName());
+        String name = filePath.getName();
+        // Temp files from Path.createTempPath() are renamed away and never read back by path.
+        if (!unwrapTempFileName(name).equals(name)) {
+            return true;
+        }
         // Files rewritten in place under a stable path: caching them by path keeps serving the
         // pre-overwrite content (and a len+mtime key still collides when a rewrite lands at the
         // same size within the same clock second). Hint files, consumer and service progress
@@ -125,7 +139,10 @@ public enum FileType {
                 || name.endsWith("_SUCCESS")
                 || name.startsWith(CONSUMER_PREFIX)
                 || name.startsWith(SERVICE_PREFIX)
-                || name.startsWith(TAG_PREFIX);
+                || name.startsWith(TAG_PREFIX)
+                // Iceberg-compatible metadata rewritten in place by IcebergCommitCallback
+                || VERSION_HINT_FILENAME.equals(name)
+                || RETIRE_PENDING_FILENAME.equals(name);
     }
 
     /**
@@ -160,7 +177,8 @@ public enum FileType {
         }
 
         // manifest, manifest-list, index-manifest: name contains "manifest"
-        if (name.contains(MANIFEST)) {
+        // manifest sidecar: {manifest}.avro.sidecar, whose name need not contain "manifest"
+        if (name.contains(MANIFEST) || name.endsWith(MANIFEST_SIDECAR_SUFFIX)) {
             return META;
         }
 

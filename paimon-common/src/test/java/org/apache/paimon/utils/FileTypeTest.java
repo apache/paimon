@@ -63,6 +63,46 @@ public class FileTypeTest {
         assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/bucket-0/data-abc.orc"))).isFalse();
     }
 
+    @Test
+    public void testTempFilesAreMutable() {
+        String uuid = UUID.randomUUID().toString();
+        Path snapshotTmp = new Path(TABLE_ROOT + "/snapshot/.snapshot-13." + uuid + ".tmp");
+        assertThat(FileType.classify(snapshotTmp)).isEqualTo(FileType.META);
+        assertThat(FileType.isMutable(snapshotTmp)).isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/snapshot/snapshot-13"))).isFalse();
+
+        Path dataTmp = new Path(TABLE_ROOT + "/bucket-0/.data-abc.orc." + uuid + ".tmp");
+        assertThat(FileType.classify(dataTmp)).isEqualTo(FileType.DATA);
+        assertThat(FileType.isMutable(dataTmp)).isTrue();
+
+        // Not the createTempPath() format, judged by its own name.
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/bucket-0/data-abc.tmp"))).isFalse();
+    }
+
+    @Test
+    public void testIcebergMetadataIsMutable() {
+        Path versionHint = new Path(TABLE_ROOT + "/metadata/version-hint.text");
+        assertThat(FileType.isMutable(versionHint)).isTrue();
+        assertThat(FileType.classify(versionHint)).isEqualTo(FileType.DATA);
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/metadata/retire-pending"))).isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/metadata/v3.metadata.json")))
+                .isFalse();
+    }
+
+    @Test
+    public void testTagSuccessFile() {
+        Path success = new Path(TABLE_ROOT + "/tag/tag-success-file/t1_SUCCESS");
+        assertThat(FileType.classify(success)).isEqualTo(FileType.META);
+        assertThat(FileType.isMutable(success)).isTrue();
+    }
+
+    @Test
+    public void testChangelogMetadataIsImmutable() {
+        Path changelog = new Path(TABLE_ROOT + "/changelog/changelog-5");
+        assertThat(FileType.classify(changelog)).isEqualTo(FileType.META);
+        assertThat(FileType.isMutable(changelog)).isFalse();
+    }
+
     // ===== META files =====
 
     @Test
@@ -114,6 +154,22 @@ public class FileTypeTest {
                 .isEqualTo(FileType.META);
         // service
         assertThat(FileType.classify(new Path(TABLE_ROOT + "/service/service-primary-key-lookup")))
+                .isEqualTo(FileType.META);
+    }
+
+    @Test
+    public void testManifestSidecarFiles() {
+        Path sidecar = new Path(TABLE_ROOT + "/manifest/manifest-a1b2c3d4-0.avro.sidecar");
+        assertThat(FileType.classify(sidecar)).isEqualTo(FileType.META);
+        assertThat(FileType.isMutable(sidecar)).isFalse();
+        // Sidecar names come from ManifestFileMeta#extraFiles and need not contain "manifest".
+        assertThat(
+                        FileType.classify(
+                                new Path(TABLE_ROOT + "/manifest/explicit-rewrite.avro.sidecar")))
+                .isEqualTo(FileType.META);
+        assertThat(
+                        FileType.classify(
+                                new Path(TABLE_ROOT + "/manifest/index-a1b2c3d4.avro.sidecar")))
                 .isEqualTo(FileType.META);
     }
 
@@ -186,6 +242,29 @@ public class FileTypeTest {
                                         TABLE_ROOT
                                                 + "/dt=2024-01-01/bucket-0/data-a1b2c3d4-0.parquet.index")))
                 .isEqualTo(FileType.FILE_INDEX);
+    }
+
+    // ===== parseWhitelist() =====
+
+    @Test
+    public void testParseWhitelist() {
+        assertThat(FileType.parseWhitelist("meta,global-index"))
+                .containsExactlyInAnyOrder(FileType.META, FileType.GLOBAL_INDEX);
+        assertThat(FileType.parseWhitelist(" data , unknown ,, ")).containsExactly(FileType.DATA);
+        assertThat(FileType.parseWhitelist("")).isEmpty();
+    }
+
+    @Test
+    public void testParseWhitelistWildcard() {
+        FileType[] all = {
+            FileType.META,
+            FileType.DATA,
+            FileType.BUCKET_INDEX,
+            FileType.GLOBAL_INDEX,
+            FileType.FILE_INDEX
+        };
+        assertThat(FileType.parseWhitelist("*")).containsExactlyInAnyOrder(all);
+        assertThat(FileType.parseWhitelist(" meta , * ")).containsExactlyInAnyOrder(all);
     }
 
     // ===== isIndex() =====
