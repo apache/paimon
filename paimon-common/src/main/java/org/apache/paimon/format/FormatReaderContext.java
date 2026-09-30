@@ -34,6 +34,7 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final long fileSize;
     @Nullable private final RoaringBitmap32 selection;
     @Nullable private final ReadBatchSizer readBatchSizer;
+    @Nullable private final FileMetadataCache metadataCache;
 
     public FormatReaderContext(
             FileIO fileIO,
@@ -41,11 +42,22 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
             long fileSize,
             @Nullable RoaringBitmap32 selection,
             @Nullable ReadBatchSizer readBatchSizer) {
+        this(fileIO, file, fileSize, selection, readBatchSizer, null);
+    }
+
+    public FormatReaderContext(
+            FileIO fileIO,
+            Path file,
+            long fileSize,
+            @Nullable RoaringBitmap32 selection,
+            @Nullable ReadBatchSizer readBatchSizer,
+            @Nullable FileMetadataCache metadataCache) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
         this.selection = selection;
         this.readBatchSizer = readBatchSizer;
+        this.metadataCache = metadataCache;
     }
 
     @Override
@@ -73,5 +85,11 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Override
     public ReadBatchSizer readBatchSizer() {
         return readBatchSizer;
+    }
+
+    @Nullable
+    @Override
+    public FileMetadataCache metadataCache() {
+        return metadataCache;
     }
 }
