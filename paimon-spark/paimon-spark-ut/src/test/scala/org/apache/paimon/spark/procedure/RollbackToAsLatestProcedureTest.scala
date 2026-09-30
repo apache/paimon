@@ -18,9 +18,14 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.data.{BinaryString, GenericRow}
+import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.{ExpireSnapshotsImpl, FileStoreTable}
+import org.apache.paimon.table.sink.CommitCallback
 
 import org.apache.spark.sql.Row
+import org.assertj.core.api.Assertions.assertThatThrownBy
 
 class RollbackToAsLatestProcedureTest extends PaimonSparkTestBase {
 
@@ -48,33 +53,114 @@ class RollbackToAsLatestProcedureTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
   }
 
-  test("Paimon Procedure: rollback cleanup detects the commit after an interleaved snapshot") {
-    spark.sql("CREATE TABLE T (id INT, name STRING)")
-    spark.sql("INSERT INTO T VALUES (1, 'a')")
-    spark.sql("INSERT INTO T VALUES (2, 'b')")
-    spark.sql("INSERT INTO T VALUES (3, 'c')")
+  test("Paimon Procedure: rollback keeps the protection tag after a post-commit failure") {
+    Seq(false, true).foreach {
+      concurrentCommit =>
+        withTable("T") {
+          createTableWithFailingCallback()
+          spark.sql("INSERT INTO T VALUES (1, 'original')")
+          // The restored file must not also belong to the snapshots retained before the rollback.
+          spark.sql("INSERT OVERWRITE T VALUES (2, 'replacement')")
+          spark.sql("INSERT INTO T VALUES (3, 'retained')")
 
-    // Each rollback commits under its own unique commit user, so snapshots 4 and 5
-    // carry distinct users -- the shape the failure-path cleanup must handle when
-    // another writer commits between the procedure's snapshot read and the rollback.
-    spark.sql("CALL paimon.sys.rollback_to_as_latest(table => 'test.T', snapshot_id => 1)")
-    spark.sql("CALL paimon.sys.rollback_to_as_latest(table => 'test.T', snapshot_id => 3)")
+          FailingRollbackCallback.concurrentCommit = concurrentCommit
+          FailingRollbackCallback.failRollbackCommit = true
+          try {
+            assertThatThrownBy(() => rollbackToSnapshot1())
+              .hasStackTraceContaining("Injected post-commit callback failure")
+          } finally {
+            FailingRollbackCallback.reset()
+          }
 
-    val snapshotManager = loadTable("T").snapshotManager
-    val user4 = snapshotManager.snapshot(4).commitUser
-    val user5 = snapshotManager.snapshot(5).commitUser
-    assert(user4 != user5)
+          val table = loadTable("T")
+          val latest = table.snapshotManager().latestSnapshot()
+          assert(latest.id() == (if (concurrentCommit) 5L else 4L))
+          assert(latest.commitUser().startsWith("rollback-to-as-latest-"))
+          val tags = table.tagManager().allTagNames()
+          assert(tags.size() == 1 && tags.get(0).startsWith("rollback-to-as-latest-1-"))
+          checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "original") :: Nil)
+          val expire = table.newExpireSnapshots().asInstanceOf[ExpireSnapshotsImpl]
+          expire.expireUntil(1, latest.id())
+          checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "original") :: Nil)
+        }
+    }
+  }
 
-    // The rollback that committed snapshot 5 began when 3 was the latest, but snapshot 4
-    // (a different user) landed first. Cleanup must still find the rollback at 5 rather
-    // than probing the stale id 4 and wrongly concluding it "did not commit" -- which
-    // previously deleted the protection tag and let expiration drop the restored files.
-    assert(RollbackToAsLatestProcedure.rollbackSnapshotCommitted(snapshotManager, 3L, user5))
-    assert(RollbackToAsLatestProcedure.rollbackSnapshotCommitted(snapshotManager, 4L, user5))
-    // A rollback that never committed (no snapshot after 3 authored by it) is reported as
-    // such, so a genuine cleanup still removes its leftover helper tag.
-    assert(
-      !RollbackToAsLatestProcedure
-        .rollbackSnapshotCommitted(snapshotManager, 3L, "never-committed"))
+  test("Paimon Procedure: rollback removes the protection tag when it never started") {
+    createTableWithFailingCallback()
+    spark.sql("INSERT INTO T VALUES (1, 'original')")
+
+    FailingRollbackCallback.failCommitCreation = true
+    try {
+      assertThatThrownBy(() => rollbackToSnapshot1())
+        .hasStackTraceContaining("Injected commit creation failure")
+    } finally {
+      FailingRollbackCallback.reset()
+    }
+
+    val table = loadTable("T")
+    assert(table.tagManager().allTagNames().isEmpty)
+    assert(table.snapshotManager().latestSnapshotId() == 1L)
+  }
+
+  private def createTableWithFailingCallback(): Unit = {
+    val callback = classOf[FailingRollbackCallback].getName
+    spark.sql(
+      s"CREATE TABLE T (id INT, name STRING) TBLPROPERTIES ('commit.callbacks' = '$callback')")
+  }
+
+  private def rollbackToSnapshot1(): Unit = {
+    spark
+      .sql("CALL paimon.sys.rollback_to_as_latest(table => 'test.T', snapshot_id => 1)")
+      .collect()
+  }
+}
+
+/** Injects rollback failures, optionally after another writer commits a snapshot first. */
+class FailingRollbackCallback extends CommitCallback {
+
+  override def setTable(table: FileStoreTable): Unit = {
+    if (FailingRollbackCallback.failCommitCreation) {
+      throw new RuntimeException("Injected commit creation failure")
+    }
+    if (FailingRollbackCallback.concurrentCommit) {
+      // The procedure already read latest; the core rollback has not read it yet.
+      FailingRollbackCallback.concurrentCommit = false
+      val builder = table.newBatchWriteBuilder()
+      val write = builder.newWrite()
+      val commit = builder.newCommit()
+      try {
+        write.write(GenericRow.of(Int.box(4), BinaryString.fromString("concurrent")))
+        commit.commit(write.prepareCommit())
+      } finally {
+        write.close()
+        commit.close()
+      }
+    }
+  }
+
+  override def call(context: CommitCallback.Context): Unit = {
+    if (
+      FailingRollbackCallback.failRollbackCommit &&
+      context.snapshot.commitUser().startsWith("rollback-to-as-latest-")
+    ) {
+      throw new RuntimeException("Injected post-commit callback failure")
+    }
+  }
+
+  override def retry(committable: ManifestCommittable): Unit = {}
+
+  override def close(): Unit = {}
+}
+
+object FailingRollbackCallback {
+  @volatile var failRollbackCommit = false
+  @volatile var concurrentCommit = false
+  @volatile var failCommitCreation = false
+
+  def reset(): Unit = {
+    failRollbackCommit = false
+    concurrentCommit = false
+    failCommitCreation = false
   }
 }
