@@ -472,6 +472,52 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testCreateMetadataFallsBackWhenBaseManifestListIsMissing() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        // The next commit will use this metadata file (snapshot 1's) as its base. Simulate
+        // unrelated, later retention cleanup having already pruned the manifest list that this
+        // base's own current snapshot points to, even though the base metadata file itself is
+        // still present and otherwise healthy.
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        Path baseMetadataPath = pathFactory.toMetadataPath(1);
+        assertThat(table.fileIO().exists(baseMetadataPath)).isTrue();
+        IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+        Path danglingManifestListPath =
+                pathFactory.toManifestListPath(baseMetadata.currentSnapshot().manifestList());
+        assertThat(table.fileIO().exists(danglingManifestListPath)).isTrue();
+        table.fileIO().deleteQuietly(danglingManifestListPath);
+
+        // Committing the next snapshot must not crash: createMetadataWithBase() will fail to
+        // read the now-missing manifest list, and the fallback must rebuild metadata from
+        // scratch instead of propagating the failure.
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testExpireAllBeforeSkipsAlreadyDeletedManifestList() throws Exception {
         RowType rowType =
                 RowType.of(
@@ -512,6 +558,143 @@ public class IcebergCompatibilityTest {
         // The rebuild completed and published a usable Iceberg head.
         Path rebuiltMetadataPath = pathFactory.toMetadataPath(table.latestSnapshot().get().id());
         assertThat(table.fileIO().exists(rebuiltMetadataPath)).isTrue();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testExpireAllBeforeRespectsPreviousVersionsMaxRetentionFloor() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX.key(), "2"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // Three ordinary commits: each one after the first finds its base metadata present, so
+        // they take the safe createMetadataWithBase() path, not expireAllBefore(). With
+        // previous-versions-max = 2, nothing has crossed the retention floor yet
+        // (earliestMetadataId = 3 - 2 = 1, so only ids below 1 -- none -- would be pruned).
+        for (int i = 1; i <= 3; i++) {
+            write.write(GenericRow.of(i, i * 10));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+
+        // v2 is about to cross the retention floor once snapshot 5 is committed
+        // (earliestMetadataId = 5 - 2 = 3, so ids below 3 are pruned). Capture its own manifest
+        // list now, before that happens, so we can confirm below that it is still correctly
+        // cleaned up -- the fix must not turn cleanup into a no-op.
+        Path expiredMetadataPath = pathFactory.toMetadataPath(2);
+        IcebergMetadata expiredMetadata =
+                IcebergMetadata.fromPath(table.fileIO(), expiredMetadataPath);
+        Path expiredListPath =
+                pathFactory.toManifestListPath(expiredMetadata.currentSnapshot().manifestList());
+        assertThat(table.fileIO().exists(expiredListPath)).isTrue();
+
+        // One more ordinary commit. v3 becomes the version previous-versions-max = 2 keeps
+        // around once snapshot 4 is current (earliestMetadataId = 4 - 2 = 2). Capture the
+        // manifest list its own current snapshot points to -- this is the exact file the bug
+        // deleted out from under a retained version.
+        write.write(GenericRow.of(4, 40));
+        commit.commit(4, write.prepareCommit(false, 4));
+
+        Path retainedMetadataPath = pathFactory.toMetadataPath(3);
+        assertThat(table.fileIO().exists(retainedMetadataPath)).isTrue();
+        IcebergMetadata retainedMetadata =
+                IcebergMetadata.fromPath(table.fileIO(), retainedMetadataPath);
+        Path retainedListPath =
+                pathFactory.toManifestListPath(retainedMetadata.currentSnapshot().manifestList());
+        assertThat(table.fileIO().exists(retainedListPath)).isTrue();
+
+        // Force the next commit down the from-scratch / expireAllBefore() path by dropping its
+        // base metadata (v4), simulating the retry/rebuild scenario that triggers the bug.
+        Path baseMetadataPath = pathFactory.toMetadataPath(4);
+        assertThat(table.fileIO().exists(baseMetadataPath)).isTrue();
+        table.fileIO().deleteQuietly(baseMetadataPath);
+
+        write.write(GenericRow.of(5, 50));
+        commit.commit(5, write.prepareCommit(false, 5));
+
+        // v3's own JSON and the manifest list its current snapshot points to must both still
+        // exist -- the bug let the manifest-deletion loop run ahead of the JSON-retention floor
+        // and delete these out from under a retained version.
+        assertThat(table.fileIO().exists(retainedMetadataPath)).isTrue();
+        assertThat(table.fileIO().exists(retainedListPath)).isTrue();
+
+        // Regression check: v2 is genuinely outside the retention window (below the new
+        // earliestMetadataId = 5 - 2 = 3 floor), so both its JSON and its own manifest list are
+        // still correctly cleaned up by this same expireAllBefore() call -- the fix must not
+        // turn cleanup into a no-op.
+        assertThat(table.fileIO().exists(expiredMetadataPath)).isFalse();
+        assertThat(table.fileIO().exists(expiredListPath)).isFalse();
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)",
+                        "Record(2, 20)",
+                        "Record(3, 30)",
+                        "Record(4, 40)",
+                        "Record(5, 50)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testExpireAllBeforeDeletesNothingWhenDeleteAfterCommitDisabled() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(),
+                                        "false"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        Path oldMetadataPath = pathFactory.toMetadataPath(1);
+        assertThat(table.fileIO().exists(oldMetadataPath)).isTrue();
+        IcebergMetadata oldMetadata = IcebergMetadata.fromPath(table.fileIO(), oldMetadataPath);
+        Path oldListPath =
+                pathFactory.toManifestListPath(oldMetadata.currentSnapshot().manifestList());
+        assertThat(table.fileIO().exists(oldListPath)).isTrue();
+
+        // Force the next commit down the from-scratch / expireAllBefore() path.
+        Path baseMetadataPath = pathFactory.toMetadataPath(2);
+        table.fileIO().deleteQuietly(baseMetadataPath);
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        // delete-after-commit is disabled: every metadata JSON is retained forever, so nothing
+        // expireAllBefore() touches may be deleted either -- v1's JSON and its manifest list
+        // must both survive.
+        assertThat(table.fileIO().exists(oldMetadataPath)).isTrue();
+        assertThat(table.fileIO().exists(oldListPath)).isTrue();
+
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
 
