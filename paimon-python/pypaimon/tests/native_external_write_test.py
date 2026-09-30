@@ -184,7 +184,7 @@ def test_external_updates_upserts_deletes_history_and_abort(tmp_path, strategy, 
 
 @pytest.mark.parametrize('strategy', ['none', 'round-robin', 'entropy-inject'])
 @pytest.mark.parametrize('native', [False, True])
-def test_external_blob_fallback_and_readers(tmp_path, strategy, native):
+def test_external_blob_writer_and_readers(tmp_path, strategy, native):
     from pypaimon.schema.data_types import AtomicType, DataField
     table = _table(tmp_path, 'evolution', strategy, native, partitioned=False)
     catalog = table.catalog_environment.catalog_loader.load()
@@ -196,8 +196,7 @@ def test_external_blob_fallback_and_readers(tmp_path, strategy, native):
     data = pa.table({'id': pa.array([1, 2, 3], pa.int32()),
                      'first': pa.array([b'hello', None, b''], pa.large_binary()),
                      'second': pa.array([None, b'world', b'!'], pa.large_binary())})
-    # Blob row streams still require the Python writer, including when opted in.
-    _write(table, data, False)
+    _write(table, data, native)
     for planner in (False, True):
         for reader in (False, True):
             assert _read(table, planner, reader) == data.to_pylist()

@@ -1618,7 +1618,7 @@ class BlobTest(unittest.TestCase):
         }))
         self.assertEqual(set(), blank_canonical.blob_descriptor_fields())
 
-    def test_dedicated_writer_accepts_exact_v1_descriptor_bytes(self):
+    def test_dedicated_writer_accepts_java_descriptor_prefixes(self):
         from pypaimon.write.writer.dedicated_format_writer import (
             DedicatedFormatWriter)
 
@@ -1642,19 +1642,16 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=['payload']))
 
-        padded = pa.RecordBatch.from_arrays(
-            [pa.array([v1 + b"x"], type=pa.large_binary())], names=['payload'])
-        with self.assertRaisesRegex(ValueError, "trailing bytes"):
-            writer._validate_inline_stored_fields_input(padded)
-
+        # Java's known-descriptor parser accepts padding and the older
+        # no-magic layout. Do not apply heuristic exact-length detection here.
         v0 = bytes([0]) + v1[1:]
-        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 0"):
+        for value in (v0, v1 + b"x", v2 + b"padding"):
             writer._validate_inline_stored_fields_input(
                 pa.RecordBatch.from_arrays(
-                    [pa.array([v0], type=pa.large_binary())], names=['payload']))
+                    [pa.array([value], type=pa.large_binary())], names=['payload']))
 
         v3 = bytes([3]) + v2[1:]
-        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 3"):
+        with self.assertRaisesRegex(ValueError, "serialized BlobDescriptor"):
             writer._validate_inline_stored_fields_input(
                 pa.RecordBatch.from_arrays(
                     [pa.array([v3], type=pa.large_binary())], names=['payload']))
