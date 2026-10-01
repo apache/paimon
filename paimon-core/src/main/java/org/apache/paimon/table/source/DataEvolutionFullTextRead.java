@@ -259,7 +259,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     private Optional<GlobalIndexEvaluator.Evaluation> evaluateWithIndexes(
             Set<IndexFileMeta> scalarIndexFiles, @Nullable Snapshot planSnapshot) {
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();

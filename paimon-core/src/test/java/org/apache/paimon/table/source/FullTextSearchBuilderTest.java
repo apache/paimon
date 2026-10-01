@@ -134,6 +134,68 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids).containsAnyOf(0, 1, 3);
     }
 
+    @ParameterizedTest
+    @CsvSource({"full,true", "detail,true", "full,false", "detail,false"})
+    public void testPartialCompositeKeepsScalarFilterCoverage(String mode, boolean scalar)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode));
+        String[] documents = {"alpha keyword", "beta keyword", "gamma keyword"};
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        if (scalar) {
+            buildAndCommitIdBTreeIndex(table, documents.length);
+            buildAndCommitBTreeIndex(table, documents);
+        }
+        List<DataField> fields =
+                Arrays.asList(
+                        table.rowType().getField(TEXT_FIELD_NAME), table.rowType().getField("id"));
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                "btree",
+                                fields.get(0),
+                                fields.subList(1, fields.size()),
+                                table.coreOptions().toConfiguration());
+        writer.write(GenericRow.of(BinaryString.fromString(documents[0]), 0), 0);
+        List<IndexFileMeta> files =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, 0),
+                        fields,
+                        "btree",
+                        writer.finish(),
+                        null);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    DataIncrement.indexIncrement(files),
+                                    CompactIncrement.emptyIncrement())));
+        }
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(1)
+                        .withFilter(
+                                PredicateBuilder.and(
+                                        predicates.equal(0, 1),
+                                        predicates.equal(1, BinaryString.fromString(documents[1]))))
+                        .executeLocal();
+        assertThat(result.results()).containsExactly(1L);
+    }
+
     @Test
     public void testFullTextSearchExcludesDeletedIndexedRows() throws Exception {
         Identifier identifier = identifier("full_text_deleted_indexed_rows");

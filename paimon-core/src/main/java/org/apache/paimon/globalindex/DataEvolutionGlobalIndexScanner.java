@@ -220,12 +220,30 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return create(table, null, null, indexFiles);
     }
 
+    /** Search pre-filters use per-column coverage, so they require scalar BTree definitions. */
+    public static Optional<DataEvolutionGlobalIndexScanner> createForScalarFilters(
+            FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles) {
+        return create(
+                table,
+                pinnedSnapshot,
+                partitionFilter,
+                indexFiles.stream()
+                        .filter(file -> !isCompositeBTree(file))
+                        .collect(Collectors.toList()));
+    }
+
     public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table,
             @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
-        List<IndexFileMeta> globalIndexFiles = globalIndexFiles(indexFiles);
+        List<IndexFileMeta> globalIndexFiles =
+                globalIndexFiles(indexFiles).stream()
+                        .filter(file -> isIndexInSchema(table.rowType(), file))
+                        .collect(Collectors.toList());
         if (globalIndexFiles.isEmpty()) {
             return Optional.empty();
         }
@@ -341,7 +359,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null) {
+                    if (globalIndex == null
+                            || !isIndexInSchema(table.rowType(), entry.indexFile())) {
                         return false;
                     }
                     // Collect indexes whose primary column is filtered, and also multi-column
@@ -369,6 +388,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 && meta.extraFieldIds().length > 0;
     }
 
+    /** Dropped indexed columns leave manifest entries that cannot serve the current schema. */
+    static boolean isIndexInSchema(RowType rowType, IndexFileMeta file) {
+        return file.globalIndexMeta().getIndexedFieldIds().stream()
+                .allMatch(rowType::containsField);
+    }
+
     private static List<IndexFileMeta> globalIndexFiles(Collection<IndexFileMeta> indexFiles) {
         return indexFiles.stream()
                 .filter(indexFile -> indexFile.globalIndexMeta() != null)
@@ -389,16 +414,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
         if (query != null && query.hasCompositeQuery()) {
             try {
-                return Optional.of(
-                        new GlobalIndexEvaluator.Evaluation(
-                                query.evaluate(
-                                        fileIO,
-                                        options,
-                                        indexFiles.stream()
-                                                .map(file -> file.globalIndexMeta().rowRange())
-                                                .collect(Collectors.toList())),
-                                query.contributingFieldIds(rowType),
-                                query.coveredRanges()));
+                return query.evaluateWithCoverage(
+                        fileIO,
+                        options,
+                        indexFiles.stream()
+                                .map(file -> file.globalIndexMeta().rowRange())
+                                .collect(Collectors.toList()));
             } catch (IOException e) {
                 throw new RuntimeException("Failed to evaluate composite BTree query", e);
             }
@@ -426,6 +447,15 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 predicate == null
                         ? null
                         : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
+        if (query != null && query.hasCompositeQuery() && query.hasScalarQuery()) {
+            // Scalar shards can decline a predicate at runtime, so the legacy API must use
+            // evaluated coverage as well. Internal callers retain the evaluation directly.
+            Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanWithCoverage(predicate);
+            return evaluation.isPresent()
+                    ? unindexedRowsForEvaluation(evaluation.get())
+                    : GlobalIndexResult.fromRanges(
+                            coverage.unindexedRangesFromCoverage(Collections.emptyList(), null));
+        }
         List<Range> unindexed =
                 query != null && query.hasCompositeQuery()
                         ? coverage.unindexedRangesFromCoverage(query.coveredRanges(), null)

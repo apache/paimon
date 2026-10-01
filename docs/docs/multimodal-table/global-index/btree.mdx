@@ -169,6 +169,14 @@ Additional predicates remain filters, and OR branches can each use their own
 composite lookup. When several composite indexes match, the query prefers the
 one with the most columns.
 
+Queries combining a composite lookup with another indexed scalar condition are
+evaluated during planning, so unsupported scalar predicates and scan budgets
+retain the usual fallback behavior across data splits. Pure composite lookups
+can still use reader-side index evaluation.
+
+Vector and full-text search pre-filters currently use single-column indexes or
+the usual data fallback; they do not evaluate composite BTree indexes.
+
 Composite indexes can coexist with single-column indexes on the same columns.
 The current composite query path requires equality conditions for all key
 columns; prefix queries, ranges, and conditions on only some key columns use

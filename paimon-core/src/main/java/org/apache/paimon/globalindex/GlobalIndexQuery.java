@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFileGroup;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator.Evaluation;
 import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -107,7 +108,13 @@ class GlobalIndexQuery {
             List<IndexFileMeta> files,
             IndexPathFactory pathFactory) {
         Map<Integer, List<IndexMetaFileGroup>> groupsByField =
-                DataEvolutionGlobalIndexScanner.groupIndexFiles(files);
+                DataEvolutionGlobalIndexScanner.groupIndexFiles(
+                        files.stream()
+                                .filter(
+                                        file ->
+                                                DataEvolutionGlobalIndexScanner.isIndexInSchema(
+                                                        rowType, file))
+                                .collect(Collectors.toList()));
         Map<Integer, List<IndexGroup>> groups = new LinkedHashMap<>();
         groupsByField.forEach(
                 (fieldId, fieldGroups) -> {
@@ -186,6 +193,19 @@ class GlobalIndexQuery {
                         new GlobalIndexQuery(
                                 composite, false, Collections.emptyList(), selectedGroups));
                 predicates.removeAll(covered);
+                // The tuple equality already narrows these columns to one value. Leave their
+                // remaining conditions as data filters instead of reading scalar postings.
+                List<LeafPredicate> keyEqualities = matched;
+                predicates.removeIf(
+                        child -> {
+                            if (!(child instanceof LeafPredicate)) {
+                                return false;
+                            }
+                            Optional<FieldRef> field = ((LeafPredicate) child).fieldRefOptional();
+                            return keyEqualities.stream()
+                                    .anyMatch(
+                                            equality -> equality.fieldRefOptional().equals(field));
+                        });
             }
         }
         for (int i = 0; i < predicates.size(); i++) {
@@ -270,6 +290,11 @@ class GlobalIndexQuery {
                 || children.stream().anyMatch(GlobalIndexQuery::hasCompositeQuery);
     }
 
+    boolean hasScalarQuery() {
+        return groups.stream().anyMatch(group -> !group.isCompositeBTree())
+                || children.stream().anyMatch(GlobalIndexQuery::hasScalarQuery);
+    }
+
     /** Coverage of the selected query paths, including files pruned safely by key metadata. */
     List<Range> coveredRanges() {
         if (predicate != null) {
@@ -326,31 +351,65 @@ class GlobalIndexQuery {
             throws IOException {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
-        return evaluateWithExecutor(fileIO, options, ranges, executor);
+        return evaluateWithExecutor(fileIO, options, ranges, executor, false).get().result();
     }
 
-    private GlobalIndexResult evaluateWithExecutor(
-            FileIO fileIO, Options options, List<Range> ranges, ExecutorService executor)
+    /** Preserve unsupported-reader fallback and coverage of the paths that actually contributed. */
+    Optional<Evaluation> evaluateWithCoverage(FileIO fileIO, Options options, List<Range> ranges)
+            throws IOException {
+        ExecutorService executor =
+                GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
+        return evaluateWithExecutor(fileIO, options, ranges, executor, true);
+    }
+
+    private Optional<Evaluation> evaluateWithExecutor(
+            FileIO fileIO,
+            Options options,
+            List<Range> ranges,
+            ExecutorService executor,
+            boolean allowUnsupported)
             throws IOException {
         if (predicate == null) {
             GlobalIndexResult result = null;
+            Set<Integer> fields = new HashSet<>();
+            List<Range> coverage = null;
             for (GlobalIndexQuery child : children) {
-                GlobalIndexResult matches =
-                        child.evaluateWithExecutor(fileIO, options, ranges, executor);
+                Optional<Evaluation> evaluation =
+                        child.evaluateWithExecutor(
+                                fileIO, options, ranges, executor, allowUnsupported);
+                if (!evaluation.isPresent()) {
+                    if (union) {
+                        return Optional.empty();
+                    }
+                    continue;
+                }
+                GlobalIndexResult matches = evaluation.get().result();
                 result =
                         result == null ? matches : union ? result.or(matches) : result.and(matches);
+                fields.addAll(evaluation.get().contributingFieldIds());
+                List<Range> childCoverage = evaluation.get().coveredRanges();
+                coverage = coverage == null ? childCoverage : Range.and(coverage, childCoverage);
             }
-            return result == null ? GlobalIndexResult.createEmpty() : result;
+            return result == null
+                    ? Optional.empty()
+                    : Optional.of(new Evaluation(result, fields, coverage));
         }
         GlobalIndexResult result = GlobalIndexResult.createEmpty();
+        Set<Integer> fields = new HashSet<>();
+        List<Range> coverage = new ArrayList<>();
+        boolean supported = groups.isEmpty();
         for (IndexGroup group : groups) {
             if (group.files.isEmpty()) {
+                supported = true;
+                fields.addAll(collectFieldIds(new RowType(group.fields()), predicate));
+                coverage.add(group.range);
                 continue;
             }
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query =
                     predicateQuery(group);
             GlobalIndexResult splitRows = localSplitRows(ranges, group.range);
             if (splitRows.results().isEmpty()) {
+                supported = true;
                 continue;
             }
             GlobalIndexer indexer =
@@ -365,8 +424,14 @@ class GlobalIndexQuery {
                             executor)) {
                 Optional<GlobalIndexResult> matches = query.apply(reader).get();
                 if (!matches.isPresent()) {
+                    if (allowUnsupported) {
+                        continue;
+                    }
                     throw new IOException("Index reader does not support predicate: " + predicate);
                 }
+                supported = true;
+                fields.addAll(collectFieldIds(new RowType(group.fields()), predicate));
+                coverage.add(group.range);
                 // Clip in index-local coordinates before offset() iterates the retained rows.
                 result = result.or(splitRows.and(matches.get()).offset(group.range.from));
             } catch (InterruptedException e) {
@@ -376,7 +441,10 @@ class GlobalIndexQuery {
                 throw new IOException("Failed to evaluate index query split", e.getCause());
             }
         }
-        return result;
+        return supported
+                ? Optional.of(
+                        new Evaluation(result, fields, Range.sortAndMergeOverlap(coverage, true)))
+                : Optional.empty();
     }
 
     private Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>>

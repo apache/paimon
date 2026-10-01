@@ -67,6 +67,9 @@ public class DataEvolutionGlobalIndexCoverage {
         this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            if (!DataEvolutionGlobalIndexScanner.isIndexInSchema(table.rowType(), indexFile)) {
+                continue;
+            }
             // Tuple indexes cannot answer an individual column's scalar predicate.
             // Their coverage is supplied explicitly by the selected composite query.
             if ("btree".equals(indexFile.indexType())

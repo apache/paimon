@@ -21,16 +21,19 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -44,6 +47,9 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -81,6 +87,24 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
             assertThat(read(configured, query(predicates, "missing", 7))).isEmpty();
             assertThat(read(configured, PredicateBuilder.and(query, predicates.equal(0, 8))))
                     .isEmpty();
+            assertThat(
+                            read(
+                                    configured,
+                                    PredicateBuilder.and(
+                                            query,
+                                            predicates.isNotNull(1),
+                                            predicates.startsWith(
+                                                    1, BinaryString.fromString("category-")),
+                                            predicates.greaterThan(0, 5))))
+                    .containsExactlyInAnyOrder("p7", "p27", "p47", "p67", "p87");
+            assertThat(
+                            read(
+                                    configured,
+                                    PredicateBuilder.and(
+                                            query,
+                                            predicates.startsWith(
+                                                    1, BinaryString.fromString("missing")))))
+                    .isEmpty();
         }
         try (DataEvolutionGlobalIndexScanner scanner =
                 DataEvolutionGlobalIndexScanner.create(
@@ -96,6 +120,235 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                             new Range(47, 47),
                             new Range(67, 67),
                             new Range(87, 87));
+        }
+    }
+
+    @Test
+    void testUnsupportedScalarPredicatesRetainCompositeFallback() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 20);
+        build(table, "f1", "f0");
+        append(table, 20, 40);
+        build(table, "f2");
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate joint = query(predicates, "category-a", 7);
+        Predicate unsupported = predicates.notLike(2, BinaryString.fromString("x%"));
+        Predicate conjunction = PredicateBuilder.and(joint, unsupported);
+        Predicate union =
+                PredicateBuilder.or(joint, predicates.notLike(2, BinaryString.fromString("p1%")));
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        for (boolean inReader : Arrays.asList(false, true)) {
+            assertThat(read(configured(table, "fast", inReader), conjunction))
+                    .containsExactly("p7");
+            for (String mode : Arrays.asList("full", "detail")) {
+                FileStoreTable configured = configured(table, mode, inReader);
+                assertThat(read(configured, conjunction)).containsExactlyInAnyOrder("p7", "p27");
+                assertThat(read(configured, union))
+                        .containsExactlyInAnyOrderElementsOf(read(withoutIndex, union));
+                FileStoreTable budgeted =
+                        configured.copy(
+                                Collections.singletonMap(
+                                        "btree-index.fallback-scan-max-size", "0 b"));
+                assertThat(
+                                read(
+                                        budgeted,
+                                        PredicateBuilder.and(
+                                                joint,
+                                                predicates.contains(
+                                                        2, BinaryString.fromString("7")))))
+                        .containsExactlyInAnyOrder("p7", "p27");
+            }
+        }
+    }
+
+    @Test
+    void testPartialResidualIndexCoverageAcrossSplits() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                table().copy(Collections.singletonMap("source.split.target-size", "1 b"));
+        append(table, 0, 20);
+        build(table, "f2");
+        append(table, 20, 40);
+        build(table, "f1", "f0");
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate joint = query(predicates, "category-a", 7);
+        Predicate unsupported =
+                PredicateBuilder.and(joint, predicates.notLike(2, BinaryString.fromString("x%")));
+        Predicate supported =
+                PredicateBuilder.and(joint, predicates.startsWith(2, BinaryString.fromString("p")));
+        for (boolean inReader : Arrays.asList(false, true)) {
+            FileStoreTable configured = configured(table, "fast", inReader);
+            assertThat(read(configured, unsupported)).containsExactlyInAnyOrder("p7", "p27");
+            assertThat(read(configured, supported)).containsExactly("p7");
+            FileStoreTable budgeted =
+                    configured.copy(
+                            Collections.singletonMap("btree-index.fallback-scan-max-size", "0 b"));
+            assertThat(
+                            read(
+                                    budgeted,
+                                    PredicateBuilder.and(
+                                            joint,
+                                            predicates.contains(2, BinaryString.fromString("p")))))
+                    .containsExactlyInAnyOrder("p7", "p27");
+            for (String mode : Arrays.asList("full", "detail")) {
+                assertThat(read(configured(table, mode, inReader), supported))
+                        .containsExactlyInAnyOrder("p7", "p27");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "detail"})
+    void testPublicScannerFallbackUsesActualSupportedCoverage(String mode) throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 20);
+        build(table, "f2");
+        append(table, 20, 40);
+        build(table, "f2");
+        build(table, "f1", "f0");
+        List<IndexFileMeta> files = new ArrayList<>();
+        for (IndexManifestEntry entry : table.store().newIndexFileHandler().scanEntries()) {
+            IndexFileMeta file = entry.indexFile();
+            if (file.globalIndexMeta().indexFieldId() == 2
+                    && file.globalIndexMeta().rowRangeStart() == 20) {
+                // Model a residual shard over the scan budget without creating a large fixture.
+                file =
+                        new IndexFileMeta(
+                                file.indexType(),
+                                file.fileName(),
+                                1_000_000_000L,
+                                file.rowCount(),
+                                file.globalIndexMeta(),
+                                null);
+            }
+            files.add(file);
+        }
+        FileStoreTable configured =
+                configured(table, mode, false)
+                        .copy(
+                                Collections.singletonMap(
+                                        "btree-index.fallback-scan-max-size", "16 kb"));
+        PredicateBuilder predicates = new PredicateBuilder(configured.rowType());
+        Predicate query =
+                PredicateBuilder.and(
+                        query(predicates, "category-a", 7),
+                        predicates.contains(2, BinaryString.fromString("p")));
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(configured, files).get()) {
+            assertThat(scanner.scan(query).get().results().toRangeList())
+                    .containsExactly(new Range(7, 7));
+            assertThat(scanner.unindexedRows(query).results().toRangeList())
+                    .containsExactly(new Range(20, 39));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "detail"})
+    void testDroppedDefinitionDoesNotCoverSurvivingExtraColumn(String mode) throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 40);
+        IndexFileMeta stale =
+                new IndexFileMeta(
+                        "test-scalar",
+                        "stale",
+                        1,
+                        40,
+                        new GlobalIndexMeta(0, 39, 0, new int[] {1}, null),
+                        null);
+        IndexFileMeta valid =
+                new IndexFileMeta(
+                        "test-scalar",
+                        "valid",
+                        1,
+                        20,
+                        new GlobalIndexMeta(0, 19, 1, null, null),
+                        null);
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("f0"), false);
+        FileStoreTable evolved = configured(table(), mode, false);
+        DataEvolutionGlobalIndexCoverage coverage =
+                new DataEvolutionGlobalIndexCoverage(
+                        evolved,
+                        evolved.snapshotManager().latestSnapshot(),
+                        null,
+                        Arrays.asList(stale, valid),
+                        evolved.coreOptions().scalarIndexSearchMode());
+        assertThat(coverage.unindexedRanges(1)).containsExactly(new Range(20, 39));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"f0,false", "f0,true", "f1,false", "f1,true"})
+    void testDroppedCompositeComponentFallsBack(String dropped, boolean scalar) throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 40);
+        build(table, "f1", "f0");
+        String surviving = dropped.equals("f0") ? "f1" : "f0";
+        if (scalar) {
+            build(table, surviving);
+        }
+        catalog.alterTable(identifier(), SchemaChange.dropColumn(dropped), false);
+        FileStoreTable evolved = table();
+        PredicateBuilder predicates = new PredicateBuilder(evolved.rowType());
+        Predicate query =
+                predicates.equal(
+                        evolved.rowType().getFieldIndex(surviving),
+                        surviving.equals("f0") ? 7 : BinaryString.fromString("category-a"));
+        FileStoreTable withoutIndex =
+                evolved.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        List<String> expected = read(withoutIndex, query);
+        assertThat(expected).hasSize(surviving.equals("f0") ? 4 : 20);
+        for (boolean inReader : Arrays.asList(false, true)) {
+            for (String mode : Arrays.asList("fast", "full", "detail")) {
+                assertThat(read(configured(evolved, mode, inReader), query))
+                        .containsExactlyInAnyOrderElementsOf(expected);
+            }
+        }
+        Optional<DataEvolutionGlobalIndexScanner> scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                        evolved,
+                        evolved.store().newIndexFileHandler().scanEntries().stream()
+                                .map(IndexManifestEntry::indexFile)
+                                .collect(Collectors.toList()));
+        assertThat(scanner.isPresent()).isEqualTo(scalar);
+        if (scanner.isPresent()) {
+            scanner.get().close();
+        }
+    }
+
+    @Test
+    void testDroppedUnrelatedScalarDoesNotBreakCompositeLookup() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 40);
+        build(table, "f0");
+        build(table, "f1", "f2");
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("f0"), false);
+        FileStoreTable evolved = table();
+        PredicateBuilder predicates = new PredicateBuilder(evolved.rowType());
+        Predicate query =
+                PredicateBuilder.and(
+                        predicates.equal(0, BinaryString.fromString("category-a")),
+                        predicates.equal(1, BinaryString.fromString("p7")));
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                                evolved,
+                                evolved.store().newIndexFileHandler().scanEntries().stream()
+                                        .map(IndexManifestEntry::indexFile)
+                                        .collect(Collectors.toList()))
+                        .get()) {
+            assertThat(scanner.scan(query).get().results().toRangeList())
+                    .containsExactly(new Range(7, 7));
+        }
+        for (boolean inReader : Arrays.asList(false, true)) {
+            for (String mode : Arrays.asList("fast", "full", "detail")) {
+                assertThat(read(configured(evolved, mode, inReader), query)).containsExactly("p7");
+            }
         }
     }
 
@@ -243,7 +496,11 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
         builder.newRead()
                 .executeFilter()
                 .createReader(splits)
-                .forEachRemaining(row -> values.add(row.getString(2).toString()));
+                .forEachRemaining(
+                        row ->
+                                values.add(
+                                        row.getString(table.rowType().getFieldIndex("f2"))
+                                                .toString()));
         return values;
     }
 

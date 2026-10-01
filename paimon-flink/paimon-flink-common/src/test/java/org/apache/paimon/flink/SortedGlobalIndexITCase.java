@@ -86,7 +86,8 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T_COMPOSITE (id INT, category STRING, item_number INT) WITH ("
                         + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', "
-                        + "'sorted-index.records-per-file' = '13', 'btree-index.bloom-filter.enabled' = 'true')");
+                        + "'sorted-index.records-per-file' = '13', 'sorted-index.build.max-parallelism' = '4', "
+                        + "'btree-index.bloom-filter.enabled' = 'true')");
         String values =
                 IntStream.range(0, 40)
                         .mapToObj(
@@ -106,9 +107,12 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(7), Row.of(27));
         assertThat(paimonTable("T_COMPOSITE").store().newIndexFileHandler().scanEntries())
                 .allSatisfy(
-                        entry ->
-                                assertThat(entry.indexFile().globalIndexMeta().getIndexedFieldIds())
-                                        .hasSize(2));
+                        entry -> {
+                            assertThat(entry.indexFile().globalIndexMeta().getIndexedFieldIds())
+                                    .hasSize(2);
+                            assertThat(entry.indexFile().globalIndexMeta().rowRange().count())
+                                    .isLessThanOrEqualTo(13);
+                        });
         sql("ALTER TABLE T_COMPOSITE SET ('global-index.query-in-reader.enabled' = 'true')");
         assertThat(
                         sql(

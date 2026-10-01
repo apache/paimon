@@ -251,7 +251,7 @@ public class SortedIndexTopoBuilder {
                 BinaryRow partition = partitionEntry.getKey();
                 byte[] partitionBytes = binaryRowSerializer.serializeToBytes(partition);
                 Map<Range, List<Split>> ranges =
-                        keyExtractor.isIdentity()
+                        keyExtractor.isIdentity() && !(indexFieldType instanceof RowType)
                                 ? partitionEntry.getValue()
                                 : shardSplitsByRowRange(partitionEntry.getValue(), recordsPerRange);
                 for (Map.Entry<Range, List<Split>> entry : ranges.entrySet()) {

@@ -127,6 +127,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             List<DataField> extraFields,
             Options options)
             throws IOException {
+        extraFields = extraFields == null ? Collections.emptyList() : extraFields;
         List<DataField> indexFields = new ArrayList<>();
         indexFields.add(indexField);
         indexFields.addAll(extraFields);

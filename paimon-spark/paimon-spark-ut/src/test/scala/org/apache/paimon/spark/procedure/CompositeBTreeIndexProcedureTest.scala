@@ -18,13 +18,43 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder
+import org.apache.paimon.types.DataField
 
 import org.apache.spark.sql.Row
+
+import java.util.Collections
 
 import scala.collection.JavaConverters._
 
 class CompositeBTreeIndexProcedureTest extends PaimonSparkTestBase {
+
+  test("nullable extra fields preserve single column empty builds") {
+    withTable("T") {
+      sql("""CREATE TABLE T (id INT)
+            |TBLPROPERTIES ('bucket' = '-1', 'row-tracking.enabled' = 'true',
+            |'data-evolution.enabled' = 'true')
+            |""".stripMargin)
+      val table = loadTable("T")
+      for (extras <- Seq(null, Collections.emptyList[DataField]())) {
+        assert(
+          new SortedIndexTopoBuilder()
+            .buildIndex(
+              null,
+              null,
+              null,
+              table,
+              "btree",
+              table.rowType(),
+              table.rowType().getField("id"),
+              extras,
+              new Options())
+            .isEmpty)
+      }
+    }
+  }
 
   test("composite btree creation, incremental build and component refresh") {
     withTable("T", "S") {
