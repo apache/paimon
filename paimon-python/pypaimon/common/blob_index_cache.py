@@ -29,6 +29,8 @@ _CachedBlobIndex = namedtuple(
 )
 _CACHED_ENTRY_OVERHEAD = sys.getsizeof(_CachedBlobIndex((), (), 0))
 _ESTIMATED_INT_SIZE = sys.getsizeof(1 << 60)
+# Allow for cachetools' two dict slots, OrderedDict node, and allocator slack.
+_LRU_ENTRY_OVERHEAD = 256
 
 
 class BlobIndexCache:
@@ -61,6 +63,7 @@ class BlobIndexCache:
             + sys.getsizeof(blob_lengths)
             + sys.getsizeof(blob_offsets)
             + _CACHED_ENTRY_OVERHEAD
+            + _LRU_ENTRY_OVERHEAD
             + (len(blob_lengths) + len(blob_offsets)) * _ESTIMATED_INT_SIZE
         )
         if size_bytes > self.max_size_bytes:

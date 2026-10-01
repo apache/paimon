@@ -3234,7 +3234,7 @@ class BlobEndToEndTest(unittest.TestCase):
         from pypaimon.common.blob_index_cache import BlobIndexCache
         from pypaimon.common.memory_size import MemorySize
 
-        cache = BlobIndexCache(MemorySize.of_bytes(512))
+        cache = BlobIndexCache(MemorySize.of_kibi_bytes(1))
         cache.put("small.blob", (1,), (0,))
         self.assertEqual(((1,), (0,)), cache.get("small.blob"))
 
@@ -3242,6 +3242,19 @@ class BlobEndToEndTest(unittest.TestCase):
         cache.put("oversized.blob", values, values)
         self.assertIsNone(cache.get("oversized.blob"))
         self.assertEqual(((1,), (0,)), cache.get("small.blob"))
+
+    def test_blob_index_cache_accounts_for_many_small_entries(self):
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        from pypaimon.common.memory_size import MemorySize
+
+        cache = BlobIndexCache(MemorySize.of_mebi_bytes(1))
+        for i in range(10000):
+            cache.put("small-{:05d}.blob".format(i), (1,), (0,))
+
+        self.assertLess(len(cache), 2048)
+        self.assertLessEqual(cache.size_bytes, cache.max_size_bytes)
+        self.assertNotIn("small-00000.blob", cache)
+        self.assertIn("small-09999.blob", cache)
 
     def test_blob_index_cache_catalog_scope_and_serialization(self):
         import pickle
