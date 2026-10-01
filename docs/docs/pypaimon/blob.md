@@ -178,10 +178,9 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 
 ## Python BLOB index cache
 
-Set `cache.blob-index.max-size` in Catalog options to bound parsed BLOB indexes
-cached per Catalog context (default: `64 mb`; `0 b` disables caching). Tables
-share the cache, and deserialized contexts start empty. This applies only to the
-Python BLOB reader.
+Set `cache.blob-index.max-size` in Catalog options to limit parsed indexes per
+Catalog context (default: `64 mb`; `0 b` disables). The cache is process-local
+and only used by the Python BLOB reader.
 
 ## See Also
 
