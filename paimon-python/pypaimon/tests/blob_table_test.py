@@ -2688,6 +2688,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
         self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
 
+    @pytest.mark.python_read
     def test_blob_view_fields_resolve_upstream_blob(self):
         from unittest import mock
 
