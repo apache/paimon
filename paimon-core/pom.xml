@@ -79,17 +79,6 @@ under the License.
             </exclusions>
         </dependency>
 
-        <!--
-        Only used by the ZooKeeper catalog lock (org.apache.paimon.zookeeper), engaged via
-        lock.type=zookeeper. Provided scope: consumers who don't use that lock type never need
-        Curator/ZooKeeper on their runtime classpath, and consumers who do (e.g. inside a Flink
-        job) commonly already carry a (possibly shaded) Curator themselves.
-
-        A direct org.apache.zookeeper:zookeeper dependency is declared explicitly (rather than
-        left to transitive resolution) because hadoop-common above pulls in curator-client
-        2.7.1/zookeeper 3.4.6, and Maven's nearest-declaration-wins mediation would otherwise let
-        that ancient, incompatible pair win over what curator-recipes actually needs.
-        -->
         <dependency>
             <groupId>org.apache.curator</groupId>
             <artifactId>curator-recipes</artifactId>
