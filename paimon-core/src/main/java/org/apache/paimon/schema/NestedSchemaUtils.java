@@ -240,9 +240,10 @@ public class NestedSchemaUtils {
         // cannot be cast on read, and a MULTISET-to-MULTISET cast cannot be resolved at all, so
         // even an element nullability change is not read-safe. Reject any element change here so
         // it fails at DDL time with a clear message instead of silently breaking reads of
-        // existing data files.
+        // existing data files. Field ids are ignored in the comparison: they are reassigned per
+        // type conversion, so an unchanged element shifts ids whenever a sibling column is added.
         Preconditions.checkArgument(
-                oldElementType.equals(newElementType),
+                oldElementType.equalsIgnoreFieldId(newElementType),
                 "Cannot update the element type of MULTISET column %s from %s to %s "
                         + "(a multiset element is a map key, whose type cannot be evolved).",
                 joinedNames,

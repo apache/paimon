@@ -896,4 +896,40 @@ public class NestedSchemaUtilsTest {
                         "Cannot update the element type of MULTISET column multiset_column")
                 .hasMessageContaining("a multiset element is a map key");
     }
+
+    @Test
+    public void testUnchangedMultisetElementWithShiftedFieldIdNotRejected() {
+        List<String> fieldNames = Arrays.asList("v");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Adding a sibling column before an unchanged MULTISET<ROW<...>> shifts the element's
+        // nested field id, because ids are assigned in traversal order per type conversion. The
+        // multiset element is logically unchanged and must not be rejected; only the sibling is
+        // added. The ids below mirror what LogicalTypeConversion assigns for each parent ROW: the
+        // inner "x" is id 2 before the sibling and id 3 after it.
+        RowType oldType =
+                RowType.of(
+                        new DataField(0, "a", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "m",
+                                new MultisetType(
+                                        true, RowType.of(new DataField(2, "x", DataTypes.INT())))));
+        RowType newType =
+                RowType.of(
+                        new DataField(0, "a", DataTypes.INT()),
+                        new DataField(1, "added", DataTypes.STRING()),
+                        new DataField(
+                                2,
+                                "m",
+                                new MultisetType(
+                                        true, RowType.of(new DataField(3, "x", DataTypes.INT())))));
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(1);
+        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.AddColumn.class);
+        SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) schemaChanges.get(0);
+        assertThat(addColumn.fieldNames()).containsExactly("v", "added");
+    }
 }
