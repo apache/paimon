@@ -70,8 +70,7 @@ class RESTCatalog(Catalog):
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
         self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
         self.rest_api = RESTApi(context.options, config_required)
-        self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
-                                             context.prefer_io_loader, context.fallback_io_loader)
+        self.context = context.with_options(self.rest_api.options)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
         self._cache_manager = CachingFileIO.create_cache_manager(self.context.options)
 
