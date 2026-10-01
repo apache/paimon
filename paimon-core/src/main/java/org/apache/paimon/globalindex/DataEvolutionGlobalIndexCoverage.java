@@ -67,6 +67,13 @@ public class DataEvolutionGlobalIndexCoverage {
         this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            // Tuple indexes cannot answer an individual column's scalar predicate.
+            // Their coverage is supplied explicitly by the selected composite query.
+            if ("btree".equals(indexFile.indexType())
+                    && meta.extraFieldIds() != null
+                    && meta.extraFieldIds().length > 0) {
+                continue;
+            }
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             addCoverage(meta.indexFieldId(), range);
             if (meta.extraFieldIds() != null) {
@@ -87,6 +94,11 @@ public class DataEvolutionGlobalIndexCoverage {
 
     public List<Range> unindexedRanges(
             Collection<Integer> fieldIds, @Nullable List<Range> plannedDataRanges) {
+        return unindexedRangesFromCoverage(indexedRanges(fieldIds), plannedDataRanges);
+    }
+
+    public List<Range> unindexedRangesFromCoverage(
+            List<Range> indexedRanges, @Nullable List<Range> plannedDataRanges) {
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
         }
@@ -101,8 +113,7 @@ public class DataEvolutionGlobalIndexCoverage {
             dataRanges = Collections.singletonList(new Range(0, snapshot.nextRowId() - 1));
         }
 
-        List<Range> predicateIndexedRanges =
-                Range.sortAndMergeOverlap(indexedRanges(fieldIds), true);
+        List<Range> predicateIndexedRanges = Range.sortAndMergeOverlap(indexedRanges, true);
         List<Range> unindexedRanges = new ArrayList<>();
         for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
             unindexedRanges.addAll(dataRange.exclude(predicateIndexedRanges));

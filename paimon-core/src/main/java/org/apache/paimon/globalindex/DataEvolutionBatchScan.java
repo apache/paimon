@@ -399,8 +399,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                 partitionFilter,
                                 indexFiles,
                                 table.coreOptions().scalarIndexSearchMode())
-                        .unindexedRanges(
-                                indexQuery.contributingFieldIds(table.rowType()),
+                        .unindexedRangesFromCoverage(
+                                indexQuery.coveredRanges(),
                                 table.coreOptions().scalarIndexSearchMode()
                                                 == CoreOptions.GlobalIndexSearchMode.DETAIL
                                         ? GlobalIndexBuilderUtils.calcRowRanges(
@@ -472,11 +472,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 return dataPlan;
             }
             GlobalIndexResult candidates =
-                    result.get()
-                            .result()
-                            .or(
-                                    scanner.unindexedRowsForContributingFields(
-                                            result.get().contributingFieldIds()));
+                    result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
             RowRangeIndex rowRangeIndex = RowRangeIndex.create(candidates.results().toRangeList());
             ScoreGetter scores =
                     candidates instanceof ScoredGlobalIndexResult
@@ -553,11 +549,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             if (result.isPresent()) {
                 long coverageStart = System.nanoTime();
                 GlobalIndexResult finalResult =
-                        result.get()
-                                .result()
-                                .or(
-                                        scanner.unindexedRowsForContributingFields(
-                                                result.get().contributingFieldIds()));
+                        result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(

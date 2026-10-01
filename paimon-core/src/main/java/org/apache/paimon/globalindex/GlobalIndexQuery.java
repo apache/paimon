@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFileGroup;
+import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataInputView;
@@ -28,12 +29,14 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -58,6 +61,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
@@ -73,7 +77,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
  */
 class GlobalIndexQuery {
 
-    /** A leaf or paired range query; null for an AND/OR node. */
+    /** A leaf, paired range or composite lookup; null for an AND/OR node. */
     @Nullable private final Predicate predicate;
 
     /** For compound nodes, true means OR and false means AND; ignored for leaves. */
@@ -131,6 +135,59 @@ class GlobalIndexQuery {
         boolean union = compound.function() instanceof Or;
         List<GlobalIndexQuery> children = new ArrayList<>();
         List<Predicate> predicates = GlobalIndexEvaluator.normalizedChildren(compound);
+        if (!union) {
+            // Prefer the longest full composite key before any single-column posting is read.
+            while (!predicates.isEmpty()) {
+                IndexGroup selected = null;
+                List<LeafPredicate> matched = null;
+                Predicate conjunction = PredicateBuilder.and(predicates);
+                for (List<IndexGroup> fieldGroups : groups.values()) {
+                    for (IndexGroup group : fieldGroups) {
+                        if (!group.isCompositeBTree()
+                                || (selected != null
+                                        && group.extraFields.size()
+                                                <= selected.extraFields.size())) {
+                            continue;
+                        }
+                        Optional<List<LeafPredicate>> match =
+                                CompositeBTreePredicate.match(group.fields(), conjunction);
+                        if (match.isPresent()) {
+                            selected = group;
+                            matched = match.get();
+                        }
+                    }
+                }
+                if (selected == null) {
+                    break;
+                }
+                List<Predicate> covered = new ArrayList<>();
+                for (Predicate child : predicates) {
+                    if (child instanceof LeafPredicate) {
+                        LeafPredicate leaf = (LeafPredicate) child;
+                        if (leaf.function() instanceof Equal
+                                && matched.stream()
+                                        .anyMatch(
+                                                equality ->
+                                                        equality.fieldRefOptional()
+                                                                .equals(leaf.fieldRefOptional()))) {
+                            covered.add(child);
+                        }
+                    }
+                }
+                Predicate composite = PredicateBuilder.and(covered);
+                List<IndexGroup> selectedGroups = new ArrayList<>();
+                for (IndexGroup group : groups.get(selected.field.id())) {
+                    if (group.type.equals(selected.type)
+                            && group.fields().equals(selected.fields())) {
+                        selectedGroups.add(group.selectFiles(composite));
+                    }
+                }
+                children.add(
+                        new GlobalIndexQuery(
+                                composite, false, Collections.emptyList(), selectedGroups));
+                predicates.removeAll(covered);
+            }
+        }
         for (int i = 0; i < predicates.size(); i++) {
             Predicate child = predicates.get(i);
             GlobalIndexQuery query = null;
@@ -188,31 +245,45 @@ class GlobalIndexQuery {
         }
         List<IndexGroup> selectedGroups = new ArrayList<>();
         for (IndexGroup group : fieldGroups) {
-            List<GlobalIndexIOMeta> selectedFiles =
-                    GlobalIndexerFactoryUtils.selectFiles(
-                            group.type, group.field, group.extraFields, predicate, group.files);
-            if (!selectedFiles.isEmpty()) {
-                selectedGroups.add(
-                        selectedFiles == group.files
-                                ? group
-                                : new IndexGroup(
-                                        group.type,
-                                        group.field,
-                                        group.extraFields,
-                                        group.range,
-                                        selectedFiles));
+            // Non-leading columns cannot serve a scalar lookup in a tuple BTree.
+            if (!group.isCompositeBTree()) {
+                selectedGroups.add(group.selectFiles(predicate));
             }
+        }
+        if (selectedGroups.isEmpty()) {
+            return null;
         }
         return new GlobalIndexQuery(predicate, false, Collections.emptyList(), selectedGroups);
     }
 
     boolean isEmpty() {
         if (predicate != null) {
-            return groups.isEmpty();
+            return groups.stream().allMatch(group -> group.files.isEmpty());
         }
         return union
                 ? children.stream().allMatch(GlobalIndexQuery::isEmpty)
                 : children.stream().anyMatch(GlobalIndexQuery::isEmpty);
+    }
+
+    boolean hasCompositeQuery() {
+        return groups.stream().anyMatch(IndexGroup::isCompositeBTree)
+                || children.stream().anyMatch(GlobalIndexQuery::hasCompositeQuery);
+    }
+
+    /** Coverage of the selected query paths, including files pruned safely by key metadata. */
+    List<Range> coveredRanges() {
+        if (predicate != null) {
+            return Range.sortAndMergeOverlap(
+                    groups.stream().map(group -> group.range).collect(Collectors.toList()), true);
+        }
+        List<Range> coverage = null;
+        for (GlobalIndexQuery child : children) {
+            coverage =
+                    coverage == null
+                            ? child.coveredRanges()
+                            : Range.and(coverage, child.coveredRanges());
+        }
+        return coverage == null ? Collections.emptyList() : coverage;
     }
 
     /** Residual predicates discarded during planning must not expand unindexed coverage. */
@@ -271,10 +342,13 @@ class GlobalIndexQuery {
             }
             return result == null ? GlobalIndexResult.createEmpty() : result;
         }
-        Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query =
-                predicateQuery();
         GlobalIndexResult result = GlobalIndexResult.createEmpty();
         for (IndexGroup group : groups) {
+            if (group.files.isEmpty()) {
+                continue;
+            }
+            Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query =
+                    predicateQuery(group);
             GlobalIndexResult splitRows = localSplitRows(ranges, group.range);
             if (splitRows.results().isEmpty()) {
                 continue;
@@ -306,7 +380,25 @@ class GlobalIndexQuery {
     }
 
     private Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>>
-            predicateQuery() {
+            predicateQuery(IndexGroup group) {
+        if (group.isCompositeBTree()) {
+            if (CompositeBTreePredicate.isContradictory(group.fields(), predicate)) {
+                return reader ->
+                        CompletableFuture.completedFuture(
+                                Optional.of(GlobalIndexResult.createEmpty()));
+            }
+            List<LeafPredicate> equalities =
+                    CompositeBTreePredicate.match(group.fields(), predicate)
+                            .orElseThrow(
+                                    () ->
+                                            new IllegalArgumentException(
+                                                    "Incomplete composite BTree predicate"));
+            List<Object> literals =
+                    equalities.stream()
+                            .map(leaf -> leaf.literals().get(0))
+                            .collect(Collectors.toList());
+            return reader -> reader.visitCompositeEqual(literals);
+        }
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;
             return reader ->
@@ -446,8 +538,9 @@ class GlobalIndexQuery {
     }
 
     /**
-     * Files read together by one index reader, grouped by primary column, index type and row range.
-     * A group may overlap multiple data splits; primary and extra column predicates can share it.
+     * Files read together by one index reader, grouped by ordered index columns, index type and row
+     * range. A group may overlap multiple data splits; primary and extra column predicates can
+     * share it.
      */
     private static class IndexGroup {
         /** Factory identifier used to create the index reader on the worker. */
@@ -504,6 +597,27 @@ class GlobalIndexQuery {
                                                                 files));
                                             }));
             return result;
+        }
+
+        private boolean isCompositeBTree() {
+            return "btree".equals(type) && !extraFields.isEmpty();
+        }
+
+        private List<DataField> fields() {
+            List<DataField> fields = new ArrayList<>();
+            fields.add(field);
+            fields.addAll(extraFields);
+            return fields;
+        }
+
+        private IndexGroup selectFiles(Predicate predicate) {
+            List<GlobalIndexIOMeta> selected =
+                    GlobalIndexerFactoryUtils.selectFiles(
+                            type, field, extraFields, predicate, files);
+            // Retain the row range even when metadata proves there are no matching files.
+            return selected == files
+                    ? this
+                    : new IndexGroup(type, field, extraFields, range, selected);
         }
 
         @Override

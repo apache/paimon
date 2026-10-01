@@ -36,6 +36,12 @@ import java.util.concurrent.CompletableFuture;
 public interface GlobalIndexReader
         extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
 
+    /** Point lookup of a full composite key, with literals in index column order. */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitCompositeEqual(
+            List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
         return CompletableFuture.completedFuture(Optional.empty());

@@ -81,6 +81,42 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCompositeBTreeIndex() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_COMPOSITE (id INT, category STRING, item_number INT) WITH ("
+                        + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', "
+                        + "'sorted-index.records-per-file' = '13', 'btree-index.bloom-filter.enabled' = 'true')");
+        String values =
+                IntStream.range(0, 40)
+                        .mapToObj(
+                                i ->
+                                        String.format(
+                                                "(%d, '%s', %d)",
+                                                i,
+                                                (i / 10) % 2 == 0 ? "category-a" : "category-b",
+                                                i % 10))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_COMPOSITE VALUES " + values);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_COMPOSITE', index_column => 'category,item_number', index_type => 'btree')");
+        assertThat(
+                        sql(
+                                "SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category = 'category-a'"))
+                .containsExactlyInAnyOrder(Row.of(7), Row.of(27));
+        assertThat(paimonTable("T_COMPOSITE").store().newIndexFileHandler().scanEntries())
+                .allSatisfy(
+                        entry ->
+                                assertThat(entry.indexFile().globalIndexMeta().getIndexedFieldIds())
+                                        .hasSize(2));
+        sql("ALTER TABLE T_COMPOSITE SET ('global-index.query-in-reader.enabled' = 'true')");
+        assertThat(
+                        sql(
+                                "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 7"))
+                .containsExactlyInAnyOrder(Row.of(7), Row.of(27));
+    }
+
+    @Test
     public void testBitmapIndex() throws Catalog.TableNotExistException {
         sql(
                 "CREATE TABLE T_BITMAP (id INT, name STRING) WITH ("

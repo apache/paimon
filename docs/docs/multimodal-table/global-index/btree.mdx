@@ -145,6 +145,44 @@ print(pa_table)
 
 </Tabs>
 
+## Composite BTree Indexes
+
+Spark and Flink can build a composite index by listing columns in key order:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'category,item_number',
+    index_type => 'btree'
+);
+
+SELECT * FROM my_table
+WHERE category = 'category-a'
+  AND item_number = 107;
+```
+
+The index stores typed tuples and one row-ID posting list for each distinct tuple.
+An AND containing equality conditions for every indexed column uses a single
+composite point lookup, regardless of the SQL condition order. This avoids
+materializing the individual columns' posting lists before intersecting them.
+Additional predicates remain filters, and OR branches can each use their own
+composite lookup. When several composite indexes match, the query prefers the
+one with the most columns.
+
+Composite indexes can coexist with single-column indexes on the same columns.
+The current composite query path requires equality conditions for all key
+columns; prefix queries, ranges, and conditions on only some key columns use
+available single-column indexes or ordinary table scans.
+
+Coverage is determined by the selected index. In `full` and `detail` modes, rows
+outside the composite index's coverage are scanned even when single-column
+indexes cover those rows. Incremental builds fill missing ranges; under the
+`IGNORE` column-update policy, updates to any key column refresh the affected
+composite index ranges. Dropping an index requires the same ordered column list
+used to create it. PyPaimon skips composite index files and uses available
+single-column indexes or ordinary table scans; composite index building is not
+supported in PyPaimon.
+
 ## BTree Options
 
 | Option | Default | Description |
