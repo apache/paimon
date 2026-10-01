@@ -21,6 +21,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qsl, urlsplit
 
+from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_exception import ForbiddenException
 from pypaimon.api.rest_permission_management import RESTPermissionManagement
@@ -31,7 +32,7 @@ from pypaimon.management.permission_columns import PermissionColumns
 from pypaimon.management.permission_resource import PermissionResource
 from pypaimon.management.resource_type import ResourceType
 
-BASE_PATH = "/v1/catalog/permissions"
+BASE_PATH = "/v1/catalog%2Fid/permissions"
 
 LIST_RESPONSE = (
     '{"permissions":[{"resource":{"type":"TABLE",'
@@ -98,13 +99,21 @@ class RESTPermissionManagementTest(unittest.TestCase):
             "uri": "http://127.0.0.1:{}".format(self.server.server_port),
             "token.provider": "bear",
             "token": "secret",
-            "prefix": "catalog",
+            "prefix": "catalog/id",
         }
         self.management = RESTPermissionManagement(RESTApi(options, False))
 
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
+
+    def test_permission_paths_encode_the_prefix_as_one_segment(self):
+        paths = ResourcePaths("catalog/id")
+        self.assertEqual("/v1/catalog%2Fid/permissions", paths.permissions())
+        self.assertEqual("/v1/catalog%2Fid/permissions/grant", paths.grant_permission())
+        self.assertEqual("/v1/catalog%2Fid/permissions/revoke", paths.revoke_permission())
+        self.assertEqual("/v1/catalog+id/permissions", ResourcePaths("catalog id").permissions())
+        self.assertEqual("/v1/a%7Eb*c/permissions", ResourcePaths("a~b*c").permissions())
 
     def test_list_uses_prefix_and_complete_filters(self):
         page = self.management.list_permissions(ListPermissionsRequest(
