@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import sys
 import threading
+from types import ModuleType
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -103,6 +105,22 @@ def test_native_read_consumes_retained_rust_splits_and_enforces_limit():
         projection=['id'],
         blob_parallelism=1,
     )
+
+
+def test_native_read_propagates_native_fork_safety_error():
+    class ForkSafetyError(RuntimeError):
+        pass
+
+    module = ModuleType('pypaimon_rust')
+    module.ForkSafetyError = ForkSafetyError
+    read = _table_read()
+    split = _Split()
+    split._native_split = object()
+    with patch.dict(sys.modules, {'pypaimon_rust': module}), patch(
+            'pypaimon.read.native_plan.native_read',
+            side_effect=ForkSafetyError('cannot reuse Jindo after fork')):
+        with pytest.raises(ForkSafetyError):
+            read._try_native_batches([split], pa.schema([('id', pa.int32())]))
 
 
 def test_native_read_flattens_nested_rows_and_map_keys_with_parent_nulls():

@@ -456,7 +456,8 @@ class TableRead:
             return None
         try:
             from pypaimon.read.native_plan import (
-                _prepare_native_read, native_read, native_split_from_python)
+                _prepare_native_read, _raise_if_native_fork_safety_error,
+                native_read, native_split_from_python)
         except Exception as e:
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
@@ -483,6 +484,7 @@ class TableRead:
             try:
                 read_splits = _prepare_native_read(self.table, **read_kwargs)
             except Exception as e:
+                _raise_if_native_fork_safety_error(e)
                 logger.warning(
                     "Native read failed, falling back to the Python reader: %s", e)
                 return None
@@ -505,6 +507,7 @@ class TableRead:
                                     "another reader failed to start",
                                     exc_info=True,
                                 )
+                    _raise_if_native_fork_safety_error(e)
                     logger.warning(
                         "Native read failed, falling back to the Python reader: %s", e)
                     return None
@@ -515,6 +518,7 @@ class TableRead:
                     read_splits, rust_splits, schema, parallelism,
                     split_weights)
             except _NativeReadSetupError as e:
+                _raise_if_native_fork_safety_error(e)
                 logger.warning(
                     "Native read failed, falling back to the Python reader: %s", e)
                 return None
@@ -522,6 +526,7 @@ class TableRead:
             read_kwargs = self._native_read_kwargs(blob_parallelism)
             batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
+            _raise_if_native_fork_safety_error(e)
             logger.warning(
                 "Native read failed, falling back to the Python reader: %s", e)
             return None
