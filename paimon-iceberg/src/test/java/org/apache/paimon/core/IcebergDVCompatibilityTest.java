@@ -28,6 +28,7 @@ import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -38,8 +39,18 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+
+import org.apache.avro.file.DataFileReader;
+import org.apache.avro.file.SeekableFileInput;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.ManifestContent;
+import org.apache.iceberg.ManifestFile;
+import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
@@ -50,11 +61,14 @@ import org.apache.iceberg.util.StructLikeSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -126,9 +140,67 @@ public class IcebergDVCompatibilityTest {
         commit.commit(4, write.prepareCommit(false, 4));
 
         validateIcebergResult(Collections.singletonList(new Object[] {1, 10}));
+        validateManifestMetadata(table);
 
         write.close();
         commit.close();
+    }
+
+    private void validateManifestMetadata(FileStoreTable table) throws Exception {
+        try (HadoopCatalog icebergCatalog =
+                new HadoopCatalog(new Configuration(), tempDir.toString())) {
+            TableIdentifier icebergIdentifier = TableIdentifier.of("mydb.db", "t");
+            org.apache.iceberg.Table icebergTable = icebergCatalog.loadTable(icebergIdentifier);
+
+            Set<String> manifestContents = new HashSet<>();
+            for (ManifestFile manifest :
+                    icebergTable.currentSnapshot().allManifests(icebergTable.io())) {
+                try (DataFileReader<GenericRecord> dataFileReader =
+                        new DataFileReader<>(
+                                new SeekableFileInput(new File(manifest.path())),
+                                new GenericDatumReader<>())) {
+                    assertThat(dataFileReader.getMetaKeys())
+                            .contains(
+                                    "schema",
+                                    "schema-id",
+                                    "partition-spec",
+                                    "partition-spec-id",
+                                    "format-version",
+                                    "content");
+                    IcebergSchema expectedSchema = IcebergSchema.create(table.schema());
+                    assertThat(
+                                    JsonSerdeUtil.fromJson(
+                                            dataFileReader.getMetaString("schema"),
+                                            IcebergSchema.class))
+                            .isEqualTo(expectedSchema);
+                    assertThat(dataFileReader.getMetaString("schema-id"))
+                            .isEqualTo(String.valueOf(expectedSchema.schemaId()));
+                    assertThat(
+                                    JsonSerdeUtil.fromJson(
+                                            dataFileReader.getMetaString("partition-spec"),
+                                            new TypeReference<List<Object>>() {}))
+                            .isEmpty();
+                    assertThat(dataFileReader.getMetaString("partition-spec-id")).isEqualTo("0");
+                    assertThat(dataFileReader.getMetaString("format-version")).isEqualTo("3");
+                    String content = dataFileReader.getMetaString("content");
+                    assertThat(content)
+                            .isEqualTo(
+                                    manifest.content() == ManifestContent.DATA
+                                            ? "data"
+                                            : "deletes");
+                    manifestContents.add(content);
+                }
+                // Both reader paths must resolve the spec from the header without a spec map.
+                try (CloseableIterable<?> files =
+                        manifest.content() == ManifestContent.DATA
+                                ? ManifestFiles.read(manifest, icebergTable.io())
+                                : ManifestFiles.readDeleteManifest(
+                                        manifest, icebergTable.io(), null)) {
+                    assertThat(files).isNotEmpty();
+                }
+            }
+            assertThat(manifestContents).containsExactlyInAnyOrder("data", "deletes");
+        }
     }
 
     @Test
