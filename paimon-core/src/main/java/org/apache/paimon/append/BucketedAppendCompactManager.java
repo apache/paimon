@@ -39,6 +39,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -268,14 +269,15 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         @Override
         protected CompactResult doCompact() throws Exception {
             // remove large files
-            while (!forceRewriteAllFiles && !toCompact.isEmpty()) {
-                DataFileMeta file = toCompact.peekFirst();
-                // the data file with deletion file always need to be compacted.
-                if (file.fileSize() >= compactionFileSize && !hasDeletionFile(file)) {
-                    toCompact.poll();
-                    continue;
+            if (!forceRewriteAllFiles) {
+                Iterator<DataFileMeta> it = toCompact.iterator();
+                while (it.hasNext()) {
+                    DataFileMeta file = it.next();
+                    // the data file with deletion file always need to be compacted.
+                    if (file.fileSize() >= compactionFileSize && !hasDeletionFile(file)) {
+                        it.remove();
+                    }
                 }
-                break;
             }
 
             // do compaction
