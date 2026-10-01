@@ -33,7 +33,7 @@ import java.util.Map;
 /** Versioned serializer for {@link CoordinatorState}. */
 public class CoordinatorStateSerializer implements SimpleVersionedSerializer<CoordinatorState> {
 
-    private static final int CURRENT_VERSION = 1;
+    private static final int CURRENT_VERSION = 2;
 
     private final MapSerializer<String, byte[]> committerStateSerializer =
             new MapSerializer<>(StringSerializer.INSTANCE, BytePrimitiveArraySerializer.INSTANCE);
@@ -48,13 +48,17 @@ public class CoordinatorStateSerializer implements SimpleVersionedSerializer<Coo
         DataOutputSerializer out = new DataOutputSerializer(256);
         out.writeUTF(state.getCommitUser());
         committerStateSerializer.serialize(state.getCommitterStates(), out);
+        out.writeInt(state.getWriterParallelism());
+        for (long checkpoint : state.getTerminalCoveredBy()) {
+            out.writeLong(checkpoint);
+        }
         return out.getCopyOfBuffer();
     }
 
     @Override
     public CoordinatorState deserialize(int version, byte[] serialized) throws IOException {
         Preconditions.checkState(
-                version == CURRENT_VERSION,
+                version == 1 || version == CURRENT_VERSION,
                 "Could not deserialize coordinator state of version "
                         + version
                         + ", expected version "
@@ -62,6 +66,20 @@ public class CoordinatorStateSerializer implements SimpleVersionedSerializer<Coo
         DataInputDeserializer in = new DataInputDeserializer(serialized);
         String commitUser = in.readUTF();
         Map<String, byte[]> committerStates = committerStateSerializer.deserialize(in);
-        return new CoordinatorState(commitUser, committerStates);
+        if (version == 1) {
+            return new CoordinatorState(commitUser, committerStates);
+        }
+        int parallelism = in.readInt();
+        if (parallelism < 0 || parallelism > in.available() / Long.BYTES) {
+            throw new IOException("Invalid saved writer parallelism " + parallelism);
+        }
+        long[] terminalCoveredBy = new long[parallelism];
+        for (int i = 0; i < parallelism; i++) {
+            terminalCoveredBy[i] = in.readLong();
+            if (terminalCoveredBy[i] < -1 || terminalCoveredBy[i] == Long.MAX_VALUE) {
+                throw new IOException("Invalid terminal coverage " + terminalCoveredBy[i]);
+            }
+        }
+        return new CoordinatorState(commitUser, committerStates, terminalCoveredBy);
     }
 }
