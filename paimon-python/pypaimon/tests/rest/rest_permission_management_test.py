@@ -52,7 +52,7 @@ def assignment(principal):
 class RESTPermissionManagementTest(unittest.TestCase):
 
     def setUp(self):
-        recorded = self.recorded = {"revoke_calls": 0}
+        recorded = self.recorded = {"revoke_calls": 0, "base": BASE_PATH, "received": []}
 
         class Handler(BaseHTTPRequestHandler):
 
@@ -70,7 +70,8 @@ class RESTPermissionManagementTest(unittest.TestCase):
             def do_GET(self):
                 recorded["authorization"] = self.headers.get("Authorization")
                 url = urlsplit(self.path)
-                if url.path == BASE_PATH:
+                recorded["received"].append(url.path)
+                if url.path == recorded["base"]:
                     recorded["list_query"] = dict(parse_qsl(url.query, keep_blank_values=True))
                     self.respond(200, LIST_RESPONSE)
                 else:
@@ -80,13 +81,14 @@ class RESTPermissionManagementTest(unittest.TestCase):
                 recorded["authorization"] = self.headers.get("Authorization")
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
                 path = urlsplit(self.path).path
-                if path == BASE_PATH + "/grant":
+                recorded["received"].append(path)
+                if path == recorded["base"] + "/grant":
                     recorded["grant"] = body
                     if "denied" in body:
                         self.respond(403, '{"message":"forbidden","code":403}')
                     else:
                         self.respond(200)
-                elif path == BASE_PATH + "/revoke":
+                elif path == recorded["base"] + "/revoke":
                     recorded["revoke"] = body
                     recorded["revoke_calls"] += 1
                     self.respond(200)
@@ -95,17 +97,43 @@ class RESTPermissionManagementTest(unittest.TestCase):
 
         self.server = HTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        options = {
-            "uri": "http://127.0.0.1:{}".format(self.server.server_port),
-            "token.provider": "bear",
-            "token": "secret",
-            "prefix": "catalog/id",
-        }
-        self.management = RESTPermissionManagement(RESTApi(options, False))
+        self.management, _ = self.management_for("catalog/id")
 
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
+
+    def management_for(self, prefix):
+        api = RESTApi({
+            "uri": "http://127.0.0.1:{}".format(self.server.server_port),
+            "token.provider": "bear",
+            "token": "secret",
+            "prefix": prefix,
+        }, False)
+        signed = []
+        sign = api.rest_auth_function
+
+        def record(parameter):
+            signed.append(parameter.path)
+            return sign(parameter)
+
+        api.rest_auth_function = record
+        return RESTPermissionManagement(api), signed
+
+    def test_the_signed_path_is_the_path_sent(self):
+        granted = assignment("analyst")
+        for prefix, base in (("a~b*c", "/v1/a~b*c/permissions"),
+                             ("catalog/id", BASE_PATH),
+                             ("catalog id", "/v1/catalog+id/permissions")):
+            self.recorded["base"] = base
+            self.recorded["received"] = []
+            management, signed = self.management_for(prefix)
+            management.list_permissions(ListPermissionsRequest(ResourceType.CATALOG))
+            management.grant_permission(granted)
+            management.revoke_permission(
+                granted.get_resource(), granted.get_access(), granted.get_principal())
+            self.assertEqual([base, base + "/grant", base + "/revoke"], signed)
+            self.assertEqual(signed, self.recorded["received"])
 
     def test_permission_paths_encode_the_prefix_as_one_segment(self):
         paths = ResourcePaths("catalog/id")
@@ -113,7 +141,7 @@ class RESTPermissionManagementTest(unittest.TestCase):
         self.assertEqual("/v1/catalog%2Fid/permissions/grant", paths.grant_permission())
         self.assertEqual("/v1/catalog%2Fid/permissions/revoke", paths.revoke_permission())
         self.assertEqual("/v1/catalog+id/permissions", ResourcePaths("catalog id").permissions())
-        self.assertEqual("/v1/a%7Eb*c/permissions", ResourcePaths("a~b*c").permissions())
+        self.assertEqual("/v1/a~b*c/permissions", ResourcePaths("a~b*c").permissions())
 
     def test_list_uses_prefix_and_complete_filters(self):
         page = self.management.list_permissions(ListPermissionsRequest(

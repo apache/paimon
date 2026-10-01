@@ -38,9 +38,10 @@ class ResourcePaths:
     PERMISSIONS = "permissions"
 
     def __init__(self, prefix: str):
-        # Java encodes the prefix once with URLEncoder, so it stays one path segment.
+        # Java encodes the prefix once with URLEncoder, so it stays one path segment. '~' stays raw:
+        # requests un-escapes %7E before sending, and the signature must cover the path sent.
         if prefix:
-            prefix = urllib.parse.quote_plus(prefix, safe="*", errors="replace").replace("~", "%7E")
+            prefix = urllib.parse.quote_plus(prefix, safe="*~", errors="replace")
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
 
     @classmethod
