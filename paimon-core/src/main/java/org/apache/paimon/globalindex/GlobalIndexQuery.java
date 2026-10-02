@@ -449,22 +449,7 @@ class GlobalIndexQuery {
     private Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>>
             predicateQuery(IndexGroup group) {
         if (group.isCompositeBTree()) {
-            if (CompositeBTreePredicate.isContradictory(group.indexFields(), predicate)) {
-                return reader ->
-                        CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.createEmpty()));
-            }
-            List<LeafPredicate> equalities =
-                    CompositeBTreePredicate.match(group.indexFields(), predicate)
-                            .orElseThrow(
-                                    () ->
-                                            new IllegalArgumentException(
-                                                    "Incomplete composite BTree predicate"));
-            List<Object> literals =
-                    equalities.stream()
-                            .map(leaf -> leaf.literals().get(0))
-                            .collect(Collectors.toList());
-            return reader -> reader.visitCompositeEqual(literals);
+            return reader -> reader.visitComposite(predicate);
         }
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;

@@ -36,6 +36,7 @@ import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -141,16 +142,17 @@ class CompositeBTreeIndexTest {
                         null,
                         executor)) {
             assertThat(
-                            reader.visitCompositeEqual(
-                                            Arrays.asList(null, 7, BinaryString.fromString("tag")))
+                            reader.visitComposite(
+                                            equal(type, null, 7, BinaryString.fromString("tag")))
                                     .get()
                                     .get()
                                     .results()
                                     .toRangeList())
                     .isEmpty();
             assertThat(
-                            reader.visitCompositeEqual(
-                                            Arrays.asList(
+                            reader.visitComposite(
+                                            equal(
+                                                    type,
                                                     BinaryString.fromString("category-a"),
                                                     -1,
                                                     BinaryString.fromString("")))
@@ -160,8 +162,9 @@ class CompositeBTreeIndexTest {
                                     .toRangeList())
                     .containsExactly(new Range(0, 0));
             assertThat(
-                            reader.visitCompositeEqual(
-                                            Arrays.asList(
+                            reader.visitComposite(
+                                            equal(
+                                                    type,
                                                     BinaryString.fromString("category-a"),
                                                     7,
                                                     BinaryString.fromString("tag")))
@@ -171,8 +174,9 @@ class CompositeBTreeIndexTest {
                                     .toRangeList())
                     .containsExactly(new Range(2, 3));
             assertThat(
-                            reader.visitCompositeEqual(
-                                            Arrays.asList(
+                            reader.visitComposite(
+                                            equal(
+                                                    type,
                                                     BinaryString.fromString("category-a"),
                                                     8,
                                                     BinaryString.fromString("tag")))
@@ -181,6 +185,57 @@ class CompositeBTreeIndexTest {
                                     .results()
                                     .isEmpty())
                     .isTrue();
+            PredicateBuilder builder = new PredicateBuilder(type);
+            Predicate fullKey =
+                    equal(
+                            type,
+                            BinaryString.fromString("category-a"),
+                            7,
+                            BinaryString.fromString("tag"));
+            for (Predicate unsupported :
+                    Arrays.asList(
+                            builder.equal(0, BinaryString.fromString("category-a")),
+                            PredicateBuilder.and(
+                                    builder.equal(0, BinaryString.fromString("category-a")),
+                                    builder.greaterThan(1, 7),
+                                    builder.equal(2, BinaryString.fromString("tag"))),
+                            PredicateBuilder.and(
+                                    builder.in(
+                                            0,
+                                            Arrays.asList(
+                                                    BinaryString.fromString("category-a"),
+                                                    BinaryString.fromString("category-b"))),
+                                    builder.equal(1, 7),
+                                    builder.equal(2, BinaryString.fromString("tag"))),
+                            PredicateBuilder.or(fullKey, builder.equal(1, 8)))) {
+                assertThat(reader.visitComposite(unsupported).join()).isEmpty();
+            }
+            assertThat(
+                            reader.visitComposite(
+                                            PredicateBuilder.and(fullKey, builder.equal(1, 8)))
+                                    .join()
+                                    .get()
+                                    .results()
+                                    .isEmpty())
+                    .isTrue();
+            RowType predicateType =
+                    new RowType(
+                            Arrays.asList(
+                                    type.getFields().get(2),
+                                    type.getFields().get(0),
+                                    type.getFields().get(1)));
+            assertThat(
+                            reader.visitComposite(
+                                            equal(
+                                                    predicateType,
+                                                    BinaryString.fromString("tag"),
+                                                    BinaryString.fromString("category-a"),
+                                                    7))
+                                    .join()
+                                    .get()
+                                    .results()
+                                    .toRangeList())
+                    .containsExactly(new Range(2, 3));
         }
         try (GlobalIndexReader reader =
                 indexer.createReader(
@@ -190,8 +245,9 @@ class CompositeBTreeIndexTest {
                         Collections.singletonList(new Range(3, 3)),
                         executor)) {
             assertThat(
-                            reader.visitCompositeEqual(
-                                            Arrays.asList(
+                            reader.visitComposite(
+                                            equal(
+                                                    type,
                                                     BinaryString.fromString("category-a"),
                                                     7,
                                                     BinaryString.fromString("tag")))
@@ -200,6 +256,24 @@ class CompositeBTreeIndexTest {
                                     .results()
                                     .toRangeList())
                     .containsExactly(new Range(3, 3));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testScalarReaderDoesNotSupportCompositePredicates() throws Exception {
+        RowType type = RowType.of(DataTypes.INT());
+        GlobalIndexer indexer = GlobalIndexer.create("btree", type.getFields(), new Options());
+        ExecutorService executor = newDirectExecutorService();
+        try (GlobalIndexReader reader =
+                indexer.createReader(
+                        meta -> LocalFileIO.create().newInputStream(meta.filePath()),
+                        Collections.emptyList(),
+                        5,
+                        null,
+                        executor)) {
+            assertThat(reader.visitComposite(equal(type, 7)).join()).isEmpty();
         } finally {
             executor.shutdownNow();
         }
@@ -371,6 +445,15 @@ class CompositeBTreeIndexTest {
                                             new Options()))
                     .isInstanceOf(UnsupportedOperationException.class);
         }
+    }
+
+    private Predicate equal(RowType type, Object... values) {
+        PredicateBuilder builder = new PredicateBuilder(type);
+        List<Predicate> equalities = new ArrayList<>();
+        for (int i = values.length - 1; i >= 0; i--) {
+            equalities.add(builder.equal(i, values[i]));
+        }
+        return PredicateBuilder.and(equalities);
     }
 
     private GenericRow row(String category, int itemNumber, String tag) {
