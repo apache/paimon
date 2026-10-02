@@ -95,9 +95,17 @@ public class CreateTagFromWatermarkProcedure extends BaseProcedure {
                     for (Snapshot tagSnapshot : sortedTagsSnapshots) {
                         if (tagSnapshot.watermark() != null
                                 && watermark <= tagSnapshot.watermark()) {
+                            long tagWatermark = tagSnapshot.watermark();
+                            // Prefer the smaller watermark; on a tie prefer the smaller snapshot
+                            // id so the first qualifying snapshot wins. A strict `<` would miss an
+                            // older tagged snapshot that shares the retained candidate's watermark
+                            // (returning a later dataset); a plain `<=` would wrongly let a newer
+                            // equal-watermark tag replace the earlier retained snapshot.
                             if (snapshot == null
                                     || snapshot.watermark() == null
-                                    || tagSnapshot.watermark() < snapshot.watermark()) {
+                                    || tagWatermark < snapshot.watermark()
+                                    || (tagWatermark == snapshot.watermark()
+                                            && tagSnapshot.id() < snapshot.id())) {
                                 snapshot = tagSnapshot;
                             }
                             break;

@@ -68,6 +68,33 @@ class CreateTagFromWatermarkProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Procedure: create tag prefers the earlier snapshot on a watermark tie") {
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, b STRING)
+                 |TBLPROPERTIES ('primary-key'='a', 'bucket'='1')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    // Two snapshots share watermark 1000; snapshot 1 is tagged, then expired, so
+    // only the tag preserves it. laterOrEqualWatermark then returns snapshot 2,
+    // and the tag fallback must still select the earlier snapshot 1 on the tie.
+    writeWithWatermark(table, 1L, 1000L, GenericRow.of(1, BinaryString.fromString("row1")))
+    val commitTime1 = table.snapshotManager.snapshot(1).timeMillis
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'historical', snapshot => 1)")
+    writeWithWatermark(table, 2L, 1000L, GenericRow.of(2, BinaryString.fromString("row2")))
+    spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+    assert(!table.snapshotManager.snapshotExists(1))
+
+    // The first qualifying snapshot for watermark 500 is snapshot 1 (smaller id,
+    // equal watermark), reachable through the tag -- not the retained snapshot 2.
+    checkAnswer(
+      spark.sql(s"""CALL paimon.sys.create_tag_from_watermark(
+                   |table => 'test.T', tag => 'boundary', watermark => 500)""".stripMargin),
+      Row("boundary", 1, commitTime1, "1000") :: Nil
+    )
+    checkAnswer(spark.sql("SELECT * FROM T VERSION AS OF 'boundary'"), Row(1, "row1") :: Nil)
+  }
+
   private def writeWithWatermark(
       table: FileStoreTable,
       commitId: Long,
