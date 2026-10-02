@@ -103,6 +103,26 @@ class RollbackToAsLatestProcedureTest extends PaimonSparkTestBase {
     assert(table.snapshotManager().latestSnapshotId() == 1L)
   }
 
+  test("Paimon Procedure: rollback refreshes a cached table after a post-commit failure") {
+    createTableWithFailingCallback()
+    spark.sql("INSERT INTO T VALUES (1, 'original')")
+    spark.sql("INSERT OVERWRITE T VALUES (2, 'replacement')")
+    spark.sql("CACHE TABLE T")
+    checkAnswer(spark.sql("SELECT * FROM T"), Row(2, "replacement") :: Nil)
+
+    FailingRollbackCallback.failRollbackCommit = true
+    try {
+      assertThatThrownBy(() => rollbackToSnapshot1())
+        .hasStackTraceContaining("Injected post-commit callback failure")
+    } finally {
+      FailingRollbackCallback.reset()
+    }
+
+    // Snapshot 3 (the rollback) is durable despite the callback failure, so the cached read must
+    // reflect snapshot 1's data rather than the stale pre-rollback replacement row.
+    checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "original") :: Nil)
+  }
+
   private def createTableWithFailingCallback(): Unit = {
     val callback = classOf[FailingRollbackCallback].getName
     spark.sql(

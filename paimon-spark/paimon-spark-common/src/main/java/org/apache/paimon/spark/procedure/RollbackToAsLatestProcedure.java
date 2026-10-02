@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.spark.SparkTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.tag.Tag;
@@ -41,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -98,7 +100,7 @@ public class RollbackToAsLatestProcedure extends BaseProcedure {
         String tagName = args.isNullAt(1) ? null : args.getString(1);
         Long snapshotId = args.isNullAt(2) ? null : args.getLong(2);
 
-        return modifyPaimonTable(
+        return modifyPaimonTableRefreshingCacheOnFailure(
                 tableIdent,
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
@@ -172,6 +174,30 @@ public class RollbackToAsLatestProcedure extends BaseProcedure {
                                     store.snapshotManager().latestSnapshotId());
                     return new InternalRow[] {outputRow};
                 });
+    }
+
+    /**
+     * Like {@link #modifyPaimonTable} but also refreshes Spark's cached plans when {@code func}
+     * throws. {@code rollback_to_as_latest} can publish the rollback snapshot and then fail (for
+     * example a post-commit callback throws), so the table state is already durable; the shared
+     * success-only refresh would otherwise leave {@code CACHE TABLE} serving the pre-rollback data.
+     * The original failure is preserved; a refresh error is only added as suppressed.
+     */
+    private InternalRow[] modifyPaimonTableRefreshingCacheOnFailure(
+            Identifier ident, Function<org.apache.paimon.table.Table, InternalRow[]> func) {
+        SparkTable sparkTable = loadSparkTable(ident);
+        try {
+            InternalRow[] result = func.apply(sparkTable.getTable());
+            refreshSparkCache(ident, sparkTable);
+            return result;
+        } catch (RuntimeException e) {
+            try {
+                refreshSparkCache(ident, sparkTable);
+            } catch (RuntimeException refreshError) {
+                e.addSuppressed(refreshError);
+            }
+            throw e;
+        }
     }
 
     private String createRollbackToAsLatestTag(TagManager tagManager, Snapshot targetSnapshot) {
