@@ -183,7 +183,9 @@ public class SortedIndexTopoBuilder {
             String buildTaskIdField = buildTaskIdFieldName(dataReadType);
             GlobalIndexer indexer =
                     GlobalIndexer.create(
-                            indexType, table.rowType().getField(indexColumn), userOptions);
+                            indexType,
+                            Collections.singletonList(table.rowType().getField(indexColumn)),
+                            userOptions);
             if (!(indexer instanceof SortedGlobalIndexer)) {
                 throw new IllegalArgumentException(
                         "Index algorithm " + indexType + " does not expose sorted index keys.");

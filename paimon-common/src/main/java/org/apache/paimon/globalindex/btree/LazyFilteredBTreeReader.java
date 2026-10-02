@@ -18,6 +18,8 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
@@ -37,6 +39,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -107,6 +110,23 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             }
         }
         return remaining == 0 ? Pair.of(min, max) : null;
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitCompositeEqual(
+            List<Object> literals) {
+        if (!(keySerializer instanceof CompositeKeySerializer)) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        int fieldCount = ((CompositeKeySerializer) keySerializer).rowType().getFieldCount();
+        if (literals.size() != fieldCount) {
+            throw new IllegalArgumentException(
+                    "Expected " + fieldCount + " composite key fields, but got " + literals.size());
+        }
+        if (literals.stream().anyMatch(Objects::isNull)) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        return visitEqual((FieldRef) null, GenericRow.of(literals.toArray()));
     }
 
     @Override

@@ -190,7 +190,7 @@ class GlobalIndexQuery {
         for (IndexGroup group : fieldGroups) {
             List<GlobalIndexIOMeta> selectedFiles =
                     GlobalIndexerFactoryUtils.selectFiles(
-                            group.type, group.field, group.extraFields, predicate, group.files);
+                            group.type, group.indexFields(), predicate, group.files);
             if (!selectedFiles.isEmpty()) {
                 selectedGroups.add(
                         selectedFiles == group.files
@@ -280,8 +280,7 @@ class GlobalIndexQuery {
                 continue;
             }
             GlobalIndexer indexer =
-                    GlobalIndexerFactoryUtils.load(group.type)
-                            .create(group.field, group.extraFields, options);
+                    GlobalIndexerFactoryUtils.load(group.type).create(group.indexFields(), options);
             try (GlobalIndexReader reader =
                     indexer.createReader(
                             meta -> fileIO.newInputStream(meta.filePath()),
@@ -476,6 +475,13 @@ class GlobalIndexQuery {
             this.extraFields = new ArrayList<>(extraFields);
             this.range = range;
             this.files = new ArrayList<>(files);
+        }
+
+        private List<DataField> indexFields() {
+            List<DataField> fields = new ArrayList<>(1 + extraFields.size());
+            fields.add(field);
+            fields.addAll(extraFields);
+            return fields;
         }
 
         private static List<IndexGroup> fromMetadata(
