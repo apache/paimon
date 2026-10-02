@@ -26,6 +26,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.format.SupportsFileMetadata;
 import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.ConfigOption;
@@ -45,6 +46,7 @@ import org.apache.avro.io.EncoderFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,14 +102,15 @@ public class AvroFileFormat extends FileFormat {
             PositionOutputStream out, RowType rowType, String compression) throws IOException {
         // Retain Avro's direct encoder for pre-encoded manifest records. The buffered encoder
         // copies array-backed ByteBuffers into a temporary byte array for each appendEncoded call.
-        return createBlockWriter(out, rowType, compression, false);
+        return createBlockWriter(out, rowType, compression, false, Collections.emptyMap());
     }
 
     private AvroBlockWriter createBlockWriter(
             PositionOutputStream out,
             RowType rowType,
             String compression,
-            boolean useBufferedEncoder)
+            boolean useBufferedEncoder,
+            Map<String, String> fileMetadata)
             throws IOException {
         Schema schema =
                 AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
@@ -123,6 +126,7 @@ public class AvroFileFormat extends FileFormat {
             writer.setSyncInterval(avroSyncInterval(blockSize));
         }
         writer.setFlushOnEveryBlock(false);
+        fileMetadata.forEach(writer::setMeta);
         writer.create(schema, new CloseShieldOutputStream(out));
         return new AvroBlockWriter(writer, out, schema);
     }
@@ -168,7 +172,7 @@ public class AvroFileFormat extends FileFormat {
     }
 
     /** A {@link FormatWriterFactory} to write {@link InternalRow}. */
-    private class RowAvroWriterFactory implements FormatWriterFactory {
+    private class RowAvroWriterFactory implements FormatWriterFactory, SupportsFileMetadata {
 
         private final RowType rowType;
 
@@ -179,7 +183,14 @@ public class AvroFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            return createBlockWriter(out, rowType, compression, true);
+            return create(out, compression, Collections.emptyMap());
+        }
+
+        @Override
+        public FormatWriter create(
+                PositionOutputStream out, String compression, Map<String, String> fileMetadata)
+                throws IOException {
+            return createBlockWriter(out, rowType, compression, true, fileMetadata);
         }
     }
 }
