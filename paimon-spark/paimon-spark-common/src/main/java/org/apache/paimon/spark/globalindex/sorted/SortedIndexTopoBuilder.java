@@ -131,7 +131,8 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         int maxParallelism = options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
         List<CommitMessage> allMessages = new ArrayList<>();
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, options);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(indexType, Collections.singletonList(indexField), options);
         if (!(indexer instanceof SortedGlobalIndexer)) {
             throw new IllegalArgumentException(
                     "Index algorithm " + indexType + " does not expose sorted index keys.");

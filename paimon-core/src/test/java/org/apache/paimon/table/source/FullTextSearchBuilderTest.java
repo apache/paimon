@@ -1616,7 +1616,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(documents[i], i);
@@ -1657,7 +1657,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(documents[i], i);
@@ -1724,7 +1724,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         // Doc ids are file-local (0-based); the global row offset is carried by rowRange.from,
         // which
@@ -1816,7 +1816,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(documents[i], i);
@@ -1856,7 +1856,10 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(idField),
+                                options);
         for (long rowId = rowRange.from; rowId <= rowRange.to; rowId++) {
             writer.write((int) rowId, rowId - rowRange.from);
         }
@@ -1892,7 +1895,10 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, textField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(textField),
+                                options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(BinaryString.fromString(documents[i]), i);
         }
@@ -1944,7 +1950,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < mid; i++) {
             writer1.write(documents[i], i);
@@ -1967,7 +1973,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = mid; i < documents.length; i++) {
             writer2.write(documents[i], i - mid);

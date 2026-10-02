@@ -130,7 +130,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     protected GlobalIndexer createGlobalIndexer(String indexType) {
         return GlobalIndexerFactoryUtils.load(indexType)
-                .create(vectorColumn, table.coreOptions().toConfiguration());
+                .create(
+                        Collections.singletonList(vectorColumn),
+                        table.coreOptions().toConfiguration());
     }
 
     private GlobalIndexer createGlobalIndexer(String indexType, GlobalIndexMeta meta) {
@@ -139,8 +141,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
         return GlobalIndexerFactoryUtils.load(indexType)
                 .create(
-                        meta.getIndexField(table.rowType()),
-                        meta.getExtraFields(table.rowType()),
+                        meta.getIndexedFields(table.rowType()),
                         table.coreOptions().toConfiguration());
     }
 

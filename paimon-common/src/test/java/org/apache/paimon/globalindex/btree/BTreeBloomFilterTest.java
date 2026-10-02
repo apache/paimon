@@ -115,7 +115,8 @@ class BTreeBloomFilterTest {
     private Fixture writeIndex(Options options) throws IOException {
         ByteArrayGlobalIndexFileWriter fileWriter = new ByteArrayGlobalIndexFileWriter();
         BTreeGlobalIndexer indexer =
-                new BTreeGlobalIndexer(new DataField(0, "k", new IntType()), options);
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(0, "k", new IntType())), options);
         GlobalIndexSingleColumnWriter writer = indexer.createWriter(fileWriter);
         for (int i = 0; i < ENTRY_COUNT; i++) {
             writer.write(i * 2, i);

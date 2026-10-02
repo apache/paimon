@@ -39,7 +39,6 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitSerializer;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -171,8 +170,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load("btree")).thenReturn(factory);
@@ -224,7 +222,9 @@ class GlobalIndexQueryTest {
             GlobalIndexSingleColumnWriter writer =
                     (GlobalIndexSingleColumnWriter)
                             GlobalIndexer.create(
-                                            indexType, rowType.getFields().get(0), new Options())
+                                            indexType,
+                                            Collections.singletonList(rowType.getFields().get(0)),
+                                            new Options())
                                     .createWriter(io);
             if (nulls) {
                 writer.write(null, 0);
@@ -361,8 +361,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load(indexType)).thenReturn(factory);
@@ -432,8 +431,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
 
         RowType rowType = RowType.of(DataTypes.INT());
         GlobalIndexQuery plan =
@@ -508,8 +506,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
         FileIO fileIO = mock(FileIO.class);
         List<Range> first = Collections.singletonList(new Range(110, 119));
         List<Range> second = Collections.singletonList(new Range(130, 139));
