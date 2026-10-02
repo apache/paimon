@@ -192,6 +192,10 @@ writes continue after the assigned range.
 
 What to expect around the conversion:
 
+- A row-tracking table on which a copy-on-write `UPDATE`, `DELETE` or
+  `MERGE INTO` stored row IDs in its files cannot be converted: those row IDs
+  need not be contiguous, so no first row ID describes them. Rewrite those rows
+  first, for example with `INSERT OVERWRITE`.
 - Stop writers that run an older Paimon version before the conversion. They
   do not refuse to commit after the schema change, so files they commit
   afterwards would have no row ID.

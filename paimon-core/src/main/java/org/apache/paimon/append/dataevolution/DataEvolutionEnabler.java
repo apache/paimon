@@ -59,6 +59,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.storesRowIds;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -139,6 +140,7 @@ public class DataEvolutionEnabler {
             return Result.skipped(
                     schemaBefore, snapshotBefore, "data evolution is already enabled");
         }
+        checkNoFileStoresRowIds(planned);
         if (dryRun) {
             return Result.dryRun(schemaBefore, snapshotBefore, enabled, planned);
         }
@@ -159,6 +161,7 @@ public class DataEvolutionEnabler {
         beforeFence.run();
         commitFence(table);
         Assignment remaining = plan(table);
+        checkNoFileStoresRowIds(remaining);
         if (remaining.hasChanges()) {
             LOG.info(
                     "Repairing row ids or sequence numbers of table {} after fencing old writers.",
@@ -202,6 +205,33 @@ public class DataEvolutionEnabler {
             return;
         }
         catalog.alterTable(identifier, new EnableDataEvolution(), false);
+    }
+
+    /**
+     * A copy-on-write UPDATE, DELETE or MERGE INTO on a row-tracking table rewrites a file with the
+     * row ids of its rows stored in it, and no first row id. Such ids need not be contiguous, so no
+     * first row id describes them, and a new one would contradict the stored ids: a later column
+     * update by the row ids the rows read with would not reach them. A commit never assigns a first
+     * row id to such a file either. Refuse the conversion; rewriting those rows, for example with
+     * INSERT OVERWRITE, gives them new row ids that the conversion can assign.
+     */
+    private void checkNoFileStoresRowIds(Assignment assignment) {
+        if (assignment.storingRowIds.isEmpty()) {
+            return;
+        }
+        int shown = Math.min(5, assignment.storingRowIds.size());
+        throw new IllegalArgumentException(
+                String.format(
+                        "Cannot enable data evolution on table %s: %d data file(s) store the row "
+                                + "ids of their rows, written by a copy-on-write UPDATE, DELETE or "
+                                + "MERGE INTO on the row-tracking table, and have no first row "
+                                + "id, so their rows cannot be addressed by a data-evolution "
+                                + "update. Rewrite those rows first, for example with INSERT "
+                                + "OVERWRITE. Files: %s%s",
+                        identifier.getFullName(),
+                        assignment.storingRowIds.size(),
+                        assignment.storingRowIds.subList(0, shown),
+                        shown < assignment.storingRowIds.size() ? " ..." : ""));
     }
 
     private boolean dataEvolutionEnabled(FileStoreTable table) {
@@ -293,10 +323,16 @@ public class DataEvolutionEnabler {
                 manifestFile, manifests, live, table.coreOptions().scanManifestParallelism());
 
         List<ManifestEntry> withoutRowId = new ArrayList<>();
+        List<String> storingRowIds = new ArrayList<>();
         Set<FileEntry.Identifier> resetSequences = new HashSet<>();
         Map<Long, Boolean> rowTrackingOnlySchemas = new HashMap<>();
         for (ManifestEntry entry : live.values()) {
             if (entry.kind() != FileKind.ADD) {
+                continue;
+            }
+            if (entry.file().firstRowId() == null && storesRowIds(entry.file())) {
+                // see checkNoFileStoresRowIds
+                storingRowIds.add(entry.file().fileName());
                 continue;
             }
             if (entry.file().firstRowId() == null) {
@@ -325,6 +361,7 @@ public class DataEvolutionEnabler {
                     Collections.emptyList(),
                     Collections.emptyMap(),
                     resetSequences,
+                    storingRowIds,
                     0L,
                     start);
         }
@@ -347,7 +384,14 @@ public class DataEvolutionEnabler {
             rowCount += entry.file().rowCount();
         }
         return new Assignment(
-                latest, manifests, withoutRowId, firstRowIds, resetSequences, rowCount, next);
+                latest,
+                manifests,
+                withoutRowId,
+                firstRowIds,
+                resetSequences,
+                storingRowIds,
+                rowCount,
+                next);
     }
 
     private Assignment assignRowIdsWithRetry(FileStoreTable table, Assignment initial)
@@ -483,6 +527,9 @@ public class DataEvolutionEnabler {
         final List<ManifestEntry> files;
         final Map<FileEntry.Identifier, Long> firstRowIds;
         final Set<FileEntry.Identifier> resetSequences;
+        /** Files without a first row id that store the row id field physically. */
+        final List<String> storingRowIds;
+
         final long rowCount;
         final long nextRowId;
 
@@ -492,6 +539,7 @@ public class DataEvolutionEnabler {
                 List<ManifestEntry> files,
                 Map<FileEntry.Identifier, Long> firstRowIds,
                 Set<FileEntry.Identifier> resetSequences,
+                List<String> storingRowIds,
                 long rowCount,
                 long nextRowId) {
             this.snapshot = snapshot;
@@ -499,6 +547,7 @@ public class DataEvolutionEnabler {
             this.files = files;
             this.firstRowIds = firstRowIds;
             this.resetSequences = resetSequences;
+            this.storingRowIds = storingRowIds;
             this.rowCount = rowCount;
             this.nextRowId = nextRowId;
         }
@@ -514,6 +563,7 @@ public class DataEvolutionEnabler {
                     Collections.emptyList(),
                     Collections.emptyMap(),
                     Collections.emptySet(),
+                    Collections.emptyList(),
                     0L,
                     nextRowId);
         }

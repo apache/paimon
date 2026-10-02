@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.commit.RowTrackingCommitUtils;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
@@ -439,7 +440,9 @@ public class DataEvolutionUtils {
     public static boolean needsDataEvolutionConversion(
             DataFileMeta file, Function<Long, TableSchema> schemaLoader) {
         if (file.firstRowId() == null) {
-            return true;
+            // A file that stores its row ids physically never gets a first row id, not even from
+            // the conversion, which refuses tables holding such files.
+            return !RowTrackingCommitUtils.storesRowIds(file);
         }
         if (file.minSequenceNumber() == Snapshot.FIRST_SNAPSHOT_ID
                 && file.maxSequenceNumber() == Snapshot.FIRST_SNAPSHOT_ID) {

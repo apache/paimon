@@ -33,7 +33,9 @@ import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -54,6 +56,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -854,6 +857,74 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         assertThat(rowIdsById(table)).isEqualTo(before);
         writeRows(table, row(4, "d", "p1"));
         assertThat(rowIdsById(table)).containsEntry(4, 3L);
+    }
+
+    @Test
+    public void testRefusesFilesThatStoreTheirRowIds() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeRows(table, row(1, "a", "p1"), row(2, "b", "p1"));
+        writeRows(table, row(3, "c", "p1"));
+        // A copy-on-write UPDATE rewrites the first file with its row ids stored in it.
+        List<DataFileMeta> rewritten = new ArrayList<>();
+        for (DataFileMeta file : liveFiles(table)) {
+            if (file.nonNullFirstRowId() == 0L) {
+                rewritten.add(file);
+            }
+        }
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(
+                                        SpecialFields.rowTypeWithRowTracking(
+                                                table.rowType(), false, true));
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryString.fromString("A"),
+                            BinaryString.fromString("p1"),
+                            0L,
+                            null));
+            write.write(
+                    GenericRow.of(
+                            2,
+                            BinaryString.fromString("b"),
+                            BinaryString.fromString("p1"),
+                            1L,
+                            null));
+            CommitMessageImpl message = (CommitMessageImpl) write.prepareCommit().get(0);
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    message.partition(),
+                                    message.bucket(),
+                                    message.totalBuckets(),
+                                    new DataIncrement(
+                                            message.newFilesIncrement().newFiles(),
+                                            rewritten,
+                                            Collections.emptyList()),
+                                    CompactIncrement.emptyIncrement())));
+        }
+        table = loadTable();
+        assertThat(liveFiles(table)).anyMatch(file -> file.firstRowId() == null);
+        Map<Integer, Long> rowIds = rowIdsById(table);
+        assertThat(rowIds).containsEntry(1, 0L).containsEntry(2, 1L).containsEntry(3, 2L);
+        long snapshot = table.snapshotManager().latestSnapshotId();
+
+        // Any first row id would contradict the stored ids, so refuse before changing anything.
+        assertThatThrownBy(() -> enabler().run(true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("store the row ids of their rows");
+        assertThatThrownBy(() -> enabler().run(false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("store the row ids of their rows");
+        table = loadTable();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
+        assertThat(table.schemaManager().listAllIds()).containsExactly(0L);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
+        assertThat(rowIdsById(table)).isEqualTo(rowIds);
     }
 
     @Test
