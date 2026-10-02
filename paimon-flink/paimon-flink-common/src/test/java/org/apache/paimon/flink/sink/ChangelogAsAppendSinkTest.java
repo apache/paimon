@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.BigIntType;
@@ -117,7 +118,8 @@ class ChangelogAsAppendSinkTest {
         env.setParallelism(4);
         FileStoreTable table = table(true, Collections.emptyMap(), false);
         DataStream<RowData> input =
-                env.fromCollection(
+                StreamExecutionEnvironmentUtils.fromData(
+                        env,
                         Collections.singletonList((RowData) GenericRowData.of(1, null, null)),
                         InternalTypeInfo.of(toLogicalType(table.rowType())));
         input.getTransformation().setParallelism(1, parallelismConfigured);
