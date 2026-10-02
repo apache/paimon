@@ -70,6 +70,11 @@ public interface FileStoreTable extends DataTable {
     @Nullable
     SegmentsCache<Path> getManifestCache();
 
+    void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache);
+
+    @Nullable
+    SegmentsCache<Path> getManifestSidecarCache();
+
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
     void setStatsCache(Cache<String, Statistics> cache);

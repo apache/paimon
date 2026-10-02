@@ -29,6 +29,7 @@ from pypaimon.common.file_io import create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO, _file_uri_path
+from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 
 
@@ -95,7 +96,7 @@ class FileIOTest(unittest.TestCase):
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
-        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+        oss_io = OssFileIO("oss://test-bucket/warehouse", Options({
             OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
             OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
@@ -348,7 +349,7 @@ class FileIOTest(unittest.TestCase):
             file_io.delete_quietly("file:///some/path")
             file_io.delete_directory_quietly("file:///some/path")
 
-            oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+            oss_io = OssFileIO("oss://test-bucket/warehouse", Options({
                 OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
                 OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
                 OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
@@ -525,7 +526,7 @@ class FileIOTest(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_path_on_windows(self):
-        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+        oss_io = OssFileIO("oss://test-bucket/warehouse", Options({
             OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
             OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',

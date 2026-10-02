@@ -56,33 +56,26 @@ read_builder = read_builder.with_filter(predicate_5)
 
 See [Predicate](./reading#predicate) for all supported filters and building methods. Filter by `_ROW_ID`: see [Data Evolution](./data-evolution#filter-by-_row_id).
 
-You can also pushdown projection by `ReadBuilder`:
+Project a MAP subkey with `with_projection()`:
 
 ```python
-# select f3 and f2 columns
-read_builder = read_builder.with_projection(['f3', 'f2'])
+read_builder = read_builder.with_projection([
+    'id', "attributes['subkey']"
+])
 ```
 
-For tables with nested struct columns, you can project individual sub-fields using dotted names:
-
-```python
-# Given a table with schema: id BIGINT, info ROW<name STRING, age INT>, val STRING
-
-# Select a nested sub-field and a top-level field
-read_builder = read_builder.with_projection(['info.name', 'val'])
-
-# The result columns are flattened with underscore-joined names:
-# info_name, val
-```
-
-Nested `ROW` projections are supported for ordinary append tables and primary-key
-merge reads. The reader may read the containing `ROW` and extract the requested
-leaf, so selecting a leaf does not guarantee physical leaf-only I/O.
+Nested `ROW` fields use dot notation, for example
+`with_projection(['profile.name'])`. MAP subkeys use bracket notation;
+`with_projection(["attributes['sub.key']"])` treats `sub.key` as one literal
+key. Shared-shredding MAP files prune unselected keys; other layouts read the
+full MAP and extract the key.
 
 Limitations:
 
-- Data-evolution tables do not support nested projection.
-- `ARRAY<ROW>` and `MAP` nested paths are not supported.
+- Data-evolution tables support MAP keys, but not nested ROW fields.
+- Filtering a projected MAP key is not supported.
+- MAP-key projection with query authorization is not supported.
+- `ARRAY<ROW>` paths are not supported.
 
 ### Generate Splits
 

@@ -18,6 +18,7 @@
 """Snapshot-pinned PyTorch Dataset for contiguous Paimon row windows."""
 
 import copy
+import math
 import operator
 
 import numpy as np
@@ -35,84 +36,125 @@ from pypaimon.read.datasource.torch_dataset import (
     select_indexed_splits,
 )
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
+from pypaimon.schema.data_types import (
+    is_array_blob_type, is_blob_file_type, is_map_blob_type,
+)
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 
 
 class ContiguousWindowDataset(Dataset):
-    """Map-style Dataset which reads fixed row windows on demand.
+    """Map-style training samples from a single table of contiguous frames.
 
     The in-memory index contains only group values, order bounds, and Paimon
     row IDs, stored in Arrow and NumPy arrays. Each ``__getitem__`` reads the
     projected rows from the snapshot resolved while the index was built, reusing
     that snapshot's authorized scan plan instead of planning again. Within each
     group, ``order_key`` must contain non-null integers that increase by exactly
-    one; rows from different groups never share a window. ``tail`` controls
-    scheduled anchors whose remaining rows are shorter than ``window_size``:
+    one; rows from different groups never share a window. ``frame_offsets``
+    selects relative frames independently for each projected column. Unspecified
+    columns use ``[0]``. Alternatively, ``delta_timestamps`` specifies offsets in
+    seconds on a regular grid defined by ``fps``. ``boundary`` handles scheduled
+    anchors whose offsets extend beyond either end of a group:
 
     * ``drop`` omits them;
-    * ``pad`` repeats final values and marks repeats in ``is_pad``;
+    * ``pad`` repeats the closest endpoint, or uses the column's ``pad_values``;
     * ``error`` rejects the dataset.
 
-    The raw result mapping contains scalar group and order values, a
-    length-``window_size`` Boolean ``is_pad`` tensor, one-element lists for
-    ``anchor_columns``, and length-``window_size`` lists for other projected
-    columns. ``anchor_columns`` therefore avoids loading repeated context such
-    as observation images or initial robot state. ``column_transforms`` then
-    convert individual column lists before ``adapter`` adapts the complete
-    mapping to a model-specific contract.
+    The result contains scalar group/order values identifying the anchor, a
+    list for each value column (including singleton windows), and a Boolean
+    ``<column>_is_pad`` tensor per column. Offsets retain their order and
+    duplicates. Padding happens before ``column_transforms`` convert each list;
+    ``adapter`` then adapts the complete mapping to a model-specific contract.
+    Both transforms operate on independent copies of the requested values.
+
+    For compatibility, ``window_size`` selects forward consecutive frames for
+    all columns except ``anchor_columns``, which use ``[0]``. These calls retain
+    the original ``tail`` argument and single ``is_pad`` mask in their output.
+    Only one of the three window definitions may be supplied. Without any,
+    every column uses ``[0]``. ``stride`` schedules anchors from each group's
+    first row; boundary handling never shifts that schedule.
     ``blob_parallelism`` controls concurrent BLOB reads for each item or batch.
     Video frame columns are not supported yet, because a window read would drop
     the frame metadata carried by their descriptors.
     """
 
-    _TAIL_POLICIES = ("drop", "pad", "error")
+    _BOUNDARY_POLICIES = ("drop", "pad", "error")
 
     def __init__(
             self,
             query,
             *,
-            window_size,
+            window_size=None,
             columns=None,
             anchor_columns=None,
             group_key="episode_index",
             order_key="frame_index",
             stride=1,
-            tail="drop",
+            tail=None,
             column_transforms=None,
             pad_values=None,
             adapter=None,
-            blob_parallelism=64):
+            blob_parallelism=64,
+            frame_offsets=None,
+            delta_timestamps=None,
+            fps=None,
+            tolerance_s=None,
+            boundary=None):
         if not isinstance(query, ScanQuery) or isinstance(query, _PreFilterQuery):
             raise TypeError(
                 "ContiguousWindowDataset is only supported on scan(), "
                 "not search queries.")
-        self.window_size = _positive_int(window_size, "window_size")
+        self.window_size = (
+            _positive_int(window_size, "window_size")
+            if window_size is not None else None)
         self.stride = _positive_int(stride, "stride")
-        if tail not in self._TAIL_POLICIES:
+        if sum(value is not None for value in (
+                window_size, frame_offsets, delta_timestamps)) > 1:
             raise ValueError(
-                "tail must be one of %s; got %r."
-                % (self._TAIL_POLICIES, tail))
-        self.tail = tail
+                "Specify only one of window_size, frame_offsets, "
+                "or delta_timestamps.")
+        if window_size is None and (anchor_columns is not None or tail is not None):
+            raise ValueError("anchor_columns and tail require window_size.")
+        if tail is not None and boundary is not None:
+            raise ValueError("Specify boundary or tail, not both.")
+        self.boundary = boundary if boundary is not None else (
+            tail if tail is not None else "drop")
+        if self.boundary not in self._BOUNDARY_POLICIES:
+            raise ValueError(
+                "boundary must be one of %s; got %r."
+                % (self._BOUNDARY_POLICIES, self.boundary))
+        if self.window_size is not None:
+            self.tail = self.boundary
         self.group_key = _column(query, group_key, "group_key")
         self.order_key = _column(query, order_key, "order_key")
         if self.group_key == self.order_key:
             raise ValueError("group_key and order_key must name different columns.")
-        if "is_pad" in (self.group_key, self.order_key):
+        if self.window_size is not None and "is_pad" in (self.group_key, self.order_key):
             raise ValueError("group_key and order_key must not be is_pad.")
         self.columns = _columns(
             query, columns, self.group_key, self.order_key)
         _reject_video_columns(query._table, self.columns)
         self.anchor_columns = _anchor_columns(anchor_columns, self.columns)
-        anchor_column_set = set(self.anchor_columns)
-        self._window_columns = [
-            name for name in self.columns if name not in anchor_column_set
-        ]
+        self.frame_offsets = _frame_offsets(
+            self.columns, frame_offsets, delta_timestamps, fps, tolerance_s,
+            self.window_size, self.anchor_columns)
+        reserved = {"is_pad"} if self.window_size is not None else {
+            "%s_is_pad" % name for name in self.columns}
+        collisions = reserved.intersection(
+            self.columns + [self.group_key, self.order_key])
+        if collisions:
+            raise ValueError(
+                "Generated padding mask names conflict with output "
+                "columns: %s." % sorted(collisions))
         self.column_transforms = _column_transforms(
             column_transforms, self.columns)
         self.pad_values = _pad_values(pad_values, self.columns)
+        self._read_groups = {}
+        for name, offsets in self.frame_offsets.items():
+            key = (offsets, self.boundary == "pad" and name in self.pad_values)
+            self._read_groups.setdefault(key, []).append(name)
         if adapter is not None and not callable(adapter):
             raise TypeError("adapter must be callable or None.")
         self.adapter = adapter
@@ -139,19 +181,15 @@ class ContiguousWindowDataset(Dataset):
         return int(self._anchor_groups.size)
 
     def __getitem__(self, index):
-        """Read one window by map-style Dataset index.
+        """Read one sample, or a list of samples for a Python slice.
 
         Negative indices follow Python sequence semantics. The return value is
         the pre-adapter mapping described by the class, or the adapter result
         when an adapter is configured.
         """
-        anchor, row_ids = self._resolve_window(index)
-        rows = self._read_window_rows(row_ids)
-        anchor_row = (
-            self._read_rows(row_ids[:1], self.anchor_columns)[0]
-            if self.anchor_columns else None
-        )
-        return self._sample(anchor, rows, anchor_row)
+        if isinstance(index, slice):
+            return self.__getitems__(range(*index.indices(len(self))))
+        return self.__getitems__([index])[0]
 
     def __getitems__(self, indices):
         """Read several Dataset indices while coalescing overlapping row IDs.
@@ -162,28 +200,20 @@ class ContiguousWindowDataset(Dataset):
         windows = [self._resolve_window(index) for index in indices]
         if not windows:
             return []
-        row_ids = list(dict.fromkeys(
-            row_id for _, window_row_ids in windows
-            for row_id in window_row_ids
-        ))
-        rows_by_id = dict(zip(row_ids, self._read_window_rows(row_ids)))
-        anchor_row_ids = list(dict.fromkeys(
-            window_row_ids[0] for _, window_row_ids in windows
-        ))
-        anchor_rows_by_id = (
-            dict(zip(
-                anchor_row_ids,
-                self._read_rows(anchor_row_ids, self.anchor_columns),
-            ))
-            if self.anchor_columns else {}
-        )
+        reads = {}
+        for (offsets, constant_pad), columns in self._read_groups.items():
+            plans = [self._column_window(anchor, offsets, constant_pad)
+                     for anchor in windows]
+            row_ids = list(dict.fromkeys(
+                row_id for ids, _ in plans for row_id in ids
+                if row_id is not None))
+            rows = self._read_rows(row_ids, columns) if row_ids else []
+            by_id = dict(zip(row_ids, rows))
+            for name in columns:
+                reads[name] = (plans, by_id)
         return [
-            self._sample(
-                anchor,
-                [rows_by_id[row_id] for row_id in window_row_ids],
-                anchor_rows_by_id.get(window_row_ids[0]),
-            )
-            for anchor, window_row_ids in windows
+            self._sample(anchor, position, reads)
+            for position, anchor in enumerate(windows)
         ]
 
     def __getstate__(self):
@@ -202,32 +232,38 @@ class ContiguousWindowDataset(Dataset):
 
         group_index = int(self._anchor_groups[index])
         start = int(self._anchor_starts[index])
-        valid_count = min(
-            self.window_size, int(self._group_lengths[group_index]) - start)
-        offset = int(self._group_starts[group_index]) + start
-        row_ids = self._row_ids[offset:offset + valid_count].tolist()
-        return (group_index, start, valid_count), row_ids
+        return group_index, start
 
-    def _sample(self, anchor, rows, anchor_row=None):
-        group_index, start, valid_count = anchor
-        padding_count = self.window_size - valid_count
-        padding_mask = torch.zeros(self.window_size, dtype=torch.bool)
-        if padding_count:
-            padding_mask[valid_count:] = True
+    def _column_window(self, anchor, offsets, constant_pad):
+        group_index, start = anchor
+        length = int(self._group_lengths[group_index])
+        group_start = int(self._group_starts[group_index])
+        positions = [start + delta for delta in offsets]
+        padding = [position < 0 or position >= length for position in positions]
+        row_ids = [
+            None if padded and constant_pad else int(self._row_ids[
+                group_start + min(max(position, 0), length - 1)])
+            for position, padded in zip(positions, padding)
+        ]
+        return row_ids, padding
+
+    def _sample(self, anchor, position, reads):
+        group_index, start = anchor
         sample = {
             self.group_key: self._group_keys[group_index],
             self.order_key: int(self._group_first_orders[group_index]) + start,
-            "is_pad": padding_mask,
         }
+        if self.window_size is not None:
+            available = int(self._group_lengths[group_index]) - start
+            sample["is_pad"] = torch.arange(self.window_size) >= available
         for name in self.columns:
-            if name in self.anchor_columns:
-                values = [copy.deepcopy(anchor_row[name])]
-            else:
-                values = [copy.deepcopy(row[name]) for row in rows]
-            if padding_count and name not in self.anchor_columns:
-                pad_value = self.pad_values.get(name, values[-1])
-                values.extend(
-                    copy.deepcopy(pad_value) for _ in range(padding_count))
+            plans, rows = reads[name]
+            row_ids, padding = plans[position]
+            values = [copy.deepcopy(
+                self.pad_values[name] if row_id is None else rows[row_id][name])
+                for row_id in row_ids]
+            if self.window_size is None:
+                sample["%s_is_pad" % name] = torch.tensor(padding, dtype=torch.bool)
             transform = self.column_transforms.get(name)
             sample[name] = transform(values) if transform is not None else values
         if self.adapter is not None:
@@ -320,24 +356,33 @@ class ContiguousWindowDataset(Dataset):
     def _build_anchors(self):
         groups = []
         starts = []
+        minimum = min(min(offsets) for offsets in self.frame_offsets.values())
+        maximum = max(max(offsets) for offsets in self.frame_offsets.values())
+        # Legacy windows schedule their full horizon even with anchor-only
+        # columns, so their cardinality and global mask remain unchanged.
+        if self.window_size is not None:
+            maximum = max(maximum, self.window_size - 1)
         for group_index, length in enumerate(self._group_lengths):
             length = int(length)
             positions = np.arange(0, length, self.stride, dtype=np.int64)
-            valid_counts = np.minimum(self.window_size, length - positions)
-            incomplete = np.flatnonzero(valid_counts < self.window_size)
+            lower = min(length, max(0, -minimum))
+            upper = max(0, min(length, length - maximum))
+            valid = (positions >= lower) & (positions < upper)
+            incomplete = np.flatnonzero(~valid)
             if incomplete.size:
-                if self.tail == "error":
+                if self.boundary == "error":
                     first = int(incomplete[0])
+                    size = "window_size=%s, " % self.window_size \
+                        if self.window_size is not None else ""
                     raise ValueError(
                         "Group %s has an incomplete window at %s: "
-                        "window_size=%d, available=%d."
+                        "%soffset bounds=[%d, %d]."
                         % (self._group_keys[group_index],
                            int(self._group_first_orders[group_index])
                            + int(positions[first]),
-                           self.window_size,
-                           int(valid_counts[first])))
-                if self.tail == "drop":
-                    positions = positions[valid_counts == self.window_size]
+                           size, minimum, maximum))
+                if self.boundary == "drop":
+                    positions = positions[valid]
             if positions.size:
                 groups.append(np.full(positions.size, group_index, dtype=np.int64))
                 starts.append(positions)
@@ -345,11 +390,6 @@ class ContiguousWindowDataset(Dataset):
             empty = np.zeros(0, dtype=np.int64)
             return empty, empty.copy()
         return np.concatenate(groups), np.concatenate(starts)
-
-    def _read_window_rows(self, row_ids):
-        if not self._window_columns:
-            return [{} for _ in row_ids]
-        return self._read_rows(row_ids, self._window_columns)
 
     def _read_rows(self, row_ids, columns=None):
         """Read projected rows by ID from the pinned snapshot.
@@ -402,11 +442,15 @@ class _PinnedRowIdPlan:
         self._blob_columns = [
             field.name for field in table.fields
             if field.name in columns
-            and (is_blob_type(field.type) or is_map_blob_type(field.type))
+            and is_blob_file_type(field.type)
         ]
         self._map_blob_columns = {
             field.name for field in table.fields
             if field.name in self._blob_columns and is_map_blob_type(field.type)
+        }
+        self._array_blob_columns = {
+            field.name for field in table.fields
+            if field.name in self._blob_columns and is_array_blob_type(field.type)
         }
         blob_column_set = set(self._blob_columns)
         self._projection = (
@@ -459,7 +503,8 @@ class _PinnedRowIdPlan:
             arrow.select(self._blob_columns).to_pydict(),
             self._blob_columns,
             self._blob_parallelism,
-            self._map_blob_columns)
+            self._map_blob_columns,
+            self._array_blob_columns)
         blob_column_set = set(self._blob_columns)
         rows = arrow.select([
             name for name in arrow.column_names if name not in blob_column_set
@@ -608,6 +653,80 @@ def _reject_video_columns(table, columns):
             "frame_index." % video_columns)
 
 
+def _frame_offsets(columns, offsets, timestamps, fps, tolerance_s,
+                   window_size, anchor_columns):
+    """Normalize the public window forms to nonempty integer offset tuples."""
+    if timestamps is not None:
+        tolerance = _finite_number(
+            1e-4 if tolerance_s is None else tolerance_s, "tolerance_s")
+        if tolerance < 0:
+            raise ValueError("tolerance_s must be non-negative.")
+        if fps is None:
+            raise ValueError("delta_timestamps requires an explicit fps.")
+        fps = _finite_number(fps, "fps")
+        if fps <= 0:
+            raise ValueError("fps must be positive.")
+    elif fps is not None or tolerance_s is not None:
+        raise ValueError("fps and tolerance_s are only used with delta_timestamps.")
+    if window_size is not None:
+        forward = tuple(range(window_size))
+        return {
+            name: (0,) if name in anchor_columns else forward
+            for name in columns
+        }
+    parameter = "delta_timestamps" if timestamps is not None else "frame_offsets"
+    supplied = _mapping(timestamps if timestamps is not None else offsets, parameter)
+    _validate_mapping_columns(supplied, columns, parameter)
+    result = {}
+    for name in columns:
+        if name not in supplied:
+            result[name] = (0,)
+            continue
+        values = supplied[name]
+        if isinstance(values, (str, bytes, dict)):
+            raise TypeError("%s[%r] must be a sequence of offsets." % (parameter, name))
+        try:
+            values = list(values)
+        except TypeError:
+            raise TypeError("%s[%r] must be a sequence of offsets." % (parameter, name))
+        if not values:
+            raise ValueError("%s[%r] must not be empty." % (parameter, name))
+        converted = []
+        for value in values:
+            if timestamps is not None:
+                seconds = _finite_number(value, "delta_timestamps[%r]" % name)
+                scaled = seconds * fps
+                if not math.isfinite(scaled):
+                    raise ValueError("delta_timestamps * fps must be finite.")
+                delta = round(scaled)
+                if abs(seconds - delta / fps) > tolerance:
+                    raise ValueError(
+                        "delta_timestamps for %s must align to multiples of 1/fps."
+                        % name)
+            else:
+                if isinstance(value, (bool, np.bool_)):
+                    raise TypeError("frame_offsets must contain integers, not booleans.")
+                try:
+                    delta = operator.index(value)
+                except TypeError:
+                    raise TypeError("frame_offsets must contain integer offsets.")
+            converted.append(delta)
+        result[name] = tuple(converted)
+    return result
+
+
+def _finite_number(value, name):
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("%s must be a finite number, not a boolean." % name)
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("%s must be a finite number." % name)
+    if not math.isfinite(number):
+        raise ValueError("%s must be a finite number." % name)
+    return number
+
+
 def _columns(query, columns, group_key, order_key):
     available = {field.name for field in query._table.fields}
     if columns is None:
@@ -635,10 +754,10 @@ def _columns(query, columns, group_key, order_key):
     if invalid:
         raise ValueError("columns do not exist: %s." % invalid)
     reserved = [name for name in columns
-                if name in (group_key, order_key, "is_pad")]
+                if name in (group_key, order_key)]
     if reserved:
         raise ValueError(
-            "columns must not include group_key, order_key, or is_pad: %s."
+            "columns must not include group_key or order_key: %s."
             % reserved)
     return columns
 

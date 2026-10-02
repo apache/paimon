@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -69,7 +70,7 @@ public class IcebergManifestList extends ObjectsFile<IcebergManifestFileMeta> {
                         + "iceberg:true,"
                         + "manifest_file_partitions:r508,"
                         + "array_id_r508:508");
-        FileFormat fileFormat = FileFormat.fromIdentifier("avro", avroOptions);
+        FileFormat fileFormat = FileFormat.manifestFormat(new CoreOptions(avroOptions));
         boolean withFirstRowId =
                 avroOptions.get(IcebergOptions.FORMAT_VERSION) >= IcebergMetadata.FORMAT_VERSION_V3;
         RowType manifestType =

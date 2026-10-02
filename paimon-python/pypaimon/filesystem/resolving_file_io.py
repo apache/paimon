@@ -97,6 +97,13 @@ class ResolvingFileIO(FileIO):
     def rename(self, src: str, dst: str) -> bool:
         return self._get_fileio(src).rename(src, dst)
 
+    def try_to_write_atomic(self, path: str, content: str) -> bool:
+        return self._get_fileio(path).try_to_write_atomic(path, content)
+
+    def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
+        return self._get_fileio(descriptor.uri).create_blob_presigned_url(
+            table_root, descriptor, validity)
+
     def get_file_size(self, path: str) -> int:
         return self._get_fileio(path).get_file_size(path)
 

@@ -109,9 +109,8 @@ Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 
 Video features map to `BLOB`. Frame rows reference MP4 payloads copied once per
 aligned file group. Video imports use the video grouping policy and check
-rolling before each Episode. They require a bucket-unaware table. Read them
-with a Paimon scan and `VideoFrameCollator`; `PaimonLeRobotDataset` currently
-supports image features only.
+rolling before each Episode. They require a bucket-unaware table. Use
+`VideoFrameCollator` for scans or `PaimonLeRobotDataset` for training.
 
 ## Capture LeRobot frames directly into Paimon
 
@@ -208,10 +207,9 @@ pin one named snapshot on every component.
 
 ## Train with Paimon LeRobot data
 
-For map-style training, read a tagged table group created by
-`load_from_lerobot` directly from Paimon. `PaimonLeRobotDataset` requires the
-complete table group; a frame-only table created by `PaimonLeRobotWriter` is
-not sufficient.
+For map-style training, pass an image- or video-backed table group created by
+`load_from_lerobot` to `PaimonLeRobotDataset`. A frame-only table created by
+`PaimonLeRobotWriter` is not sufficient.
 
 ```python
 from torch.utils.data import DataLoader
@@ -224,6 +222,34 @@ dataset = PaimonLeRobotDataset(
 loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 ```
 
-If `tag_name` is omitted, the latest snapshots are used. Metadata is available
-through `dataset.meta`. Frame lookups use the BTree on `index`; payload columns
-remain lazy.
+Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
+on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
+to PyAV, and reuses a bounded decoder cache. Set `video_backend` to force
+either decoder.
+
+Subclass `PaimonDatasetReader` for a custom logical frame layout:
+
+```python
+from pypaimon.multimodal import PaimonDatasetReader, PaimonLeRobotDataset
+
+class CustomDatasetReader(PaimonDatasetReader):
+    def __init__(self, metadata, source, **kwargs):
+        self._source = source
+        super().__init__(
+            metadata,
+            file_io=getattr(source, "file_io", None),
+            **kwargs,
+        )
+
+    def read_indices(self, indices, columns):
+        return self._source.read_indices(indices, columns)
+
+reader = CustomDatasetReader(
+    metadata, source, delta_timestamps=delta_timestamps
+)
+dataset = PaimonLeRobotDataset(reader)
+```
+
+`source` exposes `read_indices` and optional `file_io`. Pass
+`schema=source.schema` for eager schema validation. `PaimonDatasetReader`
+reuses the standard Episode, delta-window, media, and Torch handling.

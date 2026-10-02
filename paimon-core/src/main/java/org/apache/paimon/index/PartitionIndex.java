@@ -36,7 +36,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.IntPredicate;
 
+import static org.apache.paimon.CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS;
+import static org.apache.paimon.CoreOptions.MAX_DYNAMIC_BUCKETS;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Bucket Index Per Partition. */
 public class PartitionIndex {
@@ -69,6 +72,7 @@ public class PartitionIndex {
     }
 
     public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum) {
+        validateMaxBuckets(maxBucketsNum);
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -85,14 +89,14 @@ public class PartitionIndex {
             Long number = entry.getValue();
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
-                hash2Bucket.put(hash, (short) bucket.intValue());
+                hash2Bucket.put(hash, toBucketShort(bucket));
                 return bucket;
             } else {
                 iterator.remove();
             }
         }
 
-        int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
+        int globalMaxBucketId = (maxBucketsNum == -1 ? MAX_DYNAMIC_BUCKETS : maxBucketsNum) - 1;
         if (!bucketUpperBoundReached) {
             // 3. create a new bucket
             for (int i = 0; i <= globalMaxBucketId; i++) {
@@ -100,7 +104,7 @@ public class PartitionIndex {
                     nonFullBucketInformation.put(i, 1L);
                     totalBucketSet.add(i);
                     totalBucketArray.add(i);
-                    hash2Bucket.put(hash, (short) i);
+                    hash2Bucket.put(hash, toBucketShort(i));
                     return i;
                 }
             }
@@ -114,8 +118,19 @@ public class PartitionIndex {
         }
 
         // 4. exceed buckets upper bound
+        if (totalBucketArray.isEmpty()) {
+            // this assigner owns no bucket at all: the bucket filter rejected every bucket id
+            // below the upper bound, which happens when the upper bound is smaller than the
+            // number of assigners
+            throw new RuntimeException(
+                    String.format(
+                            "Cannot assign a bucket: the bucket filter rejected all buckets under "
+                                    + "the max buckets number %s. Check '%s' is not smaller than "
+                                    + "the writer parallelism.",
+                            maxBucketsNum, DYNAMIC_BUCKET_MAX_BUCKETS.key()));
+        }
         int bucket = ListUtils.pickRandomly(totalBucketArray);
-        hash2Bucket.put(hash, (short) bucket);
+        hash2Bucket.put(hash, toBucketShort(bucket));
         return bucket;
     }
 
@@ -129,6 +144,7 @@ public class PartitionIndex {
         Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
         Map<Integer, Long> buckets = new HashMap<>();
         for (IndexManifestEntry file : files) {
+            short loadedBucket = toBucketShort(file.bucket());
             try (IntIterator iterator =
                     indexFileHandler
                             .hashIndex(file.partition(), file.bucket())
@@ -137,7 +153,7 @@ public class PartitionIndex {
                     try {
                         int hash = iterator.next();
                         if (loadFilter.test(hash)) {
-                            mapBuilder.put(hash, (short) file.bucket());
+                            mapBuilder.put(hash, loadedBucket);
                         }
                         if (bucketFilter.test(file.bucket())) {
                             buckets.compute(
@@ -153,5 +169,23 @@ public class PartitionIndex {
             }
         }
         return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
+    }
+
+    static void validateMaxBuckets(int maxBucketsNum) {
+        checkArgument(
+                maxBucketsNum == -1 || (maxBucketsNum > 0 && maxBucketsNum <= MAX_DYNAMIC_BUCKETS),
+                "'%s' must be -1 or between 1 and %s, but was %s.",
+                DYNAMIC_BUCKET_MAX_BUCKETS.key(),
+                MAX_DYNAMIC_BUCKETS,
+                maxBucketsNum);
+    }
+
+    static short toBucketShort(int bucket) {
+        checkArgument(
+                bucket >= 0 && bucket < MAX_DYNAMIC_BUCKETS,
+                "Dynamic bucket id must be between 0 and %s, but was %s.",
+                MAX_DYNAMIC_BUCKETS - 1,
+                bucket);
+        return (short) bucket;
     }
 }

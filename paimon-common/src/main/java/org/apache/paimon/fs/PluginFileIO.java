@@ -99,6 +99,14 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the plugin FileIO's iterative listing override and
+        // list each directory with listStatus instead
+        return wrap(() -> fileIO(path).listFilesIterative(path, recursive));
+    }
+
+    @Override
     public String createBlobPresignedUrl(
             Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         return wrap(

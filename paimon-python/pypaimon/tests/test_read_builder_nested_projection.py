@@ -45,6 +45,7 @@ class _ReadBuilderTestBase(unittest.TestCase):
             pa.field('pk', pa.int64(), nullable=False),
             ('mv', struct_type),
             ('val', pa.string()),
+            ('attrs', pa.map_(pa.string(), pa.int64())),
         ])
         schema = Schema.from_pyarrow_schema(
             cls.pa_schema, primary_keys=['pk'],
@@ -63,7 +64,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         rb = self.table.new_read_builder()
         fields = rb.read_type()
         names = [f.name for f in fields]
-        self.assertEqual(names, ['pk', 'mv', 'val'])
+        self.assertEqual(names, ['pk', 'mv', 'val', 'attrs'])
         # Without an explicit projection the read_type must NOT inject
         # row-tracking system columns; the raw table fields are returned
         # verbatim.
@@ -103,6 +104,27 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['pk'])
 
+    def test_bracketed_map_selector_is_one_literal_key(self):
+        rb = self.table.new_read_builder().with_projection(
+            ["attrs['key.with.dots']", 'attrs["other"]'])
+
+        self.assertEqual(
+            [['attrs', 'key.with.dots'], ['attrs', 'other']],
+            rb._nested_name_paths(),
+        )
+        self.assertEqual(
+            ['attrs_key_with_dots', 'attrs_other'],
+            [field.name for field in rb.read_type()],
+        )
+        self.assertEqual(
+            ['attrs'], [field.name for field in rb.new_scan()._read_type])
+
+    def test_dot_does_not_select_map_key(self):
+        rb = self.table.new_read_builder().with_projection(
+            ['attrs.other', 'pk'])
+
+        self.assertEqual(['pk'], [field.name for field in rb.read_type()])
+
 
 class ReadBuilderProjectionFieldIdTest(_ReadBuilderTestBase):
 
@@ -117,6 +139,35 @@ class ReadBuilderProjectionFieldIdTest(_ReadBuilderTestBase):
         sub_x = next(f for f in mv_field.type.fields
                      if f.name == 'latest_value')
         self.assertEqual(leaf_ids, [sub_v.id, sub_x.id])
+
+
+class StreamReadBuilderNestedProjectionTest(_ReadBuilderTestBase):
+
+    def test_stream_builder_matches_batch_nested_projection(self):
+        projection = [
+            'mv.latest_version',
+            "attrs['key.with.dots']",
+            'pk',
+        ]
+        batch = self.table.new_read_builder().with_projection(projection)
+        stream = self.table.new_stream_read_builder().with_projection(projection)
+
+        self.assertEqual(
+            [field.name for field in batch.read_type()],
+            [field.name for field in stream.read_type()],
+        )
+        self.assertEqual(
+            batch._nested_name_paths(),
+            stream._nested_name_paths(),
+        )
+        self.assertEqual(
+            [field.name for field in batch.new_scan()._read_type],
+            [field.name for field in stream.new_streaming_scan()._read_type],
+        )
+
+        table_read = stream.with_include_row_kind().new_read()
+        self.assertEqual(batch._nested_name_paths(), table_read.nested_name_paths)
+        self.assertTrue(table_read.include_row_kind)
 
 
 if __name__ == '__main__':

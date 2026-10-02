@@ -130,7 +130,11 @@ class GlobalIndexEvaluator:
             if child_result is None:
                 continue
             if compound_result is not None:
-                compound_result = compound_result.and_(child_result)
+                # Readers answer the same predicate: an exact result intersected
+                # with a candidate superset remains exact.
+                is_exact = compound_result.is_exact() or child_result.is_exact()
+                compound_result = GlobalIndexResult.create(
+                    compound_result.and_(child_result).results(), is_exact=is_exact)
             else:
                 compound_result = child_result
             if compound_result.is_empty():
@@ -195,6 +199,11 @@ class GlobalIndexEvaluator:
                     break
             if compound_result is None:
                 return None
+            if any(child is None for child in results):
+                # A dropped AND child can share a field with a supported child.
+                # Contributing field ids alone therefore cannot prove exactness.
+                compound_result = GlobalIndexResult.create(
+                    compound_result.results(), is_exact=False)
             return GlobalIndexEvaluation(compound_result,
                                          frozenset(contributing_field_ids))
 

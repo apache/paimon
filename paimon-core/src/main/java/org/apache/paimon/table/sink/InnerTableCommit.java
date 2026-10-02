@@ -56,10 +56,7 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     InnerTableCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
-    InnerTableCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
-
-    InnerTableCommit rowIdCheckConflictForMaterializeDvCompaction(
-            @Nullable Long rowIdCheckFromSnapshot);
+    InnerTableCommit materializeDvRowIdCheck();
 
     @Override
     InnerTableCommit withMetricRegistry(MetricRegistry registry);

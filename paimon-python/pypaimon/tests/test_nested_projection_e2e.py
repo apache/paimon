@@ -21,6 +21,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
 
@@ -54,7 +55,7 @@ class _AppendOnlyNestedBase(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create_table(self, name: str, file_format: str = 'parquet'):
+    def _create_table(self, name: str, file_format: str = 'parquet', rows=None):
         identifier = 'default.{}'.format(name)
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
@@ -64,7 +65,10 @@ class _AppendOnlyNestedBase(unittest.TestCase):
         table = self.catalog.get_table(identifier)
         wb = table.new_batch_write_builder()
         w = wb.new_write()
-        w.write_arrow(pa.Table.from_pylist(self.rows, schema=self.pa_schema))
+        w.write_arrow(pa.Table.from_pylist(
+            self.rows if rows is None else rows,
+            schema=self.pa_schema,
+        ))
         wb.new_commit().commit(w.prepare_commit())
         w.close()
         return table
@@ -83,6 +87,49 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
             [{'mv_latest_version': 100},
              {'mv_latest_version': 200},
              {'mv_latest_version': 300}])
+
+    def test_nested_leaf_preserves_parent_null(self):
+        table = self._create_table('ao_nullable_parent', rows=[
+            self.rows[0],
+            {'id': 2, 'mv': None, 'val': 'y'},
+        ])
+
+        rb = table.new_read_builder().with_projection(['mv.latest_version'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+        self.assertEqual([100, None], got.column(0).to_pylist())
+
+    def test_required_leaf_under_nullable_row_can_be_exported(self):
+        schema = pa.schema(
+            [
+                ("r", pa.struct([pa.field("x", pa.int64(), nullable=False)])),
+            ]
+        )
+        identifier = "default.nullable_row_required_leaf"
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(schema, options={"bucket": "-1"}),
+            False,
+        )
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        try:
+            writer.write_arrow(
+                pa.Table.from_pylist([{"r": None}, {"r": {"x": 7}}], schema=schema)
+            )
+            wb.new_commit().commit(writer.prepare_commit())
+        finally:
+            writer.close()
+
+        rb = table.new_read_builder().with_projection(["r.x"])
+        result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual([None, 7], result.column(0).to_pylist())
+        sink = pa.BufferOutputStream()
+        pq.write_table(result, sink)
+        restored = pq.read_table(pa.BufferReader(sink.getvalue()))
+        self.assertTrue(restored.schema.field("r_x").nullable)
+        self.assertEqual(result.to_pydict(), restored.to_pydict())
 
     def test_mixed_nested_and_top_level_preserves_order(self):
         table = self._create_table('ao_mixed_order')
@@ -116,6 +163,44 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
         rb = table.new_read_builder().with_projection(['id', 'media.left'])
         got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
         self.assertEqual(got, [{'id': 1, 'media.left': 'hello'}])
+
+    def test_row_path_precedes_dotted_top_level_prefix(self):
+        pa_schema = pa.schema([
+            ('a', pa.struct([
+                ('b', pa.struct([('c', pa.int64())])),
+            ])),
+            ('a.b', pa.struct([
+                ('c', pa.int64()),
+                ('d', pa.int64()),
+            ])),
+            ('id', pa.int64()),
+        ])
+        identifier = 'default.ao_row_path_precedence'
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'}),
+            False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_arrays([
+            pa.array([{'b': {'c': 1}}], type=pa_schema.field('a').type),
+            pa.array([{'c': 99, 'd': 88}],
+                     type=pa_schema.field('a.b').type),
+            pa.array([7], type=pa.int64()),
+        ], schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        rb = table.new_read_builder().with_projection([
+            'a.b.c', 'a.b.d', 'id',
+        ])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+        self.assertEqual(
+            {'a_b_c': [1], 'a.b_d': [88], 'id': [7]},
+            got.to_pydict(),
+        )
 
     def test_unknown_dotted_name_silently_skipped(self):
         pa_schema = pa.schema([

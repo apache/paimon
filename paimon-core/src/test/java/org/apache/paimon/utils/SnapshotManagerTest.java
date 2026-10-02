@@ -121,6 +121,46 @@ public class SnapshotManagerTest {
         Mockito.verify(fileIO, Mockito.times(3)).exists(Mockito.any(Path.class));
     }
 
+    @Test
+    public void testSnapshotExistsRestoresInterruptedStatus() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Mockito.when(fileIO.exists(Mockito.any(Path.class)))
+                .thenThrow(new IOException("Temporary failure"));
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> snapshotManager.snapshotExists(2))
+                    .hasMessageContaining("Interrupted while checking whether snapshot #2 exists")
+                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            Mockito.verify(fileIO).exists(Mockito.any(Path.class));
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    public void testLatestSnapshotOfUserStopsAtSnapshotDeletedDuringRead() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        for (long id = 1; id <= 3; id++) {
+            fileIO.tryToWriteAtomic(
+                    snapshotManager.snapshotPath(id),
+                    createSnapshotWithMillis(id, id * 1000).toJson());
+        }
+        Path expiring = snapshotManager.snapshotPath(1);
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(expiring);
+                            throw new IOException("404 Not Found");
+                        })
+                .when(fileIO)
+                .newInputStream(expiring);
+
+        assertThat(snapshotManager.latestSnapshotOfUser("currentCommitUser")).isEmpty();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testEarliestSnapshot(boolean isRaceCondition) throws IOException {

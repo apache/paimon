@@ -20,14 +20,15 @@ package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.ByteArrayKey;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Value semantics for map keys of type {@code BINARY} or {@code VARBINARY}.
+ * Value semantics for map keys of type {@code BINARY}, {@code VARBINARY}, {@code GEOMETRY} or
+ * {@code GEOGRAPHY}.
  *
  * <p>Such a key arrives as a {@code byte[]}, which inherits identity equality from {@link Object}.
  * Used directly as a hash key, two keys with the same content occupy two entries, a lookup never
@@ -39,8 +40,18 @@ final class BinaryMapKeys {
 
     private BinaryMapKeys() {}
 
-    static boolean isBinary(DataType keyType) {
-        return keyType.getTypeRoot().getFamilies().contains(DataTypeFamily.BINARY_STRING);
+    /**
+     * Whether values of this type are held as a {@code byte[]}. This is the set of roots that
+     * {@link org.apache.paimon.data.InternalArray#createElementGetter} reads with {@code
+     * getBinary}: {@code BINARY} and {@code VARBINARY}, plus {@code GEOMETRY} and {@code GEOGRAPHY}
+     * whose in-memory value is WKB.
+     */
+    static boolean isBinary(DataType type) {
+        return type.isAnyOf(
+                DataTypeRoot.BINARY,
+                DataTypeRoot.VARBINARY,
+                DataTypeRoot.GEOMETRY,
+                DataTypeRoot.GEOGRAPHY);
     }
 
     /** Wrap a key for storage in a hash collection; a no-op for every non-binary key type. */

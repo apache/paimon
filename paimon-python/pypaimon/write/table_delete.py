@@ -261,7 +261,7 @@ class TableDeleteByRowId:
             if not entry.index_file.dv_ranges:
                 continue
 
-            dv_path = self._index_file_path(entry.index_file)
+            dv_path = self._index_file_path(entry.index_file, partition, bucket)
             for data_file_name, meta in entry.index_file.dv_ranges.items():
                 deletion_file = DeletionFile(
                     dv_index_path=dv_path,
@@ -283,7 +283,8 @@ class TableDeleteByRowId:
             deletion_vectors: Dict[str, DeletionVector],
     ) -> IndexManifestEntry:
         file_name = f"{FileStorePathFactory.INDEX_PREFIX}{uuid.uuid4()}-1"
-        path = f"{self.table.path_factory().index_path()}/{file_name}"
+        path, external = self.table.path_factory().new_bucket_index_path(
+            tuple(partition.values), bucket, file_name)
 
         position = 1
         dv_ranges = {}
@@ -315,6 +316,7 @@ class TableDeleteByRowId:
             file_size=len(data),
             row_count=len(dv_ranges),
             dv_ranges=dv_ranges,
+            external_path=path if external else None,
         )
         return IndexManifestEntry(
             kind=_ADD,
@@ -323,7 +325,6 @@ class TableDeleteByRowId:
             index_file=index_file,
         )
 
-    def _index_file_path(self, index_file: IndexFileMeta) -> str:
-        if index_file.external_path:
-            return index_file.external_path
-        return f"{self.table.path_factory().index_path()}/{index_file.file_name}"
+    def _index_file_path(self, index_file: IndexFileMeta, partition: GenericRow, bucket: int) -> str:
+        return self.table.path_factory().bucket_index_path(
+            tuple(partition.values), bucket, index_file, self.file_io)

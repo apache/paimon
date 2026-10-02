@@ -78,7 +78,7 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     private final @Nullable List<String> writeCols;
 
-    private final @Nullable long[] columnMaxSequenceNumbers;
+    private final @Nullable long[] writeColsSequences;
 
     public PojoDataFileMeta(
             String fileName,
@@ -101,7 +101,7 @@ public class PojoDataFileMeta implements DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols,
-            @Nullable long[] columnMaxSequenceNumbers) {
+            @Nullable long[] writeColsSequences) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -126,8 +126,7 @@ public class PojoDataFileMeta implements DataFileMeta {
         this.externalPath = externalPath;
         this.firstRowId = firstRowId;
         this.writeCols = writeCols;
-        this.columnMaxSequenceNumbers =
-                columnMaxSequenceNumbers == null ? null : columnMaxSequenceNumbers.clone();
+        this.writeColsSequences = writeColsSequences == null ? null : writeColsSequences.clone();
     }
 
     @Override
@@ -246,8 +245,8 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     @Nullable
     @Override
-    public long[] columnMaxSequenceNumbers() {
-        return columnMaxSequenceNumbers == null ? null : columnMaxSequenceNumbers.clone();
+    public long[] writeColsSequences() {
+        return writeColsSequences == null ? null : writeColsSequences.clone();
     }
 
     @Override
@@ -274,7 +273,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -301,7 +300,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 newExternalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -327,7 +326,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -353,11 +352,11 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
-    public PojoDataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
+    public PojoDataFileMeta withWriteColsSequences(long[] writeColsSequences) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -379,7 +378,33 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
+    }
+
+    @Override
+    public PojoDataFileMeta assignFileSource(FileSource fileSource) {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                writeColsSequences);
     }
 
     @Override
@@ -405,7 +430,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -431,7 +456,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 newFirstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -457,7 +482,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -483,7 +508,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 newExternalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -509,7 +534,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                writeColsSequences);
     }
 
     @Override
@@ -541,7 +566,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 && Objects.equals(externalPath, that.externalPath().orElse(null))
                 && Objects.equals(firstRowId, that.firstRowId())
                 && Objects.equals(writeCols, that.writeCols())
-                && Arrays.equals(columnMaxSequenceNumbers, that.columnMaxSequenceNumbers());
+                && Arrays.equals(writeColsSequences, that.writeColsSequences());
     }
 
     @Override
@@ -567,7 +592,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                Arrays.hashCode(columnMaxSequenceNumbers));
+                Arrays.hashCode(writeColsSequences));
     }
 
     @Override
@@ -578,7 +603,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, "
                         + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s, "
-                        + "firstRowId: %s, writeCols: %s, columnMaxSequenceNumbers: %s}",
+                        + "firstRowId: %s, writeCols: %s, writeColsSequences: %s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -599,6 +624,6 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                Arrays.toString(columnMaxSequenceNumbers));
+                Arrays.toString(writeColsSequences));
     }
 }

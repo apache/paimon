@@ -32,6 +32,7 @@ HASH_INDEX = "HASH"
 _ADD = 0
 _DELETE = 1
 SHORT_MAX_VALUE = 32767
+MAX_DYNAMIC_BUCKETS = SHORT_MAX_VALUE + 1
 _SNAPSHOT_UNSET = object()
 
 
@@ -62,6 +63,22 @@ def compute_assigner(
 
 def is_my_bucket(bucket: int, num_assigners: int, assign_id: int) -> bool:
     return bucket % num_assigners == assign_id % num_assigners
+
+
+def validate_max_buckets(max_buckets_num: int) -> None:
+    if max_buckets_num != -1 and not 1 <= max_buckets_num <= MAX_DYNAMIC_BUCKETS:
+        raise ValueError(
+            "'dynamic-bucket.max-buckets' must be -1 or between 1 and "
+            f"{MAX_DYNAMIC_BUCKETS}, but was {max_buckets_num}."
+        )
+
+
+def validate_bucket_id(bucket: int) -> None:
+    if not 0 <= bucket < MAX_DYNAMIC_BUCKETS:
+        raise ValueError(
+            "Dynamic bucket id must be between 0 and "
+            f"{MAX_DYNAMIC_BUCKETS - 1}, but was {bucket}."
+        )
 
 
 def _iter_hashes(table, entry: IndexManifestEntry) -> Iterator[int]:
@@ -125,6 +142,7 @@ class _PartitionIndex:
         max_buckets_num: int,
         max_bucket_id: int,
     ) -> Tuple[int, bool]:
+        validate_max_buckets(max_buckets_num)
         if key_hash in self.hash_to_bucket:
             return self.hash_to_bucket[key_hash], False
 
@@ -136,7 +154,7 @@ class _PartitionIndex:
             del self.non_full_bucket_information[bucket]
 
         global_max_bucket_id = (
-            SHORT_MAX_VALUE if max_buckets_num == -1 else max_buckets_num
+            MAX_DYNAMIC_BUCKETS if max_buckets_num == -1 else max_buckets_num
         ) - 1
         if not self.total_bucket_set or max_bucket_id < global_max_bucket_id:
             for bucket in range(global_max_bucket_id + 1):
@@ -176,6 +194,7 @@ class HashBucketAssigner:
         ignore_existing: bool = False,
         snapshot=_SNAPSHOT_UNSET,
     ) -> None:
+        validate_max_buckets(max_buckets_num)
         if not 0 <= assign_id < num_channels:
             raise ValueError(
                 f"assign_id must be in [0, {num_channels}), got {assign_id}"
@@ -286,6 +305,7 @@ class HashBucketAssigner:
         )
         entries_by_bucket = {}
         for entry in entries:
+            validate_bucket_id(entry.bucket)
             previous = entries_by_bucket.get(entry.bucket)
             if previous is not None:
                 raise RuntimeError(
@@ -347,6 +367,7 @@ class HashBucketAssigner:
         )
         remaining = set(requested_hashes)
         for entry in entries:
+            validate_bucket_id(entry.bucket)
             for key_hash in _iter_hashes(self.table, entry):
                 if key_hash not in remaining:
                     continue

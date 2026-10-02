@@ -67,7 +67,7 @@ CALL sys.create_global_index(
     `table` => 'default.T',
     `index_column` => 'tag',
     `index_type` => 'bitmap',
-    `options` => 'sorted-index.records-per-range=1000000');
+    `options` => 'sorted-index.records-per-file=1000000');
 
 -- Create exact FM contains index
 CALL sys.create_global_index(

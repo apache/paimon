@@ -181,7 +181,8 @@ public class PkVectorAnnSegmentSearcher {
             return CompletableFuture.completedFuture(Collections.emptyList());
         }
         GlobalIndexer indexer =
-                GlobalIndexer.create(segment.indexType(), vectorField, indexOptions);
+                GlobalIndexer.create(
+                        segment.indexType(), Collections.singletonList(vectorField), indexOptions);
         checkArgument(
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",
@@ -204,6 +205,7 @@ public class PkVectorAnnSegmentSearcher {
                         meta -> fileIO.newInputStream(meta.filePath()),
                         Collections.singletonList(ioMeta),
                         segment.rowCount(),
+                        null,
                         executor);
         try {
             VectorSearch search = new VectorSearch(query, limit, vectorField.name(), searchOptions);
@@ -278,7 +280,8 @@ public class PkVectorAnnSegmentSearcher {
             return CompletableFuture.completedFuture(Collections.unmodifiableList(results));
         }
         GlobalIndexer indexer =
-                GlobalIndexer.create(segment.indexType(), vectorField, indexOptions);
+                GlobalIndexer.create(
+                        segment.indexType(), Collections.singletonList(vectorField), indexOptions);
         checkArgument(
                 indexer instanceof VectorGlobalIndexer,
                 "Index algorithm %s does not implement VectorGlobalIndexer.",
@@ -301,6 +304,7 @@ public class PkVectorAnnSegmentSearcher {
                         meta -> fileIO.newInputStream(meta.filePath()),
                         Collections.singletonList(ioMeta),
                         segment.rowCount(),
+                        null,
                         executor);
         try {
             BatchVectorSearch search =

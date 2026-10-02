@@ -1941,8 +1941,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 .writePartialFields(updateRows, Seq("value"))
 
             val writer = PaimonSparkWriter(table)
-            writer.rowIdCheckConflict(updateSnapshot.id())
-            writer.commit(updateMessages)
+            writer.commit(
+              updateMessages.map(
+                _.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(updateSnapshot.id())))
             assert(table.latestSnapshot().get().operation() == null)
           }
         }
@@ -2016,8 +2017,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                   .writePartialFields(updateRows, Seq("value", "extra"))
 
               val writer = PaimonSparkWriter(evolvedTable)
-              writer.rowIdCheckConflict(updateSnapshot.id())
-              writer.commit(updateMessages)
+              writer.commit(
+                updateMessages.map(
+                  _.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(updateSnapshot.id())))
             }
           }
         )
@@ -2494,8 +2496,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 .writePartialFields(updateRows, Seq("value"))
 
             val writer = PaimonSparkWriter(table)
-            writer.rowIdCheckConflict(updateSnapshot.id())
-            writer.commit(updateMessages)
+            writer.commit(
+              updateMessages.map(
+                _.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(updateSnapshot.id())))
           }
         }
       )
@@ -2586,8 +2589,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 .writePartialFields(updateRows, Seq("value"))
 
             val writer = PaimonSparkWriter(table)
-            writer.rowIdCheckConflict(updateSnapshot.id())
-            writer.commit(updateMessages)
+            writer.commit(
+              updateMessages.map(
+                _.asInstanceOf[CommitMessageImpl].withCheckFromSnapshot(updateSnapshot.id())))
           }
         }
       )

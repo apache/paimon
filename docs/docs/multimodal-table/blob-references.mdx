@@ -186,9 +186,9 @@ scheme and authority. For a descriptor forwarded from another table, pass the
 original owning table as `source_table`; using the downstream descriptor table or
 an arbitrary external object path fails this check.
 
-Configure the catalog with the standard public HTTPS OSS endpoint. Internal endpoints and
-endpoints without the `https` scheme are rejected because external consumers must be able to fetch
-the returned URL:
+Use an HTTPS OSS endpoint. Java and PyPaimon preserve the configured endpoint, including
+Internal endpoints, in the returned URL. Both the application and the URL consumer must be
+able to reach that endpoint. For consumers that require public access, configure a public endpoint:
 
 ```properties
 fs.oss.endpoint=https://oss-cn-hangzhou.aliyuncs.com
@@ -245,6 +245,22 @@ String url =
         blob.toPresignedUrl(
                 table.fileIO(), table.location(), Duration.ofMinutes(5));
 ```
+
+PyPaimon exposes the same operation for descriptor-backed `Blob` values. Pass the owning table's
+FileIO and storage path so PyPaimon can validate that the descriptor belongs to the table:
+
+```python
+from datetime import timedelta
+
+url = blob.to_presigned_url(
+    table.file_io,
+    table.table_path,
+    timedelta(minutes=5),
+)
+```
+
+Install the OSS dependencies with `pip install 'pypaimon[oss]'`. For DLF REST catalogs, PyPaimon
+refreshes the STS credentials before creating the materialized object and URL.
 
 The materialized object's bytes are unchanged. Consumers must inspect the content instead of
 relying on a URL suffix or a format-specific content type. For direct model `image_url` inputs, use

@@ -37,6 +37,7 @@ from pypaimon.api.rest_exception import (AlreadyExistsException,
                                          ServiceFailureException,
                                          ServiceUnavailableException)
 from pypaimon.api.typedef import RESTAuthParameter
+from pypaimon.common import user_agent
 from pypaimon.common.json_util import JSON
 
 T = TypeVar('T', bound='RESTResponse')
@@ -246,9 +247,12 @@ def _parse_error_response(response_body: Optional[str], status_code: int) -> Err
             resource_type=error.resource_type if error and error.resource_type else "",
             resource_name=error.resource_name if error and error.resource_name else "",
             message=response_body if response_body else "response body is null",
-            code=error.code if error and error.code else status_code
+            code=error.code if error and error.code is not None else status_code
         )
-    
+
+    if error.code is None:
+        error.code = status_code
+
     return error
 
 
@@ -283,7 +287,7 @@ class HttpClient(RESTClient):
     _READ_TIMEOUT_SECONDS = 180
     _MAX_RETRIES = 5
 
-    def __init__(self, uri: str):
+    def __init__(self, uri: str, user_agent_value: Optional[str] = None):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.uri = _normalize_uri(uri)
         self.error_handler = DefaultErrorHandler.get_instance()
@@ -298,9 +302,14 @@ class HttpClient(RESTClient):
         # and pass it explicitly on every call (see ``_execute_request``).
         self._timeout = (self._CONNECT_TIMEOUT_SECONDS, self._READ_TIMEOUT_SECONDS)
 
+        # A per-request User-Agent, e.g. from ``header.User-Agent``, still takes precedence.
         self.session.headers.update({
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            'User-Agent': user_agent_value or user_agent.rest_user_agent(),
         })
+
+    def set_user_agent(self, value: str) -> None:
+        self.session.headers['User-Agent'] = value
 
     def set_error_handler(self, error_handler: ErrorHandler) -> None:
         self.error_handler = error_handler

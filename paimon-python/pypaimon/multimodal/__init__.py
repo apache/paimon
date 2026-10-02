@@ -29,7 +29,10 @@ from pypaimon.multimodal.hdf5 import (
     Hdf5File,
     Hdf5LoadResult,
 )
-from pypaimon.multimodal.lerobot.dataset import PaimonLeRobotDataset
+from pypaimon.multimodal.lerobot.dataset import (
+    PaimonDatasetReader,
+    PaimonLeRobotDataset,
+)
 from pypaimon.multimodal.rosbag import (
     RosbagLoadResult,
     RosbagSource,
@@ -43,8 +46,10 @@ from pypaimon.multimodal.table import (
     vector_route,
 )
 from pypaimon.multimodal.temporal import (
-    AsOfJoin,
+    TemporalAlignment,
+    interpolate,
     join_asof,
+    join_window,
 )
 from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
@@ -55,7 +60,6 @@ from pypaimon.table.data_evolution_merge_into import (
 )
 
 __all__ = [
-    "AsOfJoin",
     "Blob",
     "BlobDescriptor",
     "BlobObject",
@@ -66,17 +70,21 @@ __all__ = [
     "MultimodalTable",
     "NoSuchKey",
     "ObjectInfo",
+    "PaimonDatasetReader",
     "PaimonLeRobotDataset",
     "PutObjectResult",
     "RosbagLoadResult",
     "RosbagSource",
     "RosbagStagingConfig",
     "TextRoute",
+    "TemporalAlignment",
     "VectorRoute",
     "VideoFrameCollator",
     "VideoFrameDescriptor",
     "connect",
+    "interpolate",
     "join_asof",
+    "join_window",
     "lit",
     "source_col",
     "target_col",

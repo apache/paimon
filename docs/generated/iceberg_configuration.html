@@ -123,6 +123,18 @@ under the License.
             <td>Metastore table name for Iceberg Catalog.Set this as an iceberg table alias if using a centralized Catalog.</td>
         </tr>
         <tr>
+            <td><h5>metadata.iceberg.unknown-host-retry.initial-delay-ms</h5></td>
+            <td style="word-wrap: break-word;">1000</td>
+            <td>Long</td>
+            <td>Initial delay in milliseconds before retrying an Iceberg REST catalog DNS lookup failure. The delay doubles after each failure.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.unknown-host-retry.max-retries</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>Maximum number of retries after an Iceberg REST catalog DNS lookup failure. Set to 0 to disable retries.</td>
+        </tr>
+        <tr>
             <td><h5>metadata.iceberg.uri</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

@@ -90,7 +90,8 @@ public class MySqlSyncDatabaseActionFactory
                         + "[--type_mapping <option1,option2...>] \\\n"
                         + "[--mysql_conf <mysql_cdc_source_conf> [--mysql_conf <mysql_cdc_source_conf> ...]] \\\n"
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
-                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
+                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]] \\\n"
+                        + "[--table_conf_by_table <source_table>:<key>=<value> [--table_conf_by_table <source_table>:<key>=<value> ...]]");
         System.out.println();
 
         System.out.println(

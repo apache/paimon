@@ -65,6 +65,27 @@ class ResolvingFileIOTest(unittest.TestCase):
         self.assertIsInstance(fio_local, LocalFileIO)
         self.assertIsInstance(fio_file, LocalFileIO)
 
+    def test_pyarrow_reader_resolves_each_file_path(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        from pathlib import Path
+        from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        with tempfile.TemporaryDirectory() as directory:
+            resolving = ResolvingFileIO(Options({}))
+            for value, uri in ((1, False), (2, True)):
+                path = Path(directory) / ('data-%s.parquet' % value)
+                pq.write_table(pa.table({'id': [value]}), str(path))
+                reader = FormatPyArrowReader(
+                    resolving, 'parquet', path.as_uri() if uri else str(path),
+                    [DataField(0, 'id', AtomicType('BIGINT'))], None)
+                try:
+                    self.assertEqual(reader.read_arrow_batch().to_pylist(), [{'id': value}])
+                    self.assertIsNone(reader.read_arrow_batch())
+                finally:
+                    reader.close()
+
     def test_is_object_store_with_oss_warehouse(self):
         opts = Options({CatalogOptions.WAREHOUSE.key(): 'oss://bucket/warehouse'})
         resolving = ResolvingFileIO(opts)
@@ -84,6 +105,40 @@ class ResolvingFileIOTest(unittest.TestCase):
         opts = Options({CatalogOptions.WAREHOUSE.key(): 'file:///tmp/warehouse'})
         resolving = ResolvingFileIO(opts)
         self.assertFalse(resolving.is_object_store())
+
+    def test_from_file_io_creates_http_reader(self):
+        from pypaimon.common.uri_reader import UriReaderFactory
+
+        resolving = ResolvingFileIO(Options({}))
+        try:
+            factory = UriReaderFactory.from_file_io(resolving)
+            reader = factory.create("https://example.com/blob.bin")
+            self.assertEqual(type(reader).__name__, "HttpUriReader")
+        finally:
+            resolving.close()
+
+    def test_from_file_io_reuses_self_for_non_http(self):
+        import io
+
+        from pypaimon.common.uri_reader import FileUriReader, UriReaderFactory
+
+        resolving = ResolvingFileIO(Options({}))
+        opened = []
+
+        def tracking(path):
+            opened.append(path)
+            return io.BytesIO(b"ok")
+
+        resolving.new_input_stream = tracking
+        try:
+            reader = UriReaderFactory.from_file_io(resolving).create(
+                "file:///tmp/blob.bin")
+            self.assertIsInstance(reader, FileUriReader)
+            self.assertEqual(
+                reader.new_input_stream("file:///tmp/blob.bin").read(), b"ok")
+            self.assertEqual(opened, ["file:///tmp/blob.bin"])
+        finally:
+            resolving.close()
 
 
 class ResolvingFileIOReadWriteTest(unittest.TestCase):

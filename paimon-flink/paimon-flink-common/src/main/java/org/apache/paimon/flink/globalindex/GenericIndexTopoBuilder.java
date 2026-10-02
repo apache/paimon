@@ -227,7 +227,7 @@ public class GenericIndexTopoBuilder {
         readColumns.add(SpecialFields.ROW_ID.name());
         RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
 
-        Options mergedOptions = new Options(table.options(), userOptions.toMap());
+        Options mergedOptions = new Options(table.options(), userOptions);
         byte[] sourceMeta =
                 new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId()).serialize();
 
@@ -441,7 +441,7 @@ public class GenericIndexTopoBuilder {
             long startTime = System.currentTimeMillis();
 
             GlobalIndexWriter indexWriter =
-                    createIndexWriter(table, indexType, indexField, extraFields, mergedOptions);
+                    createIndexWriter(table, indexType, indexedFields, mergedOptions);
 
             try {
                 long rowsSeen = 0;

@@ -19,8 +19,8 @@ info:
   title: Paimon REST Management API
   version: "1.0"
   description: |
-    Experimental control-plane extension for object and column permissions, table row filters, and
-    table column masks in one Paimon REST Catalog prefix. A data policy restricts an
+    Experimental control-plane extension for entity labels, object and column permissions, table
+    row filters, and table column masks in one Paimon REST Catalog prefix. A data policy restricts an
     already-authorized read;
     it never grants SELECT by itself. Each policy is attached to one principal: a principal has at
     most one row filter per table and at most one mask per table column. Policy creation is accepted
@@ -36,6 +36,139 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /v1/{prefix}/labels/{entityType}/{entityName}:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+      - $ref: '#/components/parameters/LabelEntityType'
+      - $ref: '#/components/parameters/LabelEntityName'
+    get:
+      tags: [label]
+      summary: List labels attached directly to one entity
+      operationId: listLabels
+      description: |
+        Returns direct bindings for the exact entity in stable pagination order. Labels are
+        distinct from table snapshot tags. An existing entity with no labels returns an empty
+        list; a missing entity returns 404. Following catalog pagination, an empty page
+        terminates listing and must not carry a continuation token. Omit nextPageToken on
+        the last page.
+      parameters:
+        - $ref: '#/components/parameters/PageToken'
+        - $ref: '#/components/parameters/MaxResults'
+      responses:
+        '200':
+          description: One page of label bindings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListLabelsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/{prefix}/labels/{entityType}/{entityName}/{key}:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+      - $ref: '#/components/parameters/LabelEntityType'
+      - $ref: '#/components/parameters/LabelEntityName'
+      - $ref: '#/components/parameters/LabelKey'
+    post:
+      tags: [label]
+      summary: Create or replace one label binding
+      operationId: upsertLabel
+      description: |
+        Atomically creates a binding or replaces the value identified by
+        (prefix, entityType, entityName, key) in the path. The body contains only value.
+        The entity must already exist. Other keys are unchanged. Repeating the same request
+        leaves the same label value. This operation does not create the target entity or a
+        separate label definition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertLabelRequest'
+            example:
+              value: sales
+      responses:
+        '200':
+          description: Label binding created or replaced; no response body.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    get:
+      tags: [label]
+      summary: Get one label binding
+      operationId: getLabel
+      description: |
+        Returns one direct binding. A missing entity or key returns 404. For a missing key,
+        ErrorResponse.resourceType is LABEL and resourceName is the key; for a missing entity
+        they identify the entity instead.
+      responses:
+        '200':
+          description: The requested label binding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetLabelResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags: [label]
+      summary: Idempotently delete one label binding
+      operationId: deleteLabel
+      description: |
+        Deletes only the binding identified by the path. An already absent key succeeds
+        when the entity exists. A 404 identifies a missing entity, not an absent label.
+      responses:
+        '200':
+          description: Label binding is absent; no response body.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/{prefix}/permissions:
     parameters:
       - $ref: '#/components/parameters/Prefix'
@@ -283,6 +416,24 @@ components:
       schema:
         type: string
         minLength: 1
+    LabelEntityType:
+      name: entityType
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/LabelEntityType'
+    LabelEntityName:
+      name: entityName
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/LabelEntityName'
+    LabelKey:
+      name: key
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/LabelKey'
     ResourceTypeQuery:
       name: resourceType
       in: query
@@ -378,7 +529,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     NotFound:
-      description: Referenced resource, principal, or policy does not exist.
+      description: Referenced resource, principal, policy, or label does not exist.
       content:
         application/json:
           schema:
@@ -421,6 +572,74 @@ components:
         type: string
 
   schemas:
+    LabelEntityType:
+      type: string
+      minLength: 1
+      pattern: '\S'
+      description: |
+        Non-blank, server-defined entity type, such as DATABASE, TABLE, COLUMN, VIEW, or FUNCTION.
+        This is an extensible string, not a closed enum. Clients preserve it without normalization;
+        servers reject unsupported entity types with 400.
+      examples: [TABLE, COLUMN]
+    LabelEntityName:
+      type: string
+      minLength: 1
+      pattern: '\S'
+      description: |
+        Non-blank canonical entity name within the configured prefix. Its syntax and name
+        resolution are defined by the server for each entityType. For example, a server may use
+        sales.orders for a table and sales.orders.order_id for a column. Clients treat the name
+        as opaque: do not split it on dots or append a local engine catalog alias. Servers must
+        define unambiguous names, including quoting or escaping where necessary.
+        In a path, encode the complete name as one UTF-8 segment using REST Catalog URL
+        encoding (spaces as +, literal + as %2B, slash as %2F); decode exactly once. Encode
+        dot-only segments . and .. as %2E and %2E%2E. JSON responses carry the original unencoded
+        name. All operations resolve the entity through the path.
+      examples: [sales.orders]
+    LabelKey:
+      type: string
+      minLength: 1
+      pattern: '\S'
+      description: |
+        Non-blank, case-sensitive label key. Encode it as a single path segment using the same
+        encoding as entityName. Preserve the original string in JSON responses.
+      examples: [domain]
+    UpsertLabelRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          description: Complete replacement value. An empty string is valid; null is not.
+      description: |
+        Value for the label binding identified by the request path. The body does not repeat
+        entityType, entityName, or key. Entity existence checks, authorization, and atomic
+        upsert are server responsibilities. Labels do not themselves grant access or enforce
+        a data policy.
+    GetLabelResponse:
+      type: object
+      required: [entityType, entityName, key, value]
+      properties:
+        entityType:
+          $ref: '#/components/schemas/LabelEntityType'
+        entityName:
+          $ref: '#/components/schemas/LabelEntityName'
+        key:
+          $ref: '#/components/schemas/LabelKey'
+        value:
+          type: string
+      description: One direct binding, including its canonical entity identity, key, and value.
+    ListLabelsResponse:
+      type: object
+      required: [labels]
+      properties:
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetLabelResponse'
+        nextPageToken:
+          type: string
+          description: Opaque continuation token; omitted on the last page.
     ResourceType:
       type: string
       enum: [CATALOG, CATALOG_ALL, DATABASE, DATABASE_ALL, TABLE, COLUMN, FUNCTION, VIEW]

@@ -34,6 +34,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -141,12 +142,26 @@ public class ParameterUtils {
         if (data != null) {
             JsonNode jsonArray = JsonSerdeUtil.fromJson(data, JsonNode.class);
             if (jsonArray.isArray()) {
+                // A counter only for a list that carries no ids at all, and one counter for the
+                // whole list so each field gets its own. Supplying it when some field already has
+                // an id would let the rest silently draw a colliding one, so in that case pass
+                // null and let the parser reject the list.
+                AtomicInteger fieldId = carriesAnyFieldId(jsonArray) ? null : new AtomicInteger(-1);
                 for (JsonNode objNode : jsonArray) {
-                    DataField dataField = DataTypeJsonParser.parseDataField(objNode);
+                    DataField dataField = DataTypeJsonParser.parseDataField(objNode, fieldId);
                     list.add(dataField);
                 }
             }
         }
         return list;
+    }
+
+    private static boolean carriesAnyFieldId(JsonNode jsonArray) {
+        for (JsonNode objNode : jsonArray) {
+            if (objNode.get("id") != null) {
+                return true;
+            }
+        }
+        return false;
     }
 }

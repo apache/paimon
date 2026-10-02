@@ -37,6 +37,7 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.MergeTreeWriter;
+import org.apache.paimon.mergetree.compact.CompactRewriterFactory;
 import org.apache.paimon.mergetree.compact.KvCompactionManagerFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -48,6 +49,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -181,6 +183,12 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
+    public KeyValueFileStoreWrite withCompactRewriterFactory(CompactRewriterFactory factory) {
+        compactManagerFactory.withCompactRewriterFactory(factory);
+        return this;
+    }
+
+    @Override
     public KeyValueFileStoreWrite withIOManager(IOManager ioManager) {
         super.withIOManager(ioManager);
         compactManagerFactory.withIOManager(ioManager);
@@ -251,7 +259,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     @Override
     public void close() throws Exception {
-        super.close();
-        compactManagerFactory.close();
+        IOUtils.closeAll(super::close, compactManagerFactory::close);
     }
 }

@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.apache.paimon</groupId>
+        <artifactId>paimon-spark</artifactId>
+        <version>2.2-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>paimon-spark-ut-4.0_${scala.binary.version}</artifactId>
+    <name>Paimon : Spark : UT : 4.0 : ${scala.binary.version}</name>
+
+    <!--
+      A second compilation of `paimon-spark-ut`'s test sources, against Spark 4.0.3 instead of the
+      `spark4` profile baseline. Owns no sources of its own: `build-helper` adds
+      `../paimon-spark-ut/src/test/scala` and `src/test/java` as test-source roots, and
+      `<testResources>` points at that module's test resources, so there is exactly one copy of every
+      test to maintain.
+
+      Why a whole module rather than a second classifier on `paimon-spark-ut`: a Maven module has one
+      dependency set, so producing two artifacts compiled against different Spark versions from one
+      module is not expressible.
+
+      Why it is needed at all: `paimon-spark-4.0` used to consume `paimon-spark-ut`'s test-jar, which
+      is compiled against the baseline. Those classfiles reference Spark symbols that a 4.0 runtime
+      cannot resolve, which is what `StreamTestCheckAnswerWithTimeoutStub` stood in for. Compiling
+      the same sources against 4.0.3 cannot emit a reference to a symbol 4.0.3 does not have, so the
+      stub is deleted here.
+
+      Serves `paimon-spark-4.0` only: `paimon-spark-4.1` pins 4.1.2, which is the baseline, so the
+      baseline build already matches its runtime and it keeps consuming `paimon-spark-ut` directly.
+    -->
+    <properties>
+        <spark.version>4.0.3</spark.version>
+        <ut.module.dir>${project.basedir}/../paimon-spark-ut</ut.module.dir>
+        <!-- Spark 4 only supports Scala 2.13. Pin it locally so this _2.13 module resolves its
+             dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);
+             otherwise it inherits scala.binary.version=2.12 from paimon-parent. -->
+        <scala.binary.version>2.13</scala.binary.version>
+        <!-- The tests belong to `paimon-spark-ut`, which runs them against the baseline. This module
+             exists only to produce a 4.0-compiled test-jar, so nothing should run them a second time
+             here. Both surefire and scalatest-maven-plugin bind their `skipTests` parameter to this
+             property; `maven.test.skip` would also skip test compilation and leave the test-jar
+             empty. Without this, surefire inherits the root pom's `default-test` and
+             `integration-tests` executions and fails on `TestLoggerExtension` with
+             `NoClassDefFoundError: org/slf4j/spi/LoggingEventBuilder`. -->
+        <skipTests>true</skipTests>
+    </properties>
+
+    <dependencies>
+        <!-- Add to the beginning, just to make IDEA prioritize loading Paimon's conflicting classes,
+             such as Parquet and ORC. Remove this once IDEA's bug is fixed. -->
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-format</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>${paimon-sparkx-common}</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!--
+          `${paimon-sparkx-common}` transitively pulls in `spark-sql-api` at the `spark4` profile
+          baseline (4.1.2), so every Spark artifact is pinned to ${spark.version} here to keep the
+          whole compile classpath on 4.0. Same reasoning as `paimon-spark-4.0`, and the same
+          `spark-connect-shims` exclusion on `spark-sql-api` and `spark-sql`: Spark 4.0.3's shims jar
+          carries a stub `org.apache.spark.SparkConf` with only `getAll()`, which scalac resolves in
+          preference to spark-core's real one, failing with `value set is not a member of
+          org.apache.spark.SparkConf`.
+        -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql-api_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-connect-shims_${scala.binary.version}</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-connect-shims_${scala.binary.version}</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-catalyst_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+        </dependency>
+
+        <!-- Below are test dependencies which need to be distinguished for different Spark versions. -->
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-catalyst_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-hive_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-avro_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-lumina</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <testResources>
+            <testResource>
+                <directory>${ut.module.dir}/src/test/resources</directory>
+            </testResource>
+        </testResources>
+
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-ut-test-sources</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>add-test-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${ut.module.dir}/src/test/scala</source>
+                                <source>${ut.module.dir}/src/test/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>prepare-test-jar</id>
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

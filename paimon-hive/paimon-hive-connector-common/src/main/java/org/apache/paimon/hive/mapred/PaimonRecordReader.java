@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -88,7 +89,7 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
                         .boxed()
                         .collect(
                                 Collectors.toMap(
-                                        index -> paimonColumns.get(index).toLowerCase(),
+                                        index -> paimonColumns.get(index).toLowerCase(Locale.ROOT),
                                         index -> index,
                                         (existing, replacement) -> existing,
                                         LinkedHashMap::new));

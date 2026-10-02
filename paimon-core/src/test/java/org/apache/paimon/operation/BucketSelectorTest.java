@@ -20,6 +20,8 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions.BucketFunctionType;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.BucketFilter;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
@@ -31,6 +33,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link BucketSelector}. */
@@ -55,6 +58,88 @@ public class BucketSelectorTest {
 
         Set<Integer> selected = selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS);
         assertThat(selected).hasSize(1);
+    }
+
+    @Test
+    public void testPostponeBucketIsNeverPruned() {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        RowType partType = RowType.of();
+        RowType bucketKeyType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        PredicateBuilder pb = new PredicateBuilder(rowType);
+        BucketSelector selector =
+                new BucketSelector(
+                        pb.equal(0, 5),
+                        BucketFunctionType.DEFAULT,
+                        rowType,
+                        partType,
+                        bucketKeyType);
+
+        // postpone entries carry bucket -2 and no bucket count; their pending rows cannot
+        // be pruned by bucket keys, so the selector must keep them, also when composed
+        // into the entry-level BucketFilter without onlyReadRealBuckets (streaming reads)
+        assertThat(selector.test(BinaryRow.EMPTY_ROW, -2, -2)).isTrue();
+        BucketFilter entryFilter = BucketFilter.create(false, null, null, selector);
+        assertThat(entryFilter.test(BinaryRow.EMPTY_ROW, -2, -2)).isTrue();
+
+        // a non-positive bucket count carries no bucket information, so it cannot be pruned
+        // either, and the selector must not divide by that count
+        assertThat(selector.test(BinaryRow.EMPTY_ROW, 3, 0)).isTrue();
+
+        // real buckets are still pruned: exactly the selected bucket passes
+        Set<Integer> selected = selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS);
+        assertThat(selected).hasSize(1);
+        for (int b = 0; b < NUM_BUCKETS; b++) {
+            assertThat(selector.test(BinaryRow.EMPTY_ROW, b, NUM_BUCKETS))
+                    .isEqualTo(selected.contains(b));
+        }
+    }
+
+    @Test
+    public void testManifestBucketRange() {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        RowType partType = RowType.of();
+        RowType bucketKeyType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        PredicateBuilder pb = new PredicateBuilder(rowType);
+        BucketSelector selector =
+                new BucketSelector(
+                        pb.equal(0, 5),
+                        BucketFunctionType.DEFAULT,
+                        rowType,
+                        partType,
+                        bucketKeyType);
+
+        int selected =
+                selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS).iterator().next();
+        assertThat(selector.mayContain(selected, selected, NUM_BUCKETS)).isTrue();
+        int different = (selected + 1) % NUM_BUCKETS;
+        assertThat(selector.mayContain(different, different, NUM_BUCKETS)).isFalse();
+
+        assertThat(selector.mayContain(-1, selected, NUM_BUCKETS)).isTrue();
+        assertThat(selector.mayContain(0, 0, 0)).isTrue();
+
+        BucketFilter filter = new BucketFilter(false, null, null, selector);
+        assertThat(filter.mayContain(manifest(selected, selected, NUM_BUCKETS))).isTrue();
+        assertThat(filter.mayContain(manifest(different, different, NUM_BUCKETS))).isFalse();
+        assertThat(filter.mayContain(manifest(different, different, null))).isTrue();
+        assertThat(filter.mayContain(manifest(-1, different, NUM_BUCKETS))).isTrue();
+    }
+
+    private static ManifestFileMeta manifest(int minBucket, int maxBucket, Integer totalBuckets) {
+        return new ManifestFileMeta(
+                "manifest",
+                1,
+                1,
+                0,
+                EMPTY_STATS,
+                0,
+                minBucket,
+                maxBucket,
+                0,
+                0,
+                null,
+                null,
+                totalBuckets,
+                null);
     }
 
     @Test

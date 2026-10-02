@@ -19,7 +19,7 @@
 # Build the PyPaimon source distribution and universal wheel. Publishing is
 # handled by release-python-publish.yml after this package job passes.
 
-name: Release PyPaimon Package
+name: Release / Python packages
 
 on:
   workflow_call:

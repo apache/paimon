@@ -18,6 +18,8 @@
 
 package org.apache.paimon.lumina.index;
 
+import java.util.Locale;
+
 /** Enumeration of supported Lumina vector similarity metrics. */
 public enum LuminaVectorMetric {
 
@@ -45,7 +47,7 @@ public enum LuminaVectorMetric {
     }
 
     public static LuminaVectorMetric fromString(String name) {
-        return valueOf(name.toUpperCase());
+        return valueOf(name.toUpperCase(Locale.ROOT));
     }
 
     /** Resolves a Lumina native metric name (e.g. "l2") to the corresponding enum constant. */

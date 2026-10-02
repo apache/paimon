@@ -21,6 +21,7 @@ package org.apache.paimon.data;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.VectorType;
 
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link NestedRow}s. */
 public class NestedRowTest {
+
+    private static final VectorType VECTOR_TYPE = DataTypes.VECTOR(3, DataTypes.FLOAT());
 
     @Test
     public void testNestedRowWithOneSegment() {
@@ -99,6 +102,41 @@ public class NestedRowTest {
         assertThat(5L).isEqualTo(nestedRow.getLong(1));
         assertThat(BinaryString.fromString("12345678")).isEqualTo(nestedRow.getString(2));
         assertThat(nestedRow.isNullAt(3)).isTrue();
+    }
+
+    @Test
+    public void testNestedRowWithVector() {
+        float[] values = new float[] {1.5f, -2f, 3.25f};
+        BinaryRow row = getBinaryRowWithVector(BinaryVector.fromPrimitiveArray(values));
+
+        // round-trip: the nested row reads the vector slot BinaryWriter.writeVector wrote
+        InternalRow nestedRow = row.getRow(1, 2);
+        assertThat(nestedRow.getInt(0)).isEqualTo(7);
+        assertThat(nestedRow.isNullAt(1)).isFalse();
+        assertThat(nestedRow.getVector(1).toFloatArray()).isEqualTo(values);
+
+        // the generic field getter used by format writers dispatches VECTOR to getVector
+        InternalRow.FieldGetter getter = InternalRow.createFieldGetter(VECTOR_TYPE, 1);
+        InternalVector viaGetter = (InternalVector) getter.getFieldOrNull(nestedRow);
+        assertThat(viaGetter).isNotNull();
+        assertThat(viaGetter.toFloatArray()).isEqualTo(values);
+
+        // the nested row may cross a segment boundary
+        MemorySegment[] segments = splitBytes(row.getSegments()[0].getHeapMemory(), 3);
+        row.pointTo(segments, 3, row.getSizeInBytes());
+        assertThat(row.getRow(1, 2).getVector(1).toFloatArray()).isEqualTo(values);
+
+        // a null vector field stays null
+        BinaryRow nullRow = getBinaryRowWithVector(null);
+        assertThat(nullRow.getRow(1, 2).isNullAt(1)).isTrue();
+    }
+
+    private BinaryRow getBinaryRowWithVector(InternalVector vector) {
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
+                        DataTypes.INT(), DataTypes.ROW(DataTypes.INT(), VECTOR_TYPE));
+        // copy: toBinaryRow returns the serializer's reused row
+        return serializer.toBinaryRow(GenericRow.of(1, GenericRow.of(7, vector))).copy();
     }
 
     private BinaryRow getBinaryRow() {

@@ -346,12 +346,83 @@ function validateCatalogOpenApi() {
   ['GetDatabaseResponse', 'GetTableResponse', 'GetViewResponse', 'GetFunctionResponse'].forEach(
     (schemaName) => contract.requireTypedIntegerProperties(schemaName, ['createdAt', 'updatedAt']),
   );
+  const semanticCollection = '/v1/{prefix}/databases/{database}/semantic-views';
+  const semanticItem = `${semanticCollection}/{semanticView}`;
+  [
+    [semanticCollection, 'get', 'listSemanticViews'],
+    [semanticItem, 'get', 'getSemanticView'],
+    [semanticItem, 'post', 'upsertSemanticView'],
+    [semanticItem, 'delete', 'deleteSemanticView'],
+  ].forEach(([resourcePath, method, operationId]) => {
+    contract.checkSpec(
+      contract.spec.paths[resourcePath]?.[method]?.operationId === operationId,
+      `${operationId} must use ${method.toUpperCase()} ${resourcePath}`,
+    );
+    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '500', '501']);
+  });
+  contract.checkSpec(!contract.spec.paths[semanticItem].patch, 'Semantic views use POST replacement');
+  contract.requireResponses('upsertSemanticView', ['409', '413']);
+  contract.requireResponses('deleteSemanticView', ['409']);
+  const semanticUpsert = contract.requireOperation('upsertSemanticView');
+  contract.checkSpec(
+    semanticUpsert.requestBody.required &&
+      semanticUpsert.requestBody.content['application/json'].schema.$ref ===
+        '#/components/schemas/UpsertSemanticViewRequest' &&
+      semanticUpsert.responses['200'].content['application/json'].schema.$ref ===
+        '#/components/schemas/GetSemanticViewResponse',
+    'Semantic view upsert must take a complete definition and return the committed object',
+  );
+  const semanticDelete = contract.requireOperation('deleteSemanticView');
+  contract.checkSpec(
+    !semanticDelete.requestBody &&
+      !(semanticDelete.parameters || []).some((parameter) => parameter.in === 'query'),
+    'Semantic view DELETE must use only the resource path without query parameters or a body',
+  );
+  const pageSize = contract.requireOperation('listSemanticViews').parameters.find(
+    (parameter) => parameter.name === 'maxResults',
+  );
+  contract.checkSpec(
+    pageSize.schema.minimum === 1 && pageSize.schema.maximum === 1000,
+    'Semantic view page size must be between 1 and 1000',
+  );
+  contract.requireRequiredProperties('SemanticViewDefinition', ['format', 'content']);
+  const definition = contract.requireProperties('SemanticViewDefinition', ['format', 'content']);
+  contract.checkSpec(
+    Object.keys(definition).length === 2 && !definition.format.enum &&
+      definition.content['x-max-utf8-bytes'] === 1048576,
+    'Semantic definitions require only an extensible format and content with a 1 MiB UTF-8 limit',
+  );
+  contract.requireRequiredProperties('UpsertSemanticViewRequest', ['definition']);
+  contract.requireRequiredProperties('GetSemanticViewResponse', ['name', 'definition']);
+  contract.checkSpec(
+    Object.keys(contract.requireProperties('UpsertSemanticViewRequest', ['definition'])).length === 1 &&
+      Object.keys(contract.requireProperties('GetSemanticViewResponse', ['name', 'definition'])).length === 2,
+    'Semantic upserts contain only a definition; responses contain only a name and definition',
+  );
+  const semanticNames = contract.requireProperties('ListSemanticViewsResponse', ['semanticViews', 'nextPageToken']);
+  contract.checkSpec(
+    semanticNames.semanticViews.type === 'array' && semanticNames.semanticViews.items.type === 'string',
+    'Semantic view lists must contain names only',
+  );
+  contract.checkSpec(
+    errorResourceTypes.includes('SEMANTIC_VIEW'),
+    'Semantic view errors must identify SEMANTIC_VIEW',
+  );
+  contract.checkSpec(
+    contract.requireOperation('alterView').requestBody.content['application/json'].schema.$ref ===
+      '#/components/schemas/AlterViewRequest',
+    'Ordinary view POST must retain its existing alteration request',
+  );
   return contract.operations.size;
 }
 
 function validateManagementOpenApi() {
   const contract = validateCommon('rest-management-open-api.yaml');
   const operationIds = [
+    'upsertLabel',
+    'listLabels',
+    'getLabel',
+    'deleteLabel',
     'listPermissions',
     'grantPermission',
     'revokePermission',
@@ -360,6 +431,8 @@ function validateManagementOpenApi() {
     'dropTablePolicy',
   ];
   const resourcePaths = [
+    '/v1/{prefix}/labels/{entityType}/{entityName}',
+    '/v1/{prefix}/labels/{entityType}/{entityName}/{key}',
     '/v1/{prefix}/permissions',
     '/v1/{prefix}/permissions/grant',
     '/v1/{prefix}/permissions/revoke',
@@ -384,6 +457,43 @@ function validateManagementOpenApi() {
     ),
   );
   operationIds.forEach(contract.requireOperation);
+  ['upsertLabel', 'listLabels', 'getLabel', 'deleteLabel'].forEach((operationId) =>
+    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '429', '500', '503']),
+  );
+  contract.requireRequiredProperties('UpsertLabelRequest', ['value']);
+  const labelFields = contract.requireProperties('UpsertLabelRequest', ['value']);
+  contract.checkSpec(
+    Object.keys(labelFields).length === 1 &&
+      labelFields.value.type === 'string' &&
+      !labelFields.value.minLength,
+    'Label writes must contain only a string value, permitting empty strings but rejecting null',
+  );
+  contract.checkSpec(
+    contract.schema('LabelEntityType').type === 'string' && !contract.schema('LabelEntityType').enum,
+    'Label entity types must remain extensible strings',
+  );
+  const labelFieldNames = ['entityType', 'entityName', 'key', 'value'];
+  contract.requireRequiredProperties('GetLabelResponse', labelFieldNames);
+  contract.requireProperties('GetLabelResponse', labelFieldNames);
+  contract.requireRequiredProperties('ListLabelsResponse', ['labels']);
+  const labelList = contract.requireProperties('ListLabelsResponse', ['labels', 'nextPageToken']);
+  contract.checkSpec(
+    labelList.labels.items.$ref === '#/components/schemas/GetLabelResponse',
+    'Label listings must return complete bindings',
+  );
+  const labelRoot = contract.spec.paths['/v1/{prefix}/labels'];
+  const labelEntity = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}'];
+  const labelKey = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}/{key}'];
+  contract.checkSpec(
+    !labelRoot &&
+      labelEntity.get.operationId === 'listLabels' &&
+      labelKey.get.operationId === 'getLabel' &&
+      labelKey.post.operationId === 'upsertLabel' &&
+      labelKey.delete.operationId === 'deleteLabel' &&
+      !labelKey.patch &&
+      !labelKey.put,
+    'Labels must use POST/GET/DELETE on the single-key path with no collection-level write endpoint',
+  );
   ['listPermissions', 'grantPermission', 'revokePermission'].forEach((operationId) =>
     contract.requireResponses(operationId, [
       '200',

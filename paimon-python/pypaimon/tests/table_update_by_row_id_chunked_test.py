@@ -21,12 +21,75 @@ from unittest import mock
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.write.table_update_by_row_id import (
+    TableUpdateByRowId,
+    _RowIdUpdateFileWriter,
+)
+from pypaimon.write.writer.single_file_writer import SingleFileWriter
 
 
 class TableUpdateByRowIdChunkedTest(unittest.TestCase):
+
+    def test_streaming_overlay_rejects_sidecar_before_output(self):
+        table = mock.Mock()
+        table.is_primary_key_table = False
+        table.fields = []
+        options = table.options
+        options.file_format.return_value = 'parquet'
+        options.variant_shredding_enabled.return_value = False
+        options.data_evolution_row_sidecar_enabled.return_value = False
+        options.with_vector_format.return_value = False
+        options.changelog_producer.return_value = ChangelogProducer.NONE
+        self.assertTrue(_RowIdUpdateFileWriter.supports_table(table))
+
+        options.data_evolution_row_sidecar_enabled.return_value = True
+        with self.assertRaisesRegex(ValueError, 'requires plain Parquet'):
+            _RowIdUpdateFileWriter(table, (), ['id'])
+        table.file_io.new_output_stream.assert_not_called()
+
+    def test_streaming_overlay_rejects_shared_shredding_before_output(self):
+        table = mock.Mock()
+        table.is_primary_key_table = False
+        field = mock.Mock()
+        field.name = 'metrics'
+        table.fields = [field]
+        options = table.options
+        options.file_format.return_value = 'parquet'
+        options.variant_shredding_enabled.return_value = False
+        options.data_evolution_row_sidecar_enabled.return_value = False
+        options.with_vector_format.return_value = False
+        options.changelog_producer.return_value = ChangelogProducer.NONE
+        options.map_storage_layout.return_value = 'shared-shredding'
+
+        with self.assertRaisesRegex(ValueError, 'requires plain Parquet'):
+            _RowIdUpdateFileWriter(table, (), ['metrics'])
+        table.file_io.new_output_stream.assert_not_called()
+
+    def test_single_file_writer_rejects_other_formats_before_open(self):
+        file_io = mock.Mock()
+        with self.assertRaisesRegex(NotImplementedError, 'only supports Parquet'):
+            SingleFileWriter(file_io, 'unused.orc', pa.schema([]), 'orc',
+                             'zstd', 1, [], mock.Mock())
+        file_io.new_output_stream.assert_not_called()
+
+    def test_single_file_writer_failed_open_only_deletes_owned_file(self):
+        file_io = mock.Mock()
+        file_io.new_output_stream.side_effect = FileExistsError('already exists')
+        with self.assertRaises(FileExistsError):
+            SingleFileWriter(file_io, 'existing.parquet', pa.schema([]), 'parquet',
+                             'zstd', 1, [], mock.Mock())
+        file_io.delete_quietly.assert_not_called()
+
+        file_io.new_output_stream.side_effect = None
+        with mock.patch.object(pq, 'ParquetWriter', side_effect=OSError('failed to open')):
+            with self.assertRaisesRegex(OSError, 'failed to open'):
+                SingleFileWriter(file_io, 'new.parquet', pa.schema([]), 'parquet',
+                                 'zstd', 1, [], mock.Mock())
+        file_io.delete_quietly.assert_called_once_with('new.parquet')
 
     @staticmethod
     def _updater():
@@ -104,6 +167,53 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
         with self.assertRaisesRegex(IndexError, "outside column range"):
             self._updater()._merge_update_with_original(
                 original, updates, ["payload"], first_row_id=0)
+
+    def test_streaming_update_rejects_non_contiguous_original_row_ids(self):
+        updates = pa.table({
+            SpecialFields.ROW_ID.name: pa.array([0], type=pa.int64()),
+            "payload": pa.array([3]),
+        })
+
+        for row_ids in ([0, 2], [0, 2, 1]):
+            with self.subTest(row_ids=row_ids):
+                batch = pa.RecordBatch.from_pydict({
+                    SpecialFields.ROW_ID.name:
+                        pa.array(row_ids, type=pa.int64()),
+                    "payload": pa.array(row_ids),
+                })
+                managed_reader = mock.MagicMock()
+                managed_reader.__enter__.return_value = iter([batch])
+                table_read = mock.Mock()
+                table_read._to_managed_arrow_batch_reader.return_value = (
+                    managed_reader)
+                updater = self._updater()
+                updater._original_file_read = mock.Mock(
+                    return_value=(table_read, mock.sentinel.split))
+
+                with self.assertRaisesRegex(
+                        ValueError, "not contiguous at row ID 0"):
+                    list(updater._merged_batches(0, updates, ["payload"]))
+
+    def test_streaming_update_rejects_row_ids_before_original_group(self):
+        updates = pa.table({
+            SpecialFields.ROW_ID.name: pa.array([9], type=pa.int64()),
+            "payload": pa.array([3]),
+        })
+        batch = pa.RecordBatch.from_pydict({
+            SpecialFields.ROW_ID.name: pa.array([10, 11], type=pa.int64()),
+            "payload": pa.array([1, 2]),
+        })
+        managed_reader = mock.MagicMock()
+        managed_reader.__enter__.return_value = iter([batch])
+        table_read = mock.Mock()
+        table_read._to_managed_arrow_batch_reader.return_value = managed_reader
+        updater = self._updater()
+        updater._original_file_read = mock.Mock(
+            return_value=(table_read, mock.sentinel.split))
+
+        with self.assertRaisesRegex(
+                ValueError, "precede the original file group"):
+            list(updater._merged_batches(10, updates, ["payload"]))
 
     def test_total_offsets_over_int32_remain_in_separate_chunks(self):
         child_length = 1_100_000_000

@@ -209,6 +209,8 @@ def test_daft_on_ray_read_write_e2e():
     )
 
     env = os.environ.copy()
+    # Avoid tqdm finalizers racing CPython module shutdown after Ray queries.
+    env["DAFT_PROGRESS_BAR"] = "0"
     env["PYTHONPATH"] = os.pathsep.join(
         [python_root, env.get("PYTHONPATH", "")]
     ).rstrip(os.pathsep)

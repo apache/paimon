@@ -151,8 +151,8 @@ Format Options:
 | --- | --- | --- | --- |
 | `csv.field-delimiter` | `,` | String | Field delimiter character (`','` by default), must be single character. You can use backslash to specify special characters, e.g. `'\t'` represents the tab character. |
 | `csv.line-delimiter` | `\n` | String | The line delimiter for CSV format |
-| `csv.quote-character` | `"` | String | Quote character for enclosing field values (`"` by default). |
-| `csv.escape-character` | `\` | String | The escape character for CSV format. |
+| `csv.quote-character` | `"` | String | Quote character for enclosing field values (`"` by default), must be single character. |
+| `csv.escape-character` | `\` | String | The escape character for CSV format, must be single character. |
 | `csv.include-header` | false | Boolean | Whether to include header in CSV files. |
 | `csv.null-literal` | `""` | String | Null literal string that is interpreted as a null value (disabled by default). |
 | `csv.mode` | `PERMISSIVE` | String | Allows a mode for dealing with corrupt records during reading. Currently supported values are `'PERMISSIVE'`, `'DROPMALFORMED'` and `'FAILFAST'`: <ul> <li>Option `'PERMISSIVE'` sets malformed fields to null.</li> <li>Option `'DROPMALFORMED'` ignores the whole corrupted records.</li> <li>Option `'FAILFAST'` throws an exception when it meets corrupted records.</li> </ul> |
@@ -225,7 +225,6 @@ The following table lists the type mapping from Paimon type to JSON type.
 | `TIMESTAMP_LOCAL_ZONE` | `string with format: date-time (with UTC time zone)` |
 | `ARRAY` | `array` |
 | `MAP` | `object` |
-| `MULTISET` | `object` |
 | `ROW` | `object` |
 
 ## Lance
@@ -250,12 +249,11 @@ The following table lists the type mapping from Paimon type to Lance (Arrow) typ
 | TIME | TIME32 / TIME64 |
 | TIMESTAMP(P) | TIMESTAMP (unit based on precision) |
 | ARRAY | LIST |
-| MULTISET | LIST |
 | ROW | STRUCT |
 
 Limitations:
-1. Lance file format does not support `MAP` type.
-2. Lance file format does not support `TIMESTAMP_LOCAL_ZONE` type.
+1. Lance file format does not support `MAP`, `MULTISET`, `TIMESTAMP_LOCAL_ZONE` or `VARIANT` types.
+2. Lance file format does not support `BLOB` fields stored inline in data files (`blob-descriptor-field` or `blob-view-field`). Regular `BLOB` fields are written to dedicated blob files and are not affected.
 
 ## Vortex
 
@@ -267,7 +265,8 @@ Key features:
 - **Column Projection**: Only reads requested columns from disk
 
 Limitations:
-1. Vortex does not support `MAP` or `MULTISET` types.
+1. Vortex does not support `MAP`, `MULTISET` or `VARIANT` types.
+2. Vortex does not support `BLOB` fields stored inline in data files (`blob-descriptor-field` or `blob-view-field`). Regular `BLOB` fields are written to dedicated blob files and are not affected.
 
 ## Mosaic
 

@@ -33,7 +33,10 @@ from pypaimon.data.variant_shredding import (
     shredding_schema_to_arrow_type,
     shred_variant_column,
 )
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.read.reader.format_pyarrow_reader import (
+    FormatPyArrowReader,
+    _normalized_offsets,
+)
 from pypaimon.schema.data_types import (
     ArrayType,
     AtomicType,
@@ -69,6 +72,33 @@ def _drain(reader):
             content_keys |= set(
                 batch.column(columns.index("content_key")).to_pylist())
     return rows, columns, content_keys
+
+
+class NormalizedOffsetsTest(unittest.TestCase):
+
+    def test_nested_offsets(self):
+        for arrow_type, values in [
+            (pa.list_(pa.int64()), [[1, 2], None, [], [3], None]),
+            (pa.large_list(pa.int64()), [[1, 2], None, [], [3], None]),
+            (pa.map_(pa.string(), pa.int64()),
+             [[('a', 1), ('b', 2)], None, [], [('c', 3)], None]),
+        ]:
+            array = pa.array(values, type=arrow_type)
+            for column in [array, array.slice(1, 3), array.slice(4),
+                           array.slice(2, 0), pa.array([], type=arrow_type)]:
+                with self.subTest(type=arrow_type, length=len(column), offset=column.offset):
+                    offset_type = pa.int64() if pa.types.is_large_list(arrow_type) else pa.int32()
+                    raw = pa.Array.from_buffers(
+                        offset_type, len(column) + 1,
+                        [None, column.buffers()[1]], offset=column.offset).to_pylist()
+                    expected = [value - raw[0] for value in raw]
+                    for i, null in enumerate(column.is_null().to_pylist()):
+                        if null:
+                            expected[i] = None
+                    offsets, start, end = _normalized_offsets(column)
+                    self.assertEqual((start, end), (raw[0], raw[-1]))
+                    self.assertEqual(offsets.type, offset_type)
+                    self.assertEqual(offsets.to_pylist(), expected)
 
 
 class VariantRowGroupReaderTest(unittest.TestCase):

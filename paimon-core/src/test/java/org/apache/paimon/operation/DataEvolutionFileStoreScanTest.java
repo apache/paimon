@@ -38,6 +38,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
@@ -53,6 +54,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link DataEvolutionFileStoreScan}. */
@@ -65,6 +67,66 @@ public class DataEvolutionFileStoreScanTest {
     public void setUp() {
         schemas = new HashMap<>();
         scanTableSchema = schemas::get;
+    }
+
+    @Test
+    public void testReadTypePruningKeepsAnchorAsRowRepresentative() {
+        // query reads a freshly added column no file in the group writes: the group must
+        // still contribute one row-count representative, and that representative is the
+        // oldest full-range normal file — not group.get(0), which can be a blob file
+        // covering only part of the group's row ids
+        Schema schema = createSchema("v", "b");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        // blob file first in the group, covering only row ids [0, 1]
+        ManifestEntry blob =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-blob-0.blob",
+                        0L,
+                        new String[] {"b"},
+                        new String[] {"b"},
+                        null,
+                        0L,
+                        0L,
+                        2L);
+        // normal files covering the whole group range [0, 9]; write only "v", not "c"
+        ManifestEntry newer =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-newer.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        5L,
+                        0L,
+                        10L);
+        ManifestEntry older =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-older.parquet",
+                        0L,
+                        new String[] {"v"},
+                        new String[] {"v"},
+                        null,
+                        1L,
+                        0L,
+                        10L);
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(tableSchema.highestFieldId() + 1, "c", DataTypes.INT()));
+
+        List<ManifestEntry> pruned =
+                DataEvolutionFileStoreScan.pruneByReadType(
+                        Arrays.asList(blob, newer, older),
+                        readType,
+                        Collections.emptySet(),
+                        false,
+                        entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file()));
+
+        assertThat(pruned)
+                .extracting(e -> e.file().fileName())
+                .containsExactly("data-older.parquet");
     }
 
     @Test
@@ -745,11 +807,24 @@ public class DataEvolutionFileStoreScanTest {
             String[] valueStatsCols,
             SimpleStats stats,
             long sequence) {
+        return createManifestEntryWithDifferentColsAndFileName(
+                fileName, schemaId, writeCols, valueStatsCols, stats, sequence, 0L, 100L);
+    }
+
+    private ManifestEntry createManifestEntryWithDifferentColsAndFileName(
+            String fileName,
+            Long schemaId,
+            String[] writeCols,
+            String[] valueStatsCols,
+            SimpleStats stats,
+            long sequence,
+            long firstRowId,
+            long rowCount) {
         DataFileMeta fileMeta =
                 DataFileMeta.create(
                         fileName,
                         100L,
-                        100L,
+                        rowCount,
                         createBinaryRow(1),
                         createBinaryRow(100),
                         stats,
@@ -764,7 +839,7 @@ public class DataEvolutionFileStoreScanTest {
                         FileSource.APPEND,
                         Arrays.stream(valueStatsCols).collect(Collectors.toList()),
                         null,
-                        0L,
+                        firstRowId,
                         Arrays.stream(writeCols).collect(Collectors.toList()));
 
         return ManifestEntry.create(FileKind.ADD, createBinaryRow(0), 0, 0, fileMeta);

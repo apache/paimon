@@ -19,6 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -32,6 +34,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -75,6 +78,35 @@ class PrimaryKeyFullTextSearchTest {
                         .newFullTextScan();
 
         assertThat(scan).isInstanceOf(DataEvolutionFullTextScan.class);
+    }
+
+    @Test
+    void testPrimaryKeyFullTextRejectsRowFilter() {
+        FileStoreTable table = table(false);
+        when(table.partitionKeys()).thenReturn(Collections.emptyList());
+        Predicate rowFilter = new PredicateBuilder(table.rowType()).equal(0, 1);
+
+        FullTextSearchBuilder builder =
+                new FullTextSearchBuilderImpl(table)
+                        .withQuery("content", "hello")
+                        .withLimit(10)
+                        .withFilter(rowFilter);
+
+        assertThatThrownBy(builder::newFullTextScan)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Primary-key full-text search does not support");
+        assertThatThrownBy(builder::newFullTextRead)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Primary-key full-text search does not support");
+
+        // The same filter on a column served by the global full-text path is accepted.
+        assertThat(
+                        new FullTextSearchBuilderImpl(table)
+                                .withQuery("other", "hello")
+                                .withLimit(10)
+                                .withFilter(rowFilter)
+                                .newFullTextScan())
+                .isInstanceOf(DataEvolutionFullTextScan.class);
     }
 
     @Test

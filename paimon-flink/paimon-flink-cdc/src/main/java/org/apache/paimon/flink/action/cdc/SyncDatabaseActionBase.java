@@ -39,6 +39,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -113,7 +114,10 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                     dbPrefix.entrySet().stream()
                             .collect(
                                     HashMap::new,
-                                    (m, e) -> m.put(e.getKey().toLowerCase(), e.getValue()),
+                                    (m, e) ->
+                                            m.put(
+                                                    e.getKey().toLowerCase(Locale.ROOT),
+                                                    e.getValue()),
                                     HashMap::putAll);
         }
         return this;
@@ -125,7 +129,10 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                     dbSuffix.entrySet().stream()
                             .collect(
                                     HashMap::new,
-                                    (m, e) -> m.put(e.getKey().toLowerCase(), e.getValue()),
+                                    (m, e) ->
+                                            m.put(
+                                                    e.getKey().toLowerCase(Locale.ROOT),
+                                                    e.getValue()),
                                     HashMap::putAll);
         }
         return this;
@@ -196,6 +203,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
                         tableConfig,
+                        tableConfigByTable,
                         caseSensitive,
                         partitionKeys,
                         primaryKeys,

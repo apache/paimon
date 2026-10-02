@@ -1578,6 +1578,57 @@ class CliTableTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 1)
                 self.assertIn("Invalid WHERE clause", mock_stderr.getvalue())
 
+    def test_cli_table_rollback_to_snapshot(self):
+        """table rollback --snapshot restores an earlier snapshot."""
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('test_db.rollback_users', schema, True)
+
+        def _write(row_id, name):
+            table = self.catalog.get_table('test_db.rollback_users')
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            c = wb.new_commit()
+            w.write_arrow(pa.Table.from_pydict(
+                {'id': [row_id], 'name': [name]}, schema=pa_schema))
+            c.commit(w.prepare_commit())
+            w.close()
+            c.close()
+
+        _write(1, 'a')   # snapshot 1
+        _write(2, 'b')   # snapshot 2
+
+        def _latest_id():
+            fresh = CatalogFactory.create({'warehouse': self.warehouse})
+            return fresh.get_table(
+                'test_db.rollback_users').snapshot_manager().get_latest_snapshot().id
+
+        self.assertEqual(_latest_id(), 2)
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file, 'table', 'rollback',
+                    'test_db.rollback_users', '--snapshot', '1']):
+            with patch('sys.stdout', new_callable=StringIO) as out:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+        self.assertIn('Rolled back', out.getvalue())
+
+        # The latest snapshot is back to 1 (snapshot 2 was rolled back).
+        self.assertEqual(_latest_id(), 1)
+
+    def test_cli_table_rollback_requires_a_target(self):
+        """table rollback without any target selector exits with an error."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file, 'table', 'rollback',
+                    'test_db.users']):
+            with patch('sys.stderr', new_callable=StringIO):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+                # argparse rejects the missing mutually-exclusive group.
+                self.assertNotEqual(ctx.exception.code, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

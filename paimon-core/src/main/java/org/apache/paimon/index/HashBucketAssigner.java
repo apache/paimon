@@ -58,6 +58,7 @@ public class HashBucketAssigner implements BucketAssigner {
             int assignId,
             long targetBucketRowNumber,
             int maxBucketsNum) {
+        PartitionIndex.validateMaxBuckets(maxBucketsNum);
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.indexFileHandler = indexFileHandler;

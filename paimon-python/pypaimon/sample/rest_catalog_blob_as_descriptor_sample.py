@@ -18,13 +18,12 @@
 """
 Sample demonstrating descriptor-stored blob fields with REST catalog.
 """
-from pypaimon import CatalogFactory
 import pyarrow as pa
 
-from pypaimon import Schema
-from pypaimon.table.row.blob import BlobDescriptor, Blob
+from pypaimon import CatalogFactory, Schema
+from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.table.row.blob import Blob, BlobDescriptor
 
 
 def write_table_with_blob(catalog, video_file_path: str, external_oss_options: dict):
@@ -66,7 +65,7 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
 
     # Access external OSS file to get file size
     try:
-        external_file_io = PyArrowFileIO(video_file_path, Options(external_oss_options))
+        external_file_io = FileIO.get(video_file_path, Options(external_oss_options))
         video_file_size = external_file_io.get_file_size(video_file_path)
     except Exception as e:
         raise FileNotFoundError(
@@ -92,7 +91,7 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
     print("✓ Data committed successfully")
     table_write.close()
     table_commit.close()
-    
+
     return f'{database_name}.{table_name}'
 
 
@@ -103,10 +102,10 @@ def read_table_with_blob(catalog, table_name: str):
     table_scan = read_builder.new_scan()
     splits = table_scan.plan().splits()
     table_read = read_builder.new_read()
-    
+
     result = table_read.to_arrow(splits)
     print(f"✓ Read {result.num_rows} rows")
-    
+
     video_bytes_list = result.column('video').to_pylist()
     for video_bytes in video_bytes_list:
         if video_bytes is None:
@@ -118,7 +117,7 @@ def read_table_with_blob(catalog, table_name: str):
         blob_data = blob.to_data()
         print(f"✓ Blob data verified: {len(blob_data) / 1024 / 1024:.2f} MB")
         break
-    
+
     return result
 
 
@@ -129,9 +128,9 @@ if __name__ == '__main__':
         'fs.oss.endpoint': "oss-cn-hangzhou.aliyuncs.com",
         'fs.oss.region': "cn-hangzhou",
     }
-    
+
     video_file_path = "oss://your-bucket/blob_test/video.mov"
-    
+
     catalog_options = {
         'metastore': 'rest',
         'uri': "http://your-rest-catalog-uri",
@@ -145,7 +144,7 @@ if __name__ == '__main__':
     }
 
     catalog = CatalogFactory.create(catalog_options)
-    
+
     try:
         table_name = write_table_with_blob(catalog, video_file_path, external_oss_options)
         result = read_table_with_blob(catalog, table_name)

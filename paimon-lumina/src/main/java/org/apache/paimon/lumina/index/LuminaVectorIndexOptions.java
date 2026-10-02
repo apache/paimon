@@ -196,6 +196,35 @@ public class LuminaVectorIndexOptions {
         return result;
     }
 
+    /**
+     * Returns the native options an index build runs with, and rejects the ones the native builder
+     * cannot use. Only the build path may reject: a search resolves its options with the index
+     * metadata layered on top of these, so a value that is stale or invalid on the table is
+     * overridden there and must not fail the read.
+     */
+    public Map<String, String> toBuildOptions(int dimension) {
+        Map<String, String> result = toLuminaOptions(dimension);
+        validateBuildOptions(result);
+        return result;
+    }
+
+    /**
+     * Lumina's QuantizerTrainer rejects a non-positive {@code numChunks} — {@code "Invalid
+     * numChunks [%d] for PQ encoding, must be > 0 and <= dimension [%d]."} in liblumina — but only
+     * once it is reached, which is after a build has spilled every vector of the shard to disk.
+     * Rejecting the option up front names the Paimon key instead.
+     */
+    private static void validateBuildOptions(Map<String, String> opts) {
+        String encoding = opts.get(toLuminaKey(ENCODING_TYPE));
+        if (!"pq".equalsIgnoreCase(encoding)) {
+            return;
+        }
+        String pqMStr = opts.get(toLuminaKey(ENCODING_PQ_M));
+        if (pqMStr != null) {
+            validatePositive(Integer.parseInt(pqMStr), ENCODING_PQ_M.key());
+        }
+    }
+
     public int dimension() {
         return dimension;
     }
@@ -283,7 +312,9 @@ public class LuminaVectorIndexOptions {
 
     /**
      * Ensures {@code encoding.pq.m} does not exceed the vector dimension. Lumina's QuantizerTrainer
-     * requires numChunks (pq.m) to be &gt; 0 and &le; dimension.
+     * requires numChunks (pq.m) to be &gt; 0 and &le; dimension; the upper bound is capped here
+     * because it depends on the dimension, and the lower bound is checked by {@link
+     * #toBuildOptions} because only a build can act on it.
      */
     private static void capPqM(Map<String, String> opts, int dimension) {
         String encoding = opts.get(toLuminaKey(ENCODING_TYPE));

@@ -59,7 +59,8 @@ public abstract class AbstractTextFileWriter implements FormatWriter {
 
     @Override
     public void close() throws IOException {
-        writer.flush();
+        // close() flushes on its way out; flushing first meant a throwing flush skipped close()
+        // and leaked the codec stream underneath.
         writer.close();
     }
 

@@ -256,7 +256,7 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
 
     @Nullable
     @Override
-    public long[] columnMaxSequenceNumbers() {
+    public long[] writeColsSequences() {
         int position = requiredPosition(Fields.WRITE_COLS_SEQUENCES);
         InternalRow row = currentRow();
         if (row.isNullAt(position)) {
@@ -308,8 +308,13 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
     }
 
     @Override
-    public DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
-        throw unsupportedOperation("withColumnMaxSequenceNumbers(long[])");
+    public DataFileMeta assignFileSource(FileSource fileSource) {
+        throw unsupportedOperation("assignFileSource(FileSource)");
+    }
+
+    @Override
+    public DataFileMeta withWriteColsSequences(long[] writeColsSequences) {
+        throw unsupportedOperation("withWriteColsSequences(long[])");
     }
 
     @Override

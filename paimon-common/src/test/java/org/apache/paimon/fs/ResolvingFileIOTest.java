@@ -36,6 +36,7 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -183,5 +184,42 @@ public class ResolvingFileIOTest {
         verify(delegate).tryToWriteAtomic(target, "content");
         // the interface default would have written a temp file and renamed it instead
         verify(delegate, never()).rename(any(), any());
+    }
+
+    @Test
+    public void testNewTwoPhaseOutputStreamReachesResolvedOverride() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        resolvingFileIO.configure(CatalogContext.create(new Options(), loader, null));
+
+        Path target = new Path("oss://bucket/table/data.parquet");
+        TwoPhaseOutputStream mockStream = mock(TwoPhaseOutputStream.class);
+        when(delegate.newTwoPhaseOutputStream(target, false)).thenReturn(mockStream);
+
+        assertEquals(mockStream, resolvingFileIO.newTwoPhaseOutputStream(target, false));
+        verify(delegate).newTwoPhaseOutputStream(target, false);
+        // the interface default would have renamed a temp file on the resolver instead
+        verify(delegate, never()).rename(any(), any());
+    }
+
+    @Test
+    public void testListFilesIterativeReachesResolvedOverride() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        resolvingFileIO.configure(CatalogContext.create(new Options(), loader, null));
+
+        Path tableRoot = new Path("oss://bucket/table");
+        @SuppressWarnings("unchecked")
+        RemoteIterator<FileStatus> marker = mock(RemoteIterator.class);
+        when(delegate.listFilesIterative(tableRoot, true)).thenReturn(marker);
+
+        assertSame(marker, resolvingFileIO.listFilesIterative(tableRoot, true));
+        verify(delegate).listFilesIterative(tableRoot, true);
+        // the interface default would construct its own iterator backed by listStatus
+        verify(delegate, never()).listStatus(any());
     }
 }

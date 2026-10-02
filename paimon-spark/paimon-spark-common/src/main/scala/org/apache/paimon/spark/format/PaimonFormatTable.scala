@@ -34,14 +34,15 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionException, NoSuchPartitionsException}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog, TruncatableTable}
-import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
+import org.apache.spark.sql.connector.catalog.TableCapability.{ACCEPT_ANY_SCHEMA, BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
 import org.apache.spark.sql.connector.distributions.Distribution
 import org.apache.spark.sql.connector.expressions.SortOrder
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.types.{StringType, StructType}
+import org.apache.spark.sql.types.{DataType, StringType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util
@@ -71,7 +72,14 @@ case class PaimonFormatTable(table: FormatTable)
   def hasCatalogManagedPartitions: Boolean = partitionManager != null
 
   override def capabilities(): util.Set[TableCapability] = {
-    util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
+    val capabilities =
+      util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
+    // Only LEGACY needs our output resolver: Spark's generic V2 analyzer rejects it before
+    // aligning columns. Leave ANSI/STRICT on Spark's path, also when our extension is not loaded.
+    if (SQLConf.get.storeAssignmentPolicy == SQLConf.StoreAssignmentPolicy.LEGACY) {
+      capabilities.add(ACCEPT_ANY_SCHEMA)
+    }
+    capabilities
   }
 
   override def properties: util.Map[String, String] = {
@@ -97,6 +105,13 @@ case class PaimonFormatTable(table: FormatTable)
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    require(
+      DataType.equalsIgnoreNullability(schema, info.schema),
+      "Format table writes must match the table schema. " +
+        s"Expected ${schema.catalogString}, but found ${info.schema.catalogString}. " +
+        "Configure org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions " +
+        "to resolve write columns and types."
+    )
     PaimonFormatTableWriterBuilder(table, info.schema)
   }
 

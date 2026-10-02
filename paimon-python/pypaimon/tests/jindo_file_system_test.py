@@ -27,7 +27,12 @@ from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import jindo_file_system_handler as jindo_module
-from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
+from pypaimon.filesystem import oss_user_agent
+from pypaimon.filesystem.jindo_file_system_handler import (
+    JindoFileSystemHandler,
+    JindoInputFile,
+    JINDO_AVAILABLE,
+)
 
 
 class _RecordingConfig:
@@ -36,6 +41,47 @@ class _RecordingConfig:
 
     def set(self, key, value):
         self.values[key] = value
+
+
+class _RecordingInputStream:
+    def __init__(self, position=0):
+        self.position = position
+        self.seeks = []
+        self.reads = []
+        self.closed = False
+
+    def seek(self, position, whence=0):
+        self.seeks.append((position, whence))
+        self.position = position
+        return position
+
+    def tell(self):
+        return self.position
+
+    def read(self, size=None):
+        self.reads.append(size)
+        self.position += size or 0
+        return b"x" * (size or 0)
+
+    def close(self):
+        self.closed = True
+
+
+class JindoInputFileTest(unittest.TestCase):
+
+    def test_known_size_avoids_backend_seek_from_end(self):
+        stream = _RecordingInputStream()
+        input_file = JindoInputFile(stream, file_size=100)
+
+        self.assertEqual(95, input_file.seek(-5, os.SEEK_END))
+        self.assertEqual([(95, os.SEEK_SET)], stream.seeks)
+
+    def test_known_size_bounds_unlimited_read(self):
+        stream = _RecordingInputStream(position=40)
+        input_file = JindoInputFile(stream, file_size=100)
+
+        self.assertEqual(b"x" * 60, input_file.read())
+        self.assertEqual([60], stream.reads)
 
 
 class JindoConfigTest(unittest.TestCase):
@@ -96,7 +142,10 @@ class JindoConfigTest(unittest.TestCase):
         self.assertEqual(config.values["logger.dir"], "/tmp/jindo-log")
         self.assertEqual(config.values["logger.verbose"], "3")
         self.assertEqual(config.values["logger.console.log.enable"], "false")
-        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.features"], oss_user_agent.identity())
+        self.assertNotIn("fs.oss.user.agent.module", config.values)
+        self.assertNotIn("fs.oss.user.agent.extended", config.values)
         self.assertNotIn(OssOptions.OSS_IMPL.key(), config.values)
         self.assertNotIn("fs.oss.unset.option", config.values)
         self.assertNotIn("metastore", config.values)
@@ -126,6 +175,55 @@ class JindoConfigTest(unittest.TestCase):
         self.assertEqual(config.values["logger.verbose"], "3")
         self.assertNotIn("fs.oss.provider.endpoint", config.values)
         self.assertNotIn("fs.oss.provider.format", config.values)
+
+    def test_user_agent_keeps_user_values_and_appends_access_tracking(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({
+            "fs.oss.user.agent.module": "MyModule/1.0",
+            "fs.oss.user.agent.features": "Flink",
+            "fs.oss.user.agent.extended": "user/ext",
+            "dlf.access-tracking.extended-info": "acs/xxx k/v",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             mock.patch.object(oss_user_agent, "identity", return_value="pypaimon/2.2.dev0"):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.module"], "MyModule/1.0")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.features"], "pypaimon/2.2.dev0 Flink")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.extended"], "user/ext acs/xxx k/v")
+        self.assertNotIn("dlf.access-tracking.extended-info", config.values)
+
+    def test_user_agent_from_common_keys(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({
+            "user-agent.module": "MyApp/1.0",
+            "user-agent.features": "Flink",
+            "user-agent.extended": "vvr",
+            "dlf.access-tracking.extended-info": "uid/123",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             mock.patch.object(oss_user_agent, "identity", return_value="pypaimon/2.2.dev0"):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.module"], "MyApp/1.0")
+        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon/2.2.dev0 Flink")
+        self.assertEqual(config.values["fs.oss.user.agent.extended"], "vvr uid/123")
+
+    def test_user_agent_extended_from_access_tracking_only(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({"dlf.access-tracking.extended-info": "acs/xxx"})
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.extended"], "acs/xxx")
 
     def test_forwards_native_options_to_jindo_oss_filesystem(self):
         created_config = _RecordingConfig()

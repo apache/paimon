@@ -27,6 +27,7 @@ import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.mergetree.compact.CompactRewriterFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -85,6 +86,11 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry);
 
     void withCompactExecutor(ExecutorService compactExecutor);
+
+    /** Installs a compaction rewriter factory before any bucket writer is created. */
+    default FileStoreWrite<T> withCompactRewriterFactory(CompactRewriterFactory factory) {
+        throw new UnsupportedOperationException("Custom compaction rewriters are not supported.");
+    }
 
     /**
      * Write the data to the store according to the partition and bucket.

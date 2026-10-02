@@ -104,6 +104,6 @@ public class ChangelogCompactTaskSerializerTest {
                         null,
                         null,
                         null)
-                .withColumnMaxSequenceNumbers(new long[] {1L});
+                .withWriteColsSequences(new long[] {1L});
     }
 }

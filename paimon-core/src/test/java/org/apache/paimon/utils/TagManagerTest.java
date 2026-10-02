@@ -40,7 +40,9 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
@@ -51,6 +53,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
 import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
+import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for TagManager. */
@@ -69,6 +72,25 @@ public class TagManagerTest {
         commitIdentifier = 0L;
         root = tempDir.toString();
         tagManager = null;
+    }
+
+    @Test
+    public void testGetTagDeletedDuringRead() throws IOException {
+        FileIO spyFileIO = Mockito.spy(LocalFileIO.create());
+        tagManager = new TagManager(spyFileIO, new Path(root));
+        Path path = tagManager.tagPath("tag");
+        spyFileIO.tryToWriteAtomic(
+                path,
+                Tag.fromSnapshotAndTagTtl(createSnapshotWithMillis(1, 1000), null, null).toJson());
+        Mockito.doAnswer(
+                        invocation -> {
+                            spyFileIO.deleteQuietly(path);
+                            throw new IOException("404 Not Found");
+                        })
+                .when(spyFileIO)
+                .newInputStream(path);
+
+        assertThat(tagManager.get("tag")).isEmpty();
     }
 
     @Test

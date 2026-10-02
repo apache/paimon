@@ -24,7 +24,11 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LowerTransform;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -161,5 +165,143 @@ public class TableQueryAuthResultTest {
         // a blank entry is now rejected rather than ignored, see testInvalidRowFilterFailsClosed
         Map<String, String> masking = Collections.singletonMap("display", maskJson());
         assertThat(new TableQueryAuthResult(null, masking).hasRules()).isTrue();
+    }
+
+    /**
+     * Chain table planning aborts a query whose branches disagree, so a difference that is not a
+     * difference in the rules would fail a query it should have served.
+     */
+    @Test
+    public void testEqualsComparesRulesNotTheTransportShapeTheyArriveIn() {
+        Map<String, String> masking = Collections.singletonMap("display", maskJson());
+
+        // the same conjuncts listed in the other order
+        assertThat(
+                        new TableQueryAuthResult(
+                                Arrays.asList(filterJson(), otherFilterJson()), masking))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                Arrays.asList(otherFilterJson(), filterJson()), masking))
+                .hasSameHashCodeAs(
+                        new TableQueryAuthResult(
+                                Arrays.asList(otherFilterJson(), filterJson()), masking));
+
+        // an absent rule and an empty one
+        assertThat(new TableQueryAuthResult(Collections.singletonList(filterJson()), null))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                Collections.singletonList(filterJson()), Collections.emptyMap()));
+        assertThat(new TableQueryAuthResult(null, masking))
+                .isEqualTo(new TableQueryAuthResult(Collections.emptyList(), masking));
+
+        assertThat(new TableQueryAuthResult(null, masking))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                null, Collections.singletonMap("display", maskJson())));
+
+        // JSON spaced out by a different serializer
+        assertThat(new TableQueryAuthResult(Collections.singletonList(filterJson()), masking))
+                .isEqualTo(
+                        new TableQueryAuthResult(
+                                Collections.singletonList(spacedOut(filterJson())),
+                                Collections.singletonMap("display", spacedOut(maskJson()))));
+
+        // same shape, same column, still two different masks
+        assertThat(new TableQueryAuthResult(null, Collections.singletonMap("display", upperJson())))
+                .isNotEqualTo(
+                        new TableQueryAuthResult(
+                                null, Collections.singletonMap("display", lowerJson())));
+
+        // rules that really do differ
+        assertThat(new TableQueryAuthResult(Collections.singletonList(filterJson()), null))
+                .isNotEqualTo(
+                        new TableQueryAuthResult(
+                                Collections.singletonList(otherFilterJson()), null))
+                .isNotEqualTo(new TableQueryAuthResult(null, null));
+        assertThat(new TableQueryAuthResult(null, masking))
+                .isNotEqualTo(new TableQueryAuthResult(null, null))
+                .isNotEqualTo(
+                        new TableQueryAuthResult(
+                                null, Collections.singletonMap("other", maskJson())));
+    }
+
+    /** The same JSON, with another serializer's whitespace. */
+    private static String spacedOut(String json) {
+        return json.replace(",", ", ").replace(":", ": ");
+    }
+
+    private static String upperJson() {
+        return JsonSerdeUtil.toFlatJson(
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "extra", DataTypes.STRING()))));
+    }
+
+    private static String lowerJson() {
+        return JsonSerdeUtil.toFlatJson(
+                new LowerTransform(
+                        Collections.singletonList(new FieldRef(1, "extra", DataTypes.STRING()))));
+    }
+
+    private static String otherFilterJson() {
+        return JsonSerdeUtil.toFlatJson(
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "extra", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("y"))));
+    }
+
+    private static RowType infoRowType(String... nestedFields) {
+        org.apache.paimon.types.DataField[] fields =
+                new org.apache.paimon.types.DataField[nestedFields.length];
+        for (int i = 0; i < fields.length; i++) {
+            int id;
+            if ("secret".equals(nestedFields[i])) {
+                id = 2;
+            } else if ("region".equals(nestedFields[i])) {
+                id = 3;
+            } else {
+                id = i + 2;
+            }
+            fields[i] =
+                    new org.apache.paimon.types.DataField(id, nestedFields[i], DataTypes.STRING());
+        }
+        return RowType.of(
+                new org.apache.paimon.types.DataField(0, "pk", DataTypes.INT()),
+                new org.apache.paimon.types.DataField(1, "info", RowType.of(fields)));
+    }
+
+    private static Predicate rowFilterOnInfoSecret(RowType rowType) {
+        RowType info = (RowType) rowType.getTypeAt(1);
+        return new PredicateBuilder(rowType)
+                .equal(
+                        new NestedFieldTransform(
+                                new FieldRef(1, "info", info), Collections.singletonList("secret")),
+                        org.apache.paimon.data.BinaryString.fromString("x"));
+    }
+
+    /**
+     * A row filter on a nested field must not silently follow column pruning onto a different
+     * field. Remapping resolves the components by name, so a pruned-away leaf fails closed rather
+     * than letting the policy address whatever now sits at that position.
+     */
+    @Test
+    void testNestedRowFilterDoesNotDriftWhenTheLeafIsPruned() {
+        Predicate filter = rowFilterOnInfoSecret(infoRowType("secret", "region"));
+
+        // the projection kept "info" but dropped "info.secret"
+        RowType pruned = infoRowType("region");
+        assertThatThrownBy(() -> TableQueryAuthResult.remapPredicate(filter, pruned))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("secret");
+    }
+
+    /** Remapping onto a reordered row type must keep addressing the same nested field. */
+    @Test
+    void testNestedRowFilterFollowsTheFieldWhenPositionsShift() {
+        Predicate filter = rowFilterOnInfoSecret(infoRowType("secret", "region"));
+
+        Predicate remapped =
+                TableQueryAuthResult.remapPredicate(filter, infoRowType("region", "secret"));
+        assertThat(remapped.toString()).contains("info.secret");
     }
 }

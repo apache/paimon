@@ -19,7 +19,6 @@
 
 from typing import Optional
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
@@ -67,17 +66,7 @@ def table_at_snapshot(table, snapshot):
     if snapshot is None:
         return table
 
-    pin_options = {
-        CoreOptions.SCAN_MODE.key(): "from-snapshot",
-        CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
-    }
-    for option in (CoreOptions.SCAN_TAG_NAME,
-                   CoreOptions.SCAN_WATERMARK,
-                   CoreOptions.SCAN_TIMESTAMP,
-                   CoreOptions.SCAN_TIMESTAMP_MILLIS):
-        if option.key() in table.table_schema.options:
-            pin_options[option.key()] = None
-    return table.copy_without_time_travel(pin_options)
+    return table._copy_with_snapshot(snapshot)
 
 
 def for_range(live_row_ids: Optional[RoaringBitmap64],

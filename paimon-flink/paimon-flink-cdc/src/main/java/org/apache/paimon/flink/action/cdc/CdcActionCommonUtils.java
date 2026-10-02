@@ -33,7 +33,10 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -41,6 +44,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
+import static org.apache.paimon.utils.ParameterUtils.parseKeyValueString;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
@@ -60,6 +64,7 @@ public class CdcActionCommonUtils {
     public static final String TABLE_PREFIX_DB = "table_prefix_db";
     public static final String TABLE_SUFFIX_DB = "table_suffix_db";
     public static final String TABLE_MAPPING = "table_mapping";
+    public static final String TABLE_CONF_BY_TABLE = "table_conf_by_table";
     public static final String INCLUDING_TABLES = "including_tables";
     public static final String EXCLUDING_TABLES = "excluding_tables";
     public static final String INCLUDING_DBS = "including_dbs";
@@ -74,6 +79,40 @@ public class CdcActionCommonUtils {
     public static final String EAGER_INIT = "eager_init";
     public static final String SYNC_PKEYS_FROM_SOURCE_SCHEMA =
             "sync_primary_keys_from_source_schema";
+
+    public static Map<String, Map<String, String>> parseTableConfigByTable(
+            Collection<String> values) {
+        Map<String, Map<String, String>> result = new HashMap<>();
+        for (String value : values) {
+            int colon = value.indexOf(":");
+            checkArgument(
+                    colon > 0 && colon < value.length() - 1,
+                    "Invalid table configuration %s. Expected <source-table>:<key>=<value>.",
+                    value);
+            String table = value.substring(0, colon);
+            Map<String, String> parsed = new HashMap<>();
+            parseKeyValueString(parsed, value.substring(colon + 1));
+            String key = parsed.keySet().stream().findFirst().orElse("");
+            checkArgument(!key.isEmpty(), "Table configuration key must not be empty.");
+            checkArgument(
+                    !key.startsWith("sink."),
+                    "Configuration %s cannot be configured per table; use table_conf instead.",
+                    key);
+            checkArgument(!parsed.containsKey(""), "Table configuration key must not be empty.");
+            checkArgument(
+                    parsed.size() == 1,
+                    "Invalid table configuration %s. Expected exactly one key=value pair.",
+                    value);
+            Map<String, String> options = result.computeIfAbsent(table, ignored -> new HashMap<>());
+            checkArgument(
+                    !options.containsKey(key),
+                    "Duplicate table configuration for source table %s and key %s.",
+                    table,
+                    key);
+            options.put(key, parsed.get(key));
+        }
+        return result;
+    }
 
     public static void assertSchemaCompatible(
             TableSchema paimonSchema, List<DataField> sourceTableFields) {
@@ -118,7 +157,7 @@ public class CdcActionCommonUtils {
     public static List<String> listCaseConvert(List<String> origin, boolean caseSensitive) {
         return caseSensitive
                 ? origin
-                : origin.stream().map(String::toLowerCase).collect(Collectors.toList());
+                : origin.stream().map(s -> s.toLowerCase(Locale.ROOT)).collect(Collectors.toList());
     }
 
     public static Schema buildPaimonSchema(

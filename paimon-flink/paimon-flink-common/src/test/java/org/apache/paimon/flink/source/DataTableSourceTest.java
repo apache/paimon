@@ -24,6 +24,7 @@ import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -32,9 +33,11 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.table.system.ReadOptimizedTable;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -48,6 +51,7 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.abilities.SupportsRowLevelModificationScan.RowLevelModificationType;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -80,6 +84,7 @@ class DataTableSourceTest {
                 new DataTableSource(
                         ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        assertThat(runtimeProvider.getParallelism()).isEmpty();
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         sEnv1.setParallelism(-1);
         DataStream<RowData> sourceStream1 =
@@ -100,6 +105,46 @@ class DataTableSourceTest {
         // The default parallelism is not 1
         assertThat(sourceStream2.getParallelism()).isNotEqualTo(1);
         assertThat(sourceStream2.getParallelism()).isEqualTo(sEnv2.getParallelism());
+    }
+
+    @Test
+    void testConfiguredScanParallelism() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket", "1",
+                                "bucket-key", "a",
+                                "scan.parallelism", "3"));
+
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
+        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+
+        assertThat(runtimeProvider.getParallelism()).contains(3);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+        env.setParallelism(7);
+        DataStream<RowData> sourceStream =
+                runtimeProvider.produceDataStream(s -> Optional.empty(), env);
+        assertThat(sourceStream.getParallelism()).isEqualTo(3);
+    }
+
+    @Test
+    void testEmptyRowLevelModificationScanParallelism() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket", "-1",
+                                "row-tracking.enabled", "true",
+                                "data-evolution.enabled", "true"));
+
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
+        tableSource.applyRowLevelModificationScan(RowLevelModificationType.DELETE, null);
+
+        assertThat(runtimeProvider(tableSource).getParallelism()).contains(1);
     }
 
     @Test
@@ -168,7 +213,91 @@ class DataTableSourceTest {
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         DataStream<RowData> sourceStream1 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv1);
+        assertThat(runtimeProvider.getParallelism()).contains(3);
         assertThat(sourceStream1.getParallelism()).isEqualTo(3);
+    }
+
+    @Test
+    void testBoundedSystemTableUsesFileSizeWeightModeAfterCopy() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket",
+                                "1",
+                                "bucket-key",
+                                "a",
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key(),
+                                FlinkConnectorOptions.SplitAssignMode.FAIR.toString(),
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key(),
+                                FlinkConnectorOptions.SplitWeightMode.FILE_SIZE.toString()));
+        SystemTableSource tableSource =
+                new SystemTableSource(
+                                new ReadOptimizedTable(fileStoreTable),
+                                false,
+                                ObjectIdentifier.of("cat", "db", "table$ro"))
+                        .copy();
+
+        StaticFileStoreSource source = staticSource(tableSource);
+        java.lang.reflect.Field weightFuncField =
+                StaticFileStoreSource.class.getDeclaredField("splitWeightFunc");
+        weightFuncField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        SerializableFunction<FileStoreSourceSplit, Long> weightFunc =
+                (SerializableFunction<FileStoreSourceSplit, Long>) weightFuncField.get(source);
+        FileStoreSourceSplit split =
+                new FileStoreSourceSplit(
+                        "split-1",
+                        DataSplit.builder()
+                                .withSnapshot(1L)
+                                .withPartition(org.apache.paimon.data.BinaryRow.EMPTY_ROW)
+                                .withBucket(0)
+                                .withBucketPath("bucket-0")
+                                .withDataFiles(
+                                        Collections.singletonList(
+                                                DataFileMeta.forAppend(
+                                                        "file-1",
+                                                        35L,
+                                                        1000L,
+                                                        null,
+                                                        0L,
+                                                        0L,
+                                                        0L,
+                                                        Collections.emptyList(),
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null)))
+                                .build());
+
+        assertThat(weightFunc.apply(split)).isEqualTo(35L);
+    }
+
+    @Test
+    void testBoundedSystemTableRejectsFileSizeWithPreemptiveMode() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket",
+                                "1",
+                                "bucket-key",
+                                "a",
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key(),
+                                FlinkConnectorOptions.SplitAssignMode.PREEMPTIVE.toString(),
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key(),
+                                FlinkConnectorOptions.SplitWeightMode.FILE_SIZE.toString()));
+
+        assertThatThrownBy(
+                        () ->
+                                new SystemTableSource(
+                                        new ReadOptimizedTable(fileStoreTable),
+                                        false,
+                                        ObjectIdentifier.of("cat", "db", "table$ro")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key())
+                .hasMessageContaining(
+                        FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key());
     }
 
     @Test
@@ -249,6 +378,17 @@ class DataTableSourceTest {
                                 throw new UnsupportedOperationException();
                             }
                         });
+    }
+
+    private StaticFileStoreSource staticSource(SystemTableSource tableSource) {
+        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+        DataStream<RowData> sourceStream =
+                runtimeProvider.produceDataStream(s -> Optional.empty(), env);
+        return (StaticFileStoreSource)
+                ((org.apache.flink.streaming.api.transformations.SourceTransformation<?, ?, ?>)
+                                sourceStream.getTransformation())
+                        .getSource();
     }
 
     private FileStoreTable createTable(Map<String, String> options) throws Exception {

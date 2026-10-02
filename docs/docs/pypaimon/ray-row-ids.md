@@ -143,6 +143,11 @@ ds = read_by_row_id(
   ranges raise an error; matching numeric IDs from another table cannot be
   distinguished. Persist the source table and snapshot or tag with row-ID work
   lists, and select that version when reading them.
+- A tag selected through `scan.tag-name` or `scan.version` remains readable after
+  its main snapshot metadata expires, while the tag retains the snapshot's files.
+  Each call captures the resolved snapshot for planning and worker reads; changing
+  the tag before a lazy Dataset executes does not switch that Dataset to another
+  snapshot.
 - Deletion-vectors-enabled tables are not supported yet, for the same reason as
   `update_by_row_id`.
 - For a non-empty target, the `row_ids` source is consumed lazily by the downstream

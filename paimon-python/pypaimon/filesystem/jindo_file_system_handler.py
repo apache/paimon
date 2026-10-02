@@ -16,6 +16,9 @@
 # under the License.
 
 import logging
+import os
+import threading
+from collections import OrderedDict
 
 import pyarrow as pa
 from pyarrow import PythonFile
@@ -41,6 +44,7 @@ except ImportError:
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem import oss_user_agent
 
 
 _JINDO_CONFIG_PREFIXES = ("fs.", "logger.")
@@ -50,6 +54,7 @@ _CASE_SENSITIVE_JINDO_CONFIG_KEYS = {
     OssOptions.OSS_ACCESS_KEY_SECRET.key().lower(): OssOptions.OSS_ACCESS_KEY_SECRET.key(),
     OssOptions.OSS_SECURITY_TOKEN.key().lower(): OssOptions.OSS_SECURITY_TOKEN.key(),
 }
+_KNOWN_FILE_SIZE_CACHE_MAX_ENTRIES = 4096
 
 
 def _jindo_config_value(value) -> str:
@@ -96,7 +101,14 @@ def build_jindo_config(catalog_options: Options):
         config.set("fs.oss.endpoint", endpoint_clean)
     if region:
         config.set("fs.oss.region", region)
-    config.set("fs.oss.user.agent.features", "pypaimon")
+    # This backend fills the module itself, so pypaimon/<version> leads the features.
+    user_agent_module = oss_user_agent.module(catalog_options)
+    if user_agent_module:
+        config.set(oss_user_agent.USER_AGENT_MODULE, user_agent_module)
+    config.set(oss_user_agent.USER_AGENT_FEATURES, oss_user_agent.features(catalog_options))
+    user_agent_extended = oss_user_agent.extended(catalog_options)
+    if user_agent_extended:
+        config.set(oss_user_agent.USER_AGENT_EXTENDED, user_agent_extended)
     return config
 
 
@@ -118,8 +130,9 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 
 
 class JindoInputFile:
-    def __init__(self, jindo_stream):
+    def __init__(self, jindo_stream, file_size=None):
         self._stream = jindo_stream
+        self._file_size = file_size
         self._closed = False
 
     @property
@@ -132,13 +145,18 @@ class JindoInputFile:
         if self.closed:
             raise ValueError("I/O operation on closed file")
         if nbytes is None or nbytes < 0:
-            return self._stream.read()
+            if self._file_size is None:
+                return self._stream.read()
+            nbytes = max(0, self._file_size - self.tell())
         return self._stream.read(nbytes)
 
     def seek(self, position: int, whence: int = 0):
         if self.closed:
             raise ValueError("I/O operation on closed file")
-        self._stream.seek(position, whence)
+        if whence == os.SEEK_END and self._file_size is not None:
+            position = self._file_size + position
+            whence = os.SEEK_SET
+        return self._stream.seek(position, whence)
 
     def tell(self) -> int:
         if self.closed:
@@ -210,9 +228,28 @@ class JindoFileSystemHandler(FileSystemHandler):
         self.logger = logging.getLogger(__name__)
         self.root_path = root_path
         self.properties = catalog_options
+        self._known_file_sizes = OrderedDict()
+        self._known_file_sizes_lock = threading.Lock()
 
         config = build_jindo_config(catalog_options)
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
+
+    def register_file_size(self, path: str, file_size: int):
+        """Register an immutable file's size supplied by Paimon metadata."""
+        normalized = self._normalize_path(path)
+        with self._known_file_sizes_lock:
+            self._known_file_sizes[normalized] = file_size
+            self._known_file_sizes.move_to_end(normalized)
+            while (len(self._known_file_sizes)
+                   > _KNOWN_FILE_SIZE_CACHE_MAX_ENTRIES):
+                self._known_file_sizes.popitem(last=False)
+
+    def _known_file_size(self, path: str):
+        with self._known_file_sizes_lock:
+            file_size = self._known_file_sizes.get(path)
+            if file_size is not None:
+                self._known_file_sizes.move_to_end(path)
+            return file_size
 
     def __eq__(self, other):
         if isinstance(other, JindoFileSystemHandler):
@@ -325,12 +362,16 @@ class JindoFileSystemHandler(FileSystemHandler):
     def open_input_stream(self, path: str):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
-        return PythonFile(JindoInputFile(jindo_stream), mode="r")
+        return PythonFile(
+            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            mode="r")
 
     def open_input_file(self, path: str):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
-        return PythonFile(JindoInputFile(jindo_stream), mode="r")
+        return PythonFile(
+            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            mode="r")
 
     def open_output_stream(self, path: str, metadata):
         normalized = self._normalize_path(path)

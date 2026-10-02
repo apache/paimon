@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -56,6 +57,28 @@ public interface TableScan {
     }
 
     List<PartitionEntry> listPartitionEntries();
+
+    /**
+     * Returns all non-empty partitions belonging to the top {@code num} distinct partition
+     * prefixes.
+     *
+     * <p>A prefix consists of the first {@code partitionFieldCount} partition fields. Prefixes and
+     * returned partitions are ordered descending by their logical field types. All returned rows
+     * contain the complete partition, so selecting a prefix may return more than {@code num} rows.
+     * Null values, including default partitions, are ordered below non-null values. The current
+     * scan's partition filters are respected.
+     *
+     * <p>This operation is only supported for batch scans of partitioned tables. {@code num} must
+     * be positive, and {@code partitionFieldCount} must be between one and the number of partition
+     * fields.
+     *
+     * @since 2.2.0
+     */
+    @Experimental
+    default List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        throw new UnsupportedOperationException(
+                "Finding top partitions is not supported by " + getClass().getName() + ".");
+    }
 
     /**
      * Plan of scan.

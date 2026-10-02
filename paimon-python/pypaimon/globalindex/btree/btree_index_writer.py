@@ -17,6 +17,7 @@
 
 """BTree global index writer compatible with Java's SST-backed format."""
 
+from array import array
 import struct
 import zlib
 from typing import List, Optional
@@ -27,6 +28,10 @@ from pypaimon.globalindex.index_file_utils import (
     write_uncompressed_block,
     write_var_len_int,
     write_var_len_long,
+)
+from pypaimon.globalindex.btree.bloom_filter import (
+    BloomFilter,
+    murmur_hash_bytes,
 )
 from pypaimon.globalindex.result_entry import ResultEntry
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
@@ -39,6 +44,7 @@ _BTREE_MAGIC_NUMBER = 0x50425449
 _BTREE_CURRENT_VERSION = 1
 _BLOCK_ALIGNED = 0
 _BLOCK_UNALIGNED = 1
+_BLOOM_FILTER_FPP = 0.05
 
 
 def _write_block_handle(offset: int, size: int) -> bytes:
@@ -100,15 +106,23 @@ class _BlockWriter:
 
 
 class _SstFileWriter:
-    def __init__(self, out: PositionOutput, block_size: int):
+    def __init__(
+        self,
+        out: PositionOutput,
+        block_size: int,
+        bloom_filter_enabled: bool,
+    ):
         self._out = out
         self._block_size = block_size
         self._data_block_writer = _BlockWriter()
         self._index_block_writer = _BlockWriter()
         self._last_key: Optional[bytes] = None
+        self._bloom_hashes = array('i') if bloom_filter_enabled else None
 
     def put(self, key: bytes, value: bytes) -> None:
         self._data_block_writer.add(key, value)
+        if self._bloom_hashes is not None:
+            self._bloom_hashes.append(murmur_hash_bytes(key))
         self._last_key = key
 
         if self._data_block_writer.memory() > self._block_size:
@@ -122,7 +136,19 @@ class _SstFileWriter:
             self._last_key, _write_block_handle(block_offset, block_size))
 
     def write_bloom_filter(self):
-        return None
+        if self._bloom_hashes is None:
+            return None
+
+        bloom_filter = BloomFilter.from_hashes(
+            self._bloom_hashes, _BLOOM_FILTER_FPP)
+        self._bloom_hashes = None
+        if bloom_filter is None:
+            return None
+
+        data = bloom_filter.to_bytes()
+        offset = self._out.pos
+        self._out.write(data)
+        return offset, len(data), bloom_filter.expected_entries
 
     def write_index_block(self):
         return self._write_block(self._index_block_writer)
@@ -150,6 +176,7 @@ class BTreeIndexWriter:
         index_path: str,
         key_serializer,
         block_size: int = 64 * 1024,
+        bloom_filter_enabled: bool = False,
     ):
         self.file_name = new_global_index_file_name(BTREE_IDENTIFIER)
         self._file_io = file_io
@@ -166,7 +193,8 @@ class BTreeIndexWriter:
         self._file_io.check_or_mkdirs(self._index_path)
         self._output = PositionOutput(
             self._file_io.new_output_stream(self._file_path()))
-        self._sst = _SstFileWriter(self._output, block_size)
+        self._sst = _SstFileWriter(
+            self._output, block_size, bloom_filter_enabled)
 
     def write(self, key, row_id: int) -> None:
         self._row_count += 1

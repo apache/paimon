@@ -92,6 +92,8 @@ public class LegacyManifestFileMetaSerializerPaimon10 extends ObjectSerializer<M
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
     }
 }

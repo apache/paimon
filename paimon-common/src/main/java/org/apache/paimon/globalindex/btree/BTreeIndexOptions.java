@@ -25,6 +25,15 @@ import org.apache.paimon.options.MemorySize;
 /** Options for BTree index. */
 public class BTreeIndexOptions {
 
+    public static final ConfigOption<Integer> BTREE_INDEX_FILE_VERSION =
+            ConfigOptions.key("btree-index.file-version")
+                    .intType()
+                    .defaultValue(BTreeFileFooter.DEFAULT_WRITE_VERSION)
+                    .withDescription(
+                            "The BTree index file version to write. Version 1 is the default for "
+                                    + "reader compatibility; version 2 enables adaptive posting "
+                                    + "list encoding and requires all readers to support it.");
+
     public static final ConfigOption<String> BTREE_INDEX_COMPRESSION =
             ConfigOptions.key("btree-index.compression")
                     .stringType()
@@ -42,6 +51,13 @@ public class BTreeIndexOptions {
                     .memoryType()
                     .defaultValue(MemorySize.ofKibiBytes(64))
                     .withDescription("The block size to use for BTreeIndex");
+
+    public static final ConfigOption<Boolean> BTREE_INDEX_BLOOM_FILTER_ENABLED =
+            ConfigOptions.key("btree-index.bloom-filter.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable the Bloom filter for BTree index point lookups.");
 
     public static final ConfigOption<MemorySize> BTREE_INDEX_CACHE_SIZE =
             ConfigOptions.key("btree-index.cache-size")

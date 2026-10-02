@@ -50,12 +50,41 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** test for {@link RangeBitmapFileIndex}. */
 public class RangeBitmapFileIndexTest {
 
     private static final int ROW_COUNT = 10000;
     private static final int BOUND = 1000000;
+
+    @Test
+    public void testChunkSizeBeyondIntRangeRejected() {
+        VarCharType varCharType = new VarCharType();
+
+        // the boundary is the whole guard: one byte past int range is rejected, int range itself
+        // is accepted. "2g" and "4g" would both only re-test the same comparison
+        Options justPastIntRange = new Options();
+        justPastIntRange.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2147483648 bytes");
+        assertThatThrownBy(
+                        () ->
+                                new RangeBitmapFileIndex(varCharType, justPastIntRange)
+                                        .createWriter())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("chunk-size");
+
+        Options atIntRange = new Options();
+        atIntRange.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2147483647 bytes");
+        assertThat(new RangeBitmapFileIndex(varCharType, atIntRange).createWriter()).isNotNull();
+
+        // a large but in-range chunk size still writes and serializes
+        Options valid = new Options();
+        valid.setString(RangeBitmapFileIndex.CHUNK_SIZE, "16mb");
+        FileIndexWriter writer = new RangeBitmapFileIndex(varCharType, valid).createWriter();
+        writer.write(BinaryString.fromString("a"));
+        writer.write(BinaryString.fromString("b"));
+        assertThat(writer.serializedBytes()).isNotEmpty();
+    }
 
     @RepeatedTest(10)
     public void test() {

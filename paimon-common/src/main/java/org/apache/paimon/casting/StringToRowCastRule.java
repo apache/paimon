@@ -26,11 +26,8 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.StringUtils;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -93,7 +90,7 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
             if (content.isEmpty()) {
                 return createNullRow(fieldCount);
             }
-            List<String> fieldValues = splitRowFields(content);
+            List<TokenSplitter.Token> fieldValues = TokenSplitter.split(content);
             if (fieldValues.size() != fieldCount) {
                 throw new RuntimeException(
                         "Row field count mismatch. Expected: "
@@ -137,60 +134,22 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
     }
 
     private GenericRow createRowFromFields(
-            List<String> fieldValues,
+            List<TokenSplitter.Token> fieldValues,
             CastExecutor<BinaryString, Object>[] fieldCastExecutors,
             int fieldCount) {
         GenericRow row = new GenericRow(fieldCount);
         for (int i = 0; i < fieldCount; i++) {
-            String fieldValue = fieldValues.get(i).trim();
-            Object value = parseFieldValue(fieldValue, fieldCastExecutors[i]);
-            row.setField(i, value);
+            row.setField(i, parseFieldValue(fieldValues.get(i), fieldCastExecutors[i]));
         }
         return row;
     }
 
     private Object parseFieldValue(
-            String fieldValue, CastExecutor<BinaryString, Object> castExecutor) {
-        return "null".equals(fieldValue)
+            TokenSplitter.Token token, CastExecutor<BinaryString, Object> castExecutor) {
+        String value = token.value();
+        // only an unquoted null is the null field; "null" is the four-character string
+        return !token.literal() && "null".equals(value)
                 ? null
-                : castExecutor.cast(BinaryString.fromString(fieldValue));
-    }
-
-    private List<String> splitRowFields(String content) {
-        List<String> fields = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        Stack<Character> bracketStack = new Stack<>();
-        boolean inQuotes = false;
-        boolean escaped = false;
-
-        for (char c : content.toCharArray()) {
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                inQuotes = !inQuotes;
-            } else if (!inQuotes) {
-                if (StringUtils.isOpenBracket(c)) {
-                    bracketStack.push(c);
-                } else if (StringUtils.isCloseBracket(c) && !bracketStack.isEmpty()) {
-                    bracketStack.pop();
-                } else if (c == ',' && bracketStack.isEmpty()) {
-                    addCurrentField(fields, current);
-                    continue;
-                }
-            }
-            current.append(c);
-        }
-
-        addCurrentField(fields, current);
-        return fields;
-    }
-
-    private void addCurrentField(List<String> fields, StringBuilder current) {
-        if (current.length() > 0) {
-            fields.add(current.toString());
-            current.setLength(0);
-        }
+                : castExecutor.cast(BinaryString.fromString(value));
     }
 }

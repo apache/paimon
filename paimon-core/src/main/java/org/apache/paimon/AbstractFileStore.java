@@ -89,7 +89,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -109,6 +108,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final CatalogEnvironment catalogEnvironment;
 
     @Nullable private SegmentsCache<Path> readManifestCache;
+    @Nullable private SegmentsCache<Path> manifestSidecarCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
 
     protected AbstractFileStore(
@@ -211,7 +211,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestCompression(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                readManifestCache);
+                readManifestCache,
+                manifestSidecarCache,
+                options);
     }
 
     @Override
@@ -366,7 +368,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public TagManager newTagManager() {
-        return new TagManager(fileIO, options.path(), DEFAULT_MAIN_BRANCH, options);
+        return new TagManager(fileIO, options.path(), options.branch(), options);
     }
 
     @Override
@@ -613,6 +615,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         this.readManifestCache = manifestCache;
+    }
+
+    @Override
+    public void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache) {
+        this.manifestSidecarCache = manifestSidecarCache;
     }
 
     @Override

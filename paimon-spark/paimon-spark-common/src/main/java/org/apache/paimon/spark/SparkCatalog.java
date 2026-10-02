@@ -614,7 +614,7 @@ public class SparkCatalog extends SparkBaseCatalog
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
                 normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
-                normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
+                normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase(Locale.ROOT));
             } else {
                 throw new UnsupportedOperationException(
                         String.format(

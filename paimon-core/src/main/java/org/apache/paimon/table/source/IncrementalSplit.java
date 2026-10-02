@@ -40,6 +40,8 @@ import java.util.Objects;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Incremental split for batch and streaming. */
@@ -257,8 +259,8 @@ public class IncrementalSplit implements Split {
         FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerializer =
                 DeletionFile::deserialize;
 
-        int beforeNumber = in.readInt();
-        List<DataFileMeta> beforeFiles = new ArrayList<>(beforeNumber);
+        int beforeNumber = readCount(in, "IncrementalSplit");
+        List<DataFileMeta> beforeFiles = new ArrayList<>(presizedCapacity(beforeNumber));
         for (int i = 0; i < beforeNumber; i++) {
             beforeFiles.add(dataFileMetaSerializer.deserialize(in));
         }
@@ -266,8 +268,8 @@ public class IncrementalSplit implements Split {
         List<DeletionFile> beforeDeletionFiles =
                 DeletionFile.deserializeList(in, deletionFileSerializer);
 
-        int fileNumber = in.readInt();
-        List<DataFileMeta> afterFiles = new ArrayList<>(fileNumber);
+        int fileNumber = readCount(in, "IncrementalSplit");
+        List<DataFileMeta> afterFiles = new ArrayList<>(presizedCapacity(fileNumber));
         for (int i = 0; i < fileNumber; i++) {
             afterFiles.add(dataFileMetaSerializer.deserialize(in));
         }

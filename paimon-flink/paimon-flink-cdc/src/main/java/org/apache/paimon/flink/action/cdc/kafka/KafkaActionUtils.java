@@ -176,7 +176,7 @@ public class KafkaActionUtils {
                                                 offsetResetConfig,
                                                 Arrays.stream(OffsetResetStrategy.values())
                                                         .map(Enum::name)
-                                                        .map(String::toLowerCase)
+                                                        .map(s -> s.toLowerCase(Locale.ROOT))
                                                         .collect(Collectors.joining(",")))));
     }
 

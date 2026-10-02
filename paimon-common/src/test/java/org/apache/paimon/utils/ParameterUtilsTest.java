@@ -18,15 +18,78 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.types.DataField;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ParameterUtils}. */
 class ParameterUtilsTest {
+
+    @Test
+    void testParseDataFieldArrayWithoutIds() {
+        // create_function passes a user-written parameter list, which may omit the ids; each
+        // field still has to get its own instead of every one landing on 0
+        List<DataField> fields =
+                ParameterUtils.parseDataFieldArray(
+                        "[{\"name\":\"a\",\"type\":\"INT\"},"
+                                + "{\"name\":\"b\",\"type\":\"STRING\"},"
+                                + "{\"name\":\"c\",\"type\":\"BIGINT\"}]");
+
+        assertThat(fields).extracting(DataField::id).containsExactly(0, 1, 2);
+        assertThat(fields).extracting(DataField::name).containsExactly("a", "b", "c");
+    }
+
+    @Test
+    void testParseDataFieldArrayKeepsExplicitIds() {
+        List<DataField> fields =
+                ParameterUtils.parseDataFieldArray(
+                        "[{\"id\":3,\"name\":\"a\",\"type\":\"INT\"},"
+                                + "{\"id\":9,\"name\":\"b\",\"type\":\"STRING\"}]");
+
+        assertThat(fields).extracting(DataField::id).containsExactly(3, 9);
+    }
+
+    @Test
+    void testParseDataFieldArrayRejectsPartialIds() {
+        // both orders must be rejected: supplying a counter to a list that already carries an id
+        // would let the id-less fields silently draw a colliding one
+        assertThatThrownBy(
+                        () ->
+                                ParameterUtils.parseDataFieldArray(
+                                        "[{\"name\":\"a\",\"type\":\"INT\"},"
+                                                + "{\"id\":7,\"name\":\"b\",\"type\":\"STRING\"}]"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Field id is required");
+
+        assertThatThrownBy(
+                        () ->
+                                ParameterUtils.parseDataFieldArray(
+                                        "[{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},"
+                                                + "{\"name\":\"b\",\"type\":\"STRING\"}]"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Field id is required");
+    }
+
+    @Test
+    void testParseDataFieldArrayRejectsIdLessNestedField() {
+        // a nested row inside an explicitly numbered list would otherwise draw id 0 and collide
+        // with the first top-level field
+        assertThatThrownBy(
+                        () ->
+                                ParameterUtils.parseDataFieldArray(
+                                        "[{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},"
+                                                + "{\"id\":1,\"name\":\"b\",\"type\":"
+                                                + "{\"type\":\"ROW\",\"fields\":"
+                                                + "[{\"name\":\"x\",\"type\":\"INT\"}]}}]"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Field id is required");
+    }
 
     @Test
     void testParseIntegerRanges() {

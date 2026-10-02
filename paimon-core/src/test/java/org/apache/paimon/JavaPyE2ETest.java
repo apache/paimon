@@ -580,6 +580,73 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonFloatingSequence() throws Exception {
+        for (String type : Arrays.asList("float", "double")) {
+            for (String order : Arrays.asList("ascending", "descending")) {
+                for (String grouping : Arrays.asList("batch", "commits")) {
+                    FileStoreTable table =
+                            (FileStoreTable)
+                                    catalog.getTable(
+                                            identifier(
+                                                    "floating_sequence_"
+                                                            + type
+                                                            + "_"
+                                                            + order
+                                                            + "_"
+                                                            + grouping));
+                    List<String> result =
+                            getResult(
+                                    table.newRead(),
+                                    table.newScan().plan().splits(),
+                                    row -> {
+                                        String sequence =
+                                                row.isNullAt(1)
+                                                        ? "null"
+                                                        : "float".equals(type)
+                                                                ? Float.toString(row.getFloat(1))
+                                                                : Double.toString(row.getDouble(1));
+                                        return row.getInt(0)
+                                                + ":"
+                                                + row.getString(2)
+                                                + ":"
+                                                + sequence;
+                                    });
+                    List<String> expected =
+                            new ArrayList<>(
+                                    Arrays.asList(
+                                            "5:nan:NaN",
+                                            "6:nan:NaN",
+                                            "8:nan-last:NaN",
+                                            "10:null-last:null"));
+                    if ("ascending".equals(order)) {
+                        expected.addAll(
+                                Arrays.asList(
+                                        "1:nan:NaN",
+                                        "2:nan:NaN",
+                                        "3:positive-zero:0.0",
+                                        "4:positive-zero:0.0",
+                                        "7:nan:NaN",
+                                        "9:finite:1.0"));
+                    } else {
+                        expected.addAll(
+                                Arrays.asList(
+                                        "1:finite:1.0",
+                                        "2:finite:1.0",
+                                        "3:negative-zero:-0.0",
+                                        "4:negative-zero:-0.0",
+                                        "7:infinity:Infinity",
+                                        "9:negative-infinity:-Infinity"));
+                    }
+                    assertThat(result)
+                            .as("%s sequence, %s, Python %s", type, order, grouping)
+                            .containsExactlyInAnyOrderElementsOf(expected);
+                }
+            }
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testReadPythonDynamicBucketHashIndex() throws Exception {
         Identifier identifier = identifier("dynamic_hash_python_to_java");
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
@@ -1567,6 +1634,120 @@ public class JavaPyE2ETest {
         assertAdditionalMapBlobKeyTypes(table, "python");
     }
 
+    /** Java writes shared-shredding MAP columns for Python to read. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteSharedShreddingMapTable() throws Exception {
+        for (String format : Arrays.asList("parquet", "orc")) {
+            Identifier identifier = identifier("shared_shredding_map_java_test_" + format);
+            catalog.dropTable(identifier, true);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column(
+                                    "metrics",
+                                    DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))
+                            .option(BUCKET.key(), "-1")
+                            .option(CoreOptions.FILE_FORMAT.key(), format)
+                            .option(CoreOptions.WRITE_ONLY.key(), "true")
+                            .option("fields.metrics.map.storage-layout", "shared-shredding")
+                            .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                            .build();
+            catalog.createTable(identifier, schema, false);
+
+            Map<Object, Object> first = new LinkedHashMap<>();
+            first.put(BinaryString.fromString("hot"), 10L);
+            first.put(BinaryString.fromString("warm"), 20L);
+            first.put(BinaryString.fromString("overflow"), 30L);
+            Map<Object, Object> second = new LinkedHashMap<>();
+            second.put(BinaryString.fromString("hot"), null);
+            second.put(BinaryString.fromString("new"), 40L);
+
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(1, new GenericMap(first)));
+                write.write(GenericRow.of(2, new GenericMap(second)));
+                write.write(GenericRow.of(3, new GenericMap(Collections.emptyMap())));
+                write.write(GenericRow.of(4, null));
+                commit.commit(write.prepareCommit());
+            }
+
+            Map<Object, Object> later = new LinkedHashMap<>();
+            later.put(BinaryString.fromString("late"), 50L);
+            later.put(BinaryString.fromString("hot"), 60L);
+            table = (FileStoreTable) catalog.getTable(identifier);
+            writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(5, new GenericMap(later)));
+                commit.commit(write.prepareCommit());
+            }
+        }
+    }
+
+    /** Java reads shared-shredding MAP columns written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaReadSharedShreddingMapTable() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable)
+                        catalog.getTable(identifier("shared_shredding_map_python_test_parquet"));
+        Map<Integer, Map<String, Long>> rows = new HashMap<>();
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                table.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        for (int column = 2; column <= 3; column++) {
+                            if (id == 3) {
+                                assertThat(row.isNullAt(column)).isTrue();
+                            } else {
+                                InternalMap required = row.getMap(column);
+                                assertThat(required.size()).isEqualTo(id == 2 ? 0 : 1);
+                                if (id != 2) {
+                                    InternalArray values = required.valueArray();
+                                    long value =
+                                            column == 2
+                                                    ? values.getLong(0)
+                                                    : values.getRow(0, 1).getLong(0);
+                                    assertThat(value).isEqualTo(id == 1 ? 1L : 2L);
+                                }
+                            }
+                        }
+                        if (row.isNullAt(1)) {
+                            rows.put(id, null);
+                            return;
+                        }
+                        InternalMap map = row.getMap(1);
+                        InternalArray keys = map.keyArray();
+                        InternalArray values = map.valueArray();
+                        Map<String, Long> converted = new LinkedHashMap<>();
+                        for (int i = 0; i < map.size(); i++) {
+                            converted.put(
+                                    keys.getString(i).toString(),
+                                    values.isNullAt(i) ? null : values.getLong(i));
+                        }
+                        rows.put(id, converted);
+                    });
+        }
+
+        assertThat(rows).containsOnlyKeys(1, 2, 3, 4);
+        assertThat(rows.get(1))
+                .containsOnlyKeys("hot", "warm", "overflow")
+                .containsEntry("hot", 10L)
+                .containsEntry("warm", 20L)
+                .containsEntry("overflow", 30L);
+        assertThat(rows.get(2))
+                .containsOnlyKeys("hot", "new")
+                .containsEntry("hot", null)
+                .containsEntry("new", 40L);
+        assertThat(rows.get(3)).isEmpty();
+        assertThat(rows.get(4)).isNull();
+    }
+
     private Map<Integer, Map<Integer, byte[]>> readMapBlobRows(FileStoreTable table)
             throws Exception {
         Map<Integer, Map<Integer, byte[]>> rows = new HashMap<>();
@@ -2191,7 +2372,8 @@ public class JavaPyE2ETest {
     private List<CommitMessage> buildSortedIndex(
             FileStoreTable table, String indexType, String indexFieldName) throws Exception {
         SortedGlobalIndexScanner scanner =
-                new SortedGlobalIndexScanner(table, indexType).withIndexField(indexFieldName);
+                new SortedGlobalIndexScanner(table, indexType)
+                        .withIndexFields(Collections.singletonList(indexFieldName));
         ScanResult<DataSplit> scanResult =
                 scanner.scan()
                         .orElseThrow(

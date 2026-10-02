@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+
 from setuptools import find_packages, setup
 from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
@@ -216,6 +217,11 @@ def read_requirements():
 
 install_requires = read_requirements()
 
+VIDEO_DEPENDENCIES = [
+    'av>=12,<19; python_version>="3.10"',
+    'Pillow; python_version>="3.10"',
+]
+
 LEROBOT_DEPENDENCIES = [
     # datasets 4.1+ may select PyArrow 21+, while PyPaimon currently
     # supports PyArrow <20. Pandas 2.2.2+ supports NumPy 2.x selected
@@ -248,6 +254,7 @@ setup(
         ],
     },
     extras_require={
+        'video': VIDEO_DEPENDENCIES,
         'hdf5': [
             # HDF5 loading is explicitly guarded and documented as Python 3.8+.
             'h5py>=3,<4; python_version>="3.8"',
@@ -262,6 +269,7 @@ setup(
         ],
         'torch': [
             'torch',
+            'Pillow',
         ],
         'act': LEROBOT_DEPENDENCIES + [
             'Pillow; python_version>="3.10"',
@@ -270,10 +278,12 @@ setup(
             'daft>=0.7.6; python_version>="3.10"',
         ],
         'oss': [
+            'oss2>=2.18,<3',
             'ossfs>=2021.8; python_version<"3.8"',
             'ossfs>=2023; python_version>="3.8"'
         ],
         'jindo': [
+            'oss2>=2.18,<3',
             'pyjindosdk>=6.10.4',
         ],
         'lance': [
@@ -290,7 +300,7 @@ setup(
             'lumina-data>=0.1.0'
         ],
         'vindex': [
-            'paimon-vindex==0.4.0; python_version>="3.9"',
+            'paimon-vindex==0.5.0; python_version>="3.9"',
         ],
         'full-text': [
             'paimon-ftindex==0.1.0; python_version>="3.8"',

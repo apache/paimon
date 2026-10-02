@@ -23,11 +23,11 @@ import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.filesystem.oss_file_io import OssFileIO
 
 
 class OSSFileIOTest(unittest.TestCase):
-    """Test cases for PyArrowFileIO with OSS."""
+    """Test cases for OssFileIO with OSS."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -60,8 +60,8 @@ class OSSFileIOTest(unittest.TestCase):
             OssOptions.OSS_IMPL.key(): oss_impl,
         })
         
-        # Create PyArrowFileIO instance
-        self.file_io = PyArrowFileIO(self.root_path, self.catalog_options)
+        # Create OssFileIO instance
+        self.file_io = OssFileIO(self.root_path, self.catalog_options)
         
         # Create unique test prefix to avoid conflicts
         self.test_prefix = f"test-{uuid.uuid4().hex[:8]}/"
@@ -332,7 +332,7 @@ class OSSFileIOTest(unittest.TestCase):
         self.file_io.mkdirs(target_dir)
         self.assertFalse(
             self.file_io.try_to_write_atomic(target_dir, "test content"),
-            "PyArrowFileIO should return False when target is a directory")
+            "OssFileIO should return False when target is a directory")
         
         # Verify no file was created inside the directory
         # List directory contents to verify it's empty
@@ -348,7 +348,7 @@ class OSSFileIOTest(unittest.TestCase):
         self.file_io.delete(normal_file)
         self.assertFalse(
             self.file_io.try_to_write_atomic(target_dir, "test content"),
-            "PyArrowFileIO should return False when target is a directory")
+            "OssFileIO should return False when target is a directory")
         
         # Verify no file was created inside the directory
         dir_contents = self.file_io.filesystem.get_file_info(selector)

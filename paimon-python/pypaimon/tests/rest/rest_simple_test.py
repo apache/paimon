@@ -18,6 +18,7 @@
 import sys
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, TableAlreadyExistException, \
@@ -58,6 +59,8 @@ class RESTSimpleTest(RESTBaseTest):
         }
         self.expected = pa.Table.from_pydict(self.data, schema=self.pa_schema)
 
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
     def test_with_shard_ao_unaware_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.drop_table('default.test_with_shard_ao_unaware_bucket', True)
@@ -169,6 +172,8 @@ class RESTSimpleTest(RESTBaseTest):
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
     def test_with_shard_ao_fixed_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'],
                                             options={'bucket': '5', 'bucket-key': 'item_id'})

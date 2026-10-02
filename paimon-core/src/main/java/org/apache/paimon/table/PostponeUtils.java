@@ -54,7 +54,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
-import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
+import static org.apache.paimon.CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -511,7 +511,7 @@ public class PostponeUtils {
         Map<String, String> rewriteOptions = new HashMap<>();
         rewriteOptions.put(BUCKET.key(), String.valueOf(numBuckets));
         rewriteOptions.put(WRITE_ONLY.key(), "false");
-        rewriteOptions.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(snapshotId));
+        rewriteOptions.put(COMMIT_LAST_SAFE_SNAPSHOT.key(), String.valueOf(snapshotId));
         return table.copy(rewriteOptions);
     }
 

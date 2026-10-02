@@ -329,7 +329,7 @@ public class JarFileChecker {
     }
 
     private static String getFileName(Path path) {
-        return path.getFileName().toString().toLowerCase();
+        return path.getFileName().toString().toLowerCase(Locale.ROOT);
     }
 
     private static boolean pathStartsWith(Path file, String path) {

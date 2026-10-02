@@ -24,6 +24,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 
 /* This file is based on source code of LongPacker from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -80,6 +81,25 @@ public final class VarLengthIntUtils {
             }
         }
         throw new Error("Malformed long.");
+    }
+
+    /** Decodes a canonical nonnegative long from the buffer and advances its position. */
+    public static long decodeLong(ByteBuffer in) throws IOException {
+        long value = 0;
+        for (int shift = 0; shift < 63; shift += 7) {
+            if (!in.hasRemaining()) {
+                throw new EOFException("Truncated variable-length long");
+            }
+            int b = Byte.toUnsignedInt(in.get());
+            value |= (long) (b & 0x7f) << shift;
+            if ((b & 0x80) == 0) {
+                if (shift != 0 && (b & 0x7f) == 0) {
+                    throw new IOException("Noncanonical variable-length long");
+                }
+                return value;
+            }
+        }
+        throw new IOException("Invalid variable-length long");
     }
 
     public static long decodeLong(byte[] ba, int index) {
@@ -156,6 +176,15 @@ public final class VarLengthIntUtils {
             }
         }
         throw new Error("Malformed integer.");
+    }
+
+    /** Decodes a canonical nonnegative int from the buffer and advances its position. */
+    public static int decodeInt(ByteBuffer in) throws IOException {
+        long value = decodeLong(in);
+        if (value > Integer.MAX_VALUE) {
+            throw new IOException("Variable-length integer exceeds Integer.MAX_VALUE");
+        }
+        return (int) value;
     }
 
     public static int decodeInt(InputStream is) throws IOException {

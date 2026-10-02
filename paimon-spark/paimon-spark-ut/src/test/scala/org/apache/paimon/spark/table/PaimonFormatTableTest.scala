@@ -278,18 +278,17 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("PaimonFormatTable: max_pt skips the default partition") {
+  test("PaimonFormatTable: max_pt ranks the default partition lowest") {
     val tableName = "max_pt_null"
     withTable(tableName) {
       sql(
         s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (ds STRING) " +
           "TBLPROPERTIES ('format-table.implementation'='paimon', " +
           "'metastore.partitioned-table'='true')")
-      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
-      // A null partition value comes back as a real null, which the typed comparator would
-      // dereference; it is also not what anyone means by the max partition.
       sql(s"INSERT INTO $tableName VALUES (2, null)")
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row(null)))
 
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
       checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
     }
   }
@@ -324,16 +323,14 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("max_pt on a FileStoreTable skips a null partition instead of failing") {
+  test("max_pt on a FileStoreTable ranks a null partition lowest") {
     val tableName = "max_pt_fst_null"
     withTable(tableName) {
       sql(s"CREATE TABLE $tableName (id INT, ds STRING) USING paimon PARTITIONED BY (ds)")
-      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
       sql(s"INSERT INTO $tableName VALUES (2, null)")
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row(null)))
 
-      // This is a behaviour change for FileStoreTable, not only for format tables: a null
-      // top-level partition value used to reach InternalRowUtils.compare and throw, and is now
-      // skipped. Pinned here so the change is visible rather than incidental.
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
       checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
     }
   }

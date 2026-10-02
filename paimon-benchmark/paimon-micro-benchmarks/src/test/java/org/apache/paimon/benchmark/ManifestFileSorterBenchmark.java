@@ -300,7 +300,9 @@ public class ManifestFileSorterBenchmark {
                         "zstd",
                         pathFactory,
                         TARGET_MANIFEST_SIZE,
-                        null)
+                        null,
+                        null,
+                        new CoreOptions(new Options()))
                 .create();
     }
 

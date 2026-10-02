@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 
@@ -36,8 +37,31 @@ import java.util.concurrent.CompletableFuture;
 public interface GlobalIndexReader
         extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
 
+    /** Evaluate a composite predicate. An empty Optional means the reader cannot use the index. */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitComposite(Predicate predicate) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotContains(
+            FieldRef fieldRef, Object literal) {
         return CompletableFuture.completedFuture(Optional.empty());
     }
 
@@ -56,6 +80,34 @@ public interface GlobalIndexReader
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
             FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    /**
+     * Evaluate a bounded range. Flags specify whether each endpoint is included. Readers without a
+     * combined scan retain the supported bounds as candidate filters.
+     */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        CompletableFuture<Optional<GlobalIndexResult>> lower =
+                fromInclusive
+                        ? visitGreaterOrEqual(fieldRef, from)
+                        : visitGreaterThan(fieldRef, from);
+        CompletableFuture<Optional<GlobalIndexResult>> upper =
+                toInclusive ? visitLessOrEqual(fieldRef, to) : visitLessThan(fieldRef, to);
+        return lower.thenCombine(
+                upper,
+                (left, right) -> {
+                    if (!left.isPresent()) {
+                        return right;
+                    }
+                    return right.isPresent() ? Optional.of(left.get().and(right.get())) : left;
+                });
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotLike(
+            FieldRef fieldRef, Object literal) {
         return CompletableFuture.completedFuture(Optional.empty());
     }
 

@@ -67,6 +67,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.append.dataevolution.SerializationAssignment.writeProperties;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecuteCloseable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -427,6 +428,14 @@ public class DataEvolutionRowIdReassigner {
         Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
         RewrittenIndexManifest rewrittenIndexManifest = rewriteIndexManifest(assignment);
 
+        Map<String, String> properties =
+                writeProperties(
+                        table,
+                        assignment.snapshot,
+                        assignment.rowIdMappings,
+                        assignment.firstAssignedRowId,
+                        assignment.nextRowId);
+
         boolean success;
         try (FileStoreCommitImpl commit =
                 (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
@@ -438,7 +447,8 @@ public class DataEvolutionRowIdReassigner {
                             baseManifestList,
                             deltaManifestList,
                             rewrittenIndexManifest.indexManifest,
-                            assignment.nextRowId);
+                            assignment.nextRowId,
+                            properties);
         }
         return new CommitAssignmentResult(
                 success, rewrittenDataManifests.fileCount, rewrittenIndexManifest.indexFileCount);

@@ -84,3 +84,11 @@ _FULL_VERSION = _load_full_version()
 def full_version():
     """Return ``<pypaimon-version>-<commit-id>`` for snapshot provenance."""
     return _FULL_VERSION
+
+
+def version():
+    """Return the pypaimon version embedded at build time, or None when unknown."""
+    prefix = "python-"
+    if not _FULL_VERSION.startswith(prefix):
+        return None
+    return _FULL_VERSION[len(prefix):].rsplit("-", 1)[0] or None

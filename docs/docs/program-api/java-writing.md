@@ -180,3 +180,32 @@ selector API: they require dedicated bucket assignment and `write(row, bucket)` 
 
 For a Flink job, use [FlinkSinkBuilder](flink-api#write-to-table) to integrate routing, checkpoints,
 and commits with the engine.
+
+## Custom Primary-Key Compaction Rewriters
+
+Applications can install a `CompactRewriterFactory` on a table writer to replace or wrap the
+file-rewrite work for each primary-key partition and bucket. Paimon continues to select compaction
+inputs, schedule work, and collect results for checkpoint commits. The factory receives the normal
+rewriter selected for the table's merge engine, changelog producer, and deletion-vector options,
+so an implementation can delegate unsupported operations to it.
+
+```java
+write.withCompactRewriterFactory((partition, bucket, defaultRewriter) -> {
+    // Return a custom CompactRewriter here, or retain Paimon's implementation.
+    return defaultRewriter;
+});
+```
+
+Configure the factory before writing, restoring, or compacting any bucket. Install it again on each
+recovered writer; the factory and rewriters are not checkpoint state. The callback receives an
+independent partition copy and is invoked for each newly opened or restored bucket writer.
+
+A custom rewriter implements `rewrite(outputLevel, dropDelete, sections)` and
+`upgrade(outputLevel, file)`, returning `CompactResult` file changes. It must preserve Paimon's
+merge, sequence, changelog, deletion-vector, record-expiration, and metadata contracts. The returned rewriter owns the
+default rewriter and must close it when closed, even if it handles every operation itself. Paimon
+closes the default rewriter if factory creation fails or returns null.
+
+This hook supports primary-key merge-tree writers. Append, postpone, and primary-key clustering
+writers reject it. With `write-only = true`, the factory is never invoked. Installing a factory
+after a bucket writer has been created is rejected.

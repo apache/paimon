@@ -70,6 +70,24 @@ public final class ManifestAvroReader implements AutoCloseable {
         }
     }
 
+    /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
+    public byte[] headerBytes() {
+        return blockReader.headerBytes();
+    }
+
+    /**
+     * Returns the block offset relative to the initial input position; read immediately after
+     * {@link #next()}.
+     */
+    public long blockOffset() {
+        return blockReader.blockOffset();
+    }
+
+    /** Returns the last-read block's encoded length, including its header and sync marker. */
+    public long blockLength() {
+        return blockReader.blockLength();
+    }
+
     /** Returns whether another raw Avro block is available. */
     public boolean hasNext() throws IOException {
         return blockReader.hasNextBlock();
@@ -382,7 +400,10 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         private static void validateFieldType(
                 AvroRecordDecoder decoder, int position, FieldType expectedType) {
-            FieldType actualType = decoder.fieldType(position);
+            FieldType actualType =
+                    expectedType == FieldType.RECORD
+                            ? decoder.nonNullFieldType(position)
+                            : decoder.fieldType(position);
             if (actualType != expectedType) {
                 throw new IllegalArgumentException(
                         String.format(
@@ -416,6 +437,18 @@ public final class ManifestAvroReader implements AutoCloseable {
         /** Lazily decompresses this block and returns an iterator over one reusable row. */
         public RowIterator toRows(RowType projectedType) throws IOException {
             return toRows(projectedType, null, null, true);
+        }
+
+        /**
+         * Lazily decompresses this block, applies manifest filters before decoding file metadata,
+         * and returns an iterator over one reusable row.
+         */
+        public RowIterator toRows(
+                RowType projectedType,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter)
+                throws IOException {
+            return toRows(projectedType, partitionFilter, bucketFilter, true);
         }
 
         private RowIterator toRows(

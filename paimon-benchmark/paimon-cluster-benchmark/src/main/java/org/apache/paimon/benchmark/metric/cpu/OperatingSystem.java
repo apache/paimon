@@ -18,6 +18,8 @@
 
 package org.apache.paimon.benchmark.metric.cpu;
 
+import java.util.Locale;
+
 /** An enumeration indicating the operating system that the JVM runs on. */
 public enum OperatingSystem {
     LINUX,
@@ -115,7 +117,7 @@ public enum OperatingSystem {
         if (osName.startsWith(FREEBSD_OS_PREFIX)) {
             return FREE_BSD;
         }
-        String osNameLowerCase = osName.toLowerCase();
+        String osNameLowerCase = osName.toLowerCase(Locale.ROOT);
         if (osNameLowerCase.contains(SOLARIS_OS_INFIX_1)
                 || osNameLowerCase.contains(SOLARIS_OS_INFIX_2)) {
             return SOLARIS;

@@ -26,6 +26,7 @@ import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Preconditions;
@@ -123,7 +124,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
         Map<Long, List<FileStoreSourceSplit>> splitsBySnapshot = new TreeMap<>();
 
         for (FileStoreSourceSplit split : splits) {
-            long snapshotId = ((DataSplit) split.split()).snapshotId();
+            long snapshotId = ((DataSplit) Splits.underlying(split.split())).snapshotId();
             splitsBySnapshot.computeIfAbsent(snapshotId, snapshot -> new ArrayList<>()).add(split);
         }
 

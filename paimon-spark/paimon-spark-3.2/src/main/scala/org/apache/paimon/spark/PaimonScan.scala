@@ -37,5 +37,5 @@ case class PaimonScan(
     override val pushedFullTextSearch: Option[FullTextSearch] = None,
     override val pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty,
     override val pushedMapSelectedKeys: Map[String, Seq[String]] = Map.empty,
-    bucketedScanDisabled: Boolean = true)
+    preserveDataGrouping: Boolean = false)
   extends PaimonBaseScan(table) {}

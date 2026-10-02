@@ -36,6 +36,7 @@ import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
@@ -81,6 +82,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -492,6 +494,55 @@ public class ParquetReadWriteTest {
         }
 
         innerTestTypes(folder, values, rowGroupSize);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testReadWithUnprojectedFilter(boolean conjunction) throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("status", DataTypes.STRING())
+                        .build();
+        Path path =
+                createTempParquetFileByPaimon(
+                        folder,
+                        Arrays.asList(
+                                GenericRow.of(0, BinaryString.fromString("A")),
+                                GenericRow.of(1, BinaryString.fromString("B"))),
+                        1024,
+                        rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate status = builder.equal(1, BinaryString.fromString("A"));
+        Predicate id = builder.equal(0, -1);
+        Predicate predicate =
+                conjunction ? PredicateBuilder.and(status, id) : PredicateBuilder.or(status, id);
+
+        // Exercise page pruning without row-group filters masking its behavior.
+        Options options = new Options();
+        options.setString("parquet.filter.stats.enabled", "false");
+        options.setString("parquet.filter.dictionary.enabled", "false");
+        options.setString("parquet.filter.bloom.enabled", "false");
+        ParquetReaderFactory factory =
+                new ParquetReaderFactory(
+                        options,
+                        rowType.project(new int[] {0}),
+                        1024,
+                        Collections.singletonList(predicate));
+        LocalFileIO io = LocalFileIO.create();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                factory.createReader(
+                        new FormatReaderContext(io, path, io.getFileSize(path), null, null))) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        if (conjunction) {
+            // AND must retain the projected id predicate, which excludes every row.
+            assertThat(ids).isEmpty();
+        } else {
+            // OR must retain the status match, even though its column is not projected.
+            assertThat(ids).contains(0);
+        }
     }
 
     @ParameterizedTest

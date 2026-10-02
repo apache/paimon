@@ -52,6 +52,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
@@ -68,7 +69,7 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static java.util.Collections.singletonMap;
-import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
+import static org.apache.paimon.CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -388,8 +389,15 @@ public class TableCommitTest {
         commit1.close();
     }
 
-    @Test
-    public void testStrictModeForCompact() throws Exception {
+    @ParameterizedTest
+    @CsvSource({
+        "commit.last-safe-snapshot, true",
+        "commit.last-safe-snapshot, false",
+        "commit.strict-mode.last-safe-snapshot, true",
+        "commit.strict-mode.last-safe-snapshot, false"
+    })
+    public void testStrictModeForCompact(String lastSafeKey, boolean strictEnabled)
+            throws Exception {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
@@ -428,7 +436,11 @@ public class TableCommitTest {
 
         // test skip this commit check
         String user2 = UUID.randomUUID().toString();
-        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        Map<String, String> commitOptions = new HashMap<>();
+        commitOptions.put(lastSafeKey, "2");
+        commitOptions.put(
+                CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), String.valueOf(strictEnabled));
+        table = table.copy(commitOptions);
         TableWriteImpl<?> write2 = table.newWrite(user2);
         TableCommitImpl commit2 = table.newCommit(user2);
 
@@ -444,16 +456,21 @@ public class TableCommitTest {
         assertThatCode(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
                 .doesNotThrowAnyException();
 
-        // COMPACT on the same partition should be checked and fail
+        // COMPACT on the same partition is rejected only when strict mode is enabled.
         write1.write(GenericRow.of(2, 6, 6L));
         write1.compact(pt2, 0, true);
         commit1.commit(3, write1.prepareCommit(true, 3));
 
         write2.write(GenericRow.of(2, 7, 7L));
-        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+        if (strictEnabled) {
+            assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining(
+                            "Giving up committing as commit.strict-mode.enabled is true.");
+        } else {
+            commit2.commit(3, write2.prepareCommit(false, 3));
+            assertThat(table.snapshotManager().latestSnapshot().commitUser()).isEqualTo(user2);
+        }
 
         write1.close();
         commit1.close();
@@ -502,7 +519,7 @@ public class TableCommitTest {
         // test skip this commit check
         String user2 = UUID.randomUUID().toString();
         FileStoreTable tableWithStrict =
-                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
         TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
 
@@ -532,7 +549,7 @@ public class TableCommitTest {
         assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(true, 3)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+                        "Giving up committing as commit.strict-mode.enabled is true.");
 
         write1.close();
         commit1.close();
@@ -585,7 +602,7 @@ public class TableCommitTest {
 
         String user2 = UUID.randomUUID().toString();
         FileStoreTable tableWithStrict =
-                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "1"));
+                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "1"));
         TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
         TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
         write2.write(GenericRow.of(1, 1, 1L));
@@ -620,7 +637,7 @@ public class TableCommitTest {
             assertThatThrownBy(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining(
-                            "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+                            "Giving up committing as commit.strict-mode.enabled is true.");
         }
 
         write1.close();
@@ -675,7 +692,7 @@ public class TableCommitTest {
         // user2 with strict mode, last-safe-snapshot=2 (skip its own snapshot 2)
         String user2 = UUID.randomUUID().toString();
         FileStoreTable tableWithStrict =
-                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
         TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
         write2.write(GenericRow.of(1, 1, 1L));
@@ -699,7 +716,7 @@ public class TableCommitTest {
         assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(true, 3)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+                        "Giving up committing as commit.strict-mode.enabled is true.");
 
         write1.close();
         commit1.close();
@@ -764,7 +781,7 @@ public class TableCommitTest {
         // and avoid throwing.
         String user2 = UUID.randomUUID().toString();
         FileStoreTable tableWithStrict =
-                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
         TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
         write2.write(GenericRow.of(3, 1, 1L));
@@ -852,7 +869,7 @@ public class TableCommitTest {
         // test skip this commit check
 
         String user2 = UUID.randomUUID().toString();
-        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        table = table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = table.newWrite(user2);
         TableCommitImpl commit2 = table.newCommit(user2).withOverwrite(singletonMap("pt", "1"));
 
@@ -898,7 +915,7 @@ public class TableCommitTest {
         assertThatThrownBy(() -> commit2.commit(4, write2.prepareCommit(false, 4)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+                        "Giving up committing as commit.strict-mode.enabled is true.");
 
         write1.close();
         commit1.close();
@@ -983,7 +1000,7 @@ public class TableCommitTest {
         // get filtered out and the conflict is silently missed.
         String user2 = UUID.randomUUID().toString();
         FileStoreTable tableWithStrict =
-                fixedTable.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "0"));
+                fixedTable.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "0"));
         TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
         TableCommitImpl commit2 =
                 tableWithStrict.newCommit(user2).withOverwrite(singletonMap("pt", "1"));
@@ -991,7 +1008,7 @@ public class TableCommitTest {
         assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+                        "Giving up committing as commit.strict-mode.enabled is true.");
 
         write2.close();
         commit2.close();
@@ -1036,7 +1053,7 @@ public class TableCommitTest {
         // test skip this commit check
 
         String user2 = UUID.randomUUID().toString();
-        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        table = table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = table.newWrite(user2);
         TableCommitImpl commit2 = table.newCommit(user2);
 
@@ -1091,7 +1108,7 @@ public class TableCommitTest {
         // test skip this commit check
         String user2 = UUID.randomUUID().toString();
         FileStoreTable tableWithStrict =
-                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
         TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
 
@@ -1108,7 +1125,7 @@ public class TableCommitTest {
         assertThatThrownBy(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+                        "Giving up committing as commit.strict-mode.enabled is true.");
 
         // APPEND with fixed bucket files should be caught when user2 commits OVERWRITE,
         // since non-partitioned table entries share BinaryRow.EMPTY_ROW so they always
@@ -1119,7 +1136,7 @@ public class TableCommitTest {
         commit1Append.commit(3, write1Append.prepareCommit(false, 3));
 
         FileStoreTable tableWithStrict2 =
-                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "3"));
+                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "3"));
         TableWriteImpl<?> write2Ow = tableWithStrict2.newWrite(user2);
         TableCommitImpl commit2Ow =
                 tableWithStrict2.newCommit(user2).withOverwrite(Collections.emptyMap());
@@ -1127,7 +1144,7 @@ public class TableCommitTest {
         assertThatThrownBy(() -> commit2Ow.commit(4, write2Ow.prepareCommit(false, 4)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+                        "Giving up committing as commit.strict-mode.enabled is true.");
 
         write1Append.close();
         commit1Append.close();

@@ -1,0 +1,186 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.globalindex.btree;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Complete tuple matching and conservative manifest metadata pruning. */
+class CompositeBTreePredicateTest {
+
+    private final List<DataField> fields =
+            Arrays.asList(
+                    new DataField(10, "category", DataTypes.STRING()),
+                    new DataField(20, "item_number", DataTypes.INT()));
+    private final PredicateBuilder builder = new PredicateBuilder(new RowType(fields));
+    private final BTreeGlobalIndexerFactory factory = new BTreeGlobalIndexerFactory();
+    private final KeySerializer serializer = new CompositeKeySerializer(new RowType(fields));
+
+    @Test
+    void testMatchesInIndexOrderRegardlessOfPredicateOrder() {
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(1, -3), builder.equal(0, BinaryString.fromString("a")));
+        List<LeafPredicate> matched = CompositeBTreePredicate.match(fields, predicate).get();
+        assertThat(
+                        matched.stream()
+                                .map(leaf -> leaf.literals().get(0))
+                                .collect(Collectors.toList()))
+                .containsExactly(BinaryString.fromString("a"), -3);
+        assertThat(CompositeBTreePredicate.isContradictory(fields, predicate)).isFalse();
+        assertThat(
+                        CompositeBTreePredicate.match(
+                                        Arrays.asList(fields.get(1), fields.get(0)), predicate)
+                                .get().stream()
+                                .map(leaf -> leaf.literals().get(0))
+                                .collect(Collectors.toList()))
+                .containsExactly(-3, BinaryString.fromString("a"));
+    }
+
+    @Test
+    void testRequiresCompleteConjunctiveEqualitiesAndMatchingTypes() {
+        assertThat(
+                        CompositeBTreePredicate.match(
+                                fields, builder.equal(0, BinaryString.fromString("a"))))
+                .isEmpty();
+        assertThat(
+                        CompositeBTreePredicate.match(
+                                fields,
+                                PredicateBuilder.or(
+                                        builder.equal(0, BinaryString.fromString("a")),
+                                        builder.equal(1, 7))))
+                .isEmpty();
+        assertThat(
+                        CompositeBTreePredicate.match(
+                                fields,
+                                PredicateBuilder.and(
+                                        builder.equal(0, BinaryString.fromString("a")),
+                                        builder.greaterThan(1, 7))))
+                .isEmpty();
+        PredicateBuilder incompatible =
+                new PredicateBuilder(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(10, "category", DataTypes.INT()),
+                                        fields.get(1))));
+        assertThat(
+                        CompositeBTreePredicate.match(
+                                fields,
+                                PredicateBuilder.and(
+                                        incompatible.equal(0, 1), incompatible.equal(1, 7))))
+                .isEmpty();
+    }
+
+    @Test
+    void testPrunesUsingTypedTupleEndpointsInclusively() {
+        GlobalIndexIOMeta first = file("first", "a", -3, "a", 7);
+        GlobalIndexIOMeta second = file("second", "a", 10, "b", 2);
+        GlobalIndexIOMeta third = file("third", "b", 3, "c", 4);
+        List<GlobalIndexIOMeta> files = Arrays.asList(first, second, third);
+        assertThat(factory.selectFiles(fields, equal("a", -3), files)).containsExactly(first);
+        assertThat(factory.selectFiles(fields, equal("a", 7), files)).containsExactly(first);
+        assertThat(factory.selectFiles(fields, equal("a", 10), files)).containsExactly(second);
+        assertThat(factory.selectFiles(fields, equal("b", 2), files)).containsExactly(second);
+        assertThat(factory.selectFiles(fields, equal("b", 3), files)).containsExactly(third);
+        assertThat(factory.selectFiles(fields, equal("a", 8), files)).isEmpty();
+        assertThat(factory.selectFiles(fields, equal("z", 7), files)).isEmpty();
+    }
+
+    @Test
+    void testContradictionsAndSqlNullEqualityPruneAllFiles() {
+        List<GlobalIndexIOMeta> files = Collections.singletonList(file("first", "a", -3, "a", 7));
+        for (Predicate predicate :
+                Arrays.asList(
+                        PredicateBuilder.and(equal("a", 7), builder.equal(1, 8)),
+                        PredicateBuilder.and(
+                                equal("a", 7), builder.equal(0, BinaryString.fromString("b"))),
+                        PredicateBuilder.and(builder.equal(0, null), builder.equal(1, 7)),
+                        PredicateBuilder.and(
+                                builder.equal(0, BinaryString.fromString("a")),
+                                builder.equal(1, null)))) {
+            assertThat(CompositeBTreePredicate.isContradictory(fields, predicate)).isTrue();
+            assertThat(factory.selectFiles(fields, predicate, files)).isEmpty();
+        }
+        Predicate redundant = PredicateBuilder.and(equal("a", 7), builder.equal(1, 7));
+        assertThat(CompositeBTreePredicate.isContradictory(fields, redundant)).isFalse();
+        assertThat(factory.selectFiles(fields, redundant, files)).containsExactlyElementsOf(files);
+    }
+
+    @Test
+    void testRetainsFilesWhenCompleteKeyOrMetadataIsUnavailable() {
+        GlobalIndexIOMeta file = file("first", "a", -3, "a", 7);
+        List<GlobalIndexIOMeta> files = Collections.singletonList(file);
+        assertThat(factory.selectFiles(fields, builder.equal(1, 100), files)).isSameAs(files);
+        assertThat(
+                        factory.selectFiles(
+                                fields,
+                                PredicateBuilder.and(
+                                        builder.equal(0, BinaryString.fromString("a")),
+                                        builder.greaterThan(1, 100)),
+                                files))
+                .isSameAs(files);
+        List<GlobalIndexIOMeta> unknown =
+                Arrays.asList(file, new GlobalIndexIOMeta(new Path("unknown"), 1, null));
+        assertThat(factory.selectFiles(fields, equal("z", 7), unknown)).isSameAs(unknown);
+        assertThat(
+                        factory.selectFiles(
+                                fields,
+                                PredicateBuilder.and(equal("a", 7), builder.equal(1, 8)),
+                                unknown))
+                .isEmpty();
+    }
+
+    private Predicate equal(String category, int number) {
+        return PredicateBuilder.and(
+                builder.equal(1, number), builder.equal(0, BinaryString.fromString(category)));
+    }
+
+    private GlobalIndexIOMeta file(
+            String name, String first, int firstNumber, String last, int lastNumber) {
+        byte[] metadata =
+                new SortedIndexFileMeta(
+                                serializer.serialize(
+                                        GenericRow.of(BinaryString.fromString(first), firstNumber)),
+                                serializer.serialize(
+                                        GenericRow.of(BinaryString.fromString(last), lastNumber)),
+                                false)
+                        .serialize();
+        return new GlobalIndexIOMeta(new Path(name), 1, metadata);
+    }
+}

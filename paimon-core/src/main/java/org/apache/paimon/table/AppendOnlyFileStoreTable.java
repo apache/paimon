@@ -133,7 +133,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                         schema(),
                         coreOptions(),
                         catalogEnvironment.dependencyReadContext(),
-                        () -> new AppendTableRead(providerFactories, schema()))
+                        () -> new AppendTableRead(providerFactories, schema()),
+                        fileIO())
                 : new AppendTableRead(providerFactories, schema());
     }
 

@@ -37,7 +37,8 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 1;
+    /** Version 2 appends the scalar index files usable as a row pre-filter. */
+    private static final int VERSION = 2;
 
     private static final ThreadLocal<IndexFileMetaSerializer> INDEX_SERIALIZER =
             ThreadLocal.withInitial(IndexFileMetaSerializer::new);
@@ -47,6 +48,7 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
     private long rowRangeEnd;
     private List<Range> searchRowRanges;
     private transient List<IndexFileMeta> fullTextIndexFiles;
+    private transient List<IndexFileMeta> scalarIndexFiles;
 
     public IndexFullTextSearchSplit(
             long rowRangeStart, long rowRangeEnd, List<IndexFileMeta> fullTextIndexFiles) {
@@ -72,6 +74,22 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
             long rowRangeEnd,
             List<IndexFileMeta> fullTextIndexFiles,
             List<Range> searchRowRanges) {
+        this(
+                columnName,
+                rowRangeStart,
+                rowRangeEnd,
+                fullTextIndexFiles,
+                searchRowRanges,
+                Collections.emptyList());
+    }
+
+    public IndexFullTextSearchSplit(
+            String columnName,
+            long rowRangeStart,
+            long rowRangeEnd,
+            List<IndexFileMeta> fullTextIndexFiles,
+            List<Range> searchRowRanges,
+            List<IndexFileMeta> scalarIndexFiles) {
         this.columnName = columnName;
         this.rowRangeStart = rowRangeStart;
         this.rowRangeEnd = rowRangeEnd;
@@ -86,6 +104,7 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
             }
         }
         this.searchRowRanges = Collections.unmodifiableList(ranges);
+        this.scalarIndexFiles = Collections.unmodifiableList(new ArrayList<>(scalarIndexFiles));
     }
 
     public String columnName() {
@@ -108,24 +127,35 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
         return fullTextIndexFiles;
     }
 
+    /** Scalar global index files intersecting this split, used to pre-filter rows. */
+    public List<IndexFileMeta> scalarIndexFiles() {
+        return scalarIndexFiles;
+    }
+
     private void writeObject(ObjectOutputStream out) throws IOException {
         out.defaultWriteObject();
         out.writeInt(VERSION);
         IndexFileMetaSerializer serializer = INDEX_SERIALIZER.get();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         serializer.serializeList(fullTextIndexFiles, view);
+        serializer.serializeList(scalarIndexFiles, view);
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
         int version = in.readInt();
-        if (version != VERSION) {
+        if (version < 1 || version > VERSION) {
             throw new IOException("Unsupported IndexFullTextSearchSplit version: " + version);
         }
         IndexFileMetaSerializer serializer = INDEX_SERIALIZER.get();
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
         this.fullTextIndexFiles =
                 Collections.unmodifiableList(new ArrayList<>(serializer.deserializeList(view)));
+        this.scalarIndexFiles =
+                version >= 2
+                        ? Collections.unmodifiableList(
+                                new ArrayList<>(serializer.deserializeList(view)))
+                        : Collections.emptyList();
         if (searchRowRanges == null) {
             searchRowRanges = Collections.singletonList(new Range(rowRangeStart, rowRangeEnd));
         } else {
@@ -143,13 +173,19 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
                 && rowRangeEnd == that.rowRangeEnd
                 && Objects.equals(columnName, that.columnName)
                 && Objects.equals(searchRowRanges, that.searchRowRanges)
-                && Objects.equals(fullTextIndexFiles, that.fullTextIndexFiles);
+                && Objects.equals(fullTextIndexFiles, that.fullTextIndexFiles)
+                && Objects.equals(scalarIndexFiles, that.scalarIndexFiles);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(
-                columnName, rowRangeStart, rowRangeEnd, searchRowRanges, fullTextIndexFiles);
+                columnName,
+                rowRangeStart,
+                rowRangeEnd,
+                searchRowRanges,
+                fullTextIndexFiles,
+                scalarIndexFiles);
     }
 
     @Override
@@ -166,6 +202,8 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
                 + searchRowRanges
                 + ", fullTextIndexFiles="
                 + fullTextIndexFiles
+                + ", scalarIndexFiles="
+                + scalarIndexFiles
                 + '}';
     }
 }

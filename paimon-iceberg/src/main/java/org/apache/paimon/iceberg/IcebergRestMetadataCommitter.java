@@ -59,6 +59,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -94,12 +95,25 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     private final String icebergDatabaseName;
     private final TableIdentifier icebergTableIdentifier;
     private final IcebergOptions icebergOptions;
+    private final int unknownHostMaxRetries;
+    private final long unknownHostInitialRetryDelayMillis;
 
     private Table icebergTable;
 
     public IcebergRestMetadataCommitter(FileStoreTable table) {
         Options options = new Options(table.options());
         icebergOptions = new IcebergOptions(options);
+        unknownHostMaxRetries = options.get(IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES);
+        unknownHostInitialRetryDelayMillis =
+                options.get(IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS);
+        Preconditions.checkArgument(
+                unknownHostMaxRetries >= 0,
+                "%s must be non-negative",
+                IcebergOptions.UNKNOWN_HOST_RETRY_MAX_RETRIES.key());
+        Preconditions.checkArgument(
+                unknownHostInitialRetryDelayMillis >= 0,
+                "%s must be non-negative",
+                IcebergOptions.UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS.key());
         this.fileIO = table.fileIO();
         this.metadataDirectory = IcebergCommitCallback.catalogTableMetadataPath(table);
 
@@ -144,30 +158,70 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     @Override
     public void commitMetadata(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
-        for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
+        int commitAttempt = 1;
+        int unknownHostRetry = 0;
+        long delayMillis = unknownHostInitialRetryDelayMillis;
+        while (true) {
             try {
                 commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
                 return;
             } catch (CommitStateUnknownException | CommitFailedException e) {
-                if (attempt == MAX_COMMIT_ATTEMPTS) {
-                    throw new RuntimeException(
-                            "Fail to commit iceberg metadata for table: " + icebergTableIdentifier,
-                            e);
+                if (commitAttempt == MAX_COMMIT_ATTEMPTS) {
+                    throw commitFailure(e);
                 }
                 LOG.warn(
                         "Commit attempt {} to rest catalog failed for table {}; reloading catalog"
                                 + " state before retrying.",
-                        attempt,
+                        commitAttempt,
                         icebergTableIdentifier,
                         e);
+                commitAttempt++;
             } catch (Exception e) {
-                throw new RuntimeException(
-                        "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, e);
+                if (!hasUnknownHostCause(e) || unknownHostRetry == unknownHostMaxRetries) {
+                    throw commitFailure(e);
+                }
+
+                LOG.warn(
+                        "Iceberg REST catalog DNS lookup failed for table {}; retrying in {} ms "
+                                + "({}/{}).",
+                        icebergTableIdentifier,
+                        delayMillis,
+                        unknownHostRetry + 1,
+                        unknownHostMaxRetries,
+                        e);
+                try {
+                    sleepBeforeUnknownHostRetry(delayMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw commitFailure(interrupted);
+                }
+                unknownHostRetry++;
+                delayMillis = delayMillis > Long.MAX_VALUE / 2 ? Long.MAX_VALUE : delayMillis * 2;
             }
         }
     }
 
-    private void commitMetadataImpl(
+    private RuntimeException commitFailure(Exception cause) {
+        return new RuntimeException(
+                "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, cause);
+    }
+
+    @VisibleForTesting
+    protected void sleepBeforeUnknownHostRetry(long delayMillis) throws InterruptedException {
+        Thread.sleep(delayMillis);
+    }
+
+    private static boolean hasUnknownHostCause(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof UnknownHostException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @VisibleForTesting
+    protected void commitMetadataImpl(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
 
         newIcebergMetadata = adjustMetadataForRest(newIcebergMetadata);
@@ -537,11 +591,12 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 || registered != newMetadata.currentSnapshot().snapshotId()) {
             throw new IllegalStateException(
                     String.format(
-                            "Registered catalog table is at snapshot %s instead of %s",
+                            "Registered catalog table is at snapshot %s instead of %s for table %s",
                             registered,
                             newMetadata.currentSnapshot() == null
                                     ? "null"
-                                    : newMetadata.currentSnapshot().snapshotId()));
+                                    : newMetadata.currentSnapshot().snapshotId(),
+                            icebergTableIdentifier));
         }
     }
 

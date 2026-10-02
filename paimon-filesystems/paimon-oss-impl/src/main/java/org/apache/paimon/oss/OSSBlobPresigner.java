@@ -45,14 +45,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 
 /** Materializes blob ranges and creates OSS presigned URLs. */
 public final class OSSBlobPresigner {
 
     private static final String BLOB_FINGERPRINT_METADATA = "paimon-blob-descriptor-sha256";
     private static final String BLOB_CONTENT_TYPE = "application/octet-stream";
-    private static final String OSS_INTERNAL_ENDPOINT_SUFFIX = "-internal.aliyuncs.com";
     private static final long BLOB_COPY_MIN_PART_SIZE = 100L * 1024 * 1024;
     private static final long MAX_MULTIPART_UPLOAD_PARTS = 10_000;
     private static final char[] HEX_CHARS = "0123456789abcdef".toCharArray();
@@ -96,7 +94,6 @@ public final class OSSBlobPresigner {
                             targetKey,
                             Date.from(Instant.now().plus(validity)),
                             HttpMethod.GET);
-            url = usePublicEndpoint(url);
             validatePresignedUrl(client, url, bucket, targetKey);
             return url.toString();
         } catch (IOException e) {
@@ -222,32 +219,12 @@ public final class OSSBlobPresigner {
     private static void validatePresignedUrl(
             OSSClient client, URL url, String bucket, String targetKey) throws Exception {
         URI endpoint = client.getEndpoint();
-        String expectedHost = publicEndpointHost(bucket + "." + endpoint.getHost());
+        String expectedHost = bucket + "." + endpoint.getHost();
         if (!"https".equalsIgnoreCase(endpoint.getScheme())
                 || !"https".equalsIgnoreCase(url.getProtocol())
                 || !expectedHost.equalsIgnoreCase(url.getHost())
                 || !("/" + targetKey).equals(url.toURI().getPath())) {
             throw new IOException("OSS client generated a presigned URL for an invalid target.");
         }
-    }
-
-    private static URL usePublicEndpoint(URL url) throws IOException {
-        String publicHost = publicEndpointHost(url.getHost());
-        if (publicHost.equals(url.getHost())) {
-            return url;
-        }
-        String file = url.getFile();
-        if (url.getRef() != null) {
-            file += "#" + url.getRef();
-        }
-        return new URL(url.getProtocol(), publicHost, url.getPort(), file);
-    }
-
-    private static String publicEndpointHost(String host) {
-        if (!host.toLowerCase(Locale.ROOT).endsWith(OSS_INTERNAL_ENDPOINT_SUFFIX)) {
-            return host;
-        }
-        return host.substring(0, host.length() - OSS_INTERNAL_ENDPOINT_SUFFIX.length())
-                + ".aliyuncs.com";
     }
 }

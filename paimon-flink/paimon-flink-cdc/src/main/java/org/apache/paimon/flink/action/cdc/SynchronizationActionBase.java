@@ -67,6 +67,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected final boolean caseSensitive;
 
     protected Map<String, String> tableConfig = new HashMap<>();
+    protected Map<String, Map<String, String>> tableConfigByTable = new HashMap<>();
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
     // this is to specify if we should use primary keys from source
     // in paimon schema if pkeys are not specified in action command
@@ -91,6 +92,21 @@ public abstract class SynchronizationActionBase extends ActionBase {
     public SynchronizationActionBase withTableConfig(Map<String, String> tableConfig) {
         this.tableConfig = tableConfig;
         return this;
+    }
+
+    public SynchronizationActionBase withTableConfigByTable(
+            Map<String, Map<String, String>> tableConfigByTable) {
+        this.tableConfigByTable = tableConfigByTable;
+        return this;
+    }
+
+    protected Map<String, String> tableConfig(String sourceTable) {
+        Map<String, String> config = new HashMap<>(tableConfig);
+        Map<String, String> override = tableConfigByTable.get(sourceTable);
+        if (override != null) {
+            config.putAll(override);
+        }
+        return config;
     }
 
     public SynchronizationActionBase withTypeMapping(TypeMapping typeMapping) {
@@ -198,8 +214,13 @@ public abstract class SynchronizationActionBase extends ActionBase {
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
 
     protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
+        return alterTableOptions(identifier, table, tableConfig);
+    }
+
+    protected FileStoreTable alterTableOptions(
+            Identifier identifier, FileStoreTable table, Map<String, String> options) {
         // doesn't support altering bucket here
-        Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
+        Map<String, String> dynamicOptions = new HashMap<>(options);
         dynamicOptions.remove(CoreOptions.BUCKET.key());
 
         // remove immutable options and options with equal values

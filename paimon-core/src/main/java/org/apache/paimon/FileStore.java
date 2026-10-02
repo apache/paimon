@@ -127,5 +127,7 @@ public interface FileStore<T> {
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
 
+    void setManifestSidecarCache(SegmentsCache<Path> manifestSidecarCache);
+
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 }

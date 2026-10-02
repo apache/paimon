@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CopyFilesUtilTest {
 
     @Test
-    void testClearColumnSequencesWhenChangingSchemaId() {
+    void testClearWriteColsSequencesWhenChangingSchemaId() {
         DataFileMeta source =
                 DataFileMeta.forAppend(
                                 "source.parquet",
@@ -53,14 +53,14 @@ public class CopyFilesUtilTest {
                                 null,
                                 null,
                                 Arrays.asList("a", "b"))
-                        .withColumnMaxSequenceNumbers(new long[] {2L, 3L});
+                        .withWriteColsSequences(new long[] {2L, 3L});
 
         DataFileMeta copied = CopyFilesUtil.toNewDataFileMeta(source, "copied.parquet", 6L);
 
         assertThat(copied.fileName()).isEqualTo("copied.parquet");
         assertThat(copied.schemaId()).isEqualTo(6L);
         assertThat(copied.writeCols()).containsExactly("a", "b");
-        assertThat(copied.columnMaxSequenceNumbers()).isNull();
+        assertThat(copied.writeColsSequences()).isNull();
     }
 
     @Test

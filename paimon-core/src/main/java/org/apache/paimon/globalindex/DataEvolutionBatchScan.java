@@ -19,9 +19,13 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -37,9 +41,12 @@ import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
@@ -55,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
@@ -69,7 +77,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private Predicate filter;
     private TopN topN;
-    private Integer pushDownLimit;
+    private Long pushDownLimit;
     // set when part of the filter reaches the reader only, so limit/TopN must not prune ahead of it
     private boolean rowIdFilterDeferred;
     private RowRangeIndex pushedRowRangeIndex;
@@ -183,7 +191,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
-    public InnerTableScan withLimit(int limit) {
+    public InnerTableScan withLimit(long limit) {
         // forwarded in plan(), once withFilter has said whether a row-id part was deferred
         this.pushDownLimit = limit;
         return this;
@@ -271,7 +279,20 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     @Override
+    public List<BinaryRow> topNPartitions(int num, int partitionFieldCount) {
+        return batchScan.topNPartitions(num, partitionFieldCount);
+    }
+
+    @Override
     public Plan plan() {
+        return table.coreOptions()
+                        .toConfiguration()
+                        .get(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED)
+                ? planWithIndexQuery()
+                : planEager();
+    }
+
+    private Plan planEager() {
         RowRangeIndex rowRangeIndex = this.pushedRowRangeIndex;
         ScoreGetter scoreGetter = null;
         boolean globalIndexTopNCandidatesFound = false;
@@ -286,7 +307,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -309,6 +330,131 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
+    }
+
+    /** Plan complete data splits while deferring index evaluation to readers. */
+    private Plan planWithIndexQuery() {
+        if (queryAuthEnabled()
+                || filter == null
+                // Partition-only scans may apply LIMIT/TopN before deferred index filtering.
+                || !batchScan.snapshotReader().hasNonPartitionFilter()
+                || pushedRowRangeIndex != null
+                || globalIndexResult != null
+                || !table.coreOptions().globalIndexEnabled()
+                || !supportsIndexQuery(table.coreOptions())) {
+            return planEager();
+        }
+        Predicate indexFilter = rowIdSafeResidualFilter(filter);
+        if (indexFilter == null) {
+            return planEager();
+        }
+
+        // Plan once through the normal lifecycle: auth, snapshot selection and read protection tag.
+        Plan dataPlan = batchScan.plan();
+        List<Split> splits = dataPlan.splits();
+        if (splits.isEmpty()) {
+            return dataPlan;
+        }
+        // Use the exact snapshot that produced the data splits, including explicit tag reads.
+        long snapshotId = dataSplit(splits.get(0)).snapshotId();
+        Preconditions.checkState(
+                dataPlan instanceof SnapshotReader.Plan,
+                "No snapshot plan found for index query planning");
+        Snapshot snapshot =
+                Preconditions.checkNotNull(
+                        ((SnapshotReader.Plan) dataPlan).snapshot(),
+                        "No snapshot found for index query planning");
+        Preconditions.checkState(
+                snapshot.id() == snapshotId,
+                "Planned snapshot %s differs from data split snapshot %s",
+                snapshot.id(),
+                snapshotId);
+        PartitionPredicate partitionFilter =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        List<IndexFileMeta> indexFiles =
+                table.store().newIndexFileHandler()
+                        .scan(
+                                snapshot,
+                                DataEvolutionGlobalIndexScanner.indexFileFilter(
+                                        table, partitionFilter, indexFilter))
+                        .stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        if (indexFiles.isEmpty()) {
+            return dataPlan;
+        }
+        GlobalIndexQuery indexQuery =
+                GlobalIndexQuery.create(
+                        table.rowType(),
+                        indexFilter,
+                        indexFiles,
+                        table.store().pathFactory().globalIndexFileFactory());
+        if (indexQuery == null) {
+            return dataPlan;
+        }
+        List<Split> indexQuerySplits = new ArrayList<>();
+        for (Split split : splits) {
+            DataSplit dataSplit = dataSplit(split);
+            List<Range> ranges =
+                    GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
+            GlobalIndexQuery splitQuery = indexQuery.forRanges(ranges);
+            List<Range> queryRanges =
+                    table.coreOptions().scalarIndexSearchMode()
+                                    == CoreOptions.GlobalIndexSearchMode.FAST
+                            ? Range.and(ranges, splitQuery.indexedRanges())
+                            : ranges;
+            if (queryRanges.isEmpty() || splitQuery.isEmpty(queryRanges)) {
+                continue;
+            }
+            Split indexQuerySplit =
+                    new IndexQuerySplit(
+                            dataSplit, splitQuery, table.options(), Collections.emptyList());
+            indexQuerySplits.add(withAuth(split, indexQuerySplit));
+        }
+        return () -> indexQuerySplits;
+    }
+
+    @Override
+    @Nullable
+    public String readProtectionTagName() {
+        return batchScan.readProtectionTagName();
+    }
+
+    private static boolean supportsIndexQuery(CoreOptions options) {
+        CoreOptions.StreamScanMode streamMode =
+                options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
+        if (streamMode == CoreOptions.StreamScanMode.FILE_MONITOR) {
+            return true;
+        }
+        if (streamMode != CoreOptions.StreamScanMode.NONE) {
+            return false;
+        }
+        switch (options.startupMode()) {
+            case LATEST:
+            case LATEST_FULL:
+            case FROM_SNAPSHOT:
+            case FROM_SNAPSHOT_FULL:
+            case FROM_TIMESTAMP:
+                return true;
+            case COMPACTED_FULL:
+                return options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
+                        || options.toConfiguration()
+                                .contains(CoreOptions.FULL_COMPACTION_DELTA_COMMITS);
+            default:
+                // Creation-time scans may filter files instead of reading a complete snapshot.
+                return false;
+        }
+    }
+
+    private static DataSplit dataSplit(Split split) {
+        return (DataSplit)
+                (split instanceof QueryAuthSplit ? ((QueryAuthSplit) split).split() : split);
+    }
+
+    private static Split withAuth(Split original, Split replacement) {
+        return original instanceof QueryAuthSplit
+                ? new QueryAuthSplit(replacement, ((QueryAuthSplit) original).authResult())
+                : replacement;
     }
 
     private boolean queryAuthEnabled() {
@@ -356,11 +502,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             if (result.isPresent()) {
                 long coverageStart = System.nanoTime();
                 GlobalIndexResult finalResult =
-                        result.get()
-                                .result()
-                                .or(
-                                        scanner.unindexedRowsForContributingFields(
-                                                result.get().contributingFieldIds()));
+                        result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(
@@ -450,18 +592,24 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public static Plan wrapToIndexSplits(
             List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
-        Function<Split, List<IndexedSplit>> process =
-                split ->
-                        Collections.singletonList(
-                                split instanceof IndexedSplit
-                                        ? (IndexedSplit) split
-                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+        Function<Split, List<Split>> process =
+                split -> Collections.singletonList(wrap(split, rowRangeIndex, scoreGetter));
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
     }
 
-    private static IndexedSplit wrap(
-            DataSplit dataSplit, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+    private static Split wrap(
+            Split split, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+        if (split instanceof QueryAuthSplit) {
+            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+            return new QueryAuthSplit(
+                    wrap(authSplit.split(), rowRangeIndex, scoreGetter), authSplit.authResult());
+        }
+        if (split instanceof IndexedSplit) {
+            return split;
+        }
+
+        DataSplit dataSplit = (DataSplit) split;
         List<DataFileMeta> files = dataSplit.dataFiles();
 
         List<Range> expected = new ArrayList<>();

@@ -31,8 +31,10 @@ import unittest
 
 import pyarrow as pa
 
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.data_vector_writer import DataVectorWriter
+from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
@@ -456,6 +458,8 @@ class FlushFailureTest(unittest.TestCase):
             self.vector_writer = None
             self._normal_buffer = WriteBuffer(self._merge_data)
             self.committed_files = []
+            self._committed_files_to_delete_on_abort = []
+            self._pending_normal_meta = None
             self.written = []
             self.fail_next = True
 
@@ -479,15 +483,14 @@ class FlushFailureTest(unittest.TestCase):
         self.assertEqual(writer._normal_buffer.num_rows, 0)
 
 
-class _StubMeta:
-    """The handful of ``DataFileMeta`` fields the flush and abort paths read."""
-
-    def __init__(self, row_count: int, file_name: str):
-        self.row_count = row_count
-        self.file_name = file_name
-        self.file_path = '/warehouse/%s' % file_name
-        self.external_path = None
-        self.extra_files = []
+def _file_meta(row_count: int, file_name: str) -> DataFileMeta:
+    """Use real metadata so flush and abort exercise the shared path resolver."""
+    return DataFileMeta(
+        file_name=file_name, file_size=1, row_count=row_count,
+        min_key=None, max_key=None, key_stats=None, value_stats=None,
+        min_sequence_number=0, max_sequence_number=row_count - 1,
+        schema_id=0, level=0, extra_files=[],
+        file_path='/warehouse/%s' % file_name)
 
 
 class _RecordingFileIO:
@@ -525,8 +528,11 @@ class _StubSidecarWriter:
             raise IOError('transient sidecar failure')
         if not self.committed_files:
             self.committed_files.append(
-                _StubMeta(self._row_count, self._file_name))
+                _file_meta(self._row_count, self._file_name))
         return self.committed_files.copy()
+
+    def _release_prepared_files(self):
+        return DataWriter._release_prepared_files(self)
 
     def delete_file_upon_abort(self):
         return self._delete_on_abort
@@ -563,6 +569,8 @@ class CompositeFlushResumeTest(unittest.TestCase):
             self._normal_buffer = WriteBuffer(self._merge_data)
             self._buffer = WriteBuffer(self._merge_data)
             self.committed_files = []
+            self._committed_files_to_delete_on_abort = []
+            self._pending_normal_meta = None
             self.committed_changelog_files = []
             self.file_io = _RecordingFileIO()
             self.written = []
@@ -573,7 +581,7 @@ class CompositeFlushResumeTest(unittest.TestCase):
                 self._fail_normal_times -= 1
                 raise IOError('transient storage failure')
             self.written.append(data)
-            return _StubMeta(data.num_rows, 'data-%d' % len(self.written))
+            return _file_meta(data.num_rows, 'data-%d' % len(self.written))
 
     class _DedicatedHarness(DedicatedFormatWriter):
         def __init__(self, blob_writers, vector_writer=None):
@@ -586,14 +594,16 @@ class CompositeFlushResumeTest(unittest.TestCase):
             self._normal_buffer = WriteBuffer(self._merge_normal_data)
             self._buffer = WriteBuffer(self._merge_normal_data)
             self.committed_files = []
+            self.committed_changelog_files = []
             self._committed_files_to_delete_on_abort = []
+            self._pending_normal_meta = None
             self.file_io = _RecordingFileIO()
             self.written = []
             self._video_group_policy = None
 
         def _write_normal_data_to_file(self, data: pa.Table):
             self.written.append(data)
-            return _StubMeta(data.num_rows, 'data-%d' % len(self.written))
+            return _file_meta(data.num_rows, 'data-%d' % len(self.written))
 
     def test_failed_sidecar_publishes_nothing_and_the_retry_resumes(self):
         vector = _StubSidecarWriter(3, 'vector-0', fail_times=1)
@@ -680,6 +690,31 @@ class CompositeFlushResumeTest(unittest.TestCase):
         self.assertIsNone(writer._pending_normal_meta)
         self.assertTrue(vector.aborted)
 
+    def test_abort_deletes_external_unpublished_file_and_sidecars(self):
+        for kind in ('vector', 'blob'):
+            with self.subTest(kind=kind):
+                sidecar = _StubSidecarWriter(3, 'sidecar-0', fail_times=1)
+                writer = (self._VectorHarness(sidecar) if kind == 'vector'
+                          else self._DedicatedHarness({'payload': sidecar}))
+                writer._normal_buffer.append(_table(0, 3))
+                with self.assertRaises(IOError):
+                    writer._close_current_writers()
+
+                meta = writer._pending_normal_meta
+                external_path = 'file:/external/pt=a%2Fb%25/data-1'
+                meta.external_path = external_path
+                meta.extra_files = ['data-1.index']
+                writer.abort()
+
+                self.assertEqual(writer.file_io.deleted, [
+                    '/external/pt=a%2Fb%25/data-1',
+                    '/external/pt=a%2Fb%25/data-1.index',
+                ])
+                self.assertEqual(meta.external_path, external_path)
+                self.assertEqual(writer.committed_files, [])
+                self.assertIsNone(writer._pending_normal_meta)
+                self.assertTrue(sidecar.aborted)
+
     def test_dedicated_writer_failed_blob_phase_publishes_nothing(self):
         blob = _StubSidecarWriter(3, 'blob-0', fail_times=1)
         writer = self._DedicatedHarness({'payload': blob})
@@ -703,9 +738,14 @@ class CompositeFlushResumeTest(unittest.TestCase):
 
     def test_dedicated_writer_keeps_the_documented_meta_order(self):
         blob = _StubSidecarWriter(3, 'blob-0')
-        vector = _StubSidecarWriter(3, 'vector-0')
+        vector = _StubSidecarWriter(3, 'vector-0', fail_times=1)
         writer = self._DedicatedHarness({'payload': blob}, vector)
         writer._normal_buffer.append(_table(0, 3))
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+        self.assertEqual(writer.committed_files, [])
+        self.assertEqual([m.file_name for m in blob.committed_files], ['blob-0'])
+
         writer._close_current_writers()
         self.assertEqual([m.file_name for m in writer.committed_files],
                          ['data-1', 'blob-0', 'vector-0'])

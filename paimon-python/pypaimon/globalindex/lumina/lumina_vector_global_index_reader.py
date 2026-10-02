@@ -174,7 +174,7 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
                 self._searcher = LuminaSearcher(self._options)
                 self._searcher.open_stream(stream, self._io_meta.file_size)
                 self._stream = stream
-            except Exception:
+            except BaseException:
                 stream.close()
                 raise
 

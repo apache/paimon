@@ -52,6 +52,8 @@ import org.elasticsearch.eslib.api.model.SearchResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -121,15 +123,22 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             List<DataField> fields,
-            ESIndexOptions indexOptions) {
+            @Nullable ESIndexOptions indexOptions) {
         this(fileReader, files, fields, indexOptions, null);
     }
 
+    /**
+     * Creates a reader for one es-index shard.
+     *
+     * @param indexOptions the es-index options parsed from the current table options; only used as
+     *     a fallback for legacy metadata that does not persist the field configuration, so it may
+     *     be {@code null} when the current options cannot describe a build
+     */
     public ESIndexGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             List<DataField> fields,
-            ESIndexOptions indexOptions,
+            @Nullable ESIndexOptions indexOptions,
             ExecutorService queryExecutor) {
         Objects.requireNonNull(files, "files");
         checkArgument(files.size() == 1, "Expected exactly one ES index file per shard");
@@ -138,7 +147,6 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         this.fields =
                 Collections.unmodifiableList(
                         new ArrayList<>(Objects.requireNonNull(fields, "fields")));
-        ESIndexOptions fallbackIndexOptions = Objects.requireNonNull(indexOptions, "indexOptions");
         try {
             GlobalIndexIOMeta archiveMeta =
                     Objects.requireNonNull(this.files.get(0), "index file metadata");
@@ -146,10 +154,16 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             this.fileOffsets = parsed.fileOffsets();
             validateArchiveOffsets(archiveMeta, fileOffsets);
             this.hasPersistedFieldConfigs = parsed.hasFieldConfigs();
-            this.indexOptions =
-                    parsed.hasFieldConfigs()
-                            ? ESIndexOptions.fromFieldConfigs(parsed.fieldConfigs())
-                            : fallbackIndexOptions;
+            if (parsed.hasFieldConfigs()) {
+                this.indexOptions = ESIndexOptions.fromFieldConfigs(parsed.fieldConfigs());
+            } else {
+                checkArgument(
+                        indexOptions != null,
+                        "Legacy es-index metadata does not persist the field configuration, so "
+                                + "the current es-index options must describe how the index was "
+                                + "built.");
+                this.indexOptions = indexOptions;
+            }
             List<String> physicalFields =
                     parsed.hasFieldConfigs()
                             ? parsed.indexedFieldNames()

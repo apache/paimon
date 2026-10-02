@@ -50,6 +50,7 @@ from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
+from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
@@ -85,7 +86,7 @@ class RESTApi:
             raise ValueError("URI cannot be empty")
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client = HttpClient(uri)
+        self.client = HttpClient(uri, user_agent.rest_user_agent(options))
         auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
@@ -105,6 +106,7 @@ class RESTApi:
                 RESTAuthFunction(base_headers, auth_provider),
             )
             options = config_response.merge(options)
+            self.client.set_user_agent(user_agent.rest_user_agent(options))
             base_headers.update(
                 RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
             )
@@ -191,7 +193,7 @@ class RESTApi:
         databases = response.data() or []
         return PagedList(databases, response.get_next_page_token())
 
-    def create_database(self, name: str, properties: Dict[str, str]) -> None:
+    def create_database(self, name: str, properties: Optional[Dict[str, str]]) -> None:
         if not name or not name.strip():
             raise ValueError("Database name cannot be empty")
 

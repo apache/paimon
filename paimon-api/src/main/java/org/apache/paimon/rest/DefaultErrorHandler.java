@@ -42,7 +42,10 @@ public class DefaultErrorHandler extends ErrorHandler {
 
     @Override
     public void accept(ErrorResponse error, String requestId) {
-        int code = error.getCode();
+        Integer errorCode = error.getCode();
+        // HttpClient always resolves the code before calling this, but the response may also be
+        // deserialized directly, and then "code" is absent whenever the server omits it.
+        int code = errorCode == null ? 0 : errorCode;
         String message;
         if (DEFAULT_REQUEST_ID.equals(requestId)) {
             message = error.getMessage();

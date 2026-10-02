@@ -19,6 +19,7 @@ import json
 import multiprocessing
 import os
 import pickle
+import random
 import shutil
 import subprocess
 import sys
@@ -39,8 +40,11 @@ from pypaimon.multimodal.table import MultimodalTable
 from pypaimon.read.datasource.torch_dataset import (
     SplitRangeIndex,
     TorchIterDataset,
+    TorchBatchIterDataset,
+    TorchShuffledBatchIterDataset,
     TorchShuffledIterDataset,
     _resolve_distributed_context,
+    _shuffle_record_batches,
 )
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.file_store_table import FileStoreTable
@@ -426,6 +430,92 @@ class TorchDistributedShardingTest(unittest.TestCase):
                 (1, 1): [9, 10],
             },
         )
+
+
+class TorchBatchShuffleTest(unittest.TestCase):
+    @parameterized.expand([1, 3, 8, 50])
+    def test_columnar_shuffle_matches_existing_row_shuffle(self, buffer_size):
+        rows = [{"id": i, "nested": None if i % 4 == 0 else {"values": [i, None]},
+                 "text": None if i % 3 == 0 else str(i)} for i in range(25)]
+        table = pa.Table.from_pylist(rows)
+        source = table.to_batches(max_chunksize=4)
+        source.insert(1, source[0].slice(0, 0))
+        actual = pa.Table.from_batches(list(_shuffle_record_batches(
+            iter(source), buffer_size, random.Random(17))))
+
+        legacy = TorchShuffledIterDataset(
+            SimpleNamespace(read_type=[], limit=None), [], seed=17, buffer_size=buffer_size)
+        expected = list(legacy._iter_buffer_shuffled_rows(iter(rows), 0))
+        self.assertEqual(actual.schema, table.schema)
+        self.assertEqual(actual.to_pylist(), expected)
+
+    def test_shuffle_does_not_collect_whole_input(self):
+        consumed = []
+
+        def source():
+            for start in range(0, 300, 3):
+                consumed.extend(range(start, start + 3))
+                yield pa.record_batch([pa.array(range(start, start + 3))], names=["id"])
+
+        batches = _shuffle_record_batches(source(), 5, random.Random(0))
+        self.assertEqual(next(batches).num_rows, 5)
+        self.assertLessEqual(len(consumed), 12)
+        batches.close()
+
+    def test_shuffle_drains_before_arrow_offset_overflow(self):
+        table = pa.table({"text": [str(i).zfill(4) for i in range(12)]})
+        with patch("pypaimon.read.datasource.torch_dataset._MAX_ARROW_OFFSET", 12):
+            batches = list(_shuffle_record_batches(
+                iter(table.to_batches(max_chunksize=3)), 3, random.Random(3)))
+        self.assertEqual(sorted(row["text"] for b in batches for row in b.to_pylist()),
+                         table["text"].to_pylist())
+        self.assertTrue(all(sum(len(v) for v in b["text"].to_pylist()) <= 12 for b in batches))
+
+    @parameterized.expand(["complete", "close", "read_error", "convert_error"])
+    def test_interleaved_readers_are_bounded_and_closed(self, mode):
+        opened, closed, active = [], [], set()
+        maximum = [0]
+
+        def read(dataset, splits):
+            split = splits[0]
+            opened.append(split)
+            active.add(split)
+            maximum[0] = max(maximum[0], len(active))
+            try:
+                for i in range(10):
+                    if mode == "read_error" and split == 1 and i == 1:
+                        raise RuntimeError("read failed")
+                    yield pa.record_batch([pa.array([split * 10 + i])], names=["id"])
+            finally:
+                active.remove(split)
+                closed.append(split)
+
+        def convert(batch):
+            if mode == "convert_error":
+                raise RuntimeError("conversion failed")
+            return batch
+
+        dataset = TorchShuffledBatchIterDataset(
+            SimpleNamespace(read_type=[], limit=None), list(range(8)),
+            buffer_size=3, max_buffer_input_splits=2, batch_size=2,
+            batch_format="torch", to_tensor_fn=convert)
+        with patch.object(TorchBatchIterDataset, "_arrow_batches_for_splits", read):
+            batches = iter(dataset)
+            if mode == "close":
+                next(batches)
+                batches.close()
+            elif mode.endswith("error"):
+                with self.assertRaisesRegex(RuntimeError, "failed"):
+                    list(batches)
+            else:
+                rows = [row["id"] for batch in batches for row in batch.to_pylist()]
+                self.assertEqual(sorted(rows), list(range(80)))
+        self.assertFalse(active)
+        self.assertCountEqual(opened, closed)
+        self.assertEqual(maximum[0], 2)
+
+    def test_empty_input(self):
+        self.assertEqual(list(_shuffle_record_batches(iter([]), 5, random.Random(0))), [])
 
 
 class TorchReadTest(unittest.TestCase):
@@ -1084,12 +1174,13 @@ class TorchReadTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, 'batch_size requires'):
             table_read.to_torch(splits, streaming=True, batch_size=2)
-        with self.assertRaisesRegex(ValueError, 'only supports batch_format'):
+        with self.assertRaisesRegex(ValueError, 'buffer_size'):
             table_read.to_torch(
                 splits,
                 streaming=True,
                 batch_format='torch',
                 shuffle=True,
+                buffer_size=0,
             )
         for invalid in [0, -1, 1.9, True, 2]:
             with self.subTest(prefetch_concurrency=invalid):
@@ -1128,13 +1219,14 @@ class TorchReadTest(unittest.TestCase):
                     splits,
                     streaming=True,
                     batch_format=batch_format,
-                    shuffle=batch_format == 'row' and shuffle,
+                    shuffle=shuffle,
                     auto_detect_rank=True,
                 )
                 for batch_format, shuffle in [
                     ('row', False),
                     ('row', True),
                     ('pyarrow', False),
+                    ('pyarrow', True),
                 ]
             ]
             expected = splits[(len(splits) + 1) // 2:]
@@ -1717,6 +1809,107 @@ class TorchReadTest(unittest.TestCase):
         print(f"\n{'=' * 60}")
         print("✓ All predicate test cases passed!")
         print(f"{'=' * 60}\n")
+
+    @parameterized.expand([(1, None), (7, None), (7, 3), (11, 17)])
+    def test_torch_batch_shuffle_formats_and_epochs(self, buffer_size, batch_size):
+        table = self._create_shuffle_append_table(
+            'default.batch_shuffle_%s_%s' % (buffer_size, batch_size))
+        builder = table.new_read_builder().with_projection(['user_id', 'item_id'])
+        splits = builder.new_scan().plan().splits()
+        read = builder.new_read()
+        outputs = []
+        for batch_format in ['pyarrow', 'torch']:
+            dataset = read.to_torch(
+                splits, streaming=True, shuffle=True, batch_format=batch_format,
+                batch_size=batch_size, seed=23, buffer_size=buffer_size,
+                max_buffer_input_splits=3)
+
+            def collect():
+                batches = list(dataset)
+                if batch_format == 'pyarrow':
+                    return pa.Table.from_batches(batches).to_pydict(), [b.num_rows for b in batches]
+                return {name: torch.cat([b[name] for b in batches]).tolist()
+                        for name in ['user_id', 'item_id']}, [len(b['user_id']) for b in batches]
+
+            with patch.object(TableRead, 'to_arrow', side_effect=AssertionError('whole table')), \
+                    patch.object(TableRead, 'to_iterator', side_effect=AssertionError('row conversion')):
+                data, sizes = collect()
+                self.assertEqual(data, collect()[0])
+                self.assertEqual(sorted(data['user_id']), list(range(80)))
+                self.assertEqual(data['item_id'], [1000 + i for i in data['user_id']])
+                self.assertTrue(all(size <= (batch_size or buffer_size) for size in sizes))
+                if batch_size:
+                    self.assertTrue(all(size == batch_size for size in sizes[:-1]))
+                outputs.append(data)
+                dataset.set_epoch(1)
+                if buffer_size > 1:
+                    self.assertNotEqual(data, collect()[0])
+                dataset.set_epoch(0)
+                self.assertEqual(data, collect()[0])
+        self.assertEqual(outputs[0], outputs[1])
+
+    def test_torch_batch_shuffle_filter_limit_and_empty(self):
+        table = self._create_shuffle_append_table('default.batch_shuffle_limit')
+        builder = table.new_read_builder().with_projection(['user_id'])
+        predicate = builder.new_predicate_builder().greater_or_equal('user_id', 10)
+        builder.with_filter(predicate).with_limit(9)
+        splits = builder.new_scan().plan().splits()
+        read = builder.new_read()
+        expected = read.to_arrow(splits)['user_id'].to_pylist()
+        dataset = read.to_torch(splits, streaming=True, shuffle=True, batch_format='pyarrow',
+                                batch_size=4, buffer_size=3, max_buffer_input_splits=3)
+        actual = [row['user_id'] for batch in dataset for row in batch.to_pylist()]
+        self.assertCountEqual(actual, expected)
+        for limit in [0, 9]:
+            read.limit = limit
+            empty = read.to_torch([], streaming=True, shuffle=True, batch_format='pyarrow', buffer_size=3)
+            self.assertEqual(list(empty), [])
+
+    def test_torch_batch_shuffle_persistent_spawn_workers(self):
+        table = self._create_shuffle_append_table('default.batch_shuffle_spawn', partition_keys=['dt'])
+        builder = table.new_read_builder().with_projection(['user_id'])
+        splits = builder.new_scan().plan().splits()
+        self.assertGreaterEqual(len(splits), 4)
+        all_ids = []
+        for rank in range(2):
+            dataset = builder.new_read().to_torch(
+                splits, streaming=True, shuffle=True, batch_format='torch',
+                batch_size=4, buffer_size=7, seed=23,
+                sharding_rank=rank, sharding_world_size=2)
+            loader = DataLoader(dataset, batch_size=None, num_workers=2,
+                                persistent_workers=True, multiprocessing_context='spawn')
+            try:
+                epoch0 = self._collect_torch_user_ids_from_dataloader(loader)
+                self.assertEqual(epoch0, self._collect_torch_user_ids_from_dataloader(loader))
+                dataset.set_epoch(1)
+                epoch1 = self._collect_torch_user_ids_from_dataloader(loader)
+                self.assertCountEqual(epoch0, epoch1)
+                self.assertNotEqual(epoch0, epoch1)
+                all_ids.extend(epoch0)
+            finally:
+                if loader._iterator is not None:
+                    loader._iterator._shutdown_workers()
+        self.assertEqual(sorted(all_ids), list(range(80)))
+
+    def test_torch_batch_shuffle_vectors_deletions_and_snapshot(self):
+        import pypaimon.multimodal as pm
+
+        schema = pa.schema([('id', pa.int64()), ('vector', pa.list_(pa.float32(), 2))])
+        table = pm.connect(options={'warehouse': self.warehouse}).create_table(
+            'batch_shuffle_vectors', schema=schema, options={'file.format': 'parquet'})
+        table.add(pa.table({'id': list(range(8)), 'vector': [[i, i + 1] for i in range(8)]}, schema=schema))
+        snapshot = table.raw_table.snapshot_manager().get_latest_snapshot().id
+        table.delete('id = 2')
+        for snapshot_id, expected in [(snapshot, list(range(1, 8))), (None, [1, 3, 4, 5, 6, 7])]:
+            dataset = table.scan(snapshot_id=snapshot_id).where('id >= 1').to_torch(
+                streaming=True, batch_format='torch', batch_size=3, shuffle=True,
+                seed=7, buffer_size=4, max_buffer_input_splits=1)
+            batches = list(dataset)
+            ids = torch.cat([batch['id'] for batch in batches]).tolist()
+            vectors = torch.cat([batch['vector'] for batch in batches])
+            self.assertEqual(vectors.dtype, torch.float32)
+            self.assertEqual(vectors.tolist(), [[i, i + 1] for i in ids])
+            self.assertEqual(sorted(ids), expected)
 
     def test_torch_streaming_shuffle_single_worker(self):
         table = self._create_shuffle_append_table('default.test_torch_shuffle_single')

@@ -23,4 +23,16 @@ public interface DataTableScan extends InnerTableScan {
 
     /** Specify the shard to be read, and allocate sharded files to read records. */
     DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
+
+    /**
+     * Stops the partition part of an authorization rule from pruning here, for a scan whose
+     * physical partitions are not the ones the rule speaks about — a chain table maps a branch
+     * partition onto a different logical one.
+     *
+     * <p>Only for a scan whose splits are then read, which applies the whole rule anyway. {@link
+     * #listPartitionEntries} answers the caller directly and must keep the pruning.
+     */
+    default DataTableScan withoutAuthPartitionPushdown() {
+        return this;
+    }
 }

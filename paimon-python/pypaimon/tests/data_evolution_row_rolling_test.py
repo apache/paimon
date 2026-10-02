@@ -23,6 +23,7 @@ import uuid
 from unittest.mock import Mock
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.uri_reader import FileUriReader
@@ -154,6 +155,9 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
             rb.new_read().to_arrow(rb.new_scan().plan().splits())
             ['id'].to_pylist())
 
+    # Python splits individual rows; Rust/Java bundled writes roll at batch
+    # boundaries (covered by native_write_capabilities_test).
+    @pytest.mark.python_write
     def test_rolls_when_row_count_exceeds_limit(self):
         table = self._create({**self.de_options, 'target-file-row-num': '3'})
         files = self._write_files(table, self._rows(10))
@@ -161,6 +165,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([1, 3, 3, 3], sorted(f.row_count for f in files))
         self.assertEqual(list(range(10)), self._read_ids(table))
 
+    @pytest.mark.python_write
     def test_exact_multiple_rolls_evenly(self):
         table = self._create({**self.de_options, 'target-file-row-num': '3'})
         files = self._write_files(table, self._rows(6))
@@ -178,6 +183,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         # No row limit -> a small batch stays one file (size rolling only).
         self.assertEqual([50], [f.row_count for f in files])
 
+    @pytest.mark.python_write
     def test_oversized_row_rolls_by_itself(self):
         # Each row exceeds target-file-size: the size trigger rolls every row by
         # itself even though target-file-row-num is larger.
@@ -193,6 +199,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([1, 1, 1, 1], [f.row_count for f in files])
         self.assertEqual(list(range(4)), self._read_ids(table))
 
+    @pytest.mark.python_write
     def test_non_de_table_still_fails_fast(self):
         table = self._create({'target-file-row-num': '3'})
         wb = table.new_batch_write_builder()
@@ -201,6 +208,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                 NotImplementedError, 'row-count based file rolling'):
             tw.write_arrow(self._rows(4))
 
+    @pytest.mark.python_write
     def test_blob_writer_supports_target_file_row_num(self):
         table = self._create_with_schema(
             self.blob_schema,

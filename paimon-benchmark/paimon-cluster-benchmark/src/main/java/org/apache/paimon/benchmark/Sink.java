@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /** Benchmark sink. */
 public class Sink {
@@ -66,18 +67,20 @@ public class Sink {
         Path sinkLocation = location.resolve("sinks");
 
         List<Sink> result = new ArrayList<>();
-        Iterator<Path> it = Files.list(sinkLocation).iterator();
-        while (it.hasNext()) {
-            Path p = it.next();
-            Map<?, ?> yaml =
-                    BenchmarkUtils.YAML_MAPPER.readValue(
-                            FileUtils.readFileUtf8(p.toFile()), Map.class);
-            result.add(
-                    new Sink(
-                            FilenameUtils.removeExtension(p.getFileName().toString()),
-                            (String) yaml.get("before"),
-                            (String) yaml.get("sink-name"),
-                            (String) yaml.get("sink-properties")));
+        try (Stream<Path> paths = Files.list(sinkLocation)) {
+            Iterator<Path> it = paths.iterator();
+            while (it.hasNext()) {
+                Path p = it.next();
+                Map<?, ?> yaml =
+                        BenchmarkUtils.YAML_MAPPER.readValue(
+                                FileUtils.readFileUtf8(p.toFile()), Map.class);
+                result.add(
+                        new Sink(
+                                FilenameUtils.removeExtension(p.getFileName().toString()),
+                                (String) yaml.get("before"),
+                                (String) yaml.get("sink-name"),
+                                (String) yaml.get("sink-properties")));
+            }
         }
         return result;
     }

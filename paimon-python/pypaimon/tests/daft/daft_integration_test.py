@@ -426,7 +426,8 @@ def test_native_read_handles_nested_type_widening(catalog_options):
             pa.decimal128(10, 2),
             AtomicType("DECIMAL(10, 2)"),
             [decimal.Decimal("1.2355"), decimal.Decimal("-4.5678")],
-            [decimal.Decimal("1.23"), decimal.Decimal("-4.56")],
+            # PyPaimon follows Java's HALF_UP rounding when reducing scale.
+            [decimal.Decimal("1.24"), decimal.Decimal("-4.57")],
             id="decimal-scale-down",
         ),
         pytest.param(

@@ -95,6 +95,20 @@ public class IcebergOptions {
                             "The number of old metadata files to keep after each table commit. "
                                     + "For rest-catalog, it will keep 1 old metadata at least.");
 
+    public static final ConfigOption<Integer> UNKNOWN_HOST_RETRY_MAX_RETRIES =
+            key("metadata.iceberg.unknown-host-retry.max-retries")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "Maximum number of retries after an Iceberg REST catalog DNS lookup failure. Set to 0 to disable retries.");
+
+    public static final ConfigOption<Long> UNKNOWN_HOST_RETRY_INITIAL_DELAY_MILLIS =
+            key("metadata.iceberg.unknown-host-retry.initial-delay-ms")
+                    .longType()
+                    .defaultValue(1_000L)
+                    .withDescription(
+                            "Initial delay in milliseconds before retrying an Iceberg REST catalog DNS lookup failure. The delay doubles after each failure.");
+
     public static final ConfigOption<String> URI =
             key("metadata.iceberg.uri")
                     .stringType()

@@ -429,6 +429,7 @@ under the License.
             <id>spark4</id>
             <modules>
                 <module>paimon-spark/paimon-spark4-common</module>
+                <module>paimon-spark/paimon-spark-ut-4.0</module>
                 <module>paimon-spark/paimon-spark-4.0</module>
                 <module>paimon-spark/paimon-spark-4.1</module>
             </modules>
@@ -977,6 +978,12 @@ under the License.
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>build-helper-maven-plugin</artifactId>
                     <version>1.7</version>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>templating-maven-plugin</artifactId>
+                    <version>3.0.0</version>
                 </plugin>
 
                 <plugin>

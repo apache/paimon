@@ -120,6 +120,7 @@ class BTreeIndexReader:
 
         return SstFileReader(
             self.input_stream, comparator, self.footer.index_block_handle,
+            bloom_filter_handle=self.footer.bloom_filter_handle,
             use_pread=self._supports_pread, io_lock=self._io_lock)
 
     def _read_null_bitmap(self) -> RoaringBitmap64:
@@ -217,8 +218,7 @@ class BTreeIndexReader:
             self._range_query(self.min_key, literal, True, True))
 
     def visit_equal(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(
-            self._range_query(literal, literal, True, True))
+        return GlobalIndexResult.create(self._point_query(literal))
 
     def visit_greater_than(self, literal: object) -> Optional[GlobalIndexResult]:
         return GlobalIndexResult.create(self.greater_than(literal))
@@ -226,8 +226,9 @@ class BTreeIndexReader:
     def visit_in(self, literals: List[object]) -> Optional[GlobalIndexResult]:
         result = RoaringBitmap64()
         for literal in literals:
-            range_result = self._range_query(literal, literal, True, True)
-            result = RoaringBitmap64.or_(result, range_result)
+            if literal is None:
+                continue
+            result = RoaringBitmap64.or_(result, self._point_query(literal))
         return GlobalIndexResult.create(result)
 
     def visit_not_in(self, literals: List[object]) -> Optional[GlobalIndexResult]:
@@ -238,16 +239,16 @@ class BTreeIndexReader:
         return GlobalIndexResult.create(result)
 
     def visit_starts_with(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_ends_with(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_contains(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_like(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows())
+        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
 
     def visit_between(self, min_v: object, max_v: object) -> Optional[GlobalIndexResult]:
         return GlobalIndexResult.create(
@@ -258,6 +259,14 @@ class BTreeIndexReader:
 
     def greater_than(self, literal: object) -> RoaringBitmap64:
         return self._range_query(literal, self.max_key, False, True)
+
+    def _point_query(self, key: object) -> RoaringBitmap64:
+        result = RoaringBitmap64()
+        row_ids = self.reader.lookup(self.key_serializer.serialize(key))
+        if row_ids is not None:
+            for row_id in _deserialize_row_ids(row_ids):
+                result.add(row_id)
+        return result
 
     def close(self) -> None:
         if self.input_stream is not None:

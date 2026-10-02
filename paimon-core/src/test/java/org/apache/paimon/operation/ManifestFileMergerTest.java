@@ -81,9 +81,7 @@ public class ManifestFileMergerTest extends ManifestFileMetaTestBase {
         assertThat(ManifestFileMerger.canUseManifestSort(input, NO_PARTITION_TYPE, tableOptions))
                 .isFalse();
 
-        CoreOptions compactOptions =
-                FileStoreCommitImpl.manifestCompactionOptions(
-                        tableOptions, input, NO_PARTITION_TYPE);
+        CoreOptions compactOptions = FileStoreCommitImpl.manifestCompactionOptions(tableOptions);
         assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(1);
         assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes()).isEqualTo(1);
 
@@ -239,6 +237,8 @@ public class ManifestFileMergerTest extends ManifestFileMetaTestBase {
                 current.minLevel(),
                 current.maxLevel(),
                 current.minRowId(),
-                current.maxRowId());
+                current.maxRowId(),
+                null,
+                null);
     }
 }

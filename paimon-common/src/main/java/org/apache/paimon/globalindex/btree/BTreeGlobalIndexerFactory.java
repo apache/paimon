@@ -18,10 +18,23 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedFileMetaSelector;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 
 /** The {@link GlobalIndexerFactory} for btree index. */
 public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -34,7 +47,35 @@ public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField dataField, Options options) {
-        return new BTreeGlobalIndexer(dataField, options);
+    public List<GlobalIndexIOMeta> selectFiles(
+            List<DataField> indexFields, Predicate predicate, List<GlobalIndexIOMeta> files) {
+        if (indexFields.size() > 1) {
+            Optional<List<LeafPredicate>> matched =
+                    CompositeBTreePredicate.match(indexFields, predicate);
+            if (!matched.isPresent()) {
+                return files;
+            }
+            if (CompositeBTreePredicate.isContradictory(indexFields, predicate)) {
+                return Collections.emptyList();
+            }
+            if (files.stream().anyMatch(file -> file.metadata() == null)) {
+                return files;
+            }
+            RowType keyType = new RowType(indexFields);
+            KeySerializer serializer = new CompositeKeySerializer(keyType);
+            Object[] values = matched.get().stream().map(leaf -> leaf.literals().get(0)).toArray();
+            return new SortedFileMetaSelector(files, serializer)
+                    .visitEqual(
+                            new FieldRef(0, indexFields.get(0).name(), keyType),
+                            GenericRow.of(values))
+                    .orElse(files);
+        }
+        return SortedFileMetaSelector.selectFiles(
+                predicate, files, KeySerializer.create(indexFields.get(0).type()));
+    }
+
+    @Override
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        return new BTreeGlobalIndexer(indexFields, options);
     }
 }

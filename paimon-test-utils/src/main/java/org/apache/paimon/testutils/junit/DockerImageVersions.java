@@ -24,5 +24,8 @@ package org.apache.paimon.testutils.junit;
  */
 public class DockerImageVersions {
 
-    public static final String MINIO = "minio/minio:RELEASE.2022-02-07T08-17-33Z";
+    // MinIO archived its community edition and removed the images from Docker Hub and quay.io, so
+    // quay.io/minio/minio is no longer anonymously pullable. pgsty/silo is a drop-in MinIO fork
+    // that keeps the S3 API, the MINIO_* env vars, and the /minio/* routes, and stays published.
+    public static final String MINIO = "docker.io/pgsty/silo:RELEASE.2026-09-03T13-18-01Z";
 }

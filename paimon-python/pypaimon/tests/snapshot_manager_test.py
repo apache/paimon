@@ -47,6 +47,30 @@ def _build_manager(file_io):
 class SnapshotManagerTest(unittest.TestCase):
     """Tests for SnapshotManager batch lookahead methods."""
 
+    def test_rest_snapshot_response_can_be_empty(self):
+        from pypaimon.api.api_response import GetTableSnapshotResponse
+        from pypaimon.common.json_util import JSON
+        for payload in ('{}', '{"snapshot": null}'):
+            self.assertIsNone(JSON.from_json(payload, GetTableSnapshotResponse).get_snapshot())
+
+    def test_only_unsupported_rest_snapshot_loader_falls_back(self):
+        from pypaimon.api.rest_exception import NotImplementedException, RESTException
+        from pypaimon.snapshot.snapshot_loader import SnapshotLoader
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+        catalog_loader = Mock()
+        catalog_loader.load.return_value.load_snapshot.side_effect = NotImplementedError('unsupported')
+        manager = SnapshotManager(Mock(), '/table', snapshot_loader=SnapshotLoader(catalog_loader, Mock()))
+        snapshot = _create_mock_snapshot(2)
+        manager._get_latest_snapshot_from_filesystem = Mock(return_value=snapshot)
+        self.assertIs(manager.get_latest_snapshot(), snapshot)
+        manager._get_latest_snapshot_from_filesystem.assert_called_once()
+        manager._get_latest_snapshot_from_filesystem.reset_mock()
+        for error in (RESTException('unavailable'), NotImplementedException('unavailable')):
+            catalog_loader.load.return_value.load_snapshot.side_effect = error
+            with self.assertRaisesRegex(RuntimeError, 'unavailable'):
+                manager.get_latest_snapshot()
+            manager._get_latest_snapshot_from_filesystem.assert_not_called()
+
     def test_find_next_scannable_returns_first_matching(self):
         """find_next_scannable should return the first snapshot that passes should_scan."""
         file_io = Mock()

@@ -197,6 +197,33 @@ class SchemaEvolutionPkReadTest(unittest.TestCase):
         self.assertEqual(self._read_sorted(table), [
             {'b': 'b2', 'id': 1, 'a': 'a2'}])
 
+    def test_composite_pk_column_position(self):
+        s0 = pa.schema([('customer_id', pa.int64()), ('order_id', pa.int64()),
+                        ('amount', pa.int64())])
+        table = self._create('composite_pk_position', s0,
+                             primary_keys=('customer_id', 'order_id'))
+        self._write(table, pa.Table.from_pydict({
+            'customer_id': [1, 1, 2, 2], 'order_id': [10, 20, 10, 20],
+            'amount': [100, 200, 300, 400]}, schema=s0))
+
+        self.catalog.alter_table(
+            'default.composite_pk_position',
+            [SchemaChange.update_column_position(Move.first('order_id'))], False)
+        table = self.catalog.get_table('default.composite_pk_position')
+        s1 = pa.schema([('order_id', pa.int64()), ('customer_id', pa.int64()),
+                        ('amount', pa.int64())])
+        self._write(table, pa.Table.from_pydict({
+            'order_id': [10], 'customer_id': [2], 'amount': [350]}, schema=s1))
+
+        builder = table.new_read_builder()
+        actual = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+        self.assertEqual(actual.sort_by([
+            ('customer_id', 'ascending'), ('order_id', 'ascending')]).to_pylist(), [
+            {'customer_id': 1, 'order_id': 10, 'amount': 100},
+            {'customer_id': 1, 'order_id': 20, 'amount': 200},
+            {'customer_id': 2, 'order_id': 10, 'amount': 350},
+            {'customer_id': 2, 'order_id': 20, 'amount': 400}])
+
     # -- B7: first-row engine + add column -------------------------------
 
     def test_pk_first_row_add_column(self):
@@ -215,8 +242,13 @@ class SchemaEvolutionPkReadTest(unittest.TestCase):
         self._write(table, pa.Table.from_pydict(
             {'id': [1], 'v': ['second'], 'w': ['W']}, schema=s1))
 
-        # first-row keeps the earliest row; it predates column w, so w is NULL.
-        self.assertEqual(self._read_sorted(table), [
+        # Batch first-row scans hide L0, as in Java. Inspect the un-compacted
+        # files explicitly to verify schema evolution in the merge reader.
+        builder = table.new_read_builder()
+        scan = builder.new_scan()
+        self.assertEqual(scan.plan().splits(), [])
+        rows = builder.new_read().to_arrow(scan.plan_for_write().splits()).to_pylist()
+        self.assertEqual(rows, [
             {'id': 1, 'v': 'first', 'w': None}])
 
     # -- B8: multi-version chain (add + promotion) + partial-update ------

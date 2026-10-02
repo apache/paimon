@@ -28,6 +28,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.CompressionCodecFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -114,7 +115,14 @@ public class HadoopCompressionUtils {
                 ((Configurable) codec).setConf(new Configuration());
             }
 
-            codec.createOutputStream(new java.io.ByteArrayOutputStream());
+            // Opening a stream proves the codec is usable, so that a missing native library
+            // surfaces here rather than at write time. Hadoop leases a Compressor from CodecPool
+            // for the stream and takes it back only on close(), so the probe stream has to be
+            // closed; otherwise every call orphans one lease, and a native compressor also keeps
+            // its z_stream alive because that is released only through end().
+            try (OutputStream ignored = codec.createOutputStream(new ByteArrayOutputStream())) {
+                // opening and closing is the whole probe
+            }
             return Optional.of(codec);
         } catch (Exception | UnsatisfiedLinkError e) {
             throw new RuntimeException("Failed to get compression codec", e);

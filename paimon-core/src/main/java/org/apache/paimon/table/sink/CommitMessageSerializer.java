@@ -53,7 +53,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    public static final int CURRENT_VERSION = 13;
+    public static final int CURRENT_VERSION = 14;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
@@ -121,6 +121,12 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
         indexEntrySerializer.serializeList(message.compactIncrement().newIndexFiles(), view);
         indexEntrySerializer.serializeList(message.compactIncrement().deletedIndexFiles(), view);
+
+        Long checkFromSnapshot = message.checkFromSnapshot();
+        view.writeBoolean(checkFromSnapshot != null);
+        if (checkFromSnapshot != null) {
+            view.writeLong(checkFromSnapshot);
+        }
     }
 
     @Override
@@ -143,22 +149,31 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer =
                 indexEntryDeserializer(version, view);
         if (version >= 10) {
-            return new CommitMessageImpl(
-                    deserializeBinaryRow(view),
-                    view.readInt(),
-                    view.readBoolean() ? view.readInt() : null,
+            BinaryRow partition = deserializeBinaryRow(view);
+            int bucket = view.readInt();
+            Integer totalBuckets = view.readBoolean() ? view.readInt() : null;
+            DataIncrement dataIncrement =
                     new DataIncrement(
                             fileDeserializer.get(),
                             fileDeserializer.get(),
                             fileDeserializer.get(),
                             indexEntryDeserializer.get(),
-                            indexEntryDeserializer.get()),
+                            indexEntryDeserializer.get());
+            CompactIncrement compactIncrement =
                     new CompactIncrement(
                             fileDeserializer.get(),
                             fileDeserializer.get(),
                             fileDeserializer.get(),
                             indexEntryDeserializer.get(),
-                            indexEntryDeserializer.get()));
+                            indexEntryDeserializer.get());
+            Long checkFromSnapshot = version >= 14 && view.readBoolean() ? view.readLong() : null;
+            return new CommitMessageImpl(
+                    partition,
+                    bucket,
+                    totalBuckets,
+                    dataIncrement,
+                    compactIncrement,
+                    checkFromSnapshot);
         } else {
             BinaryRow partition = deserializeBinaryRow(view);
             int bucket = view.readInt();

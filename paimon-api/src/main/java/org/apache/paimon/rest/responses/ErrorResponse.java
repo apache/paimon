@@ -47,7 +47,10 @@ public class ErrorResponse implements RESTResponse {
 
     public static final String RESOURCE_TYPE_TAG = "TAG";
 
+    public static final String RESOURCE_TYPE_LABEL = "LABEL";
+
     public static final String RESOURCE_TYPE_VIEW = "VIEW";
+    public static final String RESOURCE_TYPE_SEMANTIC_VIEW = "SEMANTIC_VIEW";
 
     public static final String RESOURCE_TYPE_DIALECT = "DIALECT";
 
@@ -73,6 +76,7 @@ public class ErrorResponse implements RESTResponse {
     @JsonProperty(FIELD_MESSAGE)
     private final String message;
 
+    @Nullable
     @JsonProperty(FIELD_CODE)
     private final Integer code;
 
@@ -81,11 +85,16 @@ public class ErrorResponse implements RESTResponse {
             @Nullable @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
             @Nullable @JsonProperty(FIELD_RESOURCE_NAME) String resourceName,
             @JsonProperty(FIELD_MESSAGE) String message,
-            @JsonProperty(FIELD_CODE) int code) {
+            @Nullable @JsonProperty(FIELD_CODE) Integer code) {
         this.resourceType = resourceType;
         this.resourceName = resourceName;
         this.message = message;
         this.code = code;
+    }
+
+    /** Retained for callers compiled against the primitive {@code code} descriptor. */
+    public ErrorResponse(String resourceType, String resourceName, String message, int code) {
+        this(resourceType, resourceName, message, (Integer) code);
     }
 
     @JsonGetter(FIELD_MESSAGE)
@@ -103,6 +112,7 @@ public class ErrorResponse implements RESTResponse {
         return resourceName;
     }
 
+    @Nullable
     @JsonGetter(FIELD_CODE)
     public Integer getCode() {
         return code;

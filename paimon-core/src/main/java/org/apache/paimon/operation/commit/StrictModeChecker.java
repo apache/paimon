@@ -44,7 +44,7 @@ public class StrictModeChecker {
     private final IndexManifestFile indexManifestFile;
     private final boolean dataEvolutionEnabled;
 
-    private long strictModeLastSafeSnapshot;
+    private long lastSafeSnapshot;
 
     public StrictModeChecker(
             SnapshotManager snapshotManager,
@@ -52,19 +52,19 @@ public class StrictModeChecker {
             Supplier<FileStoreScan> scanSupplier,
             IndexManifestFile indexManifestFile,
             boolean dataEvolutionEnabled,
-            long strictModeLastSafeSnapshot) {
+            long lastSafeSnapshot) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.scanSupplier = scanSupplier;
         this.indexManifestFile = indexManifestFile;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
-        this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
+        this.lastSafeSnapshot = lastSafeSnapshot;
     }
 
     public void check(
             long newSnapshotId, CommitKind newCommitKind, List<BinaryRow> newChangedPartitions) {
         Set<BinaryRow> newPartitions = new HashSet<>(newChangedPartitions);
-        for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
+        for (long id = lastSafeSnapshot + 1; id < newSnapshotId; id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitUser().equals(commitUser)) {
                 continue;
@@ -84,13 +84,13 @@ public class StrictModeChecker {
                             String.format(
                                     "When trying to commit snapshot %d, "
                                             + "commit user %s has found a %s snapshot (id: %d) by another user %s "
-                                            + "which modified the same partition. Giving up committing as %s is set.",
+                                            + "which modified the same partition. Giving up committing as %s is true.",
                                     newSnapshotId,
                                     commitUser,
                                     snapshot.commitKind().name(),
                                     id,
                                     snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
+                                    CoreOptions.COMMIT_STRICT_MODE_ENABLED.key()));
                 }
             }
             if (snapshot.commitKind() == CommitKind.APPEND
@@ -109,12 +109,12 @@ public class StrictModeChecker {
                                     "When trying to commit snapshot %d, "
                                             + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
                                             + "which committed files to fixed bucket on the same partition. "
-                                            + "Giving up committing as %s is set.",
+                                            + "Giving up committing as %s is true.",
                                     newSnapshotId,
                                     commitUser,
                                     id,
                                     snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
+                                    CoreOptions.COMMIT_STRICT_MODE_ENABLED.key()));
                 }
             }
         }
@@ -173,6 +173,6 @@ public class StrictModeChecker {
     }
 
     public void update(long newSafeSnapshot) {
-        strictModeLastSafeSnapshot = newSafeSnapshot;
+        lastSafeSnapshot = newSafeSnapshot;
     }
 }

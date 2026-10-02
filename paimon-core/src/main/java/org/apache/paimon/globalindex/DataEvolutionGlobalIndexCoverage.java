@@ -67,25 +67,34 @@ public class DataEvolutionGlobalIndexCoverage {
         this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            if (!DataEvolutionGlobalIndexScanner.isIndexInSchema(table.rowType(), indexFile)) {
+                continue;
+            }
+            // Single-field coverage belongs to single-field index definitions. Multi-field
+            // query paths supply their actual coverage explicitly.
+            if (meta.extraFieldIds() != null && meta.extraFieldIds().length > 0) {
+                continue;
+            }
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             addCoverage(meta.indexFieldId(), range);
-            if (meta.extraFieldIds() != null) {
-                for (int extra : meta.extraFieldIds()) {
-                    addCoverage(extra, range);
-                }
-            }
         }
     }
 
     public List<Range> unindexedRanges(RowType rowType, @Nullable Predicate predicate) {
-        return unindexedRanges(collectFieldIds(rowType, predicate));
+        return unindexedRanges(collectFieldIds(rowType, predicate), null);
     }
 
     public List<Range> unindexedRanges(int fieldId) {
-        return unindexedRanges(Collections.singleton(fieldId));
+        return unindexedRanges(Collections.singleton(fieldId), null);
     }
 
-    public List<Range> unindexedRanges(Collection<Integer> fieldIds) {
+    public List<Range> unindexedRanges(
+            Collection<Integer> fieldIds, @Nullable List<Range> plannedDataRanges) {
+        return unindexedRangesFromCoverage(indexedRanges(fieldIds), plannedDataRanges);
+    }
+
+    public List<Range> unindexedRangesFromCoverage(
+            List<Range> indexedRanges, @Nullable List<Range> plannedDataRanges) {
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
         }
@@ -95,13 +104,12 @@ public class DataEvolutionGlobalIndexCoverage {
 
         List<Range> dataRanges;
         if (searchMode == GlobalIndexSearchMode.DETAIL) {
-            dataRanges = dataRangesByDataFiles();
+            dataRanges = plannedDataRanges == null ? dataRangesByDataFiles() : plannedDataRanges;
         } else {
             dataRanges = Collections.singletonList(new Range(0, snapshot.nextRowId() - 1));
         }
 
-        List<Range> predicateIndexedRanges =
-                Range.sortAndMergeOverlap(indexedRanges(fieldIds), true);
+        List<Range> predicateIndexedRanges = Range.sortAndMergeOverlap(indexedRanges, true);
         List<Range> unindexedRanges = new ArrayList<>();
         for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
             unindexedRanges.addAll(dataRange.exclude(predicateIndexedRanges));

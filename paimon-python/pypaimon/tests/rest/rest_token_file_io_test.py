@@ -20,6 +20,7 @@ import pickle
 import tempfile
 import time
 import unittest
+from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -29,6 +30,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.table.row.blob import BlobDescriptor
 
 
 class RESTTokenFileIOTest(unittest.TestCase):
@@ -46,6 +48,125 @@ class RESTTokenFileIOTest(unittest.TestCase):
         import shutil
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
+
+    def test_blob_presigned_url_bound_table_root(self):
+        root = "oss://bucket/table-a"
+        file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)
+        descriptor = BlobDescriptor(root + "/data/video.blob", 10, 20)
+        validity = timedelta(minutes=30)
+        delegate = MagicMock()
+        delegate.create_blob_presigned_url.return_value = "https://signed-url"
+        with patch.object(
+                file_io, '_file_io_with_token',
+                return_value=(delegate, None)):
+            self.assertEqual(
+                file_io.create_blob_presigned_url(root, descriptor, validity),
+                "https://signed-url")
+            delegate.create_blob_presigned_url.assert_called_once_with(
+                root, descriptor, validity)
+
+    def test_blob_presigned_url_rejects_other_table_before_resolving_io(self):
+        file_io = RESTTokenFileIO(
+            self.identifier, "oss://bucket/table-a", self.catalog_options)
+        other_root = "oss://bucket/table-b"
+        descriptor = BlobDescriptor(other_root + "/data/video.blob", 10, 20)
+        with patch.object(file_io, '_file_io_with_token') as resolve:
+            with self.assertRaisesRegex(ValueError, "bound table root"):
+                file_io.create_blob_presigned_url(
+                    other_root, descriptor, timedelta(minutes=30))
+            resolve.assert_not_called()
+
+    def test_presigned_url_refreshes_credentials_for_requested_lifetime(self):
+        self._check_presigned_url_lifetime(3, 4, True)
+
+    def test_presigned_url_reuses_credentials_for_short_validity(self):
+        self._check_presigned_url_lifetime(0.5, 4, False)
+
+    def test_presigned_url_accepts_when_one_second_exceeds_validity(self):
+        self._check_presigned_url_lifetime(
+            1.5, 3, False, current_token_extra_seconds=1)
+
+    def test_presigned_url_rejects_insufficient_refreshed_lifetime(self):
+        self._check_presigned_url_lifetime(3, 2, True, rejected=True)
+
+    def _check_presigned_url_lifetime(
+            self, requested_hours, refreshed_hours, should_refresh, rejected=False,
+            current_token_extra_seconds=None):
+        root = "oss://bucket/table"
+        file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)
+        now = 1700000000
+        token_properties = {OssOptions.OSS_SECURITY_TOKEN.key(): "test-token"}
+        if current_token_extra_seconds is None:
+            old_expiry = now + 2 * 3600
+        else:
+            old_expiry = (
+                now + requested_hours * 3600 + current_token_extra_seconds)
+        old_token = RESTToken(token_properties, int(old_expiry * 1000))
+        new_token = RESTToken(token_properties, (now + refreshed_hours * 3600) * 1000)
+        file_io.token = old_token
+        descriptor = BlobDescriptor(root + "/video.blob", 0, 10)
+        validity = timedelta(hours=requested_hours)
+
+        def refresh():
+            file_io.token = new_token
+
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now), \
+                patch.object(file_io, '_build_cache_key', return_value='presigning-test'), \
+                patch.object(file_io, '_get_cached_token', return_value=old_token), \
+                patch.object(file_io, '_set_cached_token') as cache_token, \
+                patch.object(file_io, 'refresh_token', side_effect=refresh) as refresh_token, \
+                patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get') as get_io:
+            presign = get_io.return_value.create_blob_presigned_url
+            presign.side_effect = ["https://first-url", "https://refreshed-url"]
+            if rejected:
+                with self.assertRaisesRegex(ValueError, "credential lifetime after refresh"):
+                    file_io.create_blob_presigned_url(root, descriptor, validity)
+                get_io.assert_not_called()
+            else:
+                self.assertEqual("https://first-url", file_io.create_blob_presigned_url(
+                    root, descriptor, validity))
+                self.assertEqual(1, presign.call_count)
+                presign.assert_called_with(root, descriptor, validity)
+            self.assertEqual(int(should_refresh), refresh_token.call_count)
+            if should_refresh:
+                cache_token.assert_called_once_with(file_io._build_cache_key(), new_token)
+            else:
+                cache_token.assert_not_called()
+
+    def test_presigned_url_refreshes_and_resigns_after_materialization(self):
+        root = "oss://bucket/table"
+        file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)
+        now = [1700000000]
+        token_properties = {OssOptions.OSS_SECURITY_TOKEN.key(): "test-token"}
+        old_token = RESTToken(token_properties, (now[0] + 2 * 3600) * 1000)
+        new_token = RESTToken(token_properties, (now[0] + 4 * 3600) * 1000)
+        file_io.token = old_token
+        descriptor = BlobDescriptor(root + "/video.blob", 0, 10)
+        validity = timedelta(minutes=30)
+
+        def refresh():
+            file_io.token = new_token
+
+        def presign(*_):
+            if now[0] == 1700000000:
+                now[0] += 2 * 3600
+                return "https://first-url"
+            return "https://refreshed-url"
+
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time',
+                   side_effect=lambda: now[0]), \
+                patch.object(file_io, '_build_cache_key', return_value='presigning-test'), \
+                patch.object(file_io, '_get_cached_token', return_value=old_token), \
+                patch.object(file_io, '_set_cached_token'), \
+                patch.object(file_io, 'refresh_token', side_effect=refresh) as refresh_token, \
+                patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get') as get_io:
+            get_io.return_value.create_blob_presigned_url.side_effect = presign
+            self.assertEqual(
+                "https://refreshed-url",
+                file_io.create_blob_presigned_url(root, descriptor, validity))
+            self.assertEqual(
+                2, get_io.return_value.create_blob_presigned_url.call_count)
+            refresh_token.assert_called_once_with()
 
     def test_new_output_stream_path_conversion_and_parent_creation(self):
         """Test new_output_stream correctly handles URI paths and creates parent directories."""
@@ -147,6 +268,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
+            original_file_io.token = RESTToken({}, 1)
+            original_backend = original_file_io.file_io()
 
             pickled = pickle.dumps(original_file_io)
 
@@ -157,6 +280,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
 
             self.assertIsNone(deserialized_file_io.api_instance)
+            self.assertIsNot(deserialized_file_io.file_io(), original_backend)
 
             test_file_path = f"file://{self.temp_dir}/pickle_test.txt"
             test_content = b"pickle test content"

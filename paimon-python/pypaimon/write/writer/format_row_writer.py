@@ -18,7 +18,7 @@
 import datetime
 import re
 import struct
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any, List
 
 import pyarrow as pa
@@ -268,17 +268,16 @@ def _write_field(buf: _BlockBuffer, value: Any, data_type) -> None:
             buf.write_bytes_with_length(value)
         elif type_name.startswith('DECIMAL'):
             precision, scale = _parse_decimal_params(type_name)
+            dec = value if isinstance(value, Decimal) else Decimal(str(value))
+            # Compute the unscaled value under a context wide enough for the column:
+            # the default 28-digit precision would round a DECIMAL(p) value with more
+            # than 28 significant digits, silently corrupting it. Mirrors the read path.
+            with localcontext() as ctx:
+                ctx.prec = max(precision + abs(scale), 38)
+                unscaled = int(dec.scaleb(scale))
             if precision <= 18:
-                if isinstance(value, Decimal):
-                    unscaled = int(value * (10 ** scale))
-                else:
-                    unscaled = int(Decimal(str(value)) * (10 ** scale))
                 buf.write_long_le(unscaled)
             else:
-                if isinstance(value, Decimal):
-                    unscaled = int(value * (10 ** scale))
-                else:
-                    unscaled = int(Decimal(str(value)) * (10 ** scale))
                 raw = unscaled.to_bytes(
                     (unscaled.bit_length() + 8) // 8, byteorder='big', signed=True)
                 buf.write_bytes_with_length(raw)

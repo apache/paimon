@@ -30,6 +30,56 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CoreOptionsTest {
 
     @Test
+    void testCommitLastSafeSnapshotAndStrictMode() {
+        Options options = new Options();
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.commitLastSafeSnapshot()).isEmpty();
+        assertThat(core.commitStrictModeEnabled()).isTrue();
+
+        options.setString("commit.strict-mode.last-safe-snapshot", "7");
+        assertThat(core.commitLastSafeSnapshot()).contains(7L);
+        assertThat(core.commitStrictModeEnabled()).isTrue();
+
+        options.set(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT, 11L);
+        assertThat(core.commitLastSafeSnapshot()).contains(11L);
+
+        options.set(CoreOptions.COMMIT_STRICT_MODE_ENABLED, false);
+        assertThat(core.commitStrictModeEnabled()).isFalse();
+        assertThat(core.commitLastSafeSnapshot()).contains(11L);
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void testLegacyCommitLastSafeSnapshotApi() {
+        Options options = new Options();
+        options.set(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT, 7L);
+        CoreOptions core = new CoreOptions(options);
+        assertThat(core.commitLastSafeSnapshot()).contains(7L);
+        assertThat(core.commitStrictModeLastSafeSnapshot()).contains(7L);
+
+        options.set(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT, 11L);
+        assertThat(core.commitStrictModeLastSafeSnapshot()).contains(11L);
+    }
+
+    @Test
+    void testManifestSidecarDefaultsToManifestSort() {
+        assertThat(CoreOptions.MANIFEST_SIDECAR_ENABLED.defaultValue()).isNull();
+        for (Boolean sort : new Boolean[] {null, false, true}) {
+            for (Boolean configured : new Boolean[] {null, false, true}) {
+                Options options = new Options();
+                if (sort != null) {
+                    options.set(CoreOptions.MANIFEST_SORT_ENABLED, sort);
+                }
+                if (configured != null) {
+                    options.set(CoreOptions.MANIFEST_SIDECAR_ENABLED, configured);
+                }
+                assertThat(new CoreOptions(options).manifestSidecarEnabled())
+                        .isEqualTo(configured == null ? Boolean.TRUE.equals(sort) : configured);
+            }
+        }
+    }
+
+    @Test
     public void testDefaultStartupMode() {
         Options conf = new Options();
         assertThat(conf.get(CoreOptions.SCAN_MODE)).isEqualTo(CoreOptions.StartupMode.DEFAULT);

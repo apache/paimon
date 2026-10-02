@@ -31,6 +31,18 @@ class OssOptions:
     OSS_ENDPOINT = ConfigOptions.key("fs.oss.endpoint").string_type().no_default_value().with_description(
         "OSS endpoint")
     OSS_REGION = ConfigOptions.key("fs.oss.region").string_type().no_default_value().with_description("OSS region")
+    OSS_SSE_METHOD = ConfigOptions.key(
+        "fs.oss.server-side-encryption").string_type().no_default_value().with_description(
+        "OSS atomic metadata encryption method: AES256, KMS or SM4")
+    OSS_SSE_KMS_KEY_ID = ConfigOptions.key(
+        "fs.oss.server-side-encryption-key-id").string_type().no_default_value().with_description(
+        "KMS key ID for OSS atomic metadata encryption")
+    OSS_SSE_DATA_ENCRYPTION = ConfigOptions.key(
+        "fs.oss.server-side-data-encryption").string_type().no_default_value().with_description(
+        "Data encryption algorithm for OSS atomic metadata encryption: SM4, with KMS only")
+    OSS_SSE_ALGORITHM = ConfigOptions.key(
+        "fs.oss.server-side-encryption-algorithm").string_type().no_default_value().with_description(
+        "Legacy OSS atomic metadata encryption method; used when the other SSE options are unset")
 
 
 class S3Options:
@@ -75,6 +87,13 @@ class PVFSOptions:
 
 
 class CatalogOptions:
+    CACHE_BLOB_INDEX_MAX_SIZE = (
+        ConfigOptions.key("cache.blob-index.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(64))
+        .with_description("Maximum estimated Python BLOB index cache size per catalog.")
+    )
+
     URI = ConfigOptions.key("uri").string_type().no_default_value().with_description("Catalog URI")
     METASTORE = ConfigOptions.key("metastore").string_type().default_value("filesystem").with_description(
         "Metastore type")
@@ -114,11 +133,22 @@ class CatalogOptions:
     DLF_SIGNING_ALGORITHM = ConfigOptions.key(
         "dlf.signing-algorithm").string_type().default_value("default").with_description(
         "DLF signing algorithm. Options: 'default' (for VPC endpoint), "
-        "'openapi' (for DlfNext/2026-01-18). "
+        "'openapi-v4' (ACS4-HMAC-SHA256, for DlfNext/2026-01-18), "
+        "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
         "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
-        "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+        "header.User-Agent").string_type().no_default_value().with_description(
+        "The User-Agent of REST catalog requests, replacing Paimon's unified one")
+    USER_AGENT_MODULE = ConfigOptions.key(
+        "user-agent.module").string_type().no_default_value().with_description(
+        "The module of Paimon's unified User-Agent, 'pypaimon/<version>' by default")
+    USER_AGENT_FEATURES = ConfigOptions.key(
+        "user-agent.features").string_type().no_default_value().with_description(
+        "Space-separated features of Paimon's unified User-Agent")
+    USER_AGENT_EXTENDED = ConfigOptions.key(
+        "user-agent.extended").string_type().no_default_value().with_description(
+        "Free text appended to Paimon's unified User-Agent")
     SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
         "Sync all table properties to the catalog metastore")
     RESOLVING_FILE_IO_ENABLED = (
@@ -132,6 +162,26 @@ class CatalogOptions:
         )
     )
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class FileIOOptions:
+    READ_COALESCE_MAX_GAP = (
+        ConfigOptions.key("file-io.read-coalesce.max-gap")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(1))
+        .with_description(
+            "Maximum gap between same-file ranges merged into one read."
+        )
+    )
+    READ_COALESCE_MAX_BLOCK = (
+        ConfigOptions.key("file-io.read-coalesce.max-block")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(8))
+        .with_description(
+            "Maximum span for coalescing same-file ranges, except when an "
+            "individual range is larger. Individual ranges are not split."
+        )
+    )
 
 
 class HdfsOptions:

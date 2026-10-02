@@ -216,7 +216,8 @@ public class DataTableSource extends BaseDataTableSource
                                         tableIdentifier.asSummaryString())
                                 .setParallelism(1),
                 tableIdentifier.asSummaryString(),
-                table);
+                table,
+                Optional.of(1));
     }
 
     @Override

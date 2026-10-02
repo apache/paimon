@@ -1,0 +1,112 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+name: CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    name: Select tests and validate CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      java: ${{ steps.plan.outputs.java }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      python: ${{ steps.plan.outputs.python }}
+      docs: ${{ steps.plan.outputs.docs }}
+      licensing: ${{ steps.plan.outputs.licensing }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test CI selection and Maven commands
+        run: python3 -m unittest discover -s tools/ci -p 'test_*.py'
+      - name: Validate workflow syntax
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.7.11 --repo rhysd/actionlint \
+            --pattern 'actionlint_1.7.11_linux_amd64.tar.gz' --dir "$RUNNER_TEMP"
+          tar -xzf "$RUNNER_TEMP/actionlint_1.7.11_linux_amd64.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
+      - name: Select affected tests and check changed file sizes
+        id: plan
+        run: python3 tools/ci/plan.py
+
+  java:
+    name: Java
+    needs: plan
+    if: needs.plan.outputs.java == 'true'
+    uses: ./.github/workflows/ci-java.yml
+    with:
+      matrix: ${{ needs.plan.outputs.matrix }}
+
+  python:
+    name: Python
+    needs: plan
+    if: needs.plan.outputs.python == 'true'
+    uses: ./.github/workflows/ci-python.yml
+
+  docs:
+    name: Documentation
+    needs: plan
+    if: needs.plan.outputs.docs == 'true'
+    uses: ./.github/workflows/ci-docs.yml
+
+  licensing:
+    name: Licensing
+    needs: plan
+    if: needs.plan.outputs.licensing == 'true'
+    uses: ./.github/workflows/ci-licensing.yml
+
+  result:
+    # Use this stable check for branch protection, not individual matrix jobs.
+    name: CI result
+    if: always()
+    needs: [plan, java, python, docs, licensing]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all selected jobs to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          results = json.loads(os.environ['RESULTS'])
+          if results['plan']['result'] != 'success':
+              raise SystemExit('CI selection or validation failed')
+          selected = results['plan']['outputs']
+          for name in ('java', 'python', 'docs', 'licensing'):
+              expected = 'success' if selected[name] == 'true' else 'skipped'
+              if results[name]['result'] != expected:
+                  raise SystemExit(name + ': ' + results[name]['result'] + ', expected ' + expected)
+          PYTHON

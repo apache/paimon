@@ -77,7 +77,6 @@ class DataEvolutionVectorScan(VectorSearchScan):
 
     def scan(self):
         # type: () -> VectorSearchScanPlan
-        from pypaimon.common.options.options import Options
         from pypaimon.index.index_file_handler import IndexFileHandler
         from pypaimon.read.push_down_utils import _get_all_fields
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
@@ -95,13 +94,9 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 if field is not None:
                     filter_field_ids.add(field.id)
 
-        snapshot = TimeTravelUtil.try_travel_to_snapshot(
-            Options(self._table.table_schema.options),
-            self._table.tag_manager(),
-            self._table.snapshot_manager(),
-        )
+        snapshot = TimeTravelUtil.resolve_snapshot(self._table)
         if snapshot is None:
-            snapshot = self._table.snapshot_manager().get_latest_snapshot()
+            return VectorSearchScanPlan([])
 
         index_file_handler = IndexFileHandler(table=self._table)
 

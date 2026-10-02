@@ -55,7 +55,7 @@ public class Contains extends LeafBinaryFunction {
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.empty();
+        return Optional.of(NotContains.INSTANCE);
     }
 
     @Override

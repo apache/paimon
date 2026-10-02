@@ -21,6 +21,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory
 from pypaimon import Schema
@@ -28,6 +29,83 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read import push_down_utils
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import AtomicType, DataField
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk-raw', 'pk-merge', 'first-row'])
+@pytest.mark.parametrize('batch_size', [1, 1024])
+def test_predicate_preserves_deletion_vector_positions(tmp_path, mode, batch_size):
+    from dataclasses import replace
+    from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.write.commit_message import CommitMessage
+    from pypaimon.write.table_delete import TableDeleteByRowId
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', False)
+    options = {'file.format': 'parquet', 'deletion-vectors.enabled': 'true',
+               'deletion-vectors.merge-on-read': 'true', 'scan.native-plan.enabled': 'false',
+               'read.batch-size': str(batch_size)}
+    if mode != 'append':
+        options['bucket'] = '1'
+    if mode == 'first-row':
+        options.update({'merge-engine': 'first-row', 'pk-clustering-override': 'true',
+                        'clustering.columns': 'id'})
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64())]), options=options,
+        primary_keys=[] if mode == 'append' else ['id']), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pydict({'id': [0, 1, 2]}))
+        messages = writer.prepare_commit()
+        if mode == 'pk-raw':
+            for message in messages:
+                message.new_files = [replace(file, level=1) for file in message.new_files]
+        commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+    vector = BitmapDeletionVector()
+    vector.delete(1)
+    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        GenericRow([], []), messages[0].bucket, {messages[0].new_files[0].file_name: vector})
+    commit = builder.new_commit()
+    try:
+        commit.commit([CommitMessage(partition=(), bucket=messages[0].bucket,
+                                     new_files=[], index_adds=[entry])])
+    finally:
+        commit.close()
+    for id_, expected in [(0, [0]), (1, []), (2, [2])]:
+        read = table.new_read_builder()
+        read.with_filter(read.new_predicate_builder().equal('id', id_))
+        plan = read.new_scan().plan()
+        if mode in ('pk-merge', 'first-row'):
+            # A single unique L0 file can be planned raw; exercise the merge
+            # reader explicitly as overlapping runs and PK indexes do.
+            for split in plan.splits():
+                split.raw_convertible = False
+        assert read.new_read().to_arrow(plan.splits()).column('id').to_pylist() == expected
+    if mode != 'append':
+        from copy import copy
+        from pypaimon.globalindex.indexed_split import IndexedSplit
+        from pypaimon.utils.range import Range
+
+        # PK indexes select physical positions in one source file. Exercise
+        # range filtering both with and without a DV, including a deleted hit.
+        original = table.new_read_builder().new_scan().plan().splits()[0]
+        for with_dv in (False, True):
+            split = copy(original)
+            split.raw_convertible = False
+            if not with_dv:
+                split.data_deletion_files = None
+            for start, end in ((1, 1), (2, 2), (1, 2)):
+                indexed = IndexedSplit(split, [Range(start, end)])
+                for id_ in (1, 2):
+                    read = table.new_read_builder()
+                    read.with_filter(read.new_predicate_builder().equal('id', id_))
+                    expected = [id_] if start <= id_ <= end and (not with_dv or id_ != 1) else []
+                    assert read.new_read().to_arrow([indexed]).column('id').to_pylist() == expected
 
 
 class ReaderPredicateTest(unittest.TestCase):

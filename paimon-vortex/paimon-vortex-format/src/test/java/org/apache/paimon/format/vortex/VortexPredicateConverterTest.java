@@ -494,6 +494,27 @@ public class VortexPredicateConverterTest {
         assertEquals(1_500L, rows.get(0).getTimestamp(0, 0).getMillisecond());
     }
 
+    @Test
+    public void testTimestampNanosOverflowingLiteralNotPushed(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // epoch millis times 1_000_000 overflows int64 nanoseconds beyond 2262-04-11, and the
+        // wrapped bound landed before the epoch, so "< 9999-12-31" dropped the epoch row
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(9)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<Predicate> predicates =
+                Collections.singletonList(
+                        tsBuilder.lessThan(0, Timestamp.fromEpochMillis(253402214400000L)));
+        assertNull(VortexPredicateConverter.toVortexExpression(predicates));
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {GenericRow.of(Timestamp.fromEpochMillis(0L))},
+                        predicates);
+        assertEquals(1, rows.size());
+        assertEquals(0L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
     private List<InternalRow> roundTrip(
             java.nio.file.Path tempDir,
             RowType rowType,

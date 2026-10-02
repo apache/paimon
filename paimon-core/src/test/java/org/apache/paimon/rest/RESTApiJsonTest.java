@@ -18,8 +18,12 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -53,6 +57,8 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -290,6 +296,52 @@ public class RESTApiJsonTest {
                         RESTApi.toJson(
                                 new ListPartitionsByFilterRequest("filter-json", null, null, null)),
                         Map.class));
+    }
+
+    @Test
+    public void listPartitionsByFilterRequestPreservesTemporalAndDecimalLiterals()
+            throws Exception {
+        // A partition filter reaches the server as JsonSerdeUtil.toFlatJson(predicate) carried in
+        // the request's filter field. DATE/TIME/TIMESTAMP/TIMESTAMP_LTZ/DECIMAL literals travel as
+        // strings; assert they survive the full request round-trip that a server parses, including
+        // a decimal with more significant digits than a double can hold.
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                DataTypes.DATE(),
+                                DataTypes.TIME(3),
+                                DataTypes.TIMESTAMP(6),
+                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                                DataTypes.DECIMAL(38, 18)));
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(0, (int) java.time.LocalDate.of(2026, 1, 15).toEpochDay()),
+                        builder.equal(1, 45_296_789), // 12:34:56.789
+                        builder.equal(
+                                2,
+                                Timestamp.fromLocalDateTime(
+                                        java.time.LocalDateTime.of(
+                                                2026, 1, 15, 12, 34, 56, 789_000_000))),
+                        builder.equal(
+                                3,
+                                Timestamp.fromInstant(
+                                        java.time.Instant.parse("2026-01-15T04:34:56.789Z"))),
+                        builder.equal(
+                                4,
+                                Decimal.fromBigDecimal(
+                                        new java.math.BigDecimal(
+                                                "12345678901234567890.123456789012345678"),
+                                        38,
+                                        18)));
+
+        ListPartitionsByFilterRequest request =
+                new ListPartitionsByFilterRequest(
+                        JsonSerdeUtil.toFlatJson(predicate), "dt=2026%", 2, null);
+        ListPartitionsByFilterRequest parsed =
+                RESTApi.fromJson(RESTApi.toJson(request), ListPartitionsByFilterRequest.class);
+        Predicate serverSide = JsonSerdeUtil.fromJson(parsed.getFilter(), Predicate.class);
+
+        assertEquals(predicate, serverSide);
     }
 
     @Test

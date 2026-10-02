@@ -18,21 +18,33 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 /**
  * An Index Reader for BTree which dynamically filters file list by input predicate, then visits
@@ -42,21 +54,150 @@ import java.util.concurrent.ExecutorService;
 public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIndexReader> {
 
     private final KeySerializer keySerializer;
+    private final List<DataField> indexFields;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
+    @Nullable private final RoaringNavigableMap64 rowIdFilter;
+    private final Comparator<Object> comparator;
+    private final long totalRowCount;
+    @Nullable private final Pair<Object, Object> fullRangeBounds;
 
     public LazyFilteredBTreeReader(
             List<GlobalIndexIOMeta> files,
+            List<DataField> indexFields,
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
             CacheManager cacheManager,
             long fallbackScanMaxSize,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.indexFields = indexFields;
+        this.rowIdFilter =
+                rowRanges == null ? null : GlobalIndexResult.fromRanges(rowRanges).results();
+        this.comparator = keySerializer.createComparator();
+        this.totalRowCount = totalRowCount;
+        this.fullRangeBounds = fullRangeBounds(files);
+    }
+
+    @Nullable
+    private Pair<Object, Object> fullRangeBounds(List<GlobalIndexIOMeta> files) {
+        if (totalRowCount == 0 || files.isEmpty()) {
+            return null;
+        }
+        long remaining = totalRowCount;
+        Object min = null;
+        Object max = null;
+        for (GlobalIndexIOMeta file : files) {
+            // A file's min/max does not identify its row IDs. Only skip the entire reader
+            // when its scalar entries cover the complete local row-ID domain without gaps.
+            if (file.rowCount() < 0 || file.rowCount() > remaining) {
+                return null;
+            }
+            remaining -= file.rowCount();
+            SortedIndexFileMeta meta = SortedIndexFileMeta.deserialize(file.metadata());
+            if (meta.hasNulls() || meta.firstKey() == null || meta.lastKey() == null) {
+                return null;
+            }
+            Object first = keySerializer.deserialize(MemorySlice.wrap(meta.firstKey()));
+            Object last = keySerializer.deserialize(MemorySlice.wrap(meta.lastKey()));
+            if (min == null || comparator.compare(first, min) < 0) {
+                min = first;
+            }
+            if (max == null || comparator.compare(last, max) > 0) {
+                max = last;
+            }
+        }
+        return remaining == 0 ? Pair.of(min, max) : null;
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitComposite(Predicate predicate) {
+        if (indexFields.size() < 2) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        Optional<List<LeafPredicate>> matched =
+                CompositeBTreePredicate.match(indexFields, predicate);
+        if (!matched.isPresent()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        if (CompositeBTreePredicate.isContradictory(indexFields, predicate)) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        Object[] values = matched.get().stream().map(leaf -> leaf.literals().get(0)).toArray();
+        return visitEqual((FieldRef) null, GenericRow.of(values));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) == 0,
+                () -> super.visitEqual(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) < 0,
+                () -> super.visitLessThan(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) <= 0,
+                () -> super.visitLessOrEqual(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) > 0,
+                () -> super.visitGreaterThan(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return visitWithAllMatch(
+                key -> literal != null && comparator.compare(key, literal) >= 0,
+                () -> super.visitGreaterOrEqual(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return visitWithAllMatch(
+                key ->
+                        from != null
+                                && to != null
+                                && comparator.compare(key, from) >= 0
+                                && comparator.compare(key, to) <= 0,
+                () -> super.visitBetween(fieldRef, from, to));
+    }
+
+    // Only use for predicates whose matching keys form one contiguous interval.
+    private CompletableFuture<Optional<GlobalIndexResult>> visitWithAllMatch(
+            java.util.function.Predicate<Object> predicate,
+            Supplier<CompletableFuture<Optional<GlobalIndexResult>>> fallback) {
+        if (fullRangeBounds != null
+                && predicate.test(fullRangeBounds.getLeft())
+                && predicate.test(fullRangeBounds.getRight())) {
+            return CompletableFuture.completedFuture(
+                    Optional.of(
+                            rowIdFilter == null
+                                    ? GlobalIndexResult.fromRange(new Range(0, totalRowCount - 1))
+                                    : GlobalIndexResult.create(rowIdFilter)));
+        }
+        return fallback.get();
     }
 
     @Override
@@ -119,6 +260,16 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return visitRange(
+                fieldRef,
+                from,
+                to,
+                reader -> reader.visitRange(from, to, fromInclusive, toInclusive));
+    }
+
+    @Override
     protected Optional<GlobalIndexResult> visitBetween(
             BTreeIndexReader reader, Object from, Object to) {
         return reader.visitBetween(from, to);
@@ -142,7 +293,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Override
     protected BTreeIndexReader openReader(GlobalIndexIOMeta meta) {
         try {
-            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager);
+            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager, rowIdFilter);
         } catch (IOException e) {
             throw new RuntimeException("Can't create BTree index reader for " + meta.filePath(), e);
         }

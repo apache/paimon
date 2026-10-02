@@ -22,6 +22,9 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -36,22 +39,17 @@ public interface GlobalIndexer {
      * Creates a reader whose relative row IDs cover {@code [0, totalRowCount)}.
      *
      * <p>The complete row count lets an index implementation answer negative predicates by
-     * complement, including for an empty shard.
+     * complement, including for an empty shard. Local row ranges are optional pruning hints;
+     * callers must still clip the returned candidates.
      */
     GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor);
 
-    static GlobalIndexer create(String type, DataField indexField, Options options) {
-        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(indexField, options);
-    }
-
-    static GlobalIndexer create(
-            String type, DataField indexField, List<DataField> extraFields, Options options) {
-        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(indexField, extraFields, options);
+    static GlobalIndexer create(String type, List<DataField> indexFields, Options options) {
+        return GlobalIndexerFactoryUtils.load(type).create(indexFields, options);
     }
 }

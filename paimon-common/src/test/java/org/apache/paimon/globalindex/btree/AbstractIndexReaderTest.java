@@ -143,7 +143,10 @@ public abstract class AbstractIndexReaderTest {
                                 new Path(new Path(tempPath.toUri()), meta.filePath()));
         options = new Options();
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
         keySerializer = KeySerializer.create(dataType);
         comparator = keySerializer.createComparator();
 
@@ -334,7 +337,12 @@ public abstract class AbstractIndexReaderTest {
     protected abstract GlobalIndexReader prepareDataAndCreateReader() throws Exception;
 
     protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data) throws IOException {
-        GlobalIndexSingleColumnWriter indexWriter = globalIndexer.createWriter(fileWriter);
+        return writeData(data, globalIndexer.createWriter(fileWriter));
+    }
+
+    protected GlobalIndexIOMeta writeData(
+            List<Pair<Object, Long>> data, GlobalIndexSingleColumnWriter indexWriter)
+            throws IOException {
         for (Pair<Object, Long> pair : data) {
             indexWriter.write(pair.getKey(), pair.getValue());
         }
@@ -346,6 +354,7 @@ public abstract class AbstractIndexReaderTest {
         return new GlobalIndexIOMeta(
                 new Path(new Path(tempPath.toUri()), fileName),
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
+                resultEntry.rowCount(),
                 resultEntry.meta());
     }
 

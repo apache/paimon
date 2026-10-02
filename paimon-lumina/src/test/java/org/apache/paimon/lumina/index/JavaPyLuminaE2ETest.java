@@ -174,7 +174,7 @@ public class JavaPyLuminaE2ETest {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 LuminaVectorGlobalIndexerFactory.IDENTIFIER,
-                                embeddingField,
+                                Collections.singletonList(embeddingField),
                                 indexOptions);
 
         for (int i = 0; i < vectors.length; i++) {
@@ -284,7 +284,7 @@ public class JavaPyLuminaE2ETest {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 LuminaVectorGlobalIndexerFactory.IDENTIFIER,
-                                embeddingField,
+                                Collections.singletonList(embeddingField),
                                 indexOptions);
         for (int i = 0; i < vectors.length; i++) {
             vectorWriter.write(vectors[i], i);
@@ -305,7 +305,10 @@ public class JavaPyLuminaE2ETest {
         GlobalIndexSingleColumnWriter idWriter =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, indexOptions);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(idField),
+                                indexOptions);
         for (int i = 0; i < vectors.length; i++) {
             idWriter.write(i, i);
         }

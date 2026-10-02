@@ -20,7 +20,6 @@ import os
 import shutil
 import tempfile
 import unittest
-import random
 from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
@@ -37,6 +36,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.write.file_store_commit import FileStoreCommit
@@ -227,8 +227,12 @@ class ReaderBasicTest(unittest.TestCase):
         pd.testing.assert_frame_equal(
             actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
+    @parameterized.expand([
+        ('full',),
+        ('none',),
+    ])
     @pytest.mark.python_plan
-    def test_full_data_types(self):
+    def test_full_data_types(self, stats_mode):
         simple_pa_schema = pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
@@ -245,11 +249,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('f12', pa.date32()),
             ('f13', pa.time32('ms')),
         ])
-        stats_enabled = random.random() < 0.5
-        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        options = {'metadata.stats-mode': stats_mode}
         schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
-        self.catalog.create_table('default.test_full_data_types', schema, False)
-        table = self.catalog.get_table('default.test_full_data_types')
+        table_name = f'default.test_full_data_types_{stats_mode}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
 
         # to test read and write
         write_builder = table.new_batch_write_builder()
@@ -301,8 +305,7 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
 
-        # Python write does not produce value stats
-        if stats_enabled:
+        if stats_mode == 'full':
             self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
             min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
                                                                 table.fields).values
@@ -584,6 +587,28 @@ class ReaderBasicTest(unittest.TestCase):
         catalog.create_table("test_db.test_value_stats_cols_schema_match", schema_with_stats, False)
         table_with_stats = catalog.get_table("test_db.test_value_stats_cols_schema_match")
         self._test_append_only_schema_match_case(table_with_stats, pa_schema)
+
+    def test_value_stats_cols_use_file_schema_after_schema_evolution(self):
+        table_name = 'default.test_value_stats_schema_evolution'
+        schema = Schema.from_pyarrow_schema(pa.schema([
+            ('id', pa.int64()), ('name', pa.string())]))
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+        self._test_value_stats_cols_case(
+            ManifestFileManager(table), table, ['id', 'name'], 2, 'schema_evolution')
+
+        for change in (SchemaChange.rename_column('name', 'renamed'),
+                       SchemaChange.drop_column('renamed'),
+                       SchemaChange.add_column('name', AtomicType('INT'))):
+            self.catalog.alter_table(table_name, [change], False)
+            table = self.catalog.get_table(table_name)
+            entries = ManifestFileManager(table).read(
+                'manifest-test-schema_evolution', drop_stats=False)
+            stats = entries[0].file.value_stats
+            self.assertEqual([field.name for field in stats.min_values.fields],
+                             ['id', 'name'])
+            self.assertEqual(stats.min_values.get_field(1), 'apple')
+            self.assertEqual(stats.max_values.get_field(1), 'zebra')
 
     def test_primary_key_value_stats_excludes_system_fields(self):
         catalog = CatalogFactory.create({

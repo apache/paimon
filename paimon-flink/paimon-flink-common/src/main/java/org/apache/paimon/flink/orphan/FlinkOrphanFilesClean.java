@@ -33,6 +33,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import org.apache.flink.api.common.BatchShuffleMode;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -92,6 +93,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
         flinkConf.set(ExecutionOptions.SORT_INPUTS, false);
         flinkConf.set(ExecutionOptions.USE_BATCH_STATE_BACKEND, false);
+        // The used/candidate join below fully consumes its first input before reading the second.
+        // A pipelined shuffle can deadlock that build/probe order, so force blocking exchanges.
+        flinkConf.set(ExecutionOptions.BATCH_SHUFFLE_MODE, BatchShuffleMode.ALL_EXCHANGES_BLOCKING);
         if (parallelism != null) {
             flinkConf.set(CoreOptions.DEFAULT_PARALLELISM, parallelism);
         }

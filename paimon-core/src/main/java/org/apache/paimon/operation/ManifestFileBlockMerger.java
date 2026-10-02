@@ -742,6 +742,7 @@ final class ManifestFileBlockMerger {
                     entry.kind().toByteValue(),
                     partition,
                     entry.bucket(),
+                    entry.totalBuckets(),
                     file.level(),
                     file.schemaId(),
                     file.nonNullFirstRowId(),
@@ -751,6 +752,7 @@ final class ManifestFileBlockMerger {
                     entry.kind().toByteValue(),
                     partition,
                     entry.bucket(),
+                    entry.totalBuckets(),
                     file.level(),
                     file.schemaId(),
                     file.rowCount());
@@ -771,6 +773,8 @@ final class ManifestFileBlockMerger {
         private long schemaId = Long.MIN_VALUE;
         private int minBucket = Integer.MAX_VALUE;
         private int maxBucket = Integer.MIN_VALUE;
+        private @Nullable Integer totalBuckets;
+        private boolean totalBucketsKnown = true;
         private int minLevel = Integer.MAX_VALUE;
         private int maxLevel = Integer.MIN_VALUE;
         private long minRowId = Long.MAX_VALUE;
@@ -817,6 +821,7 @@ final class ManifestFileBlockMerger {
             int bucket = entry.bucket();
             minBucket = Math.min(minBucket, bucket);
             maxBucket = Math.max(maxBucket, bucket);
+            collectTotalBuckets(entry.totalBuckets());
             int level = file.level();
             minLevel = Math.min(minLevel, level);
             maxLevel = Math.max(maxLevel, level);
@@ -864,12 +869,28 @@ final class ManifestFileBlockMerger {
                             schemaId,
                             minBucket,
                             maxBucket,
+                            totalBucketsKnown ? totalBuckets : null,
                             minLevel,
                             maxLevel,
                             hasRowIds ? minRowId : -1,
                             hasRowIds ? maxRowId : -1,
                             partitionStatsConverter.toBinaryAllMode(stats));
             partitionCounts = null;
+        }
+
+        private void collectTotalBuckets(int candidate) {
+            if (!totalBucketsKnown) {
+                return;
+            }
+            if (candidate <= 0) {
+                totalBucketsKnown = false;
+                totalBuckets = null;
+            } else if (totalBuckets == null) {
+                totalBuckets = candidate;
+            } else if (totalBuckets != candidate) {
+                totalBucketsKnown = false;
+                totalBuckets = null;
+            }
         }
 
         private void finishFiltering(CollectedDeletes deletes, boolean deferDeletedAddCheck) {

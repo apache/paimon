@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -62,11 +63,15 @@ public class SearchArgumentToPredicateConverter {
         this.root = searchArgument.getExpression();
         this.leaves = searchArgument.getLeaves();
         this.hiveColumnNames =
-                columnNames.stream().map(String::toLowerCase).collect(Collectors.toList());
+                columnNames.stream()
+                        .map(s -> s.toLowerCase(Locale.ROOT))
+                        .collect(Collectors.toList());
         this.columnTypes = columnTypes;
         if (readColumnNames != null) {
             readColumnNames =
-                    readColumnNames.stream().map(String::toLowerCase).collect(Collectors.toSet());
+                    readColumnNames.stream()
+                            .map(s -> s.toLowerCase(Locale.ROOT))
+                            .collect(Collectors.toSet());
         }
         this.readColumnNames = readColumnNames;
 

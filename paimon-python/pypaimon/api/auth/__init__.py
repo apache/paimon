@@ -23,6 +23,7 @@ from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.api.auth.dlf_signer import (
     DLFDefaultSigner,
     DLFOpenApiSigner,
+    DLFOpenApiV4Signer,
     DLFRequestSigner,
 )
 from pypaimon.api.auth.factory import AuthProviderFactory, DLFAuthProviderFactory
@@ -36,5 +37,6 @@ __all__ = [
     "DLFRequestSigner",
     "DLFDefaultSigner",
     "DLFOpenApiSigner",
+    "DLFOpenApiV4Signer",
     "DLFAuthProvider",
 ]

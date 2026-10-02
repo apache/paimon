@@ -21,6 +21,10 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.IndexQuerySplit;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -40,22 +44,46 @@ public class DataEvolutionTableRead extends AppendTableRead {
     private final CoreOptions options;
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
+    private final FileIO fileIO;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
             TableSchema schema,
             CoreOptions options,
             @Nullable CatalogContext catalogContext,
-            @Nullable Supplier<InnerTableRead> readFactory) {
+            @Nullable Supplier<InnerTableRead> readFactory,
+            FileIO fileIO) {
         super(providerFactories, schema);
         this.options = options;
         this.catalogContext = catalogContext;
         this.readFactory = readFactory;
+        this.fileIO = fileIO;
     }
 
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
+        if (queryAuthContext.split() instanceof IndexQuerySplit) {
+            return createIndexQueryReader(
+                    (IndexQuerySplit) queryAuthContext.split(), queryAuthContext);
+        }
+        return createSelectedReader(queryAuthContext.split(), queryAuthContext, executeFilter);
+    }
+
+    private RecordReader<InternalRow> createIndexQueryReader(
+            IndexQuerySplit split, QueryAuthContext queryAuthContext) throws IOException {
+        // A full-scan fallback can change the output sequence used by Flink's recordsToSkip,
+        // especially when an index is stale. Fail if a planned index file is unavailable.
+        IndexedSplit indexedSplit = split.evaluate(fileIO);
+        if (indexedSplit.rowRanges().isEmpty()) {
+            return new EmptyRecordReader<>();
+        }
+        return createSelectedReader(indexedSplit, queryAuthContext, executeFilter);
+    }
+
+    private RecordReader<InternalRow> createSelectedReader(
+            Split dataSplit, QueryAuthContext queryAuthContext, boolean filterOnRead)
+            throws IOException {
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
         ReadBatchSizer sizer = readBatchSizer();
@@ -66,27 +94,27 @@ public class DataEvolutionTableRead extends AppendTableRead {
             }
             return BlobViewTableReadSupport.createBlobViewReader(
                     catalogContext,
-                    queryAuthContext.split(),
+                    dataSplit,
                     queryAuthContext.authResult(),
                     blobViewFields,
                     currentReadType(),
                     predicate(),
                     topN,
                     limit,
-                    executeFilter,
-                    () -> createDataReader(queryAuthContext.split(), queryAuthContext.authResult()),
+                    filterOnRead,
+                    () -> createDataReader(dataSplit, queryAuthContext.authResult(), filterOnRead),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
                         if (sizer != null) {
                             // Blob-view prescan is a separate physical read under the same budget.
                             prescanRead.withReadBatchSizer(sizer);
                         }
-                        if (executeFilter) {
+                        if (filterOnRead) {
                             prescanRead.executeFilter();
                         }
                         return prescanRead;
                     });
         }
-        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+        return createDataReader(dataSplit, queryAuthContext.authResult(), filterOnRead);
     }
 }

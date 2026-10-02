@@ -50,8 +50,12 @@ public interface SplitRead<T> {
         return this;
     }
 
-    default SplitRead<T> withLimit(@Nullable Integer limit) {
+    default SplitRead<T> withLimit(@Nullable Long limit) {
         return this;
+    }
+
+    default SplitRead<T> withLimit(int limit) {
+        return withLimit(Long.valueOf(limit));
     }
 
     default SplitRead<T> withReadBatchSizer(ReadBatchSizer sizer) {

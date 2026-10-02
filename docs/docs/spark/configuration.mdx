@@ -81,6 +81,9 @@ SELECT * FROM default.T1 JOIN default.T2 ON xxxx;
 
 ## Spark Connector Options
 
+Batch scans use regular split packing by default. To opt into bucket distribution for storage
+partition joins, see [Scan Layout and Storage Partition Joins](./sql-query#scan-layout-and-storage-partition-joins).
+
 Streaming admission limits operate on whole splits. See [Triggers and Read Limits](./structured-streaming#triggers-and-read-limits)
 for how byte, row, and file thresholds are applied.
 

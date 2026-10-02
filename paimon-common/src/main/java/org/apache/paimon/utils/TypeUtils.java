@@ -54,6 +54,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.stream.Collectors;
 
@@ -89,6 +90,24 @@ public class TypeUtils {
                 names.stream()
                         .map(k -> fields.get(fieldNames.indexOf(k)))
                         .collect(Collectors.toList()));
+    }
+
+    /**
+     * Append required fields available in the table schema to a read type. Existing fields,
+     * including nested projections, are preserved. Returns the original read type if unchanged.
+     */
+    public static RowType withMissingFields(
+            RowType tableType, RowType readType, Set<String> requiredFields) {
+        List<DataField> fields = null;
+        for (DataField field : tableType.getFields()) {
+            if (requiredFields.contains(field.name()) && !readType.containsField(field.name())) {
+                if (fields == null) {
+                    fields = new ArrayList<>(readType.getFields());
+                }
+                fields.add(field);
+            }
+        }
+        return fields == null ? readType : readType.copy(fields);
     }
 
     public static Object castFromString(String s, DataType type) {

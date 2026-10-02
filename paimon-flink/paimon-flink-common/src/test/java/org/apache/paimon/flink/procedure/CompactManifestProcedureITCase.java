@@ -122,7 +122,7 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
         long compactSnapshotId = table.snapshotManager().latestSnapshot().id();
         sql(procedure);
         Assertions.assertThat(table.snapshotManager().latestSnapshot().id())
-                .isEqualTo(compactSnapshotId);
+                .isEqualTo(compactSnapshotId + 1);
     }
 
     @Test

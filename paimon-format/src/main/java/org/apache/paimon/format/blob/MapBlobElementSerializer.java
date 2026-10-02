@@ -39,9 +39,13 @@ import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.guava30.com.google.common.io.ByteStreams;
+
 import javax.annotation.Nullable;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.HashSet;
@@ -320,13 +324,15 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                 long valueIndexStart = indexLengthsPosition - valueIndexLength;
                 long keyIndexStart = valueIndexStart - keyIndexLength;
 
-                byte[] keyIndexBytes = new byte[keyIndexLength];
                 in.seek(keyIndexStart);
-                IOUtils.readFully(in, keyIndexBytes);
+                InputStream indexes =
+                        new BufferedInputStream(
+                                ByteStreams.limit(in, (long) keyIndexLength + valueIndexLength));
+                byte[] keyIndexBytes = new byte[keyIndexLength];
+                IOUtils.readFully(indexes, keyIndexBytes);
 
                 byte[] valueIndexBytes = new byte[valueIndexLength];
-                in.seek(valueIndexStart);
-                IOUtils.readFully(in, valueIndexBytes);
+                IOUtils.readFully(indexes, valueIndexBytes);
 
                 long[] keyLengths;
                 try {
@@ -347,7 +353,9 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
 
                 // 2. deserialize keys
                 Object[] keys = new Object[entryCount];
-                long keyOffset = dataStart;
+                in.seek(dataStart);
+                // Limit read-ahead to keys so descriptor reads never fetch BLOB values.
+                InputStream keyData = new BufferedInputStream(ByteStreams.limit(in, keyDataLength));
                 for (int i = 0; i < entryCount; i++) {
                     long keyLength = keyLengths[i];
                     Object key;
@@ -355,14 +363,12 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                         key = null;
                     } else {
                         byte[] keyBytes = new byte[(int) keyLength];
-                        in.seek(keyOffset);
-                        IOUtils.readFully(in, keyBytes);
+                        IOUtils.readFully(keyData, keyBytes);
                         try {
                             key = keySerializer.deserialize(keyBytes);
                         } catch (RuntimeException e) {
                             throw new IllegalArgumentException("Invalid MAP<X, BLOB> key.", e);
                         }
-                        keyOffset += keyLength;
                     }
                     keys[i] = key;
                 }

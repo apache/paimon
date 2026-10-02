@@ -447,6 +447,8 @@ class DataEvolutionCompactRangePlannerTest extends TableTestBase {
                 meta.minLevel(),
                 meta.maxLevel(),
                 null,
+                null,
+                null,
                 null);
     }
 

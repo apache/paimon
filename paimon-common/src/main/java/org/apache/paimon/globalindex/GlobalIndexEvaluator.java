@@ -18,8 +18,11 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
 import org.apache.paimon.predicate.IsNaN;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.LeafBinaryFunction;
@@ -27,11 +30,14 @@ import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafNAryFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafTernaryFunction;
+import org.apache.paimon.predicate.LessOrEqual;
+import org.apache.paimon.predicate.LessThan;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -49,6 +55,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
@@ -142,6 +149,14 @@ public class GlobalIndexEvaluator implements Closeable {
             return CompletableFuture.completedFuture(Optional.empty());
         }
         FieldRef fieldRef = fieldRefOptional.get();
+        return visitFieldAsync(
+                fieldRef,
+                reader -> predicate.function().visit(reader, fieldRef, predicate.literals()));
+    }
+
+    private CompletableFuture<Optional<Evaluation>> visitFieldAsync(
+            FieldRef fieldRef,
+            Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor) {
         int fieldId = rowType.getField(fieldRef.name()).id();
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
@@ -149,7 +164,7 @@ public class GlobalIndexEvaluator implements Closeable {
         List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            readerFutures.add(predicate.function().visit(reader, fieldRef, predicate.literals()));
+            readerFutures.add(visitor.apply(reader));
         }
 
         return CompletableFuture.allOf(readerFutures.toArray(new CompletableFuture[0]))
@@ -174,14 +189,14 @@ public class GlobalIndexEvaluator implements Closeable {
                             }
                             return compoundResult.map(
                                     result ->
-                                            new Evaluation(result, Collections.singleton(fieldId)));
+                                            new Evaluation(
+                                                    result, Collections.singleton(fieldId), null));
                         });
     }
 
     private CompletableFuture<Optional<Evaluation>> visitCompoundAsync(
             CompoundPredicate predicate) {
-        List<Predicate> children =
-                pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
+        List<Predicate> children = normalizedChildren(predicate);
         CompletableFuture<Optional<Evaluation>> refined =
                 containsRefinementEvaluator.evaluate(children, predicate);
         if (refined != null) {
@@ -189,8 +204,41 @@ public class GlobalIndexEvaluator implements Closeable {
         }
         List<CompletableFuture<Optional<Evaluation>>> childFutures =
                 new ArrayList<>(children.size());
-        for (Predicate child : children) {
-            childFutures.add(visitAsync(child));
+        for (int i = 0; i < children.size(); i++) {
+            Predicate child = children.get(i);
+            CompletableFuture<Optional<Evaluation>> range = null;
+            if (predicate.function() instanceof And && isRangeBound(child)) {
+                LeafPredicate first = (LeafPredicate) child;
+                // ponytail: pair search is quadratic in filter count; group by field for large
+                // conjunctions.
+                for (int j = i + 1; j < children.size(); j++) {
+                    Predicate other = children.get(j);
+                    if (!isRangeBound(other)) {
+                        continue;
+                    }
+                    LeafPredicate second = (LeafPredicate) other;
+                    if (isLowerBound(first) == isLowerBound(second)
+                            || !first.fieldRefOptional().equals(second.fieldRefOptional())) {
+                        continue;
+                    }
+                    LeafPredicate lower = isLowerBound(first) ? first : second;
+                    LeafPredicate upper = isLowerBound(first) ? second : first;
+                    FieldRef field = first.fieldRefOptional().get();
+                    range =
+                            visitFieldAsync(
+                                    field,
+                                    reader ->
+                                            reader.visitRange(
+                                                    field,
+                                                    lower.literals().get(0),
+                                                    upper.literals().get(0),
+                                                    lower.function() instanceof GreaterOrEqual,
+                                                    upper.function() instanceof LessOrEqual));
+                    children.remove(j);
+                    break;
+                }
+            }
+            childFutures.add(range == null ? visitAsync(child) : range);
         }
 
         return CompletableFuture.allOf(childFutures.toArray(new CompletableFuture[0]))
@@ -202,6 +250,22 @@ public class GlobalIndexEvaluator implements Closeable {
                             }
                             return combineResults(results, predicate);
                         });
+    }
+
+    static boolean isRangeBound(Predicate predicate) {
+        if (!(predicate instanceof LeafPredicate)) {
+            return false;
+        }
+        LeafPredicate leaf = (LeafPredicate) predicate;
+        return leaf.fieldRefOptional().isPresent()
+                && (isLowerBound(leaf)
+                        || leaf.function() instanceof LessThan
+                        || leaf.function() instanceof LessOrEqual)
+                && leaf.literals().get(0) != null;
+    }
+
+    static boolean isLowerBound(LeafPredicate leaf) {
+        return leaf.function() instanceof GreaterThan || leaf.function() instanceof GreaterOrEqual;
     }
 
     private Optional<Evaluation> combineResults(
@@ -216,7 +280,7 @@ public class GlobalIndexEvaluator implements Closeable {
                 compoundResult = compoundResult.or(child.get().result());
                 contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            return Optional.of(new Evaluation(compoundResult, contributingFieldIds));
+            return Optional.of(new Evaluation(compoundResult, contributingFieldIds, null));
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<Evaluation> child : results) {
@@ -233,7 +297,7 @@ public class GlobalIndexEvaluator implements Closeable {
                     break;
                 }
             }
-            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds));
+            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds, null));
         }
     }
 
@@ -244,9 +308,17 @@ public class GlobalIndexEvaluator implements Closeable {
 
         private final GlobalIndexResult result;
         private final Set<Integer> contributingFieldIds;
+        @Nullable private final List<Range> coveredRanges;
 
-        Evaluation(GlobalIndexResult result, Collection<Integer> contributingFieldIds) {
+        Evaluation(
+                GlobalIndexResult result,
+                Collection<Integer> contributingFieldIds,
+                @Nullable List<Range> coveredRanges) {
             this.result = result;
+            this.coveredRanges =
+                    coveredRanges == null
+                            ? null
+                            : Collections.unmodifiableList(new ArrayList<>(coveredRanges));
             this.contributingFieldIds =
                     Collections.unmodifiableSet(new HashSet<>(contributingFieldIds));
         }
@@ -255,12 +327,22 @@ public class GlobalIndexEvaluator implements Closeable {
             return result;
         }
 
+        @Nullable
+        public List<Range> coveredRanges() {
+            return coveredRanges;
+        }
+
         public Set<Integer> contributingFieldIds() {
             return contributingFieldIds;
         }
     }
 
-    private List<Predicate> flattenChildren(CompoundPredicate predicate) {
+    /** Shared normalization for eager evaluation and metadata-only index planning. */
+    static List<Predicate> normalizedChildren(CompoundPredicate predicate) {
+        return pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
+    }
+
+    private static List<Predicate> flattenChildren(CompoundPredicate predicate) {
         List<Predicate> result = new ArrayList<>();
         Deque<Predicate> stack = new ArrayDeque<>(predicate.children());
         while (!stack.isEmpty()) {
@@ -280,7 +362,7 @@ public class GlobalIndexEvaluator implements Closeable {
         return result;
     }
 
-    private List<Predicate> pruneRedundantIsNotNullForAnd(
+    private static List<Predicate> pruneRedundantIsNotNullForAnd(
             List<Predicate> children, CompoundPredicate predicate) {
         if (predicate.function() instanceof Or) {
             return children;
@@ -315,7 +397,7 @@ public class GlobalIndexEvaluator implements Closeable {
         return pruned;
     }
 
-    private boolean isIsNotNull(Predicate predicate) {
+    private static boolean isIsNotNull(Predicate predicate) {
         return predicate instanceof LeafPredicate
                 && ((LeafPredicate) predicate).function() instanceof IsNotNull;
     }
@@ -327,7 +409,7 @@ public class GlobalIndexEvaluator implements Closeable {
      * predicate we are deciding whether to prune). We whitelist by arity base class so future
      * comparison functions are covered automatically without re-introducing the IS NULL hazard.
      */
-    private boolean isNullRejecting(Predicate predicate) {
+    private static boolean isNullRejecting(Predicate predicate) {
         if (!(predicate instanceof LeafPredicate)) {
             return false;
         }

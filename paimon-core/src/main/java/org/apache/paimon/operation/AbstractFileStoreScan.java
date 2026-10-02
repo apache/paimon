@@ -29,6 +29,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
@@ -55,6 +56,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -157,6 +159,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withBucketFilter(Filter<Integer> bucketFilter) {
+        manifestsReader.withBucketFilter(bucketFilter);
         this.bucketFilter = bucketFilter;
         return this;
     }
@@ -164,6 +167,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withTotalAwareBucketFilter(
             TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
+        manifestsReader.withTotalAwareBucketFilter(totalAwareBucketFilter);
         this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
@@ -365,13 +369,40 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public List<PartitionEntry> readPartitionEntries() {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        Set<Identifier> deletedEntries =
+                FileEntry.readDeletedEntries(
+                        manifest ->
+                                readManifest(
+                                        manifest,
+                                        SimpleFileEntry::from,
+                                        FileEntry.deletedFilter(),
+                                        null),
+                        manifests,
+                        parallelism);
+
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
-                m ->
-                        PartitionEntry.merge(
-                                readManifest(m, PartitionEntry::fromManifestEntry, null, null),
-                                partitions);
-        randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
+                manifest -> {
+                    Map<BinaryRow, PartitionEntry> entries = new HashMap<>();
+                    for (ManifestEntry manifestEntry :
+                            readManifest(
+                                    manifest,
+                                    Function.identity(),
+                                    FileEntry.addFilter(),
+                                    entry -> !deletedEntries.contains(entry.identifier()))) {
+                        PartitionEntry entry = PartitionEntry.fromManifestEntry(manifestEntry);
+                        entries.compute(
+                                entry.partition(),
+                                (partition, old) -> old == null ? entry : old.merge(entry));
+                    }
+                    PartitionEntry.merge(entries.values(), partitions);
+                };
+        randomlyOnlyExecute(
+                getExecutorService(parallelism),
+                processor,
+                manifests.stream()
+                        .filter(manifest -> manifest.numAddedFiles() > 0)
+                        .collect(Collectors.toList()));
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
@@ -496,27 +527,35 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
 
+        ManifestFile manifestFile = manifestFileFactory.create();
+        BucketFilter bucketFilter = createBucketFilter();
+        ManifestSidecar.Selection selected =
+                manifestFile.selectBlocks(
+                        manifest, rowRangeIndex, manifestsReader.partitionFilter(), bucketFilter);
+        if (selected != null && selected.blocks().isEmpty()) {
+            return Collections.emptyList();
+        }
         Filter<InternalRow> entryRowFilter = createEntryRowFilter();
         Function<ManifestEntry, T> finalConverter =
                 dropStats ? e -> converter.apply(dropStats(e)) : converter;
 
         List<T> entries =
-                manifestFileFactory
-                        .create()
+                manifestFile
                         .withCacheMetrics(
                                 scanMetrics != null ? scanMetrics.getCacheMetrics() : null)
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
                                 manifestsReader.partitionFilter(),
-                                createBucketFilter(),
+                                bucketFilter,
                                 entryRowFilter.and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
                                                 && filterByStats(entry),
-                                finalConverter);
+                                finalConverter,
+                                selected);
         LOG.info("Read {} manifest entries from {}", entries.size(), manifest.fileName());
         return entries;
     }

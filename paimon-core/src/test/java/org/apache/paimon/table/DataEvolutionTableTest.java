@@ -45,7 +45,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -1242,18 +1241,24 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         long readSnapshotId = table.latestSnapshot().get().id();
 
         RowType writeType = table.rowType().project(Collections.singletonList("f2"));
-        BatchWriteBuilderImpl staleBuilder = (BatchWriteBuilderImpl) table.newBatchWriteBuilder();
+        BatchWriteBuilder staleBuilder = table.newBatchWriteBuilder();
         List<CommitMessage> staleMessages;
         try (BatchTableWrite write = staleBuilder.newWrite().withWriteType(writeType)) {
             write.write(GenericRow.of(BinaryString.fromString("stale-10")));
             write.write(GenericRow.of(BinaryString.fromString("stale-11")));
-            staleMessages = write.prepareCommit();
-            setFirstRowId(staleMessages, firstRowId);
+            List<CommitMessage> prepared = write.prepareCommit();
+            setFirstRowId(prepared, firstRowId);
+            staleMessages =
+                    prepared.stream()
+                            .map(
+                                    message ->
+                                            ((CommitMessageImpl) message)
+                                                    .withCheckFromSnapshot(readSnapshotId))
+                            .collect(Collectors.toList());
         }
 
         updateF2(table, firstRowId, 100, 101);
         long concurrentSnapshotId = table.latestSnapshot().get().id();
-        staleBuilder.rowIdCheckConflict(readSnapshotId);
 
         assertThatThrownBy(
                         () -> {
@@ -1265,6 +1270,70 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                 .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
         assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
+    }
+
+    @Test
+    public void testRejectDifferentRowIdCheckSnapshotsInOneCommit() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long firstRowId = writeFullRows(table, 10);
+        long readSnapshotId = table.latestSnapshot().get().id();
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write =
+                builder.newWrite()
+                        .withWriteType(table.rowType().project(Collections.singletonList("f2")))) {
+            write.write(GenericRow.of(BinaryString.fromString("updated")));
+            messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+        }
+
+        CommitMessageImpl message = (CommitMessageImpl) messages.get(0);
+        long snapshotBeforeCommit = table.latestSnapshot().get().id();
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            Arrays.asList(
+                                                    message.withCheckFromSnapshot(readSnapshotId),
+                                                    message.withCheckFromSnapshot(
+                                                            readSnapshotId + 1))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("different row-id check snapshots");
+        }
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotBeforeCommit);
+    }
+
+    @Test
+    public void testRejectMissingRowIdCheckSnapshotInMixedCommit() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long firstRowId = writeFullRows(table, 10);
+        long readSnapshotId = table.latestSnapshot().get().id();
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write =
+                builder.newWrite()
+                        .withWriteType(table.rowType().project(Collections.singletonList("f2")))) {
+            write.write(GenericRow.of(BinaryString.fromString("updated")));
+            messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+        }
+
+        CommitMessageImpl message = (CommitMessageImpl) messages.get(0);
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            Arrays.asList(
+                                                    message.withCheckFromSnapshot(readSnapshotId),
+                                                    message)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("missing its check-from snapshot");
+        }
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(readSnapshotId);
     }
 
     @Test

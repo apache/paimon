@@ -75,6 +75,7 @@ class ApplyDeletionVectorReader(RecordBatchReader):
         self._reader = reader
         self._deletion_vector = deletion_vector
         self._returned_position = 0
+        self._record_iterator = None
 
     def reader(self) -> RecordReader:
         return self._reader
@@ -108,12 +109,18 @@ class ApplyDeletionVectorReader(RecordBatchReader):
         Returns:
             A RecordIterator with deletion filtering, or None if no more data.
         """
+        if self._record_iterator is not None:
+            self._returned_position = self._record_iterator.returned_position() + 1
         batch = self._reader.read_batch()
 
         if batch is None:
             return None
 
-        return ApplyDeletionRecordIterator(batch, self._deletion_vector)
+        # Positions address the whole file, including rows deleted in earlier
+        # batches. Starting each iterator at zero would apply the DV repeatedly.
+        self._record_iterator = ApplyDeletionRecordIterator(
+            batch, self._deletion_vector, self._returned_position)
+        return self._record_iterator
 
     def close(self):
         self._reader.close()
@@ -129,6 +136,7 @@ class ApplyDeletionRecordIterator(RecordIterator):
         self,
         iterator: RecordIterator,
         deletion_vector,
+        start_position: int = 0,
     ):
         """
         Initialize an ApplyDeletionRecordIterator.
@@ -136,10 +144,11 @@ class ApplyDeletionRecordIterator(RecordIterator):
         Args:
             iterator: The underlying record iterator.
             deletion_vector: The deletion vector to apply for filtering.
+            start_position: Position of the first record in this batch.
         """
         self._iterator = iterator
         self._deletion_vector = deletion_vector
-        self._returned_position = -1
+        self._returned_position = start_position - 1
 
     def iterator(self) -> RecordIterator:
         return self._iterator

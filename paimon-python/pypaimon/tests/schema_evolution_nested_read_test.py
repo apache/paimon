@@ -28,6 +28,7 @@ Two layers are covered:
   is not revived, and a type change is cast at read time.
 """
 
+import decimal
 import os
 import shutil
 import tempfile
@@ -559,6 +560,41 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
             MapType(True, AtomicType('STRING'), AtomicType('INT')),
             MapType(True, AtomicType('STRING'), AtomicType('BIGINT')))
         self.assertEqual(out.to_pylist(), [[('b', 2)], None])
+
+    def test_nested_decimal_scale_down_rounds_and_nulls_overflow(self):
+        from pypaimon.read.reader.data_file_batch_reader import \
+            DataFileBatchReader
+        reader = DataFileBatchReader.__new__(DataFileBatchReader)
+        source_type = RowType(True, [
+            DataField(1, 'price', AtomicType('DECIMAL(6, 3)'))])
+        target_type = RowType(True, [
+            DataField(1, 'price', AtomicType('DECIMAL(3, 2)'))])
+        source = pa.array([
+            {'price': decimal.Decimal('9.994')},
+            {'price': decimal.Decimal('9.995')},
+            {'price': decimal.Decimal('-4.565')},
+            None,
+        ], type=pa.struct([pa.field('price', pa.decimal128(6, 3))]))
+
+        actual = reader._align_array_by_id(source, source_type, target_type)
+
+        self.assertEqual(actual.to_pylist(), [
+            {'price': decimal.Decimal('9.99')},
+            {'price': None},
+            {'price': decimal.Decimal('-4.57')},
+            None,
+        ])
+
+    def test_decimal_scale_down_preserves_max_precision_values(self):
+        from pypaimon.read.reader.data_file_batch_reader import \
+            cast_array_for_schema_evolution
+        value = decimal.Decimal('12345678901234567890123456789012345.678')
+        source = pa.array([value], type=pa.decimal128(38, 3))
+
+        actual = cast_array_for_schema_evolution(source, pa.decimal128(38, 2))
+
+        self.assertEqual(actual.to_pylist(), [
+            decimal.Decimal('12345678901234567890123456789012345.68')])
 
     def test_map_wrapper_token_validated(self):
         # The token consumed when descending through a MAP must be 'value'.

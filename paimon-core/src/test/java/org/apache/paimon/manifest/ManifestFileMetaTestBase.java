@@ -166,7 +166,9 @@ public abstract class ManifestFileMetaTestBase {
                                 false,
                                 null),
                         Long.MAX_VALUE,
-                        null)
+                        null,
+                        null,
+                        new CoreOptions(new Options()))
                 .create();
     }
 

@@ -43,7 +43,6 @@ _SHUFFLE = importlib.util.module_from_spec(_SHUFFLE_SPEC)
 _SHUFFLE_SPEC.loader.exec_module(_SHUFFLE)
 
 BUCKET_KEY_COL = _SHUFFLE.BUCKET_KEY_COL
-_coerce_large_string_types = _SHUFFLE._coerce_large_string_types
 _make_bucket_udf = _SHUFFLE._make_bucket_udf
 _pick_bucket_col_name = _SHUFFLE._pick_bucket_col_name
 maybe_apply_repartition = _SHUFFLE.maybe_apply_repartition
@@ -116,35 +115,6 @@ class PickBucketColNameTest(unittest.TestCase):
         self.assertNotEqual(name, BUCKET_KEY_COL)
         self.assertTrue(name.startswith("__paimon_bucket_"))
         self.assertNotIn(name, {"id", BUCKET_KEY_COL})
-
-
-class CoerceLargeStringTypesTest(unittest.TestCase):
-    """``_identity_batch`` casts back the large_string / large_binary
-    types that some Ray versions introduce when materialising blocks
-    during ``groupby().map_groups``. The Paimon writer's strict schema
-    check would otherwise reject those rows."""
-
-    def test_pass_through_when_no_large_variants(self):
-        batch = pa.table({"id": pa.array([1, 2], type=pa.int32()),
-                          "name": pa.array(["a", "b"], type=pa.string())})
-        out = _coerce_large_string_types(batch)
-        self.assertEqual(out.schema, batch.schema)
-
-    def test_casts_large_string_back_to_string(self):
-        batch = pa.table({
-            "id": pa.array([1, 2], type=pa.int32()),
-            "name": pa.array(["x", "y"], type=pa.large_string()),
-        })
-        out = _coerce_large_string_types(batch)
-        self.assertEqual(out.schema.field("name").type, pa.string())
-        self.assertEqual(out.column("name").to_pylist(), ["x", "y"])
-
-    def test_casts_large_binary_back_to_binary(self):
-        batch = pa.table({
-            "blob": pa.array([b"x", b"y"], type=pa.large_binary()),
-        })
-        out = _coerce_large_string_types(batch)
-        self.assertEqual(out.schema.field("blob").type, pa.binary())
 
 
 class BucketModeDispatchTest(unittest.TestCase):
