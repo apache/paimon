@@ -40,9 +40,12 @@ import org.apache.spark.sql.types.TimestampNTZType;
 import org.apache.spark.sql.types.TimestampType;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
@@ -257,6 +260,25 @@ public class SparkZOrderUDF implements Serializable {
         return udf;
     }
 
+    private UserDefinedFunction decimalToOrderedBytesUDF(int width) {
+        UserDefinedFunction udf =
+                functions
+                        .udf(
+                                (BigDecimal value) -> {
+                                    if (value == null) {
+                                        return new byte[width];
+                                    }
+                                    return decimalToOrderedBytes(value.unscaledValue(), width);
+                                },
+                                DataTypes.BinaryType)
+                        .withName("DECIMAL_ORDERED_BYTES");
+
+        this.inputCol++;
+        increaseOutputSize(width);
+
+        return udf;
+    }
+
     private UserDefinedFunction booleanToOrderedBytesUDF() {
         int position = inputCol;
         UserDefinedFunction udf =
@@ -366,7 +388,12 @@ public class SparkZOrderUDF implements Serializable {
         } else if (type instanceof TimestampNTZType) {
             return longToOrderedBytesUDF().apply(timestampNtzToLongUDF().apply(column));
         } else if (type instanceof DecimalType) {
-            return longToOrderedBytesUDF().apply(column.cast(DataTypes.LongType));
+            // Encode the unscaled value as fixed-width, sign-flipped two's complement (mirroring
+            // the core ZIndexer). Casting to LongType instead would raise CAST_OVERFLOW under ANSI
+            // (Spark 4's default) for values outside the BIGINT range, aborting the z-order
+            // compact.
+            int width = decimalBytes(((DecimalType) type).precision());
+            return decimalToOrderedBytesUDF(width).apply(column);
         } else if (type instanceof DateType) {
             return longToOrderedBytesUDF().apply(column.cast(DataTypes.LongType));
         } else {
@@ -379,5 +406,25 @@ public class SparkZOrderUDF implements Serializable {
 
     private void increaseOutputSize(int bytes) {
         totalOutputBytes = Math.min(totalOutputBytes + bytes, maxOutputSize);
+    }
+
+    /** Two's-complement byte width that holds any unscaled value with {@code precision} digits. */
+    static int decimalBytes(int precision) {
+        return BigInteger.TEN.pow(precision).bitLength() / 8 + 1;
+    }
+
+    /**
+     * Fixed-width, sign-flipped big-endian two's complement of {@code unscaled}, so signed order
+     * becomes the unsigned lexicographic order a z-value compares with. {@code width} is wide
+     * enough for any value of the column's precision, so values past the long range keep distinct
+     * keys.
+     */
+    static byte[] decimalToOrderedBytes(BigInteger unscaled, int width) {
+        byte[] buffer = new byte[width];
+        Arrays.fill(buffer, 0, width, unscaled.signum() < 0 ? (byte) 0xFF : (byte) 0x00);
+        byte[] magnitude = unscaled.toByteArray();
+        System.arraycopy(magnitude, 0, buffer, width - magnitude.length, magnitude.length);
+        buffer[0] ^= (byte) 0x80;
+        return buffer;
     }
 }

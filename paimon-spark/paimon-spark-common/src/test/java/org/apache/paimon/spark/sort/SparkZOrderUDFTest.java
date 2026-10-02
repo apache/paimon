@@ -182,9 +182,8 @@ public class SparkZOrderUDFTest {
                             schema);
 
             SparkZOrderUDF udf = new SparkZOrderUDF(1, 8, Integer.MAX_VALUE);
-            // A decimal column used to fall through to the default branch and throw "the type
-            // is unsupported". Hilbert already clusters decimals by casting them to long, and
-            // this mirrors that so zorder(order_by => '<decimal>') no longer fails.
+            // A decimal column used to fall through to the default branch and throw "the type is
+            // unsupported". It now encodes the unscaled value as fixed-width ordered bytes.
             List<Row> rows =
                     df.select(
                                     df.col("a"),
@@ -199,15 +198,80 @@ public class SparkZOrderUDFTest {
 
             assertThat(rows).hasSize(4);
             assertThat(rows.get(0).isNullAt(0)).isTrue();
-            assertThat(rows.get(0).getString(1)).isEqualTo("0000000000000000");
+            // NULL is the all-zero sentinel, width bytes wide (two hex chars each).
+            int width = SparkZOrderUDF.decimalBytes(10);
+            assertThat(rows.get(0).getString(1))
+                    .isEqualTo(String.join("", java.util.Collections.nCopies(width, "00")));
 
-            // the z-value rises with the (truncated) integer part of the decimal
+            // the z-value rises with the decimal value
             List<String> nonNull = new ArrayList<>();
             for (Row row : rows.subList(1, rows.size())) {
                 nonNull.add(row.getString(1));
             }
             for (int i = 1; i < nonNull.size(); i++) {
                 assertThat(nonNull.get(i)).isGreaterThan(nonNull.get(i - 1));
+            }
+        } finally {
+            spark.stop();
+            SparkSession.clearActiveSession();
+            SparkSession.clearDefaultSession();
+        }
+    }
+
+    @Test
+    void testDecimalOutsideBigIntRangeIsOrderedWithoutOverflow() {
+        SparkSession spark =
+                SparkSession.builder()
+                        .master("local[1]")
+                        .appName("spark-zorder-udf-decimal-wide-test")
+                        .config("spark.ui.enabled", "false")
+                        // ANSI (Spark 4's default) would make a decimal->long cast raise
+                        // CAST_OVERFLOW on these values; the fixed-width encoding must not.
+                        .config("spark.sql.ansi.enabled", "true")
+                        .getOrCreate();
+        try {
+            StructType schema =
+                    new StructType(
+                            new StructField[] {
+                                new StructField(
+                                        "a",
+                                        DataTypes.createDecimalType(38, 2),
+                                        true,
+                                        Metadata.empty())
+                            });
+            // Values straddling the BIGINT range, including both just past Long.MAX and Long.MIN.
+            List<BigDecimal> values =
+                    Arrays.asList(
+                            new BigDecimal("-9223372036854775809.00"),
+                            new BigDecimal("-1.00"),
+                            new BigDecimal("0.00"),
+                            new BigDecimal("1.00"),
+                            new BigDecimal("9223372036854775808.00"),
+                            new BigDecimal("9223372036854775809.00"));
+            List<Row> input = new ArrayList<>();
+            for (BigDecimal v : values) {
+                input.add(RowFactory.create(v));
+            }
+            Dataset<Row> df = spark.createDataFrame(input, schema);
+
+            SparkZOrderUDF udf = new SparkZOrderUDF(1, 8, Integer.MAX_VALUE);
+            List<Row> rows =
+                    df.select(
+                                    df.col("a"),
+                                    functions
+                                            .hex(
+                                                    udf.sortedLexicographically(
+                                                            df.col("a"),
+                                                            DataTypes.createDecimalType(38, 2)))
+                                            .as("zvalue"))
+                            .orderBy(df.col("a").asc())
+                            .collectAsList();
+
+            // No CAST_OVERFLOW, and the z-value is strictly increasing with the decimal across the
+            // whole range (negatives, zero, and both out-of-long positives stay distinct/ordered).
+            assertThat(rows).hasSize(values.size());
+            for (int i = 1; i < rows.size(); i++) {
+                assertThat(rows.get(i).getString(1)).isGreaterThan(rows.get(i - 1).getString(1));
             }
         } finally {
             spark.stop();
