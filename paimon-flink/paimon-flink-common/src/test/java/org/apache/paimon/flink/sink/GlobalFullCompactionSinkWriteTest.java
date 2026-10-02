@@ -154,8 +154,10 @@ public class GlobalFullCompactionSinkWriteTest {
         CommitMessage activeBucket;
         IOManager ioManager = new IOManagerAsync();
         try {
-            try (TableWriteImpl<?> initialWrite =
-                            table.newWrite(initialUser).withIOManager(ioManager);
+            try (org.apache.paimon.disk.IOManager initialIOManager =
+                            org.apache.paimon.disk.IOManager.create(tempDir.toString());
+                    TableWriteImpl<?> initialWrite =
+                            table.newWrite(initialUser).withIOManager(initialIOManager);
                     TableCommitImpl commit = table.newCommit(initialUser)) {
                 initialWrite.writeAndReturn(
                         GenericRow.of(1, 1, 10L), PartitionBucketMapping.loadFromTable(table));
