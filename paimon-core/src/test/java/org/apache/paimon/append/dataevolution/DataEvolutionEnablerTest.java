@@ -34,6 +34,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.options.CatalogOptions;
@@ -58,6 +60,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -935,6 +938,119 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
+    public void testRollbackBeforeRowTrackingOnlyConversionIsRefused() throws Exception {
+        long before = convertRowTrackingOnlyTableWithRowCountSequences(Collections.emptyMap());
+        long converted = loadTable().snapshotManager().latestSnapshotId();
+        loadTable().createTag("before", before);
+        overwriteColumnV(10, "first", 10);
+        assertColumnV(10, 20, "first");
+
+        // The snapshot has row tracking, but not the sequences that the conversion normalized.
+        assertThatThrownBy(() -> loadTable().rollbackTo(before))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before data evolution was enabled");
+        assertThatThrownBy(() -> loadTable().rollbackTo("before"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before data evolution was enabled");
+        assertColumnV(10, 20, "first");
+
+        // a snapshot from after the conversion can still be restored
+        loadTable().rollbackTo(converted);
+        assertColumnV(10, 20, "old");
+        overwriteColumnV(10, "second", 10);
+        assertColumnV(10, 20, "second");
+    }
+
+    @Test
+    public void testRollbackToAsLatestBeforeRowTrackingOnlyConversionIsRefused() throws Exception {
+        long before =
+                convertRowTrackingOnlyTableWithRowCountSequences(
+                        Collections.singletonMap(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2"));
+        loadTable().createTag("before", before);
+        overwriteColumnV(10, "first", 10);
+        // replaces the converted files, so a rollback would add the original ones back
+        FileStoreTable latest = loadTable();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        latest, false, false, latest.snapshotManager().latestSnapshot());
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : coordinator.plan()) {
+            compactMessages.add(task.doCompact(latest, "test-compact"));
+        }
+        assertThat(compactMessages).isNotEmpty();
+        try (BatchTableCommit commit = latest.newBatchWriteBuilder().newCommit()) {
+            commit.commit(compactMessages);
+        }
+        assertColumnV(10, 20, "first");
+        Map<Integer, Long> rowIds = rowIdsById(loadTable());
+
+        FileStoreTable table = loadTable();
+        long snapshotBeforeRollback = table.snapshotManager().latestSnapshotId();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.rollbackToAsLatest(
+                                            table.tagManager().getOrThrow("before")))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("before data evolution was enabled");
+        }
+        assertThat(loadTable().snapshotManager().latestSnapshotId())
+                .isEqualTo(snapshotBeforeRollback);
+        assertColumnV(0, 10, "old");
+        assertColumnV(10, 20, "first");
+        assertThat(rowIdsById(loadTable())).isEqualTo(rowIds);
+    }
+
+    @Test
+    public void testRestoredRowTrackingOnlyCompactionIsRefusedAfterConversion() throws Exception {
+        FileStoreTable staleTable =
+                createTable(
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeRows(staleTable, row(1, "a", "p1"));
+        writeRows(staleTable, row(2, "b", "p1"));
+        AppendCompactTask task = new AppendCompactTask(BinaryRow.EMPTY_ROW, liveFiles(staleTable));
+        BaseAppendFileStoreWrite write =
+                (BaseAppendFileStoreWrite) staleTable.store().newWrite("job");
+        CommitMessage message;
+        try {
+            write.withIOManager(ioManager);
+            message = task.doCompact(staleTable, write);
+        } finally {
+            write.close();
+        }
+        // the compaction is pending in a checkpoint of the job
+        ManifestCommittable pending = new ManifestCommittable(1L);
+        pending.addFileCommittable(message);
+        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
+        byte[] checkpoint = serializer.serialize(pending);
+
+        enabler().run(false);
+        overwriteColumnV(0, "new-a", 1);
+        Map<Integer, Long> rowIds = rowIdsById(loadTable());
+        Map<Integer, String> values = valuesById(loadTable());
+        assertThat(rowIds).containsEntry(1, 0L).containsEntry(2, 1L);
+        assertThat(values).containsEntry(1, "new-a").containsEntry(2, "b");
+
+        // The job is resubmitted with the converted schema and restores the checkpoint with a
+        // freshly loaded committer, as RestoreCommittableStateManager does.
+        FileStoreTable table = loadTable();
+        long latestSnapshot = table.snapshotManager().latestSnapshotId();
+        ManifestCommittable restored = serializer.deserialize(serializer.getVersion(), checkpoint);
+        try (TableCommitImpl commit = table.newCommit("job")) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.filterAndCommitMultiple(
+                                            Collections.singletonList(restored), true))
+                    .hasStackTraceContaining("has no first row id")
+                    .hasStackTraceContaining("with schema 0");
+        }
+
+        assertThat(loadTable().snapshotManager().latestSnapshotId()).isEqualTo(latestSnapshot);
+        assertThat(rowIdsById(loadTable())).isEqualTo(rowIds);
+        assertThat(valuesById(loadTable())).isEqualTo(values);
+    }
+
+    @Test
     public void testRepairRowTrackingOnlySequencesPreservesConcurrentColumnUpdate()
             throws Exception {
         Map<String, String> options = new HashMap<>();
@@ -1240,6 +1356,65 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     // ---------------------------------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Writes 20 rows to a row-tracking-only table in two files, the second of which keeps the
+     * row-count sequence 19, and converts the table. Returns the snapshot before the conversion.
+     */
+    private long convertRowTrackingOnlyTableWithRowCountSequences(Map<String, String> extraOptions)
+            throws Exception {
+        Map<String, String> options = new HashMap<>(extraOptions);
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "10");
+        FileStoreTable table = createTable(options);
+        GenericRow[] rows = new GenericRow[20];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = row(i, "old" + i, "p1");
+        }
+        writeRows(table, rows);
+        assertThat(liveFiles(table))
+                .filteredOn(file -> file.nonNullFirstRowId() == 10L)
+                .extracting(DataFileMeta::maxSequenceNumber)
+                .containsExactly(19L);
+        long before = table.snapshotManager().latestSnapshotId();
+        enabler().run(false);
+        return before;
+    }
+
+    /** Overwrites column v of the {@code count} rows from row id {@code firstRowId}. */
+    private void overwriteColumnV(long firstRowId, String prefix, int count) throws Exception {
+        FileStoreTable table = loadTable();
+        RowType writeType = table.rowType().project(Collections.singletonList("v"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                String value = count == 1 ? prefix : prefix + (firstRowId + i);
+                write.write(GenericRow.of(BinaryString.fromString(value)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            for (CommitMessage message : messages) {
+                CommitMessageImpl impl = (CommitMessageImpl) message;
+                List<DataFileMeta> files = new ArrayList<>(impl.newFilesIncrement().newFiles());
+                impl.newFilesIncrement().newFiles().clear();
+                // the writer may roll the column into several files
+                long next = firstRowId;
+                for (DataFileMeta file : files) {
+                    impl.newFilesIncrement().newFiles().add(file.assignFirstRowId(next));
+                    next += file.rowCount();
+                }
+            }
+            commit.commit(messages);
+        }
+    }
+
+    /** Asserts that rows {@code from} until {@code to}, whose ids equal their row ids, have v. */
+    private void assertColumnV(int from, int to, String prefix) throws Exception {
+        Map<Integer, String> values = valuesById(loadTable());
+        for (int i = from; i < to; i++) {
+            assertThat(values).containsEntry(i, prefix + i);
+        }
+    }
 
     private DataEvolutionEnabler enabler() {
         return new DataEvolutionEnabler(catalog, TABLE);

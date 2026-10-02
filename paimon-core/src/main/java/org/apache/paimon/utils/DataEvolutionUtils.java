@@ -19,7 +19,9 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
@@ -363,5 +365,50 @@ public class DataEvolutionUtils {
                 "Data evolution compact files",
                 merged);
         return merged.get(0);
+    }
+
+    /**
+     * Refuses to make {@code target} the latest snapshot again if it was committed before {@code
+     * sys.enable_data_evolution} converted the table, while the latest schema still has the
+     * converted options. Such a snapshot references the files as they were before the conversion:
+     *
+     * <ul>
+     *   <li>before row tracking was enabled, the files have no first row id;
+     *   <li>before data evolution was enabled, files of a row-tracking-only writer may keep
+     *       row-count sequence numbers, which the conversion normalized. Restored, they are higher
+     *       than the snapshot ids of later commits, so they hide the columns that later
+     *       data-evolution updates write over the same rows.
+     * </ul>
+     *
+     * <p>Decide by the latest persisted schema, not by the options of the caller: a table loaded
+     * before the conversion still reports both options as disabled. Roll the schema back first if
+     * the conversion really has to be undone.
+     */
+    public static void checkRollbackKeepsRowTracking(
+            String tableName,
+            SchemaManager schemaManager,
+            TableSchema latestSchema,
+            Snapshot target) {
+        CoreOptions latestOptions = CoreOptions.fromMap(latestSchema.options());
+        if (!latestOptions.rowTrackingEnabled() && !latestOptions.dataEvolutionEnabled()) {
+            return;
+        }
+        CoreOptions targetOptions =
+                CoreOptions.fromMap(schemaManager.schema(target.schemaId()).options());
+        String reason;
+        if (latestOptions.rowTrackingEnabled() && !targetOptions.rowTrackingEnabled()) {
+            reason = "before row tracking was enabled, so its files have no row ids";
+        } else if (latestOptions.dataEvolutionEnabled() && !targetOptions.dataEvolutionEnabled()) {
+            reason =
+                    "before data evolution was enabled, so its files may have sequence numbers "
+                            + "that hide later data-evolution updates";
+        } else {
+            return;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Cannot roll back table %s to snapshot %d: it was committed with schema %d, "
+                                + "%s.",
+                        tableName, target.id(), target.schemaId(), reason));
     }
 }

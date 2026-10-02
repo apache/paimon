@@ -61,6 +61,7 @@ import org.apache.paimon.utils.BranchMergeHandler;
 import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
+import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
@@ -654,29 +655,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
     }
 
-    /**
-     * A snapshot committed before {@code sys.enable_data_evolution} converted the table holds files
-     * without a first row id. Making such a snapshot the latest again while the schema still has
-     * row tracking enabled would leave the table unreadable as a data-evolution table, so refuse
-     * it; roll the schema back first if the conversion really has to be undone.
-     */
+    /** See {@link DataEvolutionUtils#checkRollbackKeepsRowTracking}. */
     private void checkRollbackKeepsRowTracking(Snapshot target) {
-        // Decide by the latest persisted schema, not by the options of this object: a table loaded
-        // before row tracking was enabled still reports it as disabled.
         Optional<TableSchema> latestSchema = schemaManager().latest();
-        if (!latestSchema.isPresent()
-                || !CoreOptions.fromMap(latestSchema.get().options()).rowTrackingEnabled()) {
-            return;
+        if (latestSchema.isPresent()) {
+            DataEvolutionUtils.checkRollbackKeepsRowTracking(
+                    name(), schemaManager(), latestSchema.get(), target);
         }
-        TableSchema targetSchema = schemaManager().schema(target.schemaId());
-        if (CoreOptions.fromMap(targetSchema.options()).rowTrackingEnabled()) {
-            return;
-        }
-        throw new IllegalStateException(
-                String.format(
-                        "Cannot roll back table %s to snapshot %d: it was committed with schema %d, "
-                                + "before row tracking was enabled, so its files have no row ids.",
-                        name(), target.id(), target.schemaId()));
     }
 
     @Override

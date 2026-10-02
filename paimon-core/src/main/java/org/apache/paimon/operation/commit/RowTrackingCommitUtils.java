@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.SpecialFields;
@@ -125,6 +126,22 @@ public class RowTrackingCommitUtils {
             }
         }
         return start;
+    }
+
+    /**
+     * Whether the rows of a file that a commit adds end up without row ids: the file has no first
+     * row id, {@link #assignRowTracking} assigns none because it is not an {@link
+     * FileSource#APPEND} file, and it does not store the row id field either.
+     */
+    public static boolean leavesRowsWithoutRowIds(DataFileMeta file) {
+        if (file.firstRowId() != null) {
+            return false;
+        }
+        List<String> writeCols = file.writeCols();
+        if (writeCols != null && writeCols.contains(SpecialFields.ROW_ID.name())) {
+            return false;
+        }
+        return !file.fileSource().map(FileSource.APPEND::equals).orElse(false);
     }
 
     /** Assigned results. */

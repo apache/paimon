@@ -199,11 +199,17 @@ What to expect around the conversion:
   its commit is refused with a message asking to restart it, because a file it
   commits would have no row ID. Restart such jobs after the conversion; they
   pick up the new schema and assign row IDs as usual.
+- Do not restore such a job from a checkpoint taken before the conversion if
+  it may hold pending compaction: committing compacted files without row IDs
+  is refused, because they would replace files that have row IDs.
 - Snapshots and tags from before the conversion stay readable. Their files
   have no row ID, so `_ROW_ID` reads as `NULL` for them, and they cannot be the
   target of a partial-column update or of Data Evolution compaction.
-- The table cannot be rolled back to a snapshot from before the conversion
-  while the schema has row tracking enabled.
+- The table cannot be rolled back to a snapshot or tag from before the
+  conversion, with `rollback_to` or `rollback_to_as_latest`, while the schema
+  has Data Evolution enabled. This also holds for a table that already had row
+  tracking enabled: the conversion normalizes the sequence numbers of its
+  files, and restoring the old ones would hide later partial-column updates.
 - `data-evolution.nested-field.enabled` can be switched on afterwards with
   `ALTER TABLE` as for any Data Evolution table.
 

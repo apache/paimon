@@ -33,6 +33,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -75,6 +76,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -113,6 +115,7 @@ import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.leavesRowsWithoutRowIds;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -1048,6 +1051,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
         long latestSchemaId = latestSchema.id();
         checkRowTrackingOrDataEvolutionNotEnabledAfterLoad(latestSchema);
+        if (options.dataEvolutionEnabled()) {
+            checkNewFilesKeepRowIds(deltaFiles, latestSchema);
+        }
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
@@ -1433,6 +1439,37 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tableName, feature, latestSchema.id()));
     }
 
+    /**
+     * A data-evolution read derives every row id from the first row id of its file. A commit
+     * assigns one to every new {@link FileSource#APPEND} file, while a compaction must carry the
+     * first row id of its input over to its output. The output of a compactor that does not would
+     * replace files that have row ids by files without: refuse it before it is published. Such a
+     * compactor is the append compactor of a row-tracking-only table, for example when a job
+     * restores its compaction state from a checkpoint taken before {@code
+     * sys.enable_data_evolution} converted the table. The committer itself is then loaded with the
+     * current schema, so {@link #checkRowTrackingOrDataEvolutionNotEnabledAfterLoad} passes.
+     */
+    private void checkNewFilesKeepRowIds(List<ManifestEntry> deltaFiles, TableSchema latestSchema) {
+        for (ManifestEntry entry : deltaFiles) {
+            if (entry.kind() == FileKind.ADD && leavesRowsWithoutRowIds(entry.file())) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Cannot commit data file %s to table %s: data evolution is "
+                                        + "enabled in schema %d, but the file has no first row id "
+                                        + "and, as %s output, gets none on commit. It was written "
+                                        + "with schema %d by a writer that does not preserve row "
+                                        + "ids, for example compaction state restored from before "
+                                        + "sys.enable_data_evolution converted the table. Discard "
+                                        + "that state and restart the writer.",
+                                entry.file().fileName(),
+                                tableName,
+                                latestSchema.id(),
+                                entry.file().fileSource().map(Enum::name).orElse("unknown"),
+                                entry.file().schemaId()));
+            }
+        }
+    }
+
     public boolean replaceManifestList(
             Snapshot latest,
             long totalRecordCount,
@@ -1538,20 +1575,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
                         "Latest snapshot is null, can not roll back.");
-        // Decide by the latest persisted schema, not by the options this commit was created with:
-        // a table loaded before row tracking was enabled still reports it as disabled.
-        TableSchema latestSchema =
-                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
-        if (CoreOptions.fromMap(latestSchema.options()).rowTrackingEnabled()
-                && !CoreOptions.fromMap(schemaManager.schema(targetSnapshot.schemaId()).options())
-                        .rowTrackingEnabled()) {
-            throw new IllegalStateException(
-                    String.format(
-                            "Cannot roll back table %s to snapshot %d: it was committed with schema "
-                                    + "%d, before row tracking was enabled, so its files have no "
-                                    + "row ids.",
-                            tableName, targetSnapshot.id(), targetSnapshot.schemaId()));
-        }
+        DataEvolutionUtils.checkRollbackKeepsRowTracking(
+                tableName,
+                schemaManager,
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName),
+                targetSnapshot);
 
         Map<FileEntry.Identifier, ManifestEntry> latestEntries = new HashMap<>();
         FileEntry.mergeEntries(
