@@ -32,6 +32,7 @@ import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.SortedGlobalIndexer;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.Options;
@@ -70,7 +71,7 @@ class CompositeBTreeIndexTest {
 
     @ParameterizedTest
     @ValueSource(ints = {1, 2})
-    void testMutableTupleKeysPostingListsAndLocalRanges(int version) throws Exception {
+    void testDeserializedTupleKeysPostingListsAndLocalRanges(int version) throws Exception {
         RowType type =
                 new RowType(
                         Arrays.asList(
@@ -99,17 +100,27 @@ class CompositeBTreeIndexTest {
                 };
         GenericRow reused = row("category-a", -1, "");
         reused.setRowKind(RowKind.UPDATE_AFTER);
+        KeySerializer serializer = new CompositeKeySerializer(type);
+        List<byte[]> keys = new ArrayList<>();
+        keys.add(serializer.serialize(reused));
+        reused.setField(1, 7);
+        keys.add(serializer.serialize(reused));
+        reused.setField(2, BinaryString.fromString("tag"));
+        keys.add(serializer.serialize(reused));
+        keys.add(serializer.serialize(reused));
+        reused.setField(0, BinaryString.fromString("category-b"));
+        keys.add(serializer.serialize(reused));
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter) indexer.createWriter(files);
-        writer.write(reused, 0);
-        reused.setField(1, 7);
-        writer.write(reused, 1);
-        reused.setField(2, BinaryString.fromString("tag"));
-        writer.write(reused, 2);
-        writer.write(reused, 3);
-        reused.setField(0, BinaryString.fromString("category-b"));
-        writer.write(reused, 4);
+        for (int i = 0; i < keys.size(); i++) {
+            writer.write(serializer.deserialize(MemorySlice.wrap(keys.get(i))), i);
+        }
         ResultEntry result = writer.finish().get(0);
+        SortedIndexFileMeta indexMeta = SortedIndexFileMeta.deserialize(result.meta());
+        assertThat(serializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey())))
+                .isEqualTo(row("category-a", -1, ""));
+        assertThat(serializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey())))
+                .isEqualTo(row("category-b", 7, "tag"));
         Path path = new Path(directory, result.fileName());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, io.getFileSize(path), result.rowCount(), result.meta());
@@ -228,6 +239,27 @@ class CompositeBTreeIndexTest {
                                 new Options());
         assertThat(scalarIndexer.keyExtractor().keyType()).isEqualTo(DataTypes.STRING());
         assertThat(indexer.keyExtractor().keyType()).isEqualTo(type);
+    }
+
+    @Test
+    void testDeserializedKeysRemainIndependentOfSubsequentReadsAndInputBuffers() {
+        KeySerializer serializer =
+                new CompositeKeySerializer(
+                        RowType.of(DataTypes.STRING(), DataTypes.INT(), DataTypes.STRING()));
+        GenericRow expectedFirst = row("category-a", 7, "first");
+        GenericRow expectedSecond = row("category-b", 8, "second");
+        byte[] firstBytes = serializer.serialize(expectedFirst);
+        Object first = serializer.deserialize(MemorySlice.wrap(firstBytes));
+        Arrays.fill(firstBytes, (byte) 0);
+        byte[] secondBytes = serializer.serialize(expectedSecond);
+        Object second = serializer.deserialize(MemorySlice.wrap(secondBytes));
+        Arrays.fill(secondBytes, (byte) 0);
+        for (int i = 0; i < 100; i++) {
+            serializer.deserialize(MemorySlice.wrap(serializer.serialize(row("other", i, null))));
+        }
+        assertThat(first).isEqualTo(expectedFirst);
+        assertThat(second).isEqualTo(expectedSecond);
+        assertThat(serializer.createComparator().compare(first, second)).isNegative();
     }
 
     @Test
