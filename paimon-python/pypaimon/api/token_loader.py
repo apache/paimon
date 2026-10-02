@@ -27,6 +27,7 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
 from pypaimon.api.client import ExponentialRetry
+from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.json_util import JSON, json_field, json_ignore_field
@@ -136,6 +137,7 @@ class HTTPClient:
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
         self.session = requests.Session()
+        self.session.headers['User-Agent'] = user_agent.rest_user_agent()
 
         # Add retry adapter
         retry_interceptor = ExponentialRetry(max_retries=3)
