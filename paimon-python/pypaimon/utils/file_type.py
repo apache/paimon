@@ -51,10 +51,10 @@ class FileType(Enum):
         # temp files (.{name}.{UUID}.tmp) are still being written
         if FileType._unwrap_temp_file_name(name) != name:
             return True
-        # hint, _SUCCESS, consumer, service, tag and Iceberg version-hint / retire-pending files
-        # are overwritten in place under a stable path
+        # hint, _SUCCESS, consumer, service, tag and Iceberg-compatible metadata (version-hint,
+        # retire-pending, v{N}.metadata.json on tag changes) are overwritten in place
         return (name in ("EARLIEST", "LATEST", "_SUCCESS", "version-hint.text", "retire-pending")
-                or name.endswith("_SUCCESS")
+                or name.endswith(("_SUCCESS", ".metadata.json"))
                 or name.startswith(("consumer-", "service-", "tag-")))
 
     @staticmethod

@@ -135,6 +135,7 @@ class FileTypeMutableTest(unittest.TestCase):
     def test_iceberg_metadata_rewritten_in_place_is_mutable(self):
         self.assertTrue(FileType.is_mutable("/warehouse/db/t/metadata/version-hint.text"))
         self.assertTrue(FileType.is_mutable("/warehouse/db/t/metadata/retire-pending"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/metadata/v1.metadata.json"))
 
     def test_changelog_meta_not_mutable(self):
         path = "/warehouse/db/t/changelog/changelog-5"
@@ -147,7 +148,7 @@ class FileTypeMutableTest(unittest.TestCase):
                      "/warehouse/db/t/manifest/manifest-abc-0",
                      "/warehouse/db/t/manifest/manifest-abc-0.avro.sidecar",
                      "/warehouse/db/t/statistics/stat-abc",
-                     "/warehouse/db/t/metadata/v1.metadata.json",
+                     "/warehouse/db/t/metadata/snap-1-1-a1b2c3d4.avro",
                      "/warehouse/db/t/bucket-0/data-abc.orc",
                      "/warehouse/db/t/bucket-0/data-abc.orc.index",
                      "/warehouse/db/t/index/index-uuid-0",
