@@ -154,9 +154,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             return write.writeAndReturn(row);
         }
 
-        BinaryRow partition = write.getPartition(row);
-        return write.writeAndReturn(
-                row, write.getBucket(row), partitionBucketMapping.resolveNumBuckets(partition));
+        return write.writeAndReturn(row, partitionBucketMapping);
     }
 
     @Override
