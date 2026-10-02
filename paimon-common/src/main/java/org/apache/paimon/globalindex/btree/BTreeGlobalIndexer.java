@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -93,7 +94,10 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
             }
         }
         DataType keyType = extraFields.isEmpty() ? dataField.type() : new RowType(fields);
-        this.keySerializer = KeySerializer.create(keyType);
+        this.keySerializer =
+                extraFields.isEmpty()
+                        ? KeySerializer.create(keyType)
+                        : new CompositeKeySerializer((RowType) keyType);
         this.keyExtractor = GlobalIndexKeyExtractor.identity(keyType);
         this.options = options;
         this.fallbackScanMaxSize =

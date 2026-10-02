@@ -64,7 +64,10 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
             index_type="btree", global_index_meta=SimpleNamespace(extra_field_ids=None))
         composite = SimpleNamespace(
             index_type="btree", global_index_meta=SimpleNamespace(extra_field_ids=[2]))
-        self.assertEqual([single], _supported_scalar_index_files([single, composite]))
+        bitmap = SimpleNamespace(
+            index_type="bitmap", global_index_meta=SimpleNamespace(extra_field_ids=[2]))
+        self.assertEqual([single, bitmap],
+                         _supported_scalar_index_files([single, composite, bitmap]))
         self.assertIsNone(DataEvolutionGlobalIndexScanner.create(None, [composite]))
 
     def test_default_values(self):

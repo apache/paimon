@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
@@ -67,7 +68,7 @@ public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
             if (files.stream().anyMatch(file -> file.metadata() == null)) {
                 return files;
             }
-            KeySerializer serializer = KeySerializer.create(new RowType(fields));
+            KeySerializer serializer = new CompositeKeySerializer(new RowType(fields));
             Object[] values = matched.get().stream().map(leaf -> leaf.literals().get(0)).toArray();
             return new SortedFileMetaSelector(files, serializer)
                     .visitEqual(

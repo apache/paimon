@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.reader.RecordReader;
@@ -108,7 +109,10 @@ public final class SortedGlobalIndexTestUtils {
         }
 
         Comparator<Object> comparator =
-                KeySerializer.create(keyExtractor.keyType()).createComparator();
+                (keyExtractor.keyType() instanceof RowType
+                                ? new CompositeKeySerializer((RowType) keyExtractor.keyType())
+                                : KeySerializer.create(keyExtractor.keyType()))
+                        .createComparator();
         rows.sort(
                 (left, right) -> {
                     if (left.getKey() == null) {

@@ -1767,7 +1767,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual("ivf-flat", raw[0].index_type)
 
     def test_scan_attaches_scalar_index_when_filter_hits_extra_field(self):
-        id_name_index = _entry(None, field_id=2, index_type="btree",
+        id_name_index = _entry(None, field_id=2, index_type="bitmap",
                                file_name="name-id.index",
                                row_range_start=0,
                                row_range_end=9)
@@ -1802,7 +1802,7 @@ class VectorSearchFilterTest(unittest.TestCase):
 
 
 class VectorSearchMultiShardScalarTest(unittest.TestCase):
-    """Scalar pre-filter across multiple btree shards of the same field.
+    """Scalar pre-filter across multiple index shards of the same field.
 
     Exercises the real DataEvolutionGlobalIndexScanner reader-construction path (with
     OffsetGlobalIndexReader + UnionGlobalIndexReader wrapping) so that:
@@ -1893,10 +1893,10 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         )
 
         fields = [_field(0, "a"), _field(1, "b"), _field(2, "c")]
-        primary = _entry(None, field_id=2, index_type="btree",
+        primary = _entry(None, field_id=2, index_type="bitmap",
                          file_name="c-primary.index",
                          row_range_start=0, row_range_end=4).index_file
-        extra = _entry(None, field_id=0, index_type="btree",
+        extra = _entry(None, field_id=0, index_type="bitmap",
                        file_name="a-c.index",
                        row_range_start=5, row_range_end=9).index_file
         extra.global_index_meta.extra_field_ids = [2]
@@ -2024,11 +2024,11 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        short = _entry(None, field_id=0, index_type="btree",
+        short = _entry(None, field_id=0, index_type="bitmap",
                        file_name="a-c.index",
                        row_range_start=0, row_range_end=4).index_file
         short.global_index_meta.extra_field_ids = [2]
-        long = _entry(None, field_id=1, index_type="btree",
+        long = _entry(None, field_id=1, index_type="bitmap",
                       file_name="b-c.index",
                       row_range_start=0, row_range_end=9).index_file
         long.global_index_meta.extra_field_ids = [2]
@@ -2087,15 +2087,15 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        a_early = _entry(None, field_id=0, index_type="btree",
+        a_early = _entry(None, field_id=0, index_type="bitmap",
                          file_name="a-c-early.index",
                          row_range_start=2, row_range_end=3).index_file
         a_early.global_index_meta.extra_field_ids = [2]
-        a_late = _entry(None, field_id=0, index_type="btree",
+        a_late = _entry(None, field_id=0, index_type="bitmap",
                         file_name="a-c-late.index",
                         row_range_start=7, row_range_end=9).index_file
         a_late.global_index_meta.extra_field_ids = [2]
-        b_full = _entry(None, field_id=1, index_type="btree",
+        b_full = _entry(None, field_id=1, index_type="bitmap",
                         file_name="b-c-full.index",
                         row_range_start=0, row_range_end=9).index_file
         b_full.global_index_meta.extra_field_ids = [2]
@@ -2155,11 +2155,11 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b", "STRING")
         c_field = _field(2, "c", "STRING")
 
-        short = _entry(None, field_id=0, index_type="btree",
+        short = _entry(None, field_id=0, index_type="bitmap",
                        file_name="a-c.index",
                        row_range_start=0, row_range_end=4).index_file
         short.global_index_meta.extra_field_ids = [2]
-        long = _entry(None, field_id=1, index_type="btree",
+        long = _entry(None, field_id=1, index_type="bitmap",
                       file_name="b-c.index",
                       row_range_start=0, row_range_end=9).index_file
         long.global_index_meta.extra_field_ids = [2]
@@ -2345,7 +2345,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         name_field = _field(0, "name", "STRING")
         id_field = _field(1, "id")
         emb_field = _field(2, "embedding", "FLOAT")
-        multi = _entry(None, field_id=0, index_type="btree",
+        multi = _entry(None, field_id=0, index_type="bitmap",
                        file_name="name-id.index",
                        row_range_start=0, row_range_end=9).index_file
         multi.global_index_meta.extra_field_ids = [1]
@@ -2358,35 +2358,31 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         )
         _patch_snapshot(self, table._entries)
 
-        class _StubBTreeReader:
-            def __init__(self_inner, key_serializer, file_io, index_path,
-                         io_meta):
-                pass
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 
-            def visit_equal(self_inner, literal):
-                return GlobalIndexResult.create_empty()
+        class _StubReader(GlobalIndexReader):
+            def visit_equal(self_inner, field_ref, literal):
+                return _completed_future(GlobalIndexResult.create_empty())
 
             def close(self_inner):
                 pass
 
         with mock.patch(
-                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
-                _StubBTreeReader):
-            with mock.patch(
-                    "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
-                    return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
-                scanner = DataEvolutionGlobalIndexScanner.create(
-                    table,
-                    predicate=Predicate(method="equal", index=1, field="id",
-                                        literals=[3]),
-                )
-                try:
-                    self.assertIsNotNone(scanner)
-                    readers = scanner._evaluator._readers_function(id_field)
-                    self.assertTrue(readers)
-                finally:
-                    if scanner is not None:
-                        scanner.close()
+                "pypaimon.globalindex.data_evolution_global_index_scanner."
+                "_create_inner_readers",
+                return_value=[_StubReader()]):
+            scanner = DataEvolutionGlobalIndexScanner.create(
+                table,
+                predicate=Predicate(method="equal", index=1, field="id",
+                                    literals=[3]),
+            )
+            try:
+                self.assertIsNotNone(scanner)
+                readers = scanner._evaluator._readers_function(id_field)
+                self.assertTrue(readers)
+            finally:
+                if scanner is not None:
+                    scanner.close()
 
 
 class VectorSearchPartitionedFilterTest(unittest.TestCase):

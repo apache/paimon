@@ -35,7 +35,6 @@ import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
@@ -63,11 +62,6 @@ public interface KeySerializer {
                     public KeySerializer defaultMethod(DataType dataType) {
                         throw new UnsupportedOperationException(
                                 "DataType: " + dataType + " is not supported by global index now.");
-                    }
-
-                    @Override
-                    public KeySerializer visit(RowType rowType) {
-                        return new CompositeKeySerializer(rowType);
                     }
 
                     @Override

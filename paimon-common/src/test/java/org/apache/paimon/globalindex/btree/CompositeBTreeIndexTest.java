@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
@@ -51,6 +52,7 @@ import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for typed composite BTree keys. */
 class CompositeBTreeIndexTest {
@@ -183,7 +185,8 @@ class CompositeBTreeIndexTest {
                                 type.getFields().get(0),
                                 type.getFields().subList(1, 3),
                                 new Options());
-        KeySerializer serializer = KeySerializer.create(indexer.keyExtractor().keyType());
+        KeySerializer serializer =
+                new CompositeKeySerializer((RowType) indexer.keyExtractor().keyType());
         Comparator<Object> comparator = serializer.createComparator();
         GenericRow first = row("category-a", -1, "a\u0000b");
         GenericRow second = row("category-a", 107, "");
@@ -204,6 +207,15 @@ class CompositeBTreeIndexTest {
                                 Collections.emptyList(),
                                 new Options()))
                 .isInstanceOf(BTreeGlobalIndexer.class);
+    }
+
+    @Test
+    void testCompositeSupportDoesNotEnablePhysicalRowIndexes() {
+        DataField field = new DataField(40, "nested", RowType.of(DataTypes.INT()));
+        for (String indexType : Arrays.asList("btree", "bitmap")) {
+            assertThatThrownBy(() -> GlobalIndexer.create(indexType, field, new Options()))
+                    .isInstanceOf(UnsupportedOperationException.class);
+        }
     }
 
     private GenericRow row(String category, int itemNumber, String tag) {
