@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import math
 import re
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
@@ -504,6 +505,31 @@ class Like(Tester):
         return True
 
 
+def _elements_equal(element, literal) -> bool:
+    """Match one array element against a literal using Java's element
+    comparator contract rather than Python ``==``.
+
+    For floats this mirrors ``Double.compare`` / ``Float.compare``: NaN equals
+    NaN, and signed zero is distinguished (``+0.0`` != ``-0.0``). FLOAT literals
+    are already normalized to float32 precision by the builder, so a stored
+    ``float32`` value compares equal to its intended literal. Other types fall
+    back to ``==``.
+    """
+    if isinstance(element, float) and isinstance(literal, float):
+        if math.isnan(element) or math.isnan(literal):
+            return math.isnan(element) and math.isnan(literal)
+        if element == 0.0 and literal == 0.0:
+            return math.copysign(1.0, element) == math.copysign(1.0, literal)
+        return element == literal
+    return element == literal
+
+
+def _array_contains_element(val, literal) -> bool:
+    """Whether ``literal`` appears in array ``val`` under Java element
+    equality (see :func:`_elements_equal`)."""
+    return any(_elements_equal(element, literal) for element in val)
+
+
 class ArrayContains(Tester):
     name = "arrayContains"
 
@@ -513,7 +539,7 @@ class ArrayContains(Tester):
         # element must appear in the array.
         if val is None or not literals or literals[0] is None:
             return False
-        return literals[0] in val
+        return _array_contains_element(val, literals[0])
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
         # Array element stats are not tracked; never prune a file.
@@ -532,7 +558,8 @@ class ArraysOverlap(Tester):
         # the literals. Mirrors Java ArraysOverlap.
         if val is None or not literals:
             return False
-        return any(literal in val for literal in literals if literal is not None)
+        return any(_array_contains_element(val, lit)
+                   for lit in literals if lit is not None)
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
         return True
@@ -550,7 +577,8 @@ class ArrayContainsAll(Tester):
         # vacuously true for a non-null array).
         if val is None:
             return False
-        return all(literal is not None and literal in val for literal in literals)
+        return all(lit is not None and _array_contains_element(val, lit)
+                   for lit in literals)
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
         return True

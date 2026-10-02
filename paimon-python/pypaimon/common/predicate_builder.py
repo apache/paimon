@@ -16,9 +16,10 @@
 # under the License.
 
 from typing import Any, List, Optional
+import struct
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.schema.data_types import ArrayType, DataField
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
 
 
 class PredicateBuilder:
@@ -49,6 +50,26 @@ class PredicateBuilder:
         if not isinstance(field_type, ArrayType):
             raise ValueError(
                 "{} requires an ARRAY field, but '{}' is {}.".format(method, field, field_type))
+
+    def _normalize_array_literals(self, field: str, literals: List[Any]) -> List[Any]:
+        """Normalize element literals to the array's declared element type.
+
+        A FLOAT array stores float32 values, so a Python ``float`` literal
+        (double) such as ``0.1`` must be rounded to float32 before comparison;
+        otherwise ``array_contains`` never matches the stored ``0.1``. Other
+        element types need no normalization (Python ``float`` is already a
+        double; int/str/bool compare exactly).
+        """
+        element = self._field_types[field].element
+        if isinstance(element, AtomicType) and element.type == 'FLOAT':
+            return [self._to_float32(literal) for literal in literals]
+        return literals
+
+    @staticmethod
+    def _to_float32(value: Any) -> Any:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return value
+        return struct.unpack('<f', struct.pack('<f', float(value)))[0]
 
     def _build_predicate(self, method: str, field: str, literals: Optional[List[Any]] = None) -> Predicate:
         """Build a predicate with the given method, field, and literals."""
@@ -129,7 +150,8 @@ class PredicateBuilder:
         ``element_literal``. Mirrors Java ``PredicateBuilder.arrayContains``.
         """
         self._validate_array_field('arrayContains', field)
-        return self._build_predicate('arrayContains', field, [element_literal])
+        literals = self._normalize_array_literals(field, [element_literal])
+        return self._build_predicate('arrayContains', field, literals)
 
     def arrays_overlap(self, field: str, element_literals: List[Any]) -> Predicate:
         """Create an ARRAYS_OVERLAP predicate: the array column shares at
@@ -137,7 +159,8 @@ class PredicateBuilder:
         ``PredicateBuilder.arraysOverlap``.
         """
         self._validate_array_field('arraysOverlap', field)
-        return self._build_predicate('arraysOverlap', field, list(element_literals))
+        literals = self._normalize_array_literals(field, list(element_literals))
+        return self._build_predicate('arraysOverlap', field, literals)
 
     def array_contains_all(self, field: str, element_literals: List[Any]) -> Predicate:
         """Create an ARRAY_CONTAINS_ALL predicate: the array column contains
@@ -145,7 +168,8 @@ class PredicateBuilder:
         ``PredicateBuilder.arrayContainsAll``.
         """
         self._validate_array_field('arrayContainsAll', field)
-        return self._build_predicate('arrayContainsAll', field, list(element_literals))
+        literals = self._normalize_array_literals(field, list(element_literals))
+        return self._build_predicate('arrayContainsAll', field, literals)
 
     @staticmethod
     def and_predicates(predicates: List[Predicate]) -> Optional[Predicate]:

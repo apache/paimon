@@ -138,5 +138,69 @@ class ArrayPredicateE2ETest(unittest.TestCase):
             pb.array_contains_all('id', [1])
 
 
+class ArrayPredicateNumericTest(unittest.TestCase):
+    """Numeric element types must compare with Java's contract: a FLOAT
+    literal is matched at float32 precision, NaN matches a stored NaN, and
+    signed zero is distinguished -- none of which plain Python membership
+    does."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create(
+            {'warehouse': os.path.join(cls.tempdir, 'warehouse')})
+        cls.catalog.create_database('default', True)
+        cls.pa_schema = pa.schema([
+            ('id', pa.int32(), False),
+            ('floats', pa.list_(pa.float32())),
+            ('doubles', pa.list_(pa.float64())),
+        ])
+        cls.rows = [
+            {'id': 1, 'floats': [0.1], 'doubles': [1.5]},
+            {'id': 2, 'floats': [0.5], 'doubles': [float('nan')]},
+            {'id': 3, 'floats': [0.25], 'doubles': [-0.0]},
+            {'id': 4, 'floats': [0.75], 'doubles': [0.0]},
+        ]
+        schema = Schema.from_pyarrow_schema(cls.pa_schema)
+        cls.catalog.create_table('default.nums', schema, False)
+        table = cls.catalog.get_table('default.nums')
+        wb = table.new_batch_write_builder()
+        w, c = wb.new_write(), wb.new_commit()
+        try:
+            w.write_arrow(pa.Table.from_pylist(cls.rows, schema=cls.pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def _ids(self, predicate):
+        table = self.catalog.get_table('default.nums')
+        rb = table.new_read_builder().with_filter(predicate)
+        result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        return sorted(result.column('id').to_pylist())
+
+    def _pb(self):
+        return self.catalog.get_table('default.nums').new_read_builder() \
+            .new_predicate_builder()
+
+    def test_float_literal_matches_at_float32_precision(self):
+        # Stored as float32, 0.1 is 0.10000000149...; a double 0.1 literal must
+        # still match (it is rounded to float32 when the predicate is built).
+        self.assertEqual([1], self._ids(self._pb().array_contains('floats', 0.1)))
+
+    def test_nan_literal_matches_stored_nan(self):
+        self.assertEqual(
+            [2], self._ids(self._pb().array_contains('doubles', float('nan'))))
+
+    def test_signed_zero_is_distinguished(self):
+        # +0.0 matches only the +0.0 row, -0.0 only the -0.0 row.
+        self.assertEqual([4], self._ids(self._pb().array_contains('doubles', 0.0)))
+        self.assertEqual([3], self._ids(self._pb().array_contains('doubles', -0.0)))
+
+
 if __name__ == '__main__':
     unittest.main()
