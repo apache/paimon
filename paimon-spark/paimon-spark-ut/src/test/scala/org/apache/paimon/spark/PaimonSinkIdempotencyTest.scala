@@ -33,11 +33,12 @@ import org.apache.hadoop.fs.permission.FsPermission
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
-import org.apache.spark.sql.streaming.{OutputMode, StreamingQuery, StreamTest}
+import org.apache.spark.sql.streaming.{OutputMode, StreamingQuery, StreamingQueryListener, StreamTest}
 
 import java.io.{File, IOException, OutputStream}
-import java.util.{Collections, List => JList, Map => JMap}
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.{Collections, List => JList, Map => JMap, UUID}
+import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 
 import scala.collection.JavaConverters._
 
@@ -471,6 +472,88 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
 
           assert(userA != userB, s"both queries committed as '$userA'")
           checkAnswer(spark.sql("SELECT * FROM T ORDER BY a"), Row(1, "a") :: Row(2, "b") :: Nil)
+      }
+    }
+  }
+
+  /**
+   * Commits batch 0 under 'commit.user-prefix' = 'old-job', leaves it to be replayed, and resumes
+   * the checkpoint under 'new-job' with `start`, which applies the prefix it is given.
+   */
+  private def checkPrefixChangeIsRefused(
+      checkpointPath: String,
+      start: String => StreamingQuery): Unit = {
+    runToCompletion(start("old-job"))
+    assert(latestCommitUser("T").startsWith("old-job_spark-query-"))
+    dropCommitLogEntry(checkpointPath, 0)
+
+    // Under another commit user the replay of batch 0 would not be recognised.
+    val failure = intercept[Exception](runToCompletion(start("new-job")))
+    assert(
+      causes(failure).exists(
+        e =>
+          e.isInstanceOf[IllegalStateException] &&
+            e.getMessage.contains("Set 'commit.user-prefix' back to 'old-job'")),
+      s"expected the prefix change to be refused, but got $failure"
+    )
+    checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "a") :: Nil)
+    assert(snapshotCount("T") == 1)
+
+    // Under the previous prefix the replay is recognised.
+    runToCompletion(start("old-job"))
+    checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "a") :: Nil)
+    assert(
+      snapshotCount("T") == 1,
+      s"replaying batch 0 created a second snapshot (${snapshotCount("T")} in total)")
+  }
+
+  test("Paimon Sink: a checkpoint is not resumed under another table commit.user-prefix") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql("CREATE TABLE T (a INT, b STRING)")
+          val location = loadTable("T").location().toString
+          val checkpointPath = checkpointDir.getCanonicalPath
+
+          val inputData = MemoryStream[(Int, String)]
+          val df = inputData.toDS().toDF("a", "b")
+          inputData.addData((1, "a"))
+
+          checkPrefixChangeIsRefused(
+            checkpointPath,
+            prefix => {
+              spark.sql(s"ALTER TABLE T SET TBLPROPERTIES ('commit.user-prefix' = '$prefix')")
+              df.writeStream
+                .option("checkpointLocation", checkpointPath)
+                .format("paimon")
+                .start(location)
+            }
+          )
+      }
+    }
+  }
+
+  test("Paimon Sink: a checkpoint is not resumed under another write commit.user-prefix") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql("CREATE TABLE T (a INT, b STRING)")
+          val location = loadTable("T").location().toString
+          val checkpointPath = checkpointDir.getCanonicalPath
+
+          val inputData = MemoryStream[(Int, String)]
+          val df = inputData.toDS().toDF("a", "b")
+          inputData.addData((1, "a"))
+
+          checkPrefixChangeIsRefused(
+            checkpointPath,
+            prefix =>
+              df.writeStream
+                .option("checkpointLocation", checkpointPath)
+                .option("commit.user-prefix", prefix)
+                .format("paimon")
+                .start(location)
+          )
       }
     }
   }
@@ -1217,6 +1300,112 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
             Thread.sleep(50)
           }
           assert(CountingCommitCallback.created == 1)
+      }
+    }
+  }
+  test("Paimon Sink: a late termination of the previous run leaves the restarted run open") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          // A restarted query keeps its id, and Spark delivers terminations asynchronously: the
+          // termination of the previous run may arrive while the restarted run is writing. It
+          // must close the committer of the previous run only.
+          CountingCommitCallback.reset()
+          spark.sql(
+            "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES (" +
+              s"'commit.callbacks' = '${classOf[CountingCommitCallback].getName}')")
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, String)]
+          def start(): StreamingQuery =
+            inputData
+              .toDS()
+              .toDF("a", "b")
+              .writeStream
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .format("paimon")
+              .start(location)
+
+          // Holds back a progress event of the first run, and with it the termination of that run
+          // that Spark queues behind it.
+          val firstRun = new AtomicReference[UUID]()
+          val release = new CountDownLatch(1)
+          val blocker = new StreamingQueryListener {
+            override def onQueryStarted(event: StreamingQueryListener.QueryStartedEvent): Unit = {}
+
+            override def onQueryProgress(event: StreamingQueryListener.QueryProgressEvent): Unit = {
+              if (event.progress.runId == firstRun.get()) {
+                release.await(streamingTimeout.toMillis, TimeUnit.MILLISECONDS)
+              }
+            }
+
+            override def onQueryTerminated(
+                event: StreamingQueryListener.QueryTerminatedEvent): Unit = {}
+          }
+          // Registered after the sink listeners, so it sees a termination once they have.
+          val delivered = Collections.synchronizedSet(new java.util.HashSet[UUID]())
+          val observer = new StreamingQueryListener {
+            override def onQueryStarted(event: StreamingQueryListener.QueryStartedEvent): Unit = {}
+
+            override def onQueryProgress(
+                event: StreamingQueryListener.QueryProgressEvent): Unit = {}
+
+            override def onQueryTerminated(
+                event: StreamingQueryListener.QueryTerminatedEvent): Unit = {
+              delivered.add(event.runId)
+            }
+          }
+          def awaitDelivered(runId: UUID): Unit = {
+            // Bounded by the timeout of this test.
+            while (!delivered.contains(runId)) {
+              Thread.sleep(50)
+            }
+          }
+
+          spark.streams.addListener(blocker)
+          try {
+            val first = start()
+            firstRun.set(first.runId)
+            inputData.addData((1, "a"))
+            first.processAllAvailable()
+            first.stop()
+
+            val restarted = start()
+            try {
+              assert(restarted.id == first.id && restarted.runId != first.runId)
+              inputData.addData((2, "b"))
+              restarted.processAllAvailable()
+              spark.streams.addListener(observer)
+
+              release.countDown()
+              awaitDelivered(first.runId)
+              assert(restarted.isActive)
+              assert(
+                CountingCommitCallback.created == 2 && CountingCommitCallback.closed == 1,
+                "the termination of the first run must close its own committer only, but " +
+                  s"${CountingCommitCallback.closed} of ${CountingCommitCallback.created} " +
+                  "committers are closed"
+              )
+
+              inputData.addData((3, "c"))
+              restarted.processAllAvailable()
+            } finally {
+              restarted.stop()
+            }
+            awaitDelivered(restarted.runId)
+            assert(
+              CountingCommitCallback.created == 2 && CountingCommitCallback.closed == 2,
+              s"${CountingCommitCallback.closed} of ${CountingCommitCallback.created} " +
+                "committers are closed after both runs terminated"
+            )
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+          } finally {
+            release.countDown()
+            spark.streams.removeListener(blocker)
+            spark.streams.removeListener(observer)
+          }
       }
     }
   }

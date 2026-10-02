@@ -65,19 +65,25 @@ class PaimonSink(
    * that constructs the sink.
    */
   private lazy val commitUser: String = {
+    val user = withPrefix(identity)
+    logInfo(s"Streaming writes to ${originTable.name()} commit as '$user'.")
+    user
+  }
+
+  /** The part of the commit user that identifies the checkpoint, without the prefix. */
+  private lazy val identity: String =
     queryId
-      .map(derivedCommitUser("query", _))
+      .map(derivedIdentity("query", _))
       // Only reachable outside a stream execution, e.g. a direct addBatch call. A location cannot
       // tell a recreated checkpoint from a resumed one, so it is a last resort.
-      .orElse(checkpointLocation.map(derivedCommitUser("checkpoint", _)))
+      .orElse(checkpointLocation.map(derivedIdentity("checkpoint", _)))
       .getOrElse {
         logWarning(
           "This streaming write has neither a query id nor a checkpoint location to derive a " +
             "stable commit user from, so a replayed micro-batch cannot be recognised and may " +
             "be committed twice.")
-        withPrefix(UUID.randomUUID().toString)
+        UUID.randomUUID().toString
       }
-  }
 
   // Spark hands the sink its options case-insensitively, but keeps whatever case the user wrote.
   private def checkpointLocation: Option[String] =
@@ -95,18 +101,16 @@ class PaimonSink(
   private def queryId: Option[String] =
     Option(sqlContext.sparkContext.getLocalProperty(PaimonSink.QUERY_ID_KEY)).filter(_.nonEmpty)
 
-  private def derivedCommitUser(kind: String, value: String): String = {
-    val user = withPrefix(s"spark-$kind-${UUID.nameUUIDFromBytes(value.getBytes(UTF_8))}")
-    logInfo(s"Streaming writes to ${originTable.name()} commit as '$user'.")
-    user
-  }
+  private def derivedIdentity(kind: String, value: String): String =
+    s"spark-$kind-${UUID.nameUUIDFromBytes(value.getBytes(UTF_8))}"
 
   /**
    * 'commit.user-prefix' names the writers of a table, the way
    * [[org.apache.paimon.CoreOptions#createCommitUser]] prefixes the random user of a batch write.
    * It prefixes a derived user here too, so that a streaming job keeps the name its table was
    * configured with. It cannot be the identity by itself, since every writer of the table shares
-   * it, so what follows it still has to be unique to the query.
+   * it, so what follows it still has to be unique to the query. Being part of the commit user, it
+   * cannot change while a checkpoint is resumed; see [[checkPrefixUnchanged]].
    */
   private def withPrefix(user: String): String =
     Seq(
@@ -120,10 +124,51 @@ class PaimonSink(
    * terminates. Spark creates a sink per run, so a restarted query starts a new context and looks
    * up once what the previous run committed.
    */
-  private lazy val context: StreamingWriteContext =
-    new StreamingWriteContext(
-      commitUser,
-      markerLocation.map(new CommitMarker(_, sqlContext.sparkSession.sessionState.newHadoopConf())))
+  private var context: StreamingWriteContext = _
+
+  private def openContext(): StreamingWriteContext = synchronized {
+    if (context == null) {
+      val marker =
+        markerLocation.map(
+          new CommitMarker(_, sqlContext.sparkSession.sessionState.newHadoopConf()))
+      marker.foreach(checkPrefixUnchanged)
+      context = new StreamingWriteContext(commitUser, marker)
+    }
+    context
+  }
+
+  /** Closes the context of this run, if it has created one. */
+  private def closeContext(): Unit = synchronized {
+    if (context != null) {
+      context.close()
+    }
+  }
+
+  /**
+   * A replayed micro-batch is only recognised under the commit user that committed it, so a run
+   * resuming a checkpoint under a different 'commit.user-prefix' would commit it twice. The marker
+   * left by the previous run names its commit user: one with the same identity but another prefix
+   * is that of this checkpoint, and the run is refused. A marker of another identity belongs to a
+   * query that used the location before, which says nothing about this one.
+   */
+  private def checkPrefixUnchanged(marker: CommitMarker): Unit =
+    marker.commitUser.filter(_ != commitUser).foreach {
+      previous =>
+        if (previous == identity || previous.endsWith(s"_$identity")) {
+          val previousPrefix = previous.stripSuffix(identity).stripSuffix("_")
+          throw new IllegalStateException(
+            s"The streaming query writing to ${originTable.name()} committed as '$previous' " +
+              s"before it was restarted, but now commits as '$commitUser': " +
+              s"'${CoreOptions.COMMIT_USER_PREFIX.key}' was changed. A micro-batch replayed by " +
+              "the restart would not be recognised and would be committed twice. " +
+              (if (previousPrefix.isEmpty) {
+                 s"Unset '${CoreOptions.COMMIT_USER_PREFIX.key}'"
+               } else {
+                 s"Set '${CoreOptions.COMMIT_USER_PREFIX.key}' back to '$previousPrefix'"
+               }) +
+              " to resume this checkpoint, or start the query from a new checkpoint.")
+        }
+    }
 
   /**
    * Where the commit marker is kept: the checkpoint of the query, which the writer names only when
@@ -175,13 +220,13 @@ class PaimonSink(
         saveMode,
         newData,
         options,
-        Some(StreamingWrite(context, batchId)))
+        Some(StreamingWrite(openContext(), batchId)))
         .run(sqlContext.sparkSession)
     } finally {
       // Outside a stream execution nothing ever terminates the query, so the committer of a batch
       // cannot be kept for the next one.
       if (closeAfterBatch) {
-        context.close()
+        closeContext()
       }
     }
   }
@@ -190,15 +235,23 @@ class PaimonSink(
    * Closes the committer of this run when the query terminates, whether it completes, fails or is
    * stopped. Returns whether the query is one whose termination Spark reports; it is not when
    * [[addBatch]] is called outside a stream execution.
+   *
+   * A restarted query keeps its id and gets a new run id, and Spark reports terminations
+   * asynchronously, so the termination of the previous run may only be delivered once this run is
+   * writing. The listener therefore waits for the termination of this run only.
    */
   private def registerCloseOnTermination(): Boolean = synchronized {
     if (closeRegistered) {
       return true
     }
+    val streams = sqlContext.sparkSession.streams
     // Spark's own query id is a uuid; anything else cannot be matched against a termination.
-    queryId.flatMap(id => Try(UUID.fromString(id)).toOption) match {
-      case Some(id) =>
-        val streams = sqlContext.sparkSession.streams
+    val run = for {
+      id <- queryId.flatMap(id => Try(UUID.fromString(id)).toOption)
+      query <- Option(streams.get(id))
+    } yield (id, query.runId)
+    run match {
+      case Some((id, runId)) =>
         streams.addListener(new StreamingQueryListener {
           override def onQueryStarted(event: StreamingQueryListener.QueryStartedEvent): Unit = {}
 
@@ -206,9 +259,9 @@ class PaimonSink(
 
           override def onQueryTerminated(
               event: StreamingQueryListener.QueryTerminatedEvent): Unit = {
-            if (event.id == id) {
+            if (event.id == id && event.runId == runId) {
               try {
-                context.close()
+                closeContext()
               } finally {
                 streams.removeListener(this)
               }

@@ -78,19 +78,32 @@ class CommitMarker(checkpointLocation: String, hadoopConf: Configuration) {
    * query says nothing about this one. A corrupt marker, however, might have been truncated by an
    * older sink retrying an already committed batch, so it must not be treated as a missing marker.
    */
-  def latestSnapshotIdBefore(commitUser: String, batchId: Long): Option[Long] = {
+  def latestSnapshotIdBefore(commitUser: String, batchId: Long): Option[Long] =
+    read().map(lines => parse(lines).getOrElse(throw corrupt())).collect {
+      case (user, batch, snapshot) if user == commitUser && batch == batchId => snapshot
+    }
+
+  /**
+   * The commit user of the micro-batch the marker was published for. A corrupt marker names none;
+   * the commit of a batch refuses it.
+   */
+  def commitUser: Option[String] = read().flatMap(parse).map(_._1)
+
+  private def read(): Option[List[String]] = {
     val fs = path.getFileSystem(hadoopConf)
     if (!fs.exists(path)) {
       return None
     }
     val in = fs.open(path)
-    val lines =
-      try {
-        Source.fromInputStream(in, UTF_8.name()).getLines().toList
-      } finally {
-        in.close()
-      }
-    val entry = lines match {
+    try {
+      Some(Source.fromInputStream(in, UTF_8.name()).getLines().toList)
+    } finally {
+      in.close()
+    }
+  }
+
+  private def parse(lines: List[String]): Option[(String, Long, Long)] =
+    lines match {
       case user :: batch :: snapshot :: Nil =>
         for {
           id <- Try(batch.toLong).toOption.filter(_ >= 0)
@@ -99,13 +112,9 @@ class CommitMarker(checkpointLocation: String, hadoopConf: Configuration) {
         } yield (user, id, before)
       case _ => None
     }
-    entry match {
-      case Some((user, batch, snapshot)) =>
-        if (user == commitUser && batch == batchId) Some(snapshot) else None
-      case None =>
-        throw new IllegalStateException(
-          s"Cannot read commit marker $path. It may belong to an already committed micro-batch; " +
-            "restore a valid marker or verify the table before deleting it and restarting.")
-    }
-  }
+
+  private def corrupt(): IllegalStateException =
+    new IllegalStateException(
+      s"Cannot read commit marker $path. It may belong to an already committed micro-batch; " +
+        "restore a valid marker or verify the table before deleting it and restarting.")
 }
