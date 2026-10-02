@@ -32,6 +32,7 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictException;
 import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictKind;
@@ -303,9 +304,8 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void dropDatabaseImpl(String name) {
-        // Delete the database directory in the warehouse like the file system catalog,
-        // otherwise a re-created same-name database cannot re-create its tables
-        fileIO.deleteDirectoryQuietly(newDatabasePath(name));
+        // Read the registered tables before their rows are deleted
+        List<String> tables = listTablesImpl(name);
         // Delete table from paimon_tables
         execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
         // Delete properties from paimon_database_properties
@@ -320,6 +320,33 @@ public class JdbcCatalog extends AbstractCatalog {
         }
         // Delete views from paimon_views.
         execute(connections, JdbcUtils.DELETE_VIEWS_SQL, catalogKey, name);
+        deleteDatabaseDirectories(name, tables);
+    }
+
+    /**
+     * Deletes the table directory {@link #dropTableImpl} deletes for each of the given registered
+     * tables, then the database directory if nothing is left in it. Files this catalog did not
+     * register under the database directory are kept.
+     */
+    private void deleteDatabaseDirectories(String database, List<String> tables) {
+        for (String table : tables) {
+            try {
+                fileIO.deleteDirectoryQuietly(getTableLocation(Identifier.create(database, table)));
+            } catch (Exception e) {
+                LOG.error("Failed to delete directory of table {}.{}", database, table, e);
+            }
+        }
+        try {
+            Path databasePath = newDatabasePath(database);
+            if (fileIO.exists(databasePath)) {
+                FileStatus[] children = fileIO.listStatus(databasePath);
+                if (children != null && children.length == 0) {
+                    fileIO.delete(databasePath, false);
+                }
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to delete directory of database {}", database, e);
+        }
     }
 
     @Override
@@ -539,24 +566,17 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private void createTableImplWithLock(Identifier identifier, Schema schema) {
-        boolean registered = false;
-        boolean schemaCreated = false;
         try {
             // create table file
             SchemaManager schemaManager = getSchemaManager(identifier);
             TableSchema tableSchema = schemaManager.createTable(schema);
-            // this call created the schema directory; a pre-existing one makes createTable throw
-            // above, so schemaCreated stays false for that case and its directory is left intact
-            schemaCreated = true;
             // Update schema metadata
             Path path = getTableLocation(identifier);
-            registered =
-                    JdbcUtils.insertTable(
-                            connections,
-                            catalogKey,
-                            identifier.getDatabaseName(),
-                            identifier.getTableName());
-            if (registered) {
+            if (JdbcUtils.insertTable(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName())) {
                 LOG.debug("Successfully committed to new table: {}", identifier);
             } else {
                 try {
@@ -578,13 +598,6 @@ public class JdbcCatalog extends AbstractCatalog {
                         collectTableProperties(tableSchema));
             }
         } catch (Exception e) {
-            // Clean up only a directory this call created but failed to register (the leaked-dir
-            // case the flag guards). A pre-existing on-disk table (schemaCreated == false, missing
-            // from the catalog and recoverable via repairTable) must survive a failed create, and
-            // once registered the table works even if a later step fails.
-            if (schemaCreated && !registered) {
-                fileIO.deleteDirectoryQuietly(getTableLocation(identifier));
-            }
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
     }

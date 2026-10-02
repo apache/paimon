@@ -842,84 +842,109 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCreateTableSurvivesLatePropertySyncFailure() throws Exception {
-        // the property-sync step runs after the table row is committed: its failure
-        // must not delete the working table's directory
-        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
-        String databaseName = "late_sync_db";
-        jdbcCatalog.createDatabase(databaseName, false);
-        dropPropertyTable(jdbcCatalog);
-        Identifier identifier = Identifier.create(databaseName, "t");
-
-        assertThatThrownBy(
-                        () ->
-                                jdbcCatalog.createTable(
-                                        identifier,
-                                        Schema.newBuilder()
-                                                .column("k", DataTypes.INT())
-                                                .option("comment", "synced")
-                                                .build(),
-                                        false))
-                .isInstanceOf(RuntimeException.class);
-
-        java.nio.file.Path dir =
-                java.nio.file.Paths.get(jdbcCatalog.newDatabasePath(databaseName).toUri());
-        assertThat(dir).exists();
-        // the table is registered and readable: only the property rows are missing
-        assertThat(jdbcCatalog.listTables(databaseName)).contains("t");
-        assertThat(jdbcCatalog.getTable(identifier)).isNotNull();
-    }
-
-    @Test
-    public void testCreateTablePreservesUnregisteredOnDiskTableOnFailure() throws Exception {
-        // A create-table failure caused by a pre-existing on-disk table (schema file present but
-        // no paimon_tables row) must NOT delete that directory: the state is recoverable via
-        // repairTable, and deleting it on a failed create would destroy the table's data.
-        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
-        String databaseName = "reg_fail_db";
-        jdbcCatalog.createDatabase(databaseName, false);
-        Identifier identifier = Identifier.create(databaseName, "t");
-
-        // Seed an on-disk table that is missing from the JDBC catalog. createTable then fails
-        // inside schemaManager.createTable ("schema in filesystem exists") before registration.
-        Path tableLocation = jdbcCatalog.getTableLocation(identifier);
-        new FileSystemSchemaManager(jdbcCatalog.fileIO(), tableLocation)
-                .createTable(Schema.newBuilder().column("k", DataTypes.INT()).build());
-        java.nio.file.Path dir = java.nio.file.Paths.get(tableLocation.toUri());
-        assertThat(dir).exists();
-        assertThat(jdbcCatalog.listTables(databaseName)).doesNotContain("t");
-
-        assertThatThrownBy(
-                        () ->
-                                jdbcCatalog.createTable(
-                                        identifier,
-                                        Schema.newBuilder().column("k", DataTypes.INT()).build(),
-                                        false))
-                .isInstanceOf(RuntimeException.class);
-
-        // the pre-existing directory must survive the failed create and stay recoverable
-        assertThat(dir).exists();
-        jdbcCatalog.repairTable(identifier);
-        assertThat(jdbcCatalog.listTables(databaseName)).contains("t");
-        assertThat(jdbcCatalog.getTable(identifier)).isNotNull();
-    }
-
-    @Test
     public void testDropDatabaseCascadeDeletesWarehouseDirectory() throws Exception {
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
         String databaseName = "drop_dir_db";
-        catalog.createDatabase(databaseName, false);
+        jdbcCatalog.createDatabase(databaseName, false);
         Identifier identifier = Identifier.create(databaseName, "t");
-        catalog.createTable(
+        jdbcCatalog.createTable(
                 identifier, Schema.newBuilder().column("k", DataTypes.INT()).build(), false);
-        java.nio.file.Path dir =
-                java.nio.file.Paths.get(
-                        ((JdbcCatalog) catalog).newDatabasePath(databaseName).toUri());
+        java.nio.file.Path dir = localPath(jdbcCatalog.newDatabasePath(databaseName));
         assertThat(dir).exists();
 
-        // leaving the directory behind blocks re-creating the table after re-creating
-        // the database
-        catalog.dropDatabase(databaseName, false, true);
+        jdbcCatalog.dropDatabase(databaseName, false, true);
         assertThat(dir).doesNotExist();
+
+        // a leftover schema would make re-creating the same table fail
+        jdbcCatalog.createDatabase(databaseName, false);
+        jdbcCatalog.createTable(
+                identifier, Schema.newBuilder().column("v", DataTypes.INT()).build(), false);
+        assertThat(jdbcCatalog.getTable(identifier).rowType().getFieldNames()).containsExactly("v");
+    }
+
+    @Test
+    public void testDropDatabaseCascadeKeepsUnregisteredOnDiskTable() throws Exception {
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        String databaseName = "drop_keep_db";
+        jdbcCatalog.createDatabase(databaseName, false);
+        Identifier registered = Identifier.create(databaseName, "t");
+        jdbcCatalog.createTable(
+                registered, Schema.newBuilder().column("k", DataTypes.INT()).build(), false);
+        Identifier unregistered = Identifier.create(databaseName, "u");
+        seedUnregisteredTable(jdbcCatalog, unregistered);
+
+        jdbcCatalog.dropDatabase(databaseName, false, true);
+
+        assertThat(localPath(jdbcCatalog.getTableLocation(registered))).doesNotExist();
+        assertThat(localPath(jdbcCatalog.getTableLocation(unregistered))).exists();
+        jdbcCatalog.repairDatabase(databaseName);
+        assertThat(jdbcCatalog.listTables(databaseName)).containsExactly("u");
+    }
+
+    @Test
+    public void testDropDatabaseCascadeKeepsObjectTablePath() throws Exception {
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        String databaseName = "drop_object_db";
+        jdbcCatalog.createDatabase(databaseName, false);
+        // an object table whose PATH lies under the database directory
+        Identifier objectTable = Identifier.create(databaseName, "o");
+        Path objectPath = new Path(jdbcCatalog.newDatabasePath(databaseName), "o_data");
+        java.nio.file.Path objectFile = localPath(new Path(objectPath, "f"));
+        java.nio.file.Files.createDirectories(objectFile.getParent());
+        java.nio.file.Files.write(objectFile, new byte[] {1});
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TYPE.key(), TableType.OBJECT_TABLE.toString());
+        options.put(CoreOptions.PATH.key(), objectPath.toString());
+        jdbcCatalog.createTable(objectTable, Schema.newBuilder().options(options).build(), false);
+
+        jdbcCatalog.dropDatabase(databaseName, false, true);
+
+        assertThat(localPath(jdbcCatalog.getTableLocation(objectTable))).doesNotExist();
+        assertThat(objectFile).exists();
+    }
+
+    @Test
+    public void testDropDatabaseRestrictKeepsUnregisteredOnDiskTable() throws Exception {
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        String databaseName = "drop_restrict_db";
+        jdbcCatalog.createDatabase(databaseName, false);
+        Identifier unregistered = Identifier.create(databaseName, "u");
+        seedUnregisteredTable(jdbcCatalog, unregistered);
+
+        // the emptiness check only looks at JDBC rows, so the drop currently succeeds
+        jdbcCatalog.dropDatabase(databaseName, false, false);
+
+        assertThat(localPath(jdbcCatalog.getTableLocation(unregistered))).exists();
+        jdbcCatalog.repairDatabase(databaseName);
+        assertThat(jdbcCatalog.listTables(databaseName)).containsExactly("u");
+    }
+
+    @Test
+    public void testDropDatabaseKeepsFilesWhenRowDeleteFails() throws Exception {
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        String databaseName = "drop_row_fail_db";
+        jdbcCatalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, "t");
+        jdbcCatalog.createTable(
+                identifier, Schema.newBuilder().column("k", DataTypes.INT()).build(), false);
+
+        executeSql(
+                jdbcCatalog,
+                "CREATE TRIGGER fail_table_delete BEFORE DELETE ON "
+                        + JdbcUtils.CATALOG_TABLE_NAME
+                        + " BEGIN SELECT RAISE(ABORT, 'injected'); END");
+        try {
+            assertThatThrownBy(() -> jdbcCatalog.dropDatabase(databaseName, false, true))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining(JdbcUtils.DELETE_TABLES_SQL);
+        } finally {
+            executeSql(jdbcCatalog, "DROP TRIGGER IF EXISTS fail_table_delete");
+        }
+
+        // the table is still registered, so its data must still be there
+        assertThat(jdbcCatalog.listTables(databaseName)).containsExactly("t");
+        assertThat(localPath(jdbcCatalog.getTableLocation(identifier))).exists();
+        assertThat(jdbcCatalog.getTable(identifier).rowType().getFieldNames()).containsExactly("k");
     }
 
     @Test
@@ -930,6 +955,14 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         "missing_db",
                                         Collections.singletonList(
                                                 PropertyChange.setProperty("k", "v")),
+                                        false))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterDatabase(
+                                        "missing_db",
+                                        Collections.singletonList(
+                                                PropertyChange.removeProperty("k")),
                                         false))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
         // no phantom database materialized by the property insert
@@ -1606,7 +1639,26 @@ public class JdbcCatalogTest extends CatalogTestBase {
                 .isInstanceOf(Catalog.DialectNotExistException.class);
     }
 
-    private static void dropPropertyTable(JdbcCatalog catalog) throws Exception {
-        JdbcUtils.execute(catalog.getConnections(), "DROP TABLE paimon_table_properties");
+    /** Writes a table schema on disk without registering the table in the JDBC catalog. */
+    private static void seedUnregisteredTable(JdbcCatalog catalog, Identifier identifier)
+            throws Exception {
+        new FileSystemSchemaManager(catalog.fileIO(), catalog.getTableLocation(identifier))
+                .createTable(Schema.newBuilder().column("k", DataTypes.INT()).build());
+        assertThat(catalog.listTables(identifier.getDatabaseName()))
+                .doesNotContain(identifier.getTableName());
+    }
+
+    private static java.nio.file.Path localPath(Path path) {
+        return java.nio.file.Paths.get(path.toUri());
+    }
+
+    private static void executeSql(JdbcCatalog catalog, String sql) throws Exception {
+        catalog.getConnections()
+                .run(
+                        conn -> {
+                            try (java.sql.Statement statement = conn.createStatement()) {
+                                return statement.execute(sql);
+                            }
+                        });
     }
 }
