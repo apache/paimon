@@ -152,17 +152,17 @@ public class GlobalFullCompactionSinkWriteTest {
                 createPartitionedTable(new LocalFileIO(), CoreOptions.ChangelogProducer.LOOKUP);
         String initialUser = UUID.randomUUID().toString();
         CommitMessage activeBucket;
-        try (TableWriteImpl<?> initialWrite = table.newWrite(initialUser);
-                TableCommitImpl commit = table.newCommit(initialUser)) {
-            initialWrite.writeAndReturn(
-                    GenericRow.of(1, 1, 10L), PartitionBucketMapping.loadFromTable(table));
-            List<CommitMessage> messages = initialWrite.prepareCommit(false, 0);
-            activeBucket = messages.get(0);
-            commit.commit(0, messages);
-        }
-
         IOManager ioManager = new IOManagerAsync();
         try {
+            try (TableWriteImpl<?> initialWrite = table.newWrite(initialUser).withIOManager(ioManager);
+                    TableCommitImpl commit = table.newCommit(initialUser)) {
+                initialWrite.writeAndReturn(
+                        GenericRow.of(1, 1, 10L), PartitionBucketMapping.loadFromTable(table));
+                List<CommitMessage> messages = initialWrite.prepareCommit(false, 0);
+                activeBucket = messages.get(0);
+                commit.commit(0, messages);
+            }
+
             LookupSinkWrite write =
                     new LookupSinkWrite(
                             table,
