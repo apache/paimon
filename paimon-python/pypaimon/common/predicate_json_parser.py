@@ -43,6 +43,20 @@ _TRIM_OPS = {
     "TRAILING": (pc.utf8_rtrim, str.rstrip),
 }
 
+# Calendar-field extractions on a DATE / TIMESTAMP field, mirroring Java's
+# DateExtractTransform subclasses (name -> the Arrow kernel over a timestamp).
+# QUARTER matches (month - 1) / 3 + 1; the rest map one to one.
+_DATE_EXTRACT = {
+    "YEAR": pc.year,
+    "MONTH": pc.month,
+    "DAY": pc.day,
+    "HOUR": pc.hour,
+    "MINUTE": pc.minute,
+    "SECOND": pc.second,
+    "QUARTER": pc.quarter,
+    "DAY_OF_YEAR": pc.day_of_year,
+}
+
 
 def parse_predicate_to_batch_filter(json_str: str) -> Callable[[pa.RecordBatch], pa.Array]:
     data = json.loads(json_str)
@@ -135,7 +149,23 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     elif name == "NULL":
         return pa.nulls(len(batch), type=null_type)
 
+    elif name in _DATE_EXTRACT:
+        return _date_extract(name, transform["fieldRef"], batch)
+
     raise ValueError(f"Unknown transform type: {name}")
+
+
+def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array:
+    """Extract a calendar field from a DATE / TIMESTAMP column, as INT.
+
+    A DATE is read at the start of its day (Java's LocalDate.atStartOfDay),
+    so it is cast to a timestamp first and HOUR/MINUTE/SECOND come out as 0.
+    Nulls propagate. Mirrors Java DateExtractTransform.
+    """
+    column = _field_column(field_ref, batch)
+    if pa.types.is_date(column.type):
+        column = pc.cast(column, pa.timestamp("us"))
+    return pc.cast(_DATE_EXTRACT[name](column), pa.int32())
 
 
 def _substring(inputs, batch: pa.RecordBatch) -> pa.Array:

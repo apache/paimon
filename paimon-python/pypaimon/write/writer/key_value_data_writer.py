@@ -17,6 +17,7 @@
 
 from typing import List, Union
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -157,7 +158,7 @@ class KeyValueDataWriter(DataWriter):
         """Fold same-PK runs in ``data`` using ``self._merge_function``.
 
         ``data`` is required to already be sorted by
-        ``(primary_key, _SEQUENCE_NUMBER)``. ``_flush_all`` is the
+        ``(primary_key, sequence.field, _SEQUENCE_NUMBER)``. ``_flush_all`` is the
         only caller and runs ``_sort_by_primary_key`` immediately
         before this method, so the precondition holds.
 
@@ -285,12 +286,42 @@ class KeyValueDataWriter(DataWriter):
         # pc.sort_indices + .take work uniformly over RecordBatch and
         # Table, so this serves both the per-batch entry path (legacy)
         # and the buffer-wide sort path (used by ``_flush_all``).
-        sort_keys = [(key, 'ascending') for key in self.trimmed_primary_keys]
+        sort_columns = [data.column(key) for key in self.trimmed_primary_keys]
+        sort_orders = ['ascending'] * len(sort_columns)
+        sequence_fields = self.options.sequence_field()
+        if sequence_fields:
+            sequence_order = ('ascending' if self.options.sequence_field_sort_order_is_ascending()
+                              else 'descending')
+            for field in sequence_fields:
+                column = data.column(field)
+                if pa.types.is_floating(column.type):
+                    column = self._floating_sequence_sort_key(column)
+                sort_columns.append(column)
+                sort_orders.append(sequence_order)
         if '_SEQUENCE_NUMBER' in data.schema.names:
-            sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
+            sort_columns.append(data.column('_SEQUENCE_NUMBER'))
+            sort_orders.append('ascending')
 
+        # Sort a separate key table so temporary keys cannot collide with user
+        # column names or change the stored values (including signed zero).
+        names = [str(i) for i in range(len(sort_columns))]
         # Java MergeTree comparators order null keys first. Keep Python-written files in the same
         # order so their key ranges and sorted-run invariants are interoperable with Java readers.
         sorted_indices = pc.sort_indices(
-            data, sort_keys=sort_keys, null_placement='at_start')
+            pa.table(sort_columns, names=names),
+            sort_keys=list(zip(names, sort_orders)), null_placement='at_start')
         return data.take(sorted_indices)
+
+    @staticmethod
+    def _floating_sequence_sort_key(column):
+        """Unsigned keys in Java Float/Double.compare order, preserving nulls."""
+        # The NumPy protocol supports Array and older ChunkedArray APIs alike.
+        values = np.asarray(column)
+        bits = values.view(np.dtype('uint{}'.format(column.type.bit_width)))
+        sign_bit = np.array(1 << (column.type.bit_width - 1), dtype=bits.dtype)
+        # Invert negative IEEE bits, flip the sign bit for nonnegative values.
+        # This orders -0.0 before +0.0, unlike Arrow's floating-point sort.
+        keys = np.where(bits & sign_bit, ~bits, bits ^ sign_bit)
+        # All NaN signs/payloads compare equal, above positive infinity.
+        keys[np.isnan(values)] = np.iinfo(bits.dtype).max
+        return pa.array(keys, mask=np.asarray(column.is_null()))

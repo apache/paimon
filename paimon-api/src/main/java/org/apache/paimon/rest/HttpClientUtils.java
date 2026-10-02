@@ -18,9 +18,12 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.interceptor.TimingInterceptor;
+import org.apache.paimon.utils.BuildVersions;
 import org.apache.paimon.utils.SensitiveConfigUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
@@ -55,6 +58,10 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.options.CatalogOptions.USER_AGENT_EXTENDED;
+import static org.apache.paimon.options.CatalogOptions.USER_AGENT_FEATURES;
+import static org.apache.paimon.options.CatalogOptions.USER_AGENT_MODULE;
+
 /** Utils for {@link HttpClientBuilder}. */
 public class HttpClientUtils {
 
@@ -80,10 +87,38 @@ public class HttpClientUtils {
     public static HttpClientBuilder createBuilder() {
         HttpClientBuilder clientBuilder = HttpClients.custom();
         clientBuilder.setDefaultRequestConfig(DEFAULT_REQUEST_CONFIG);
+        // A request's own User-Agent header, e.g. from header.User-Agent, still wins.
+        clientBuilder.setUserAgent(userAgent(new Options()));
 
         clientBuilder.setConnectionManager(configureConnectionManager());
         clientBuilder.setRetryStrategy(new ExponentialHttpRequestRetryStrategy(5));
         return clientBuilder;
+    }
+
+    /**
+     * Paimon's unified User-Agent, {@code module(Apache-HttpClient/<version>;features) extended}.
+     */
+    public static String userAgent(Options options) {
+        String module = options.get(USER_AGENT_MODULE);
+        StringBuilder builder =
+                new StringBuilder(
+                                StringUtils.isNullOrWhitespaceOnly(module)
+                                        ? "Paimon/" + BuildVersions.PAIMON
+                                        : module.trim())
+                        .append("(Apache-HttpClient/")
+                        .append(BuildVersions.HTTP_CLIENT);
+        String features = options.get(USER_AGENT_FEATURES);
+        if (!StringUtils.isNullOrWhitespaceOnly(features)) {
+            for (String feature : features.trim().split("\\s+")) {
+                builder.append(';').append(feature);
+            }
+        }
+        builder.append(')');
+        String extended = options.get(USER_AGENT_EXTENDED);
+        if (!StringUtils.isNullOrWhitespaceOnly(extended)) {
+            builder.append(' ').append(extended.trim());
+        }
+        return builder.toString();
     }
 
     private static HttpClientConnectionManager configureConnectionManager() {

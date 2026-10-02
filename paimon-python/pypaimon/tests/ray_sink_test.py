@@ -21,6 +21,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
+import pytest
 from ray.data._internal.execution.interfaces import TaskContext
 
 from pypaimon import CatalogFactory, Schema
@@ -361,6 +362,7 @@ class RaySinkTest(unittest.TestCase):
         self.assertEqual({0, 1}, {message.bucket for message in messages})
         self.assertEqual({2}, {message.total_buckets for message in messages})
 
+    @pytest.mark.python_write
     def test_write_does_not_return_prepared_messages_when_dedicated_close_aborts(self):
         from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 

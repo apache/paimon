@@ -161,6 +161,104 @@ class MultimodalTableTest(unittest.TestCase):
         _, bodies = table.scan().read_blobs("video", parallelism=2)
         self.assertEqual([video_bytes] * 3, bodies["video"])
 
+    def test_add_images_as_video_encodes_and_stores_frame_rows(self):
+        table = self.conn.create_table(
+            "image_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        calls = []
+
+        def encode(images, output_path, **options):
+            images = list(images)
+            calls.append((images, options))
+            with open(output_path, "wb") as output:
+                output.write(b"encoded-video")
+            return len(images)
+
+        with patch(
+                "pypaimon.multimodal.video._encode_images_to_video",
+                encode):
+            table.add_images_as_video(
+                [b"frame-0", b"frame-1"],
+                [{"episode_id": 42}, {"episode_id": 42}],
+                fps=30,
+                codec="mpeg4",
+                pixel_format="yuv420p",
+                gop_size=2,
+                codec_options={"qscale": "3"},
+            )
+
+        self.assertEqual(
+            [
+                (
+                    [b"frame-0", b"frame-1"],
+                    {
+                        "fps": 30,
+                        "codec": "mpeg4",
+                        "pixel_format": "yuv420p",
+                        "gop_size": 2,
+                        "codec_options": {"qscale": "3"},
+                    },
+                )
+            ],
+            calls,
+        )
+        rows = table.scan().select(["episode_id", "video"]).to_list()
+        descriptors = [
+            pmm.VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([0, 1], [value.frame_index for value in descriptors])
+        _, bodies = table.scan().read_blobs("video")
+        self.assertEqual([b"encoded-video"] * 2, bodies["video"])
+
+    def test_add_images_as_video_rejects_frame_count_mismatch(self):
+        table = self.conn.create_table(
+            "mismatched_image_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        output_paths = []
+
+        def encode(unused_images, output_path, **unused_options):
+            output_paths.append(output_path)
+            with open(output_path, "wb") as output:
+                output.write(b"one-frame-video")
+            return 1
+
+        with patch(
+                "pypaimon.multimodal.video._encode_images_to_video",
+                encode):
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Image count 1 does not match frame row count 2"):
+                table.add_images_as_video(
+                    [b"frame-0"],
+                    [{"episode_id": 42}, {"episode_id": 42}],
+                    fps=30,
+                    codec="mpeg4",
+                    pixel_format="yuv420p",
+                    gop_size=2,
+                )
+
+        self.assertFalse(os.path.exists(output_paths[0]))
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
     def test_add_videos_packs_multiple_videos_in_one_commit(self):
         from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 

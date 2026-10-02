@@ -39,12 +39,14 @@ class CatalogEnvironment:
             identifier: Optional[Identifier] = None,
             uuid: Optional[str] = None,
             catalog_loader: Optional[CatalogLoader] = None,
-            supports_version_management: bool = False
+            supports_version_management: bool = False,
+            rest_table_response: Optional[str] = None
     ):
         self.identifier = identifier
         self.uuid = uuid
         self.catalog_loader = catalog_loader
         self.supports_version_management = supports_version_management
+        self.rest_table_response = rest_table_response
 
     def snapshot_commit(self, snapshot_manager) -> Optional[SnapshotCommit]:
         """
@@ -142,7 +144,8 @@ class CatalogEnvironment:
             identifier=identifier,
             uuid=self.uuid,
             catalog_loader=self.catalog_loader,
-            supports_version_management=self.supports_version_management
+            supports_version_management=self.supports_version_management,
+            rest_table_response=getattr(self, 'rest_table_response', None)
         )
 
     @staticmethod

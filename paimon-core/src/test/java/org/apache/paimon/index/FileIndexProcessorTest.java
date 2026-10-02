@@ -250,4 +250,71 @@ public class FileIndexProcessorTest {
             }
         }
     }
+
+    @Test
+    public void testProcessAfterDroppingColumnBeforeIndexedColumn() throws Exception {
+        // The file is written at schema 0 [k, a, v] with a bloom filter on v. Dropping "a"
+        // shrinks the current schema to [k, v] while the file keeps v at file position 2; the
+        // rewrite must still build the index for v (a file-schema position past the current
+        // arity must not throw or index the wrong column).
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put(CoreOptions.FILE_INDEX + ".bloom-filter.columns", "v");
+        options.put(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "0 B");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()},
+                        new String[] {"k", "a", "v"});
+        Identifier identifier = Identifier.create("mydb", "t");
+        FileStoreTable table;
+        try (FileSystemCatalog catalog = new FileSystemCatalog(fileIO, warehouse)) {
+            catalog.createDatabase("mydb", false);
+            catalog.createTable(
+                    identifier,
+                    new Schema(
+                            rowType.getFields(),
+                            Collections.emptyList(),
+                            Collections.singletonList("k"),
+                            options,
+                            ""),
+                    false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+        }
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, BinaryString.fromString("x"), 10));
+            write.write(GenericRow.of(2, BinaryString.fromString("y"), 20));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        table.schemaManager().commitChanges(SchemaChange.dropColumn("a"));
+        table = table.copyWithLatestSchema();
+
+        List<ManifestEntry> entries = table.store().newScan().plan().files();
+        assertThat(entries).isNotEmpty();
+        ManifestEntry entry = entries.get(0);
+        assertThat(entry.file().schemaId()).isEqualTo(0L);
+
+        FileIndexProcessor processor = new FileIndexProcessor(table);
+        DataFileMeta processed = processor.process(entry.partition(), entry.bucket(), entry);
+
+        String indexFile =
+                processed.extraFiles().stream()
+                        .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError("no file index was written"));
+        Path indexPath =
+                new Path(
+                        table.store().pathFactory().bucketPath(entry.partition(), entry.bucket()),
+                        indexFile);
+        try (FileIndexFormat.Reader reader =
+                FileIndexFormat.createReader(fileIO.newInputStream(indexPath), rowType)) {
+            assertThat(reader.readAll().keySet()).containsExactly("v");
+        }
+    }
 }

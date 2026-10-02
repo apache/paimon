@@ -580,6 +580,73 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonFloatingSequence() throws Exception {
+        for (String type : Arrays.asList("float", "double")) {
+            for (String order : Arrays.asList("ascending", "descending")) {
+                for (String grouping : Arrays.asList("batch", "commits")) {
+                    FileStoreTable table =
+                            (FileStoreTable)
+                                    catalog.getTable(
+                                            identifier(
+                                                    "floating_sequence_"
+                                                            + type
+                                                            + "_"
+                                                            + order
+                                                            + "_"
+                                                            + grouping));
+                    List<String> result =
+                            getResult(
+                                    table.newRead(),
+                                    table.newScan().plan().splits(),
+                                    row -> {
+                                        String sequence =
+                                                row.isNullAt(1)
+                                                        ? "null"
+                                                        : "float".equals(type)
+                                                                ? Float.toString(row.getFloat(1))
+                                                                : Double.toString(row.getDouble(1));
+                                        return row.getInt(0)
+                                                + ":"
+                                                + row.getString(2)
+                                                + ":"
+                                                + sequence;
+                                    });
+                    List<String> expected =
+                            new ArrayList<>(
+                                    Arrays.asList(
+                                            "5:nan:NaN",
+                                            "6:nan:NaN",
+                                            "8:nan-last:NaN",
+                                            "10:null-last:null"));
+                    if ("ascending".equals(order)) {
+                        expected.addAll(
+                                Arrays.asList(
+                                        "1:nan:NaN",
+                                        "2:nan:NaN",
+                                        "3:positive-zero:0.0",
+                                        "4:positive-zero:0.0",
+                                        "7:nan:NaN",
+                                        "9:finite:1.0"));
+                    } else {
+                        expected.addAll(
+                                Arrays.asList(
+                                        "1:finite:1.0",
+                                        "2:finite:1.0",
+                                        "3:negative-zero:-0.0",
+                                        "4:negative-zero:-0.0",
+                                        "7:infinity:Infinity",
+                                        "9:negative-infinity:-Infinity"));
+                    }
+                    assertThat(result)
+                            .as("%s sequence, %s, Python %s", type, order, grouping)
+                            .containsExactlyInAnyOrderElementsOf(expected);
+                }
+            }
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testReadPythonDynamicBucketHashIndex() throws Exception {
         Identifier identifier = identifier("dynamic_hash_python_to_java");
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
