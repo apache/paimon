@@ -39,23 +39,15 @@ public interface GlobalIndexer {
      * Creates a reader whose relative row IDs cover {@code [0, totalRowCount)}.
      *
      * <p>The complete row count lets an index implementation answer negative predicates by
-     * complement, including for an empty shard.
+     * complement, including for an empty shard. Local row ranges are optional pruning hints;
+     * callers must still clip the returned candidates.
      */
     GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
-            ExecutorService executor);
-
-    /** Optional local row ranges for pruning; callers must still clip the returned candidates. */
-    default GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> files,
-            long totalRowCount,
             @Nullable List<Range> rowRanges,
-            ExecutorService executor) {
-        return createReader(fileReader, files, totalRowCount, executor);
-    }
+            ExecutorService executor);
 
     static GlobalIndexer create(String type, DataField indexField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);

@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.schema.TableSchema;
@@ -56,7 +57,8 @@ class DataEvolutionTableReadTest {
                         schema,
                         new CoreOptions(options),
                         CatalogContext.create(new Options()),
-                        () -> prescanRead);
+                        () -> prescanRead,
+                        mock(FileIO.class));
         ReadBatchSizer sizer = new ReadBatchSizer();
         read.withReadBatchSizer(sizer);
 

@@ -31,7 +31,8 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * Metadata-only planning for lazy index scans, matching sorted index reader support and budgets.
+ * Metadata-only planning for deferred index queries, matching sorted index reader support and
+ * budgets.
  *
  * <p>An absent result means the predicate is unsupported; a present empty list means no files can
  * match. Keeping this distinction before distribution preserves AND/OR semantics across splits.

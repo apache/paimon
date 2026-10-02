@@ -136,6 +136,7 @@ class NativePrimaryKeyFullTextIndexTest {
                                         fileReader(),
                                         Collections.singletonList(toIOMeta(payload)),
                                         totalRowCount,
+                                        null,
                                         newDirectExecutorService()));
 
         List<List<PrimaryKeySearchPosition>> rankings =

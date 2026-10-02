@@ -30,6 +30,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -80,6 +81,7 @@ public class BitmapGlobalIndexer implements SortedGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            @Nullable List<Range> rowRanges,
             ExecutorService executor) {
         return new LazyFilteredBitmapReader(
                 fileReader, files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);

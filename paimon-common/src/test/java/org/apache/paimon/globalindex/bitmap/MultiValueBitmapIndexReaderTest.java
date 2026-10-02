@@ -117,6 +117,7 @@ class MultiValueBitmapIndexReaderTest {
                         fileReader,
                         Collections.singletonList(meta),
                         5,
+                        null,
                         newDirectExecutorService())) {
             assertRows(reader.visitArrayContains(fieldRef, str("A")).join(), 0L);
             assertRows(reader.visitArrayContains(fieldRef, str("B")).join(), 0L, 3L);
@@ -171,6 +172,7 @@ class MultiValueBitmapIndexReaderTest {
                         fileReader,
                         Collections.singletonList(meta),
                         3,
+                        null,
                         newDirectExecutorService())) {
             assertRows(reader.visitArrayContains(fieldRef, str("A")).join());
         }
@@ -197,6 +199,7 @@ class MultiValueBitmapIndexReaderTest {
                         fileReader,
                         Collections.singletonList(meta),
                         2,
+                        null,
                         newDirectExecutorService())) {
             assertRows(reader.visitArrayContains(intFieldRef, -1).join(), 0L);
             assertRows(reader.visitArrayContains(intFieldRef, 0).join(), 0L);

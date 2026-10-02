@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import platform
 import unittest
 from unittest.mock import patch
 
@@ -24,219 +23,87 @@ import requests
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.typedef import RESTAuthParameter
-from pypaimon.common.options.config import CatalogOptions, OssOptions
-from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
+from pypaimon.common.options.config import CatalogOptions
 
 
 class UserAgentTest(unittest.TestCase):
 
-    @staticmethod
-    def prepared_user_agent(rest_api):
-        headers = rest_api.rest_auth_function.apply(
-            RESTAuthParameter("GET", "/v1/config", ""))
+    def create_api(self, client=None, defaults=None, overrides=None):
+        options = {
+            CatalogOptions.URI.key(): "http://catalog",
+            CatalogOptions.WAREHOUSE.key(): "warehouse",
+            CatalogOptions.TOKEN_PROVIDER.key(): "bear",
+            CatalogOptions.TOKEN.key(): "token",
+        }
+        options.update(client or {})
+        with patch("pypaimon.api.client.HttpClient.get_with_params",
+                   return_value=ConfigResponse(defaults=defaults or {}, overrides=overrides)), patch(
+                       "pypaimon.common.user_agent.identity", return_value="pypaimon/2.3.0"):
+            return RESTApi(options)
+
+    def prepared_user_agent(self, api):
+        headers = api.rest_auth_function.apply(RESTAuthParameter("GET", "/v1/config", ""))
         request = requests.Request("GET", "http://catalog/v1/config", headers=headers)
-        return requests.Session().prepare_request(request).headers["User-Agent"]
+        return api.client.session.prepare_request(request).headers["User-Agent"]
 
-    def test_rest_api_uses_sdk_and_python_versions_in_default_user_agent(self):
-        with patch(
-                "pypaimon.api.rest_api.build_info.full_version",
-                return_value="python-2.3.0-deadbeef"), patch(
-                    "pypaimon.api.rest_api.platform.python_version",
-                    return_value="3.11.9"):
-            rest_api = RESTApi(
-                {
-                    CatalogOptions.URI.key(): "http://catalog",
-                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                    CatalogOptions.TOKEN.key(): "token",
-                },
-                config_required=False,
-            )
+    def test_lowercase_client_wins_over_server_default(self):
+        api = self.create_api({"header.user-agent": "client/1"},
+                              {"header.User-Agent": "default/1"})
+        self.assertEqual("client/1", self.prepared_user_agent(api))
 
-        self.assertEqual(
-            "PyPaimon/2.3.0 Python/3.11.9",
-            rest_api.rest_auth_function.init_header["User-Agent"],
-        )
+    def test_mixed_case_client_wins_over_server_default(self):
+        api = self.create_api({"header.USER-AGENT": "client/1"},
+                              {"header.User-Agent": "default/1"})
+        self.assertEqual("client/1", self.prepared_user_agent(api))
 
-    def test_rest_api_uses_unknown_version_when_version_lookup_fails(self):
-        with patch(
-                "pypaimon.api.rest_api.build_info.full_version",
-                side_effect=RuntimeError("unavailable")), patch(
-                    "pypaimon.api.rest_api.platform.python_version",
-                    return_value="3.11.9"):
-            rest_api = RESTApi(
-                {
-                    CatalogOptions.URI.key(): "http://catalog",
-                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                    CatalogOptions.TOKEN.key(): "token",
-                },
-                config_required=False,
-            )
+    def test_lowercase_override_wins_over_client_and_default(self):
+        api = self.create_api({"header.User-Agent": "client/1"},
+                              {"header.USER-AGENT": "default/1"},
+                              {"header.user-agent": "override/1"})
+        self.assertEqual("override/1", self.prepared_user_agent(api))
 
-        self.assertEqual(
-            "PyPaimon/unknown Python/3.11.9",
-            rest_api.rest_auth_function.init_header["User-Agent"],
-        )
+    def test_uppercase_override_wins_over_lowercase_client(self):
+        api = self.create_api({"header.user-agent": "client/1"},
+                              {"header.User-Agent": "default/1"},
+                              {"header.USER-AGENT": "override/1"})
+        self.assertEqual("override/1", self.prepared_user_agent(api))
 
-    def test_rest_api_uses_unknown_version_when_version_info_is_invalid(self):
-        with patch(
-                "pypaimon.api.rest_api.build_info.full_version",
-                return_value="UNKNOWN"), patch(
-                    "pypaimon.api.rest_api.platform.python_version",
-                    return_value="3.11.9"):
-            rest_api = RESTApi(
-                {
-                    CatalogOptions.URI.key(): "http://catalog",
-                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                    CatalogOptions.TOKEN.key(): "token",
-                },
-                config_required=False,
-            )
+    def test_uppercase_override_wins_over_default_using_same_key_as_client(self):
+        api = self.create_api({"header.user-agent": "client/1"},
+                              {"header.user-agent": "default/1"},
+                              {"header.User-Agent": "override/1"})
+        self.assertEqual("override/1", self.prepared_user_agent(api))
 
-        self.assertEqual(
-            "PyPaimon/unknown Python/3.11.9",
-            rest_api.rest_auth_function.init_header["User-Agent"],
-        )
+    def test_config_request_preserves_lowercase_client_user_agent(self):
+        with patch("pypaimon.api.client.HttpClient.get_with_params",
+                   return_value=ConfigResponse(defaults={}, overrides=None)) as config:
+            api = RESTApi({"uri": "http://catalog", "warehouse": "warehouse",
+                           "token.provider": "bear", "token": "token",
+                           "header.user-agent": "client/1"})
+        headers = config.call_args[0][3].apply(RESTAuthParameter("GET", "/v1/config", ""))
+        prepared = api.client.session.prepare_request(
+            requests.Request("GET", "http://catalog/v1/config", headers=headers))
+        self.assertEqual("client/1", prepared.headers["User-Agent"])
 
-    def test_rest_api_preserves_configured_user_agent(self):
-        rest_api = RESTApi(
-            {
-                CatalogOptions.URI.key(): "http://catalog",
-                CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                CatalogOptions.TOKEN.key(): "token",
-                "header.User-Agent": "custom-client/1.0",
-            },
-            config_required=False,
-        )
+    def test_server_default_used_without_client(self):
+        api = self.create_api(defaults={"header.user-agent": "default/1"})
+        self.assertEqual("default/1", self.prepared_user_agent(api))
 
-        self.assertEqual(
-            "custom-client/1.0",
-            rest_api.rest_auth_function.init_header["User-Agent"],
-        )
+    def test_missing_custom_user_agent_keeps_upstream_unified_format(self):
+        api = self.create_api()
+        expected = "pypaimon/2.3.0(python-requests/{})".format(requests.__version__)
+        self.assertEqual(expected, self.prepared_user_agent(api))
 
-    def test_rest_api_preserves_lowercase_configured_user_agent_on_wire(self):
-        rest_api = RESTApi(
-            {
-                CatalogOptions.URI.key(): "http://catalog",
-                CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                CatalogOptions.TOKEN.key(): "token",
-                "header.user-agent": "custom-client/1.0",
-            },
-            config_required=False,
-        )
+    def test_response_updates_unified_user_agent_options(self):
+        api = self.create_api(overrides={"user-agent.module": "MyApp/1.0",
+                                         "user-agent.features": "Flink"})
+        expected = "MyApp/1.0(python-requests/{};Flink)".format(requests.__version__)
+        self.assertEqual(expected, self.prepared_user_agent(api))
 
-        self.assertEqual("custom-client/1.0", self.prepared_user_agent(rest_api))
-
-    def test_rest_config_merge_preserves_lowercase_client_user_agent(self):
-        with patch("pypaimon.api.rest_api.HttpClient") as http_client_class:
-            http_client_class.return_value.get_with_params.return_value = ConfigResponse(
-                defaults={"header.User-Agent": "server-default/1.0"},
-                overrides=None,
-            )
-            rest_api = RESTApi(
-                {
-                    CatalogOptions.URI.key(): "http://catalog",
-                    CatalogOptions.WAREHOUSE.key(): "warehouse",
-                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                    CatalogOptions.TOKEN.key(): "token",
-                    "header.user-agent": "custom-client/1.0",
-                },
-            )
-
-        self.assertEqual("custom-client/1.0", self.prepared_user_agent(rest_api))
-
-    def test_rest_config_override_wins_over_lowercase_client_user_agent(self):
-        with patch("pypaimon.api.rest_api.HttpClient") as http_client_class:
-            http_client_class.return_value.get_with_params.return_value = ConfigResponse(
-                defaults={},
-                overrides={"header.USER-AGENT": "required-client/2.0"},
-            )
-            rest_api = RESTApi(
-                {
-                    CatalogOptions.URI.key(): "http://catalog",
-                    CatalogOptions.WAREHOUSE.key(): "warehouse",
-                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                    CatalogOptions.TOKEN.key(): "token",
-                    "header.user-agent": "custom-client/1.0",
-                },
-            )
-
-        self.assertEqual("required-client/2.0", self.prepared_user_agent(rest_api))
-
-    def test_rest_config_request_uses_default_user_agent(self):
-        with patch("pypaimon.api.rest_api.HttpClient") as http_client_class, patch(
-                "pypaimon.api.rest_api.build_info.full_version",
-                return_value="python-2.3.0-deadbeef"), patch(
-                    "pypaimon.api.rest_api.platform.python_version",
-                    return_value="3.11.9"):
-            http_client = http_client_class.return_value
-            http_client.get_with_params.return_value = ConfigResponse(
-                defaults={}, overrides=None)
-            RESTApi(
-                {
-                    CatalogOptions.URI.key(): "http://catalog",
-                    CatalogOptions.WAREHOUSE.key(): "warehouse",
-                    CatalogOptions.TOKEN_PROVIDER.key(): "bear",
-                    CatalogOptions.TOKEN.key(): "token",
-                },
-            )
-
-        config_auth_function = http_client.get_with_params.call_args[0][3]
-        config_headers = config_auth_function.apply(
-            RESTAuthParameter("GET", "/v1/config", ""))
-        self.assertEqual(
-            "PyPaimon/2.3.0 Python/3.11.9",
-            config_headers["User-Agent"],
-        )
-
-    def test_pvfs_adds_default_user_agent(self):
-        pvfs = PaimonVirtualFileSystem(
-            {OssOptions.OSS_ACCESS_KEY_ID.key(): "ak"},
-            skip_instance_cache=True,
-        )
-
-        self.assertIn("header.User-Agent", pvfs.options.to_map())
-
-    def test_pvfs_includes_sdk_and_python_versions_in_default_user_agent(self):
-        with patch(
-                "pypaimon.filesystem.pvfs.build_info.full_version",
-                return_value="python-2.3.0-deadbeef"):
-            pvfs = PaimonVirtualFileSystem(
-                {OssOptions.OSS_ACCESS_KEY_ID.key(): "ak"},
-                skip_instance_cache=True,
-            )
-
-        self.assertEqual(
-            "PythonPVFS PyPaimon/2.3.0 Python/{}".format(
-                platform.python_version()),
-            pvfs.options.get(CatalogOptions.HTTP_USER_AGENT_HEADER),
-        )
-
-    def test_pvfs_preserves_configured_user_agent(self):
-        pvfs = PaimonVirtualFileSystem(
-            {
-                OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
-                "header.User-Agent": "custom-client/1.0",
-            },
-            skip_instance_cache=True,
-        )
-
-        self.assertEqual(
-            "custom-client/1.0",
-            pvfs.options.get(CatalogOptions.HTTP_USER_AGENT_HEADER),
-        )
-
-    def test_pvfs_preserves_lowercase_configured_user_agent(self):
-        pvfs = PaimonVirtualFileSystem(
-            {
-                OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
-                "header.user-agent": "custom-client/1.0",
-            },
-            skip_instance_cache=True,
-        )
-
-        self.assertNotIn("header.User-Agent", pvfs.options.to_map())
-        self.assertEqual(
-            "custom-client/1.0", pvfs.options.to_map()["header.user-agent"])
+    def test_none_override_keeps_client(self):
+        api = self.create_api({"header.user-agent": "client/1"},
+                              overrides={"header.User-Agent": None})
+        self.assertEqual("client/1", self.prepared_user_agent(api))
 
 
 if __name__ == "__main__":

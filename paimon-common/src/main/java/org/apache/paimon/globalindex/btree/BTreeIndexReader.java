@@ -142,15 +142,6 @@ public class BTreeIndexReader implements Closeable {
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
             GlobalIndexIOMeta globalIndexIOMeta,
-            CacheManager cacheManager)
-            throws IOException {
-        this(keySerializer, fileReader, globalIndexIOMeta, cacheManager, null);
-    }
-
-    BTreeIndexReader(
-            KeySerializer keySerializer,
-            GlobalIndexFileReader fileReader,
-            GlobalIndexIOMeta globalIndexIOMeta,
             CacheManager cacheManager,
             @Nullable RoaringNavigableMap64 rowIdFilter)
             throws IOException {

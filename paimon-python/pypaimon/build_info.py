@@ -86,13 +86,9 @@ def full_version():
     return _FULL_VERSION
 
 
-def sdk_version():
-    """Return the SDK version embedded in the build metadata."""
-    try:
-        full = full_version()
-        if not full.startswith("python-"):
-            return "unknown"
-        version, separator, _ = full[len("python-"):].rpartition("-")
-        return version if separator and version else "unknown"
-    except Exception:
-        return "unknown"
+def version():
+    """Return the pypaimon version embedded at build time, or None when unknown."""
+    prefix = "python-"
+    if not _FULL_VERSION.startswith(prefix):
+        return None
+    return _FULL_VERSION[len(prefix):].rsplit("-", 1)[0] or None

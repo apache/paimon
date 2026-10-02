@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
@@ -31,6 +32,18 @@ public interface GlobalIndexerFactory {
 
     default boolean supportsFullTextSearch() {
         return false;
+    }
+
+    /**
+     * Select index files using metadata only. Implementations must retain every file that may
+     * match; the default keeps all files when no safe pruning is available.
+     */
+    default List<GlobalIndexIOMeta> selectFiles(
+            DataField indexField,
+            List<DataField> extraFields,
+            Predicate predicate,
+            List<GlobalIndexIOMeta> files) {
+        return files;
     }
 
     GlobalIndexer create(DataField indexField, Options options);

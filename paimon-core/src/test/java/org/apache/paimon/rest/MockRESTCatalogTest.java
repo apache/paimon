@@ -53,10 +53,12 @@ import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -68,6 +70,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BuildVersions;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -79,6 +82,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.net.URI;
@@ -143,6 +147,37 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     public void tearDown() throws Exception {
         if (restCatalogServer != null) {
             restCatalogServer.shutdown();
+        }
+    }
+
+    @Test
+    public void testAlterTableRethrowsForeignTypedNotFound() throws Exception {
+        // a 404 typed other than TABLE/COLUMN must not be swallowed into reported success
+        Identifier identifier = Identifier.create("test_alter_404", "t");
+        RESTApi mockApi = Mockito.mock(RESTApi.class);
+        Mockito.doThrow(
+                        new NoSuchResourceException(
+                                ErrorResponse.RESOURCE_TYPE_DATABASE,
+                                "test_alter_404",
+                                "database missing"))
+                .when(mockApi)
+                .alterTable(Mockito.any(), Mockito.anyList());
+
+        java.lang.reflect.Field field = RESTCatalog.class.getDeclaredField("api");
+        field.setAccessible(true);
+        Object original = field.get(restCatalog);
+        field.set(restCatalog, mockApi);
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier,
+                                            Collections.singletonList(
+                                                    SchemaChange.setOption("k", "v")),
+                                            false))
+                    .isInstanceOf(org.apache.paimon.rest.exceptions.NoSuchResourceException.class);
+        } finally {
+            field.set(restCatalog, original);
         }
     }
 
@@ -1629,6 +1664,53 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         // Perform an operation that will trigger REST request
         restCatalog.listDatabases();
         checkHeader(customHeaderName, customHeaderValue);
+    }
+
+    @Test
+    void testDefaultUserAgentInRequests() throws Exception {
+        restCatalogServer.clearReceivedHeaders();
+        initCatalog(false).listDatabases();
+
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .isNotEmpty()
+                .allSatisfy(
+                        headers ->
+                                assertThat(headers)
+                                        .containsEntry(
+                                                "user-agent",
+                                                HttpClientUtils.userAgent(new Options())));
+    }
+
+    @Test
+    void testCatalogWideUserAgentOptionsInRequests() throws Exception {
+        options.set(CatalogOptions.USER_AGENT_FEATURES, "Flink");
+        options.set(CatalogOptions.USER_AGENT_EXTENDED, "vvr");
+        restCatalogServer.clearReceivedHeaders();
+        initCatalog(false).listDatabases();
+
+        String expected =
+                "Paimon/"
+                        + BuildVersions.PAIMON
+                        + "(Apache-HttpClient/"
+                        + BuildVersions.HTTP_CLIENT
+                        + ";Flink) vvr";
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .isNotEmpty()
+                .allSatisfy(headers -> assertThat(headers).containsEntry("user-agent", expected));
+    }
+
+    @Test
+    void testConfiguredUserAgentWins() throws Exception {
+        options.set(RESTCatalogOptions.HTTP_USER_AGENT, "starrocks/user");
+        options.set(CatalogOptions.USER_AGENT_EXTENDED, "vvr");
+        restCatalogServer.clearReceivedHeaders();
+        initCatalog(false).listDatabases();
+
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .isNotEmpty()
+                .allSatisfy(
+                        headers ->
+                                assertThat(headers).containsEntry("user-agent", "starrocks/user"));
     }
 
     @Test

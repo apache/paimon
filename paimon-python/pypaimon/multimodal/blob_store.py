@@ -24,11 +24,9 @@ from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.schema.data_types import is_blob_type
-from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 
 _RANGE_PATTERN = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -318,11 +316,9 @@ class BlobStore:
         write_builder = self._raw_table.new_batch_write_builder()
         table_commit = write_builder.new_commit()
         try:
-            messages = TableUpdateByRowId(
-                self._raw_table,
-                write_builder.commit_user,
-                BATCH_COMMIT_IDENTIFIER,
-            ).update_rows_columns(rows, row_ids_by_row, update_columns)
+            updater = write_builder.new_update().new_update_by_row_id()
+            messages = updater.update_rows_columns(
+                rows, row_ids_by_row, update_columns)
             if messages:
                 table_commit.commit(messages)
         finally:

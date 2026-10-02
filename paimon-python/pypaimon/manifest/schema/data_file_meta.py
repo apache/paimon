@@ -141,10 +141,36 @@ class DataFileMeta:
             file_path=file_path,
         )
 
+    def physical_path(self):
+        """Resolve persisted Java path text for Python file I/O without URL decoding."""
+        from pypaimon.utils.path import to_file_io_path
+        path = self.external_path or self.file_path
+        return to_file_io_path(str(path)) if path is not None else None
+
+    def aligned_file_path(self, file_name, bucket_path=None):
+        """Place a sidecar beside its data file, including external locations."""
+        from pypaimon.utils.path import resolve_path, to_file_io_path
+        data_path = self.physical_path()
+        parent = data_path.rsplit('/', 1)[0] if data_path and '/' in data_path else bucket_path
+        return to_file_io_path(resolve_path(parent, file_name) if parent else file_name)
+
+    def collect_files(self, bucket_path=None):
+        """Return the physical data file and its aligned sidecars for cleanup."""
+        from pypaimon.utils.path import resolve_path, to_file_io_path
+        path = self.physical_path()
+        if not path and bucket_path:
+            path = to_file_io_path(resolve_path(bucket_path, self.file_name))
+        return ([path] if path else []) + [
+            self.aligned_file_path(name, bucket_path) for name in self.extra_files]
+
     def set_file_path(
             self, table_path: str, partition: GenericRow, bucket: int,
-            default_part_value: str = "__DEFAULT_PARTITION__"):
-        path_builder = table_path.rstrip('/')
+            default_part_value: str = "__DEFAULT_PARTITION__",
+            data_file_path_directory: Optional[str] = None):
+        from pypaimon.utils.path import resolve_path, to_file_io_path
+        path_builder = resolve_path(table_path, data_file_path_directory)
+        if data_file_path_directory is not None:
+            path_builder = to_file_io_path(path_builder)
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
             part_value = default_part_value if _is_null_or_whitespace_only(field_value) else str(field_value)
