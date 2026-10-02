@@ -64,6 +64,7 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
         Callable<Boolean> callable =
                 () -> {
                     boolean committed = fileIO.tryToWriteAtomic(newSnapshotPath, snapshot.toJson());
+                    // Do not overwrite a snapshot committed by another writer.
                     if (!committed) {
                         if (!fileIO.exists(newSnapshotPath)) {
                             throw new IOException(

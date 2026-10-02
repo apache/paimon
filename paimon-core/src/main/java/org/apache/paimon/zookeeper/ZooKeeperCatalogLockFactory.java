@@ -43,18 +43,66 @@ public class ZooKeeperCatalogLockFactory implements CatalogLockFactory {
 
     public static final String IDENTIFIER = "zookeeper";
 
-    // One client per (quorum, root) per JVM, shared by every lock built from it. Static because
-    // the factory is serialized and deserialized into independent instances.
-    private static final ConcurrentHashMap<String, SessionTracker> CLIENTS =
+    // Static because the factory is serialized and deserialized into independent instances.
+    private static final ConcurrentHashMap<ClientConfig, SessionTracker> CLIENTS =
             new ConcurrentHashMap<>();
 
     /** A client plus a session-loss counter derived from its connection-state events. */
     static final class SessionTracker {
         final CuratorFramework client;
         final AtomicLong epoch = new AtomicLong();
+        int references;
 
         SessionTracker(CuratorFramework client) {
             this.client = client;
+        }
+    }
+
+    private static final class ClientConfig {
+        private final String quorum;
+        private final String root;
+        private final int sessionTimeoutMs;
+        private final int connectionTimeoutMs;
+        private final int retryBaseSleepMs;
+        private final int retryMaxAttempts;
+
+        private ClientConfig(
+                String quorum,
+                String root,
+                int sessionTimeoutMs,
+                int connectionTimeoutMs,
+                int retryBaseSleepMs,
+                int retryMaxAttempts) {
+            this.quorum = quorum;
+            this.root = root;
+            this.sessionTimeoutMs = sessionTimeoutMs;
+            this.connectionTimeoutMs = connectionTimeoutMs;
+            this.retryBaseSleepMs = retryBaseSleepMs;
+            this.retryMaxAttempts = retryMaxAttempts;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof ClientConfig)) {
+                return false;
+            }
+            ClientConfig that = (ClientConfig) o;
+            return sessionTimeoutMs == that.sessionTimeoutMs
+                    && connectionTimeoutMs == that.connectionTimeoutMs
+                    && retryBaseSleepMs == that.retryBaseSleepMs
+                    && retryMaxAttempts == that.retryMaxAttempts
+                    && quorum.equals(that.quorum)
+                    && root.equals(that.root);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = quorum.hashCode();
+            result = 31 * result + root.hashCode();
+            result = 31 * result + sessionTimeoutMs;
+            result = 31 * result + connectionTimeoutMs;
+            result = 31 * result + retryBaseSleepMs;
+            return 31 * result + retryMaxAttempts;
         }
     }
 
@@ -96,36 +144,50 @@ public class ZooKeeperCatalogLockFactory implements CatalogLockFactory {
                     sessionTimeoutMillis);
         }
 
+        ClientConfig config = clientConfig(quorum, root, options);
         SessionTracker tracker =
-                CLIENTS.computeIfAbsent(
-                        quorum + "|" + root, key -> newClient(quorum, root, options));
+                CLIENTS.compute(
+                        config,
+                        (key, existing) -> {
+                            SessionTracker result = existing == null ? newClient(config) : existing;
+                            result.references++;
+                            return result;
+                        });
 
         return new ZooKeeperCatalogLock(
-                tracker.client, tracker.epoch, warehouse, acquireTimeoutMillis);
+                tracker.client,
+                tracker.epoch,
+                () -> releaseClient(config, tracker),
+                warehouse,
+                acquireTimeoutMillis);
     }
 
-    private static SessionTracker newClient(String quorum, String root, Options options) {
-        int sessionTimeoutMs =
+    private static ClientConfig clientConfig(String quorum, String root, Options options) {
+        return new ClientConfig(
+                quorum,
+                root,
                 toBoundedIntMillis(
                         options.get(ZooKeeperCatalogLockOptions.SESSION_TIMEOUT).toMillis(),
-                        ZooKeeperCatalogLockOptions.SESSION_TIMEOUT.key());
-        int connectionTimeoutMs =
+                        ZooKeeperCatalogLockOptions.SESSION_TIMEOUT.key()),
                 toBoundedIntMillis(
                         options.get(ZooKeeperCatalogLockOptions.CONNECTION_TIMEOUT).toMillis(),
-                        ZooKeeperCatalogLockOptions.CONNECTION_TIMEOUT.key());
-        int baseSleepMs =
+                        ZooKeeperCatalogLockOptions.CONNECTION_TIMEOUT.key()),
                 toBoundedIntMillis(
                         options.get(ZooKeeperCatalogLockOptions.RETRY_BASE_SLEEP).toMillis(),
-                        ZooKeeperCatalogLockOptions.RETRY_BASE_SLEEP.key());
-        int maxRetries = options.get(ZooKeeperCatalogLockOptions.RETRY_MAX_ATTEMPTS);
+                        ZooKeeperCatalogLockOptions.RETRY_BASE_SLEEP.key()),
+                options.get(ZooKeeperCatalogLockOptions.RETRY_MAX_ATTEMPTS));
+    }
 
+    private static SessionTracker newClient(ClientConfig config) {
         CuratorFramework client =
                 CuratorFrameworkFactory.builder()
-                        .connectString(quorum)
-                        .sessionTimeoutMs(sessionTimeoutMs)
-                        .connectionTimeoutMs(connectionTimeoutMs)
-                        .retryPolicy(new ExponentialBackoffRetry(baseSleepMs, maxRetries))
-                        .namespace(root.startsWith("/") ? root.substring(1) : root)
+                        .connectString(config.quorum)
+                        .sessionTimeoutMs(config.sessionTimeoutMs)
+                        .connectionTimeoutMs(config.connectionTimeoutMs)
+                        .retryPolicy(
+                                new ExponentialBackoffRetry(
+                                        config.retryBaseSleepMs, config.retryMaxAttempts))
+                        .namespace(config.root.startsWith("/") ? config.root.substring(1) : config.root)
                         .build();
 
         SessionTracker tracker = new SessionTracker(client);
@@ -143,13 +205,13 @@ public class ZooKeeperCatalogLockFactory implements CatalogLockFactory {
                                         "ZooKeeper connection state changed to {} for quorum '{}'"
                                                 + " (epoch -> {})",
                                         newState,
-                                        quorum,
+                                        config.quorum,
                                         newEpoch);
                             } else {
                                 LOG.info(
                                         "ZooKeeper connection state changed to {} for quorum '{}'",
                                         newState,
-                                        quorum);
+                                        config.quorum);
                             }
                         });
 
@@ -157,9 +219,21 @@ public class ZooKeeperCatalogLockFactory implements CatalogLockFactory {
 
         LOG.info(
                 "Started ZooKeeper client for Paimon catalog locks: quorum='{}', namespace='{}'",
-                quorum,
-                root);
+                config.quorum,
+                config.root);
         return tracker;
+    }
+
+    private static void releaseClient(ClientConfig config, SessionTracker tracker) {
+        CLIENTS.computeIfPresent(
+                config,
+                (key, current) -> {
+                    if (current != tracker || --current.references > 0) {
+                        return current;
+                    }
+                    current.client.close();
+                    return null;
+                });
     }
 
     private static int toBoundedIntMillis(long millis, String key) {

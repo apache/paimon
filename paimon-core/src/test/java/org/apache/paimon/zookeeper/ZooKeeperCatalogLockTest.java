@@ -231,7 +231,7 @@ class ZooKeeperCatalogLockTest {
     void detectsRealSessionLossDuringCriticalSectionAndFailsRatherThanReportSuccess()
             throws Exception {
         // A dedicated root, NOT options(): CLIENTS is a static, JVM-wide cache keyed by
-        // quorum|root, so every other test in this class shares one CuratorFramework and one
+        // client configuration, so every other test in this class shares one CuratorFramework and one
         // epoch. Killing ITS session would leave that shared client mid
         // SUSPENDED->LOST->RECONNECTED (each bumping the shared epoch) while whatever test runs
         // next is inside its own critical section, failing it for a reason that has nothing to
@@ -379,30 +379,38 @@ class ZooKeeperCatalogLockTest {
         assertTrue(bothInside.get(), "different tables should lock independently");
     }
 
-    /**
-     * All locks in a JVM must share one ZooKeeper connection. One client per (committer, table)
-     * would mean thousands of connections per job against a shared ensemble.
-     */
+    /** Locks with the same configuration share a client until the last lock is closed. */
     @Test
-    void reusesOneZooKeeperClientPerQuorum() throws Exception {
+    void reusesClientUntilLastLockCloses() throws Exception {
         ZooKeeperCatalogLockFactory factory = new ZooKeeperCatalogLockFactory();
         CatalogLock first = factory.createLock(CatalogLockContext.fromOptions(options()));
         CatalogLock second = factory.createLock(CatalogLockContext.fromOptions(options()));
+        CuratorFramework shared = clientOf(first);
 
         try {
-            assertSame(
-                    clientOf(first),
-                    clientOf(second),
-                    "locks should share a single CuratorFramework per JVM");
+            assertSame(shared, clientOf(second));
+            first.close();
+            assertEquals("still-usable", second.runWithLock("db", "tbl", () -> "still-usable"));
         } finally {
             first.close();
             second.close();
         }
 
-        // Closing individual locks must NOT close the shared client -- sibling tables still need
-        // it.
         try (CatalogLock third = factory.createLock(CatalogLockContext.fromOptions(options()))) {
+            assertNotEquals(shared, clientOf(third));
             assertEquals("still-usable", third.runWithLock("db", "tbl", () -> "still-usable"));
+        }
+    }
+
+    @Test
+    void doesNotShareClientWithDifferentTimeouts() throws Exception {
+        Options firstOptions = options();
+        Options secondOptions = options();
+        secondOptions.set(ZooKeeperCatalogLockOptions.SESSION_TIMEOUT, Duration.ofSeconds(11));
+
+        try (CatalogLock first = newLock(firstOptions);
+                CatalogLock second = newLock(secondOptions)) {
+            assertNotEquals(clientOf(first), clientOf(second));
         }
     }
 

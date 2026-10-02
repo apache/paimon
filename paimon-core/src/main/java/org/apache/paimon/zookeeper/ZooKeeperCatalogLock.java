@@ -34,6 +34,7 @@ import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** ZooKeeper catalog lock, backed by a Curator {@link InterProcessMutex} per znode path. */
@@ -48,6 +49,8 @@ public class ZooKeeperCatalogLock implements CatalogLock {
     // session expiry, since Curator never updates it on connection loss, so runWithLock also
     // checks this epoch and does a synchronous checkExists() round trip.
     private final AtomicLong sessionEpoch;
+    private final Runnable releaseClient;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     private final String warehouseHash;
     private final long acquireTimeoutMillis;
@@ -68,10 +71,12 @@ public class ZooKeeperCatalogLock implements CatalogLock {
     ZooKeeperCatalogLock(
             CuratorFramework client,
             AtomicLong sessionEpoch,
+            Runnable releaseClient,
             String warehouse,
             long acquireTimeoutMillis) {
         this.client = client;
         this.sessionEpoch = sessionEpoch;
+        this.releaseClient = releaseClient;
         this.warehouseHash = hashWarehouse(warehouse);
         this.acquireTimeoutMillis = acquireTimeoutMillis;
     }
@@ -230,9 +235,11 @@ public class ZooKeeperCatalogLock implements CatalogLock {
         return safe.equals(segment) ? safe : safe + "-" + shortHash(segment);
     }
 
-    /** Does not close the shared {@link CuratorFramework}; it outlives any single lock. */
     @Override
     public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
         List<String> removed = new ArrayList<>();
         mutexes.forEach(
                 (path, mutex) -> {
@@ -248,5 +255,6 @@ public class ZooKeeperCatalogLock implements CatalogLock {
                     }
                 });
         removed.forEach(mutexes::remove);
+        releaseClient.run();
     }
 }
