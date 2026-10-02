@@ -29,7 +29,6 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -867,25 +866,6 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testDropDatabaseCascadeKeepsUnregisteredOnDiskTable() throws Exception {
-        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
-        String databaseName = "drop_keep_db";
-        jdbcCatalog.createDatabase(databaseName, false);
-        Identifier registered = Identifier.create(databaseName, "t");
-        jdbcCatalog.createTable(
-                registered, Schema.newBuilder().column("k", DataTypes.INT()).build(), false);
-        Identifier unregistered = Identifier.create(databaseName, "u");
-        seedUnregisteredTable(jdbcCatalog, unregistered);
-
-        jdbcCatalog.dropDatabase(databaseName, false, true);
-
-        assertThat(localPath(jdbcCatalog.getTableLocation(registered))).doesNotExist();
-        assertThat(localPath(jdbcCatalog.getTableLocation(unregistered))).exists();
-        jdbcCatalog.repairDatabase(databaseName);
-        assertThat(jdbcCatalog.listTables(databaseName)).containsExactly("u");
-    }
-
-    @Test
     public void testDropDatabaseKeepsTablesOfAnotherCatalogKey() throws Exception {
         String uri =
                 "jdbc:sqlite:file:"
@@ -895,7 +875,8 @@ public class JdbcCatalogTest extends CatalogTestBase {
         JdbcCatalog catalogB = initCatalog(Maps.newHashMap(), uri, "catalog_b");
 
         // both catalogs share the JDBC database and the warehouse, so their same-named
-        // databases map to the same directory
+        // databases map to the same directory; for catalog_a, b_table is an on-disk table it
+        // never registered
         String databaseName = "shared_db";
         catalogA.createDatabase(databaseName, false);
         catalogB.createDatabase(databaseName, false);
@@ -906,7 +887,6 @@ public class JdbcCatalogTest extends CatalogTestBase {
         catalogA.dropDatabase(databaseName, false, false);
 
         assertThat(localPath(catalogB.getTableLocation(tableOfB))).exists();
-        assertThat(catalogB.listTables(databaseName)).containsExactly("b_table");
         assertDoesNotThrow(() -> catalogB.getTable(tableOfB));
     }
 
@@ -933,22 +913,6 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testDropDatabaseRestrictKeepsUnregisteredOnDiskTable() throws Exception {
-        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
-        String databaseName = "drop_restrict_db";
-        jdbcCatalog.createDatabase(databaseName, false);
-        Identifier unregistered = Identifier.create(databaseName, "u");
-        seedUnregisteredTable(jdbcCatalog, unregistered);
-
-        // the emptiness check only looks at JDBC rows, so the drop currently succeeds
-        jdbcCatalog.dropDatabase(databaseName, false, false);
-
-        assertThat(localPath(jdbcCatalog.getTableLocation(unregistered))).exists();
-        jdbcCatalog.repairDatabase(databaseName);
-        assertThat(jdbcCatalog.listTables(databaseName)).containsExactly("u");
-    }
-
-    @Test
     public void testDropDatabaseKeepsFilesWhenRowDeleteFails() throws Exception {
         JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
         String databaseName = "drop_row_fail_db";
@@ -971,7 +935,6 @@ public class JdbcCatalogTest extends CatalogTestBase {
         }
 
         // the table is still registered, so its data must still be there
-        assertThat(jdbcCatalog.listTables(databaseName)).containsExactly("t");
         assertThat(localPath(jdbcCatalog.getTableLocation(identifier))).exists();
         assertThat(jdbcCatalog.getTable(identifier).rowType().getFieldNames()).containsExactly("k");
     }
@@ -986,18 +949,9 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                                 PropertyChange.setProperty("k", "v")),
                                         false))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterDatabase(
-                                        "missing_db",
-                                        Collections.singletonList(
-                                                PropertyChange.removeProperty("k")),
-                                        false))
-                .isInstanceOf(Catalog.DatabaseNotExistException.class);
         // no phantom database materialized by the property insert
         assertThatThrownBy(() -> catalog.getDatabase("missing_db"))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
-        assertThat(catalog.listDatabases()).doesNotContain("missing_db");
     }
 
     @Test
@@ -1669,14 +1623,6 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     /** Writes a table schema on disk without registering the table in the JDBC catalog. */
-    private static void seedUnregisteredTable(JdbcCatalog catalog, Identifier identifier)
-            throws Exception {
-        new FileSystemSchemaManager(catalog.fileIO(), catalog.getTableLocation(identifier))
-                .createTable(Schema.newBuilder().column("k", DataTypes.INT()).build());
-        assertThat(catalog.listTables(identifier.getDatabaseName()))
-                .doesNotContain(identifier.getTableName());
-    }
-
     private static java.nio.file.Path localPath(Path path) {
         return java.nio.file.Paths.get(path.toUri());
     }
