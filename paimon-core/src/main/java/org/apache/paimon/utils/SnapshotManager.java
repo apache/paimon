@@ -225,6 +225,16 @@ public class SnapshotManager implements Serializable {
             } catch (FileNotFoundException e) {
                 Long newSnapshotId = latestSnapshotIdFromFileSystem();
                 if (snapshotId.equals(newSnapshotId)) {
+                    // The LATEST hint may still point to a snapshot that has been expired, for
+                    // example when hint writes failed for longer than the retention, find the
+                    // latest snapshot by listing the snapshot directory instead.
+                    try {
+                        newSnapshotId = snapshotIdStream().reduce(Math::max).orElse(newSnapshotId);
+                    } catch (IOException ioException) {
+                        throw new UncheckedIOException(ioException);
+                    }
+                }
+                if (snapshotId.equals(newSnapshotId)) {
                     // Retry once to preserve the existing exception when the latest snapshot is
                     // genuinely missing instead of being concurrently expired.
                     return snapshot(snapshotId);

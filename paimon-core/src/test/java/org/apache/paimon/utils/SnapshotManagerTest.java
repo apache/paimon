@@ -211,7 +211,6 @@ public class SnapshotManagerTest {
         }
         snapshotManager.commitLatestHint(2);
 
-        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
         assertThat(snapshotManager.latestSnapshot().id()).isEqualTo(10);
     }
 

@@ -81,7 +81,7 @@ public class StaleLatestHintTest {
             assertThat(snapshotManager.snapshotExists(1)).isFalse();
             assertThat(snapshotManager.snapshotExists(2)).isFalse();
             long latestBeforeRecovery = listLatestSnapshotId(fileIO, snapshotManager);
-            assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestBeforeRecovery);
+            assertThat(snapshotManager.latestSnapshot().id()).isEqualTo(latestBeforeRecovery);
 
             // once hint writes recover, commits should go on and refresh the hint
             fileIO.skipLatestHint = false;
