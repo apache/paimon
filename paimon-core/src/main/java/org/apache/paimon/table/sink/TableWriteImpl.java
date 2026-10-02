@@ -68,6 +68,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private int[] deleteNotNullFieldIndex;
 
     private @Nullable DefaultValueRow defaultValueRow;
+    private boolean defaultValueRowOutdated;
     private final @Nullable Set<String> deleteNotNullFieldNames;
 
     public TableWriteImpl(
@@ -134,11 +135,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.withWriteType(writeType);
         this.writeType = writeType;
         updateNotNullFieldIndexes();
-        // the default values must follow the write type: a different type (e.g. extended
-        // with row-tracking special fields, or a narrowed partial-write projection) has
-        // different positions and arity, and the stale row would crash the write with an
-        // out-of-bounds read on null fields the original type does not have
-        this.defaultValueRow = DefaultValueRow.create(writeType);
+        // the default value row must follow the positions and arity of the write type; rebuild
+        // it lazily when the next row is wrapped, since callers that only use the FileStoreWrite
+        // (e.g. the data-evolution partial writers, whose pruned ROW types cannot convert the
+        // full ROW default) never wrap rows with it
+        this.defaultValueRowOutdated = true;
         return this;
     }
 
@@ -269,6 +270,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private InternalRow wrapDefaultValue(InternalRow row) {
+        if (defaultValueRowOutdated) {
+            defaultValueRow = DefaultValueRow.create(writeType);
+            defaultValueRowOutdated = false;
+        }
         return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
     }
 
