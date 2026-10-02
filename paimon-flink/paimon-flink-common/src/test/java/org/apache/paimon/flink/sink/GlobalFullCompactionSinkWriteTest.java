@@ -154,7 +154,8 @@ public class GlobalFullCompactionSinkWriteTest {
         CommitMessage activeBucket;
         try (TableWriteImpl<?> initialWrite = table.newWrite(initialUser);
                 TableCommitImpl commit = table.newCommit(initialUser)) {
-            initialWrite.write(GenericRow.of(1, 1, 10L));
+            initialWrite.writeAndReturn(
+                    GenericRow.of(1, 1, 10L), PartitionBucketMapping.loadFromTable(table));
             List<CommitMessage> messages = initialWrite.prepareCommit(false, 0);
             activeBucket = messages.get(0);
             commit.commit(0, messages);
