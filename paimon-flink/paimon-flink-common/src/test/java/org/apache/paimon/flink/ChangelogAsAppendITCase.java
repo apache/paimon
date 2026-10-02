@@ -18,6 +18,10 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.apache.flink.table.api.ExplainDetail;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -93,6 +97,44 @@ public class ChangelogAsAppendITCase extends CatalogITCaseBase {
                         Row.of(1, 30, "UPDATE_AFTER"), Row.of(1, 30, "UPDATE_BEFORE"),
                         Row.of(1, 10, "UPDATE_AFTER"), Row.of(1, 10, "DELETE"));
         assertEmissionTimes(stored, started, finished);
+    }
+
+    @Test
+    public void testGlobalAggregatePreservesSinkParallelism() throws Exception {
+        setParallelism(4);
+        createLog();
+        batchSql("CREATE TABLE input_table (id INT) WITH ('bucket'='-1')");
+        String plan =
+                sEnv.explainSql(
+                        "INSERT INTO event_log SELECT 1, CAST(COUNT(*) AS INT), "
+                                + "CAST(NULL AS STRING), CAST(NULL AS BIGINT) FROM input_table",
+                        ExplainDetail.JSON_EXECUTION_PLAN);
+        String physicalPlanHeader = "== Physical Execution Plan ==";
+        JsonNode nodes =
+                new ObjectMapper()
+                        .readTree(
+                                plan.substring(
+                                        plan.indexOf(physicalPlanHeader)
+                                                + physicalPlanHeader.length()))
+                        .get("nodes");
+        assertThat(nodes)
+                .filteredOn(
+                        node ->
+                                node.get("type").asText().equals("Materialize changelog as append")
+                                        || node.get("type").asText().equals("Writer : event_log"))
+                .hasSize(2)
+                .allSatisfy(
+                        node -> {
+                            assertThat(node.get("parallelism").asInt()).isOne();
+                            assertThat(node.get("predecessors"))
+                                    .allSatisfy(
+                                            predecessor ->
+                                                    assertThat(
+                                                                    predecessor
+                                                                            .get("ship_strategy")
+                                                                            .asText())
+                                                            .isEqualTo("FORWARD"));
+                        });
     }
 
     private void createSource(List<Row> input) {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.BigIntType;
@@ -26,17 +27,28 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Opt-in negotiation must retain before images without changing the default sink contract. */
@@ -90,11 +102,42 @@ class ChangelogAsAppendSinkTest {
         FormatTable table = mock(FormatTable.class);
         when(table.options())
                 .thenReturn(Collections.singletonMap("sink.changelog-as-append", "true"));
-        FlinkTableSink sink =
-                new FlinkTableSink(ObjectIdentifier.of("catalog", "db", "log"), table, null);
-        assertThatThrownBy(() -> sink.getChangelogMode(ChangelogMode.all()))
+        assertThatThrownBy(
+                        () ->
+                                new FlinkFormatTableSink(
+                                        ObjectIdentifier.of("catalog", "db", "log"), table, null))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("non-keyed FileStoreTable");
+                .hasMessage("sink.changelog-as-append is not supported for format tables.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void preservesInputParallelism(boolean parallelismConfigured) {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(4);
+        FileStoreTable table = table(true, Collections.emptyMap(), false);
+        DataStream<RowData> input =
+                env.fromCollection(
+                        Collections.singletonList((RowData) GenericRowData.of(1, null, null)),
+                        InternalTypeInfo.of(toLogicalType(table.rowType())));
+        input.getTransformation().setParallelism(1, parallelismConfigured);
+        FlinkSinkBuilder builder = mock(FlinkSinkBuilder.class, RETURNS_SELF);
+        FlinkTableSink sink =
+                new FlinkTableSink(ObjectIdentifier.of("catalog", "db", "log"), table, null) {
+                    @Override
+                    protected FlinkSinkBuilder createSinkBuilder() {
+                        return builder;
+                    }
+                };
+
+        ((PaimonDataStreamSinkProvider) sink.getSinkRuntimeProvider(null))
+                .consumeDataStream(null, input);
+
+        ArgumentCaptor<DataStream<RowData>> converted = ArgumentCaptor.forClass(DataStream.class);
+        verify(builder).forRowData(converted.capture());
+        assertThat(converted.getValue().getParallelism()).isOne();
+        assertThat(converted.getValue().getTransformation().isParallelismConfigured())
+                .isEqualTo(parallelismConfigured);
     }
 
     @Test

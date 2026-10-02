@@ -35,9 +35,32 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for format table. */
 public class FormatTableITCase extends RESTCatalogITCaseBase {
+
+    @Test
+    public void testRejectChangelogAsAppend() {
+        String tableName = "format_changelog_log";
+        sql(
+                "CREATE TABLE %s (id INT, original_kind STRING, emitted_ms BIGINT) WITH ("
+                        + "'type'='format-table', 'file.format'='parquet', "
+                        + "'sink.changelog-as-append'='true', "
+                        + "'sink.changelog-as-append.kind-field'='original_kind', "
+                        + "'sink.changelog-as-append.time-field'='emitted_ms')",
+                tableName);
+        setDataToken(tableName);
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "INSERT INTO %s VALUES (1, CAST(NULL AS STRING), CAST(NULL AS BIGINT))",
+                                        tableName))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("sink.changelog-as-append is not supported for format tables.");
+    }
 
     @Test
     public void testDiffFormat() {

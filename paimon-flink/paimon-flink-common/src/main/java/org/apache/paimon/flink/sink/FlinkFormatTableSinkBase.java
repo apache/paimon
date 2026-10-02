@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -30,6 +31,9 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 
 import java.util.HashMap;
 import java.util.Map;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CHANGELOG_AS_APPEND;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Table sink for format tables. */
 public abstract class FlinkFormatTableSinkBase
@@ -45,6 +49,10 @@ public abstract class FlinkFormatTableSinkBase
             ObjectIdentifier tableIdentifier,
             FormatTable table,
             DynamicTableFactory.Context context) {
+        // Batch planning can skip changelog negotiation, so validate when the sink is created.
+        checkArgument(
+                !Options.fromMap(table.options()).get(SINK_CHANGELOG_AS_APPEND),
+                "sink.changelog-as-append is not supported for format tables.");
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.context = context;

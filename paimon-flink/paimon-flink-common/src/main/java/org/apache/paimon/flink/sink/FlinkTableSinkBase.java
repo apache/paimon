@@ -30,6 +30,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -60,6 +61,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CHANGELOG_TIME_
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /** Table sink to create sink. */
 public abstract class FlinkTableSinkBase
@@ -172,7 +174,7 @@ public abstract class FlinkTableSinkBase
                                     dataStream.getTransformation());
                     if (changelogAsAppend()) {
                         RowType rowType = (RowType) toLogicalType(table.rowType());
-                        input =
+                        SingleOutputStreamOperator<RowData> materialized =
                                 input.map(
                                                 new ChangelogAsAppend(
                                                         rowType,
@@ -180,6 +182,8 @@ public abstract class FlinkTableSinkBase
                                                         conf.get(SINK_CHANGELOG_TIME_FIELD)))
                                         .returns(InternalTypeInfo.of(rowType))
                                         .name("Materialize changelog as append");
+                        forwardParallelism(materialized, input);
+                        input = materialized;
                     }
                     builder.forRowData(input);
                     if (!conf.get(CLUSTERING_INCREMENTAL)
