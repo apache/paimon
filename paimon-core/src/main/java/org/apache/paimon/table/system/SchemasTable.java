@@ -345,9 +345,7 @@ public class SchemasTable implements ReadonlyTable {
 
         if (optionalMaxSchemaId != null) {
             if (optionalMaxSchemaId < lowerBoundSchemaId) {
-                // the range matches no schema id; engines re-apply the filter after
-                // the scan, so an empty result is the correct outcome, not a query
-                // failure
+                // schema ids lie in [0, latest], so the range matches none of them
                 return Collections.emptyList();
             }
             upperBoundSchematId =
@@ -358,8 +356,7 @@ public class SchemasTable implements ReadonlyTable {
 
         if (optionalMinSchemaId != null) {
             if (optionalMinSchemaId > upperBoundSchematId) {
-                // same as above: a lower bound above the upper bound selects
-                // nothing
+                // schema ids lie in [0, latest], so the range matches none of them
                 return Collections.emptyList();
             }
             lowerBoundSchemaId =

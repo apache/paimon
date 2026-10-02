@@ -385,7 +385,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                         + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
                 .isEmpty();
 
-        // check with out-of-range schema id: the filter describes an empty range, so the
+        // check with out-of-range schema id: no schema has id >= 6 (latest is 4), so the
         // query returns zero rows instead of failing
         assertThat(
                         sql(
