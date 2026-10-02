@@ -105,6 +105,27 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Row ID column updates
+
+For a batch update of selected columns in a data-evolution table with row
+tracking, pass an Arrow table containing `_ROW_ID` and the columns to update.
+Create the updater and committer from the same builder so they share a commit
+user:
+
+```python
+builder = table.new_batch_write_builder()
+updater = builder.new_update().new_update_by_row_id()
+messages = updater.update_columns(updates, ["name"])
+commit = builder.new_commit()
+try:
+    commit.commit(messages)
+finally:
+    commit.close()
+```
+
+For stream updates, use `table.new_stream_write_builder()` and pass the stream
+commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
+
 # Parquet page-index reads
 
 For row-tracking tables with a Parquet OffsetIndex, PyPaimon can read a
@@ -140,12 +161,35 @@ finally:
 The native writer returns ordinary PyPaimon commit messages, so the Python
 committer also works when `commit.native.enabled` is false. Batch overwrite and
 reusable stream writers retain the builder's commit user and identifier. Native
-write is currently limited to Parquet tables without BLOB fields or
-data-evolution mode, on the same filesystem/JDBC publication route as native
-commit. Writer methods requiring Python's specialized path select the Python
-writer before native data is written. If the runtime or table route is
+write supports Parquet append, primary-key and data-evolution tables, including
+top-level scalar BLOB Arrow columns, on the same filesystem/JDBC publication
+route as native commit. ARRAY/MAP BLOB, video and optional data-evolution row
+sidecars select the Python writer. Writer methods requiring Python's specialized
+path select the Python writer before native data is written. If the runtime or table route is
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
+
+Native writes honor `data-file.path-directory` and the configured
+`data-file.external-paths` strategy. Existing files keep their recorded locations
+when the write destinations change. Python and native readers and committers
+can exchange these files, including external data files and their index sidecars.
+
+BLOB Arrow values may contain payload bytes or serialized descriptors. Fields
+listed in `blob-descriptor-field` remain inline and require descriptors. HTTP(S)
+references use decoded response streams, including gzip and deflate. Blob
+files roll by payload size, independently of the normal Parquet files. Python
+`Blob` row objects can provide custom streams or URI readers; `write_row` on a
+BLOB table selects the Python writer before any native data is written. Switching
+to row writes after native Arrow writes is rejected. Use `write.native.enabled=false` when
+mixing Arrow batches and Python `Blob` objects in one writer.
+
+An explicit native writer `abort()` also deletes prepared files that have not
+been passed to a PyPaimon committer. Calling `close()` instead releases those
+files to the caller without deleting them; use `commit.abort(messages)` to
+discard them after closing the writer. Once a commit attempt starts, writer
+abort preserves its files even if the attempt raises, because a snapshot may
+already reference them. Stream writers retain cleanup ownership only for
+messages that have not been submitted to a committer.
 
 Both native options are disabled by default.
 

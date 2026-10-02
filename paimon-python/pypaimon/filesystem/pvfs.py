@@ -34,6 +34,7 @@ from readerwriterlock import rwlock
 from pypaimon.api.api_response import GetTableResponse, GetTableTokenResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptions
 from pypaimon.common.identifier import Identifier
@@ -149,7 +150,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
         if isinstance(options, dict):
             options = Options(options)
-        options.set(CatalogOptions.HTTP_USER_AGENT_HEADER, 'PythonPVFS')
+        user_agent.with_feature(options, 'PythonPVFS')
         self.options = options
         self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (

@@ -138,6 +138,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void reset() {
         this.currentKey = null;
+        this.currentDeleteRow = false;
         this.meetInsert = false;
         this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
@@ -149,7 +150,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public void add(KeyValue kv) {
         // refresh key object to avoid reference overwritten
         currentKey = kv.key();
-        currentDeleteRow = false;
         if (kv.valueKind().isRetract()) {
 
             if (!notNullColumnFilled) {
@@ -193,6 +193,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         latestSequenceNumber = kv.sequenceNumber();
         if (fieldSeqComparators.isEmpty()) {
+            currentDeleteRow = false;
             updateNonNullFields(kv);
         } else {
             updateWithSequenceGroup(kv);
@@ -257,6 +258,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     if (Arrays.stream(seqComparator.compareFields())
                             .anyMatch(seqIndex -> seqIndex == index)) {
                         for (int fieldIndex : seqComparator.compareFields()) {
+                            if (sequenceGroupPartialDelete.contains(fieldIndex)) {
+                                currentDeleteRow = false;
+                            }
                             row.setField(
                                     fieldIndex, getters[fieldIndex].getFieldOrNull(kv.value()));
                             // Mark these sequence fields as processed

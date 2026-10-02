@@ -26,7 +26,6 @@ from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import require_columns, row_to_named_values
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_write import StreamTableWrite
 
 # Composite key is represented as a tuple of values
@@ -53,6 +52,12 @@ class TableUpsertByKey:
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_identifier = commit_identifier
+
+    def _new_row_id_updater(self):
+        from pypaimon.write.write_builder import _new_update_by_row_id
+
+        return _new_update_by_row_id(
+            self.table, self.commit_user, self.commit_identifier)
 
     def upsert(self, data: pa.Table, upsert_keys: List[str],
                update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
@@ -89,6 +94,12 @@ class TableUpsertByKey:
         else:
             effective_update_cols = update_cols
 
+        columns = (list(effective_update_cols) if effective_update_cols
+                   else list(self.table.field_names))
+        native = self._create_native_upsert(data, upsert_keys, columns)
+        if native is not None:
+            return native.upsert()
+
         all_commit_messages: List[CommitMessage] = []
 
         # Process each partition independently
@@ -118,6 +129,13 @@ class TableUpsertByKey:
         else:
             effective_update_cols = update_cols
 
+        columns = (list(effective_update_cols) if effective_update_cols is not None
+                   else list(self.table.field_names))
+        native = self._create_native_upsert(
+            [values for _, values in row_items], upsert_keys, columns)
+        if native is not None:
+            return native.upsert()
+
         commit_messages: List[CommitMessage] = []
         for partition_spec, partition_items in self._group_rows_by_partition(row_items):
             commit_messages.extend(
@@ -129,6 +147,16 @@ class TableUpsertByKey:
                 )
             )
         return commit_messages
+
+    def _create_native_upsert(self, data, upsert_keys, columns):
+        try:
+            from pypaimon.write.native_update import create_native_upsert
+            return create_native_upsert(
+                self.table, self.commit_user, data, upsert_keys, columns)
+        except Exception as error:
+            logger.debug(
+                'Native upsert preparation failed; using Python: %s', error)
+            return None
 
     @staticmethod
     def _normalize_rows(rows) -> List:
@@ -200,9 +228,7 @@ class TableUpsertByKey:
             )
             for _, values_by_name in matched_items:
                 require_columns(values_by_name, cols_to_update, "upsert_by_key")
-            commit_messages.extend(TableUpdateByRowId(
-                self.table, self.commit_user, self.commit_identifier,
-            ).update_rows_columns(
+            commit_messages.extend(self._new_row_id_updater().update_rows_columns(
                 [row for row, _ in matched_items],
                 matched_row_ids,
                 cols_to_update,
@@ -498,7 +524,8 @@ class TableUpsertByKey:
         if partition_spec:
             predicate_builder = read_builder.new_predicate_builder()
             sub_predicates = [
-                predicate_builder.equal(k, v)
+                (predicate_builder.is_null(k) if v is None
+                 else predicate_builder.equal(k, v))
                 for k, v in partition_spec.items()
             ]
             partition_predicate = predicate_builder.and_predicates(sub_predicates)
@@ -551,9 +578,8 @@ class TableUpsertByKey:
         )
 
         cols_to_update = list(update_cols) if update_cols else list(self.table.field_names)
-        return TableUpdateByRowId(
-            self.table, self.commit_user, self.commit_identifier,
-        ).update_columns(update_data, cols_to_update)
+        return self._new_row_id_updater().update_columns(
+            update_data, cols_to_update)
 
     def _do_appends(
             self,

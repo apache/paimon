@@ -403,14 +403,9 @@ class DedicatedFormatWriter(CompositeDataWriter):
                         "BlobDescriptor."
                     )
                 descriptor_bytes = bytes(value)
-                if descriptor_bytes:
-                    version = descriptor_bytes[0]
-                    if version < 1 or version > BlobDescriptor.CURRENT_VERSION:
-                        raise ValueError(
-                            f"blob-descriptor-field requires BlobDescriptor version "
-                            f"in [1, {BlobDescriptor.CURRENT_VERSION}], but found "
-                            f"{version}."
-                        )
+                # Like Java, schema-declared descriptors use the prefix parser.
+                # Exact wire length is only needed when detecting descriptors
+                # among arbitrary payload bytes.
                 try:
                     BlobDescriptor.deserialize(descriptor_bytes)
                 except Exception as e:
@@ -418,10 +413,6 @@ class DedicatedFormatWriter(CompositeDataWriter):
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     ) from e
-                # serialize() always emits CURRENT_VERSION, so a round-trip
-                # would reject exact v1 bytes. Check exact wire length instead.
-                if BlobDescriptor.parse_if_serialized(descriptor_bytes) is None:
-                    raise ValueError("Descriptor payload contains trailing bytes.")
 
         for field_name in self.blob_view_fields:
             if field_name not in data.schema.names:
