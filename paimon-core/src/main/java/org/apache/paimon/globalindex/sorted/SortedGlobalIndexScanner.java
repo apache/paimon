@@ -75,10 +75,6 @@ public class SortedGlobalIndexScanner implements Serializable {
         this.options = options;
     }
 
-    public SortedGlobalIndexScanner withIndexField(String indexField) {
-        return withIndexFields(Collections.singletonList(indexField));
-    }
-
     public SortedGlobalIndexScanner withIndexFields(List<String> fieldNames) {
         checkArgument(!fieldNames.isEmpty(), "At least one index column is required.");
         this.indexFields = new ArrayList<>();

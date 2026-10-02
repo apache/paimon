@@ -921,7 +921,8 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
     private void createIndex(String type, String field) throws Exception {
         FileStoreTable table = getTableDefault();
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, type).withIndexField(field);
+                new SortedGlobalIndexScanner(table, type)
+                        .withIndexFields(Collections.singletonList(field));
         createIndex(type, field, builder.scan().get().entries());
     }
 

@@ -43,7 +43,6 @@ import org.apache.paimon.utils.Range;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -77,10 +76,6 @@ public class SortedGlobalIndexWriter implements Serializable {
         this.options = options;
         this.recordsPerRange =
                 (long) (options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE) * FLOATING);
-    }
-
-    public SortedGlobalIndexWriter withIndexField(String indexField) {
-        return withIndexFields(Collections.singletonList(indexField));
     }
 
     public SortedGlobalIndexWriter withIndexFields(List<String> fieldNames) {
