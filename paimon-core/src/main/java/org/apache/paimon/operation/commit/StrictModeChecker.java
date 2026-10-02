@@ -29,10 +29,12 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.util.Collections;
+import javax.annotation.Nullable;
+
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -140,9 +142,6 @@ public class StrictModeChecker {
             return false;
         }
         String indexManifest = snapshot.indexManifest();
-        if (indexManifest == null) {
-            return false;
-        }
         // Fast exit: if this snapshot's indexManifest file name equals the
         // previous snapshot's, no index file was added/removed by this commit
         // (writeIndexFiles reuses the previous file when newIndexFiles is empty).
@@ -151,25 +150,34 @@ public class StrictModeChecker {
         if (snapshotManager.snapshotExists(prevId)) {
             prevIndexManifest = snapshotManager.snapshot(prevId).indexManifest();
         }
-        if (indexManifest.equals(prevIndexManifest)) {
+        if (Objects.equals(indexManifest, prevIndexManifest)) {
             return false;
         }
-        // The index delta (current \ previous) considers only entries this commit
-        // added or replaced, never removals. Entries inherited from earlier snapshots
-        // were already covered when the commit that wrote them was itself checked. A
-        // pure index-entry removal in a partition is not missed either: it always
-        // carries a data-file delta in the same partition, which the data-partition
-        // check (run first) already catches.
+        // Count only the index entries this commit added, replaced or removed relative to
+        // the previous snapshot (every entry if that snapshot is gone). Removals matter
+        // because an OVERWRITE such as rollbackToAsLatest can drop a DV entry without any
+        // data-file delta.
         Set<IndexManifestEntry> previousEntries =
-                prevIndexManifest == null
-                        ? Collections.emptySet()
-                        : new HashSet<>(indexManifestFile.read(prevIndexManifest));
-        for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
-            if (!previousEntries.contains(entry) && newPartitions.contains(entry.partition())) {
+                readEntriesInPartitions(prevIndexManifest, newPartitions);
+        for (IndexManifestEntry entry : readEntriesInPartitions(indexManifest, newPartitions)) {
+            if (!previousEntries.remove(entry)) {
                 return true;
             }
         }
-        return false;
+        return !previousEntries.isEmpty();
+    }
+
+    private Set<IndexManifestEntry> readEntriesInPartitions(
+            @Nullable String indexManifest, Set<BinaryRow> partitions) {
+        Set<IndexManifestEntry> entries = new HashSet<>();
+        if (indexManifest != null) {
+            for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
+                if (partitions.contains(entry.partition())) {
+                    entries.add(entry);
+                }
+            }
+        }
+        return entries;
     }
 
     private boolean hasOverlappedPartition(
