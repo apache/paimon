@@ -100,9 +100,10 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * A union {@link SplitRead} to read multiple inner files to merge columns.
  *
  * <p>Filters can only be pushed down where they can not interfere with the column merging: a file
- * read without merging gets both the file index and the format level push down, while a merged
- * group only uses the file index to skip the whole group, as dropping rows in one of the merged
- * readers would break the positional alignment between them.
+ * read without merging gets both the file index and the format level push down, while an eligible
+ * merged group shares one bitmap selection across all aligned field readers. Other merged groups
+ * only use the file index to skip the whole group, as dropping rows in one reader would break the
+ * positional alignment between them.
  *
  * <p>Only a filter whose every field belongs to the read type is pushed down, see {@link
  * #readTypeFilters}, and only to the files that wrote those fields, see {@link #fileFilters}.
@@ -267,13 +268,16 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             fileIndexResults, rowRanges, deletionVector)) {
                                 return new EmptyFileRecordReader<>();
                             }
+                            BitmapIndexResult groupSelection =
+                                    buildGroupSelection(needMergeFiles, fileIndexResults);
                             return createUnionReader(
                                     needMergeFiles,
                                     partition,
                                     dataFilePathFactory,
                                     rowRanges,
                                     readRowType,
-                                    deletionVector);
+                                    deletionVector,
+                                    groupSelection);
                         });
             }
         }
@@ -296,7 +300,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable DeletionVectorWithRange deletionVector)
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable BitmapIndexResult groupSelection)
             throws IOException {
         List<DataEvolutionVectorReadPlanner.ReadRange> vectorRanges =
                 DataEvolutionVectorReadPlanner.plan(
@@ -341,7 +346,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         dataFilePathFactory,
                                         readRanges,
                                         readRowType,
-                                        deletionVector));
+                                        deletionVector,
+                                        null));
             }
             return ConcatRecordReader.create(suppliers);
         }
@@ -365,7 +371,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 dataFilePathFactory,
                 rowRanges,
                 readRowType,
-                deletionVector);
+                deletionVector,
+                groupSelection);
     }
 
     private RecordReader<InternalRow> createUnionReader(
@@ -375,7 +382,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable DeletionVectorWithRange deletionVector)
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable BitmapIndexResult groupSelection)
             throws IOException {
 
         long rowCount = fieldsFiles.get(0).rowCount();
@@ -424,7 +432,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     formatBuilder,
                     rowRanges,
                     readRowType,
-                    deletionVector);
+                    deletionVector,
+                    groupSelection);
         }
 
         // Build the per-bunch readers from the planned partial read row types.
@@ -464,7 +473,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     formatReaderMapping,
                                     rowRanges,
                                     partialReadRowType,
-                                    deletionVector));
+                                    deletionVector,
+                                    groupSelection));
         }
 
         return nestedFieldEnabled
@@ -482,7 +492,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             Builder formatBuilder,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable DeletionVectorWithRange deletionVector)
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable BitmapIndexResult groupSelection)
             throws IOException {
         DataFileMeta firstFile = bunch.files().get(0);
         // Use the physical schema: the full table schema may declare columns this file never wrote.
@@ -500,7 +511,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 mapping,
                 rowRanges,
                 readRowType,
-                deletionVector);
+                deletionVector,
+                groupSelection);
     }
 
     private boolean nestedFieldEnabledFor(List<DataFileMeta> files) {
@@ -565,7 +577,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable DeletionVectorWithRange deletionVector)
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable BitmapIndexResult groupSelection)
             throws IOException {
         if (bunch instanceof DataBunch) {
             // for data bunch, directly read the single file
@@ -576,7 +589,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     formatReaderMapping,
                     rowRanges,
                     readRowType,
-                    deletionVector);
+                    deletionVector,
+                    groupSelection);
         } else if (bunch instanceof VectorFileBunch) {
             // for vector bunch, sequential read all data files and concat them
             return sequentialReadFiles(
@@ -585,7 +599,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     dataFilePathFactory,
                     formatReaderMapping,
                     rowRanges,
-                    deletionVector);
+                    deletionVector,
+                    groupSelection);
         } else if (bunch instanceof BlobFileBunch) {
             // for blob bunch, fallback on placeholders
             BlobFileBunch blobBunch = (BlobFileBunch) bunch;
@@ -619,7 +634,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
-            @Nullable DeletionVectorWithRange deletionVector)
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable BitmapIndexResult groupSelection)
             throws IOException {
         List<ReaderSupplier<InternalRow>> readerSuppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
@@ -636,7 +652,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             dataFilePathFactory.toPath(file),
                                             file.fileSize()),
                                     deletionVector,
-                                    null));
+                                    groupSelection));
         }
         return ConcatRecordReader.create(readerSuppliers);
     }
@@ -727,12 +743,33 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return createFileReader(
                 partition,
                 file,
+                dataFilePathFactory,
+                formatReaderMapping,
+                rowRanges,
+                readRowType,
+                deletionVector,
+                null);
+    }
+
+    private FileRecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory,
+            FormatReaderMapping formatReaderMapping,
+            List<Range> rowRanges,
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector,
+            @Nullable BitmapIndexResult groupSelection)
+            throws IOException {
+        return createFileReader(
+                partition,
+                file,
                 formatReaderMapping,
                 rowRanges,
                 readRowType,
                 readTarget(file, dataFilePathFactory, rowRanges),
                 deletionVector,
-                null);
+                groupSelection);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -910,6 +947,47 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
         return false;
+    }
+
+    /**
+     * Builds one row selection for a normal merged group from the cached file-index results.
+     *
+     * <p>Each result is a necessary condition for the final row, so independent bitmap results are
+     * intersected. An OR predicate is already evaluated as one bitmap by {@link
+     * FileIndexEvaluator}; treating its result as one condition preserves the OR semantics. Results
+     * that cannot provide an exact bitmap remain conservative and do not restrict the group.
+     */
+    @Nullable
+    private BitmapIndexResult buildGroupSelection(
+            List<DataFileMeta> files, List<FileIndexResultEntry> fileIndexResults) {
+        if (!canPushDownGroupSelection(files)) {
+            return null;
+        }
+
+        BitmapIndexResult selection = null;
+        for (FileIndexResultEntry entry : fileIndexResults) {
+            if (entry.result instanceof BitmapIndexResult) {
+                BitmapIndexResult bitmap = (BitmapIndexResult) entry.result;
+                selection = selection == null ? bitmap : (BitmapIndexResult) selection.and(bitmap);
+            }
+        }
+        return selection;
+    }
+
+    private boolean canPushDownGroupSelection(List<DataFileMeta> files) {
+        if (files.isEmpty()) {
+            return false;
+        }
+
+        Range groupRange = files.get(0).nonNullRowIdRange();
+        for (DataFileMeta file : files) {
+            if (isBlobFile(file.fileName())
+                    || isVectorStoreFile(file.fileName())
+                    || !groupRange.equals(file.nonNullRowIdRange())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Builder formatBuilder(
