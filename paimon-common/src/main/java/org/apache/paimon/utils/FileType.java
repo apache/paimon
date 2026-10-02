@@ -71,6 +71,8 @@ public enum FileType {
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
     // keep in sync with IcebergCommitCallback.RETIRE_PENDING_FILENAME
     private static final String RETIRE_PENDING_FILENAME = "retire-pending";
+    // keep in sync with IcebergPathFactory#toMetadataPath: v{N}.metadata.json
+    private static final String ICEBERG_METADATA_SUFFIX = ".metadata.json";
 
     private static final String MANIFEST = "manifest";
     private static final String CHANGELOG_DIR = "changelog";
@@ -140,9 +142,11 @@ public enum FileType {
                 || name.startsWith(CONSUMER_PREFIX)
                 || name.startsWith(SERVICE_PREFIX)
                 || name.startsWith(TAG_PREFIX)
-                // Iceberg-compatible metadata rewritten in place by IcebergCommitCallback
+                // Iceberg-compatible metadata rewritten in place by IcebergCommitCallback,
+                // including v{N}.metadata.json when tags are created or deleted
                 || VERSION_HINT_FILENAME.equals(name)
-                || RETIRE_PENDING_FILENAME.equals(name);
+                || RETIRE_PENDING_FILENAME.equals(name)
+                || name.endsWith(ICEBERG_METADATA_SUFFIX);
     }
 
     /**

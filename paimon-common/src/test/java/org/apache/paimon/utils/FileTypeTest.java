@@ -86,6 +86,8 @@ public class FileTypeTest {
         assertThat(FileType.classify(versionHint)).isEqualTo(FileType.DATA);
         assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/metadata/retire-pending"))).isTrue();
         assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/metadata/v3.metadata.json")))
+                .isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/metadata/snap-1-1-abc.avro")))
                 .isFalse();
     }
 
