@@ -2692,9 +2692,13 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
         self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
 
+    @pytest.mark.python_read
     def test_blob_view_fields_resolve_upstream_blob(self):
+        from unittest import mock
+
         from pypaimon import Schema
         from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader import format_blob_reader
         from pypaimon.table.row.blob import BlobViewStruct
 
         source_schema = pa.schema([
@@ -2761,15 +2765,24 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             "Blob view fields should be stored inline without writing new blob files",
         )
 
-        result = target_table.new_read_builder().new_read().to_arrow(
-            target_table.new_read_builder().new_scan().plan().splits()
-        ).sort_by('id')
-        self.assertEqual(result.column('picture').to_pylist(), payloads)
+        with mock.patch.object(
+                format_blob_reader,
+                '_decode_blob_index',
+                wraps=format_blob_reader._decode_blob_index,
+        ) as decode_index:
+            result = target_table.new_read_builder().new_read().to_arrow(
+                target_table.new_read_builder().new_scan().plan().splits()
+            ).sort_by('id')
+            self.assertEqual(result.column('picture').to_pylist(), payloads)
 
-        descriptor_table = target_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'})
-        descriptor_result = descriptor_table.new_read_builder().new_read().to_arrow(
-            descriptor_table.new_read_builder().new_scan().plan().splits()
-        ).sort_by('id')
+            descriptor_table = target_table.copy({
+                CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'
+            })
+            descriptor_result = descriptor_table.new_read_builder().new_read().to_arrow(
+                descriptor_table.new_read_builder().new_scan().plan().splits()
+            ).sort_by('id')
+
+        self.assertEqual(1, decode_index.call_count)
         # With blob-as-descriptor=true, view fields return BlobDescriptor bytes
         from pypaimon.table.row.blob import BlobDescriptor
         for value in descriptor_result.column('picture').to_pylist():
