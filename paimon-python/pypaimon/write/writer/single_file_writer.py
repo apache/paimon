@@ -66,6 +66,12 @@ class SingleFileWriter:
                 previous = self.column_stats.get(field.name)
                 if previous is not None:
                     current['null_counts'] += previous['null_counts']
+                    # A bound is unreliable if any batch's was (e.g. a NaN or a
+                    # nanosecond timestamp seen in an earlier batch).
+                    if 'min_max_unreliable' in current or 'min_max_unreliable' in previous:
+                        current['min_max_unreliable'] = (
+                            current.get('min_max_unreliable', False)
+                            or previous.get('min_max_unreliable', False))
                     for key, choose in (
                             ('min_values', min), ('max_values', max)):
                         values = [

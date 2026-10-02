@@ -191,5 +191,94 @@ class MetadataStatsModeE2ETest(unittest.TestCase):
         self.assertEqual(null_counts, [0, 1])
 
 
+@pytest.mark.python_write
+class TruncateUnsoundBoundsTest(unittest.TestCase):
+    """Enabling value bounds for ``truncate(N)`` must not publish an unsound
+    bound: Arrow min/max skip NaN, and a Python datetime loses a nanosecond
+    timestamp's sub-microsecond part. For those columns the Python writer
+    keeps the null count but omits min/max (so a reader cannot wrongly prune),
+    while sound columns in the same file are still truncated normally."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create(
+            {"warehouse": os.path.join(cls.tempdir, "warehouse")})
+        cls.catalog.create_database("default", True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def _write(self, name, pa_schema, rows, mode="truncate(3)"):
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, options={"metadata.stats-mode": mode})
+        self.catalog.create_table("default." + name, schema, False)
+        table = self.catalog.get_table("default." + name)
+        wb = table.new_batch_write_builder()
+        w, c = wb.new_write(), wb.new_commit()
+        try:
+            w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+        scan = table.new_read_builder().new_scan()
+        fs = scan.file_scanner
+        latest = table.snapshot_manager().get_latest_snapshot()
+        manifest_files = fs.manifest_list_manager.read_all(latest)
+        entries = fs.manifest_file_manager.read(
+            manifest_files[0].file_name,
+            lambda row: fs._filter_manifest_entry(row), False)
+        return table, entries[0].file
+
+    def _min_max(self, table, file):
+        vs = file.value_stats
+        fields = table.fields if file.value_stats_cols is None else []
+        mn = GenericRowDeserializer.from_bytes(vs.min_values.data, fields).values
+        mx = GenericRowDeserializer.from_bytes(vs.max_values.data, fields).values
+        return mn, mx, list(vs.null_counts)
+
+    def test_float_with_nan_omits_min_max_keeps_null_count(self):
+        pa_schema = pa.schema([("id", pa.int32(), False), ("d", pa.float64())])
+        table, file = self._write("trunc_nan", pa_schema, [
+            {"id": 1, "d": 1.0}, {"id": 2, "d": float("nan")}, {"id": 3, "d": None}])
+        self.assertIsNone(file.value_stats_cols)
+        mn, mx, null_counts = self._min_max(table, file)
+        # id is sound and still gets a bound; the NaN-bearing double omits it.
+        self.assertEqual((mn[0], mx[0]), (1, 3))
+        self.assertEqual((mn[1], mx[1]), (None, None))
+        self.assertEqual(null_counts, [0, 1])
+
+    def test_all_nan_float_omits_min_max(self):
+        pa_schema = pa.schema([("id", pa.int32(), False), ("d", pa.float64())])
+        table, file = self._write("trunc_allnan", pa_schema, [
+            {"id": 1, "d": float("nan")}, {"id": 2, "d": float("nan")}])
+        mn, mx, null_counts = self._min_max(table, file)
+        self.assertEqual((mn[1], mx[1]), (None, None))
+        self.assertEqual(null_counts, [0, 0])
+
+    def test_nanosecond_timestamp_omits_min_max(self):
+        pa_schema = pa.schema([
+            ("id", pa.int32(), False), ("ts", pa.timestamp("ns"))])
+        import datetime
+        epoch = datetime.datetime(1970, 1, 1)
+        # epoch+1ns and epoch+2ns both collapse to epoch as a us datetime, so
+        # min/max would be an unsound (too-narrow) bound; it must be omitted.
+        table, file = self._write("trunc_ns", pa_schema, [
+            {"id": 1, "ts": epoch}, {"id": 2, "ts": epoch}])
+        mn, mx, _ = self._min_max(table, file)
+        self.assertEqual((mn[1], mx[1]), (None, None))
+
+    def test_full_mode_unaffected(self):
+        # full is pre-existing behavior and must be left untouched: it still
+        # records the (finite) numeric bound even with NaN present.
+        pa_schema = pa.schema([("id", pa.int32(), False), ("d", pa.float64())])
+        table, file = self._write("full_nan", pa_schema, [
+            {"id": 1, "d": 1.0}, {"id": 2, "d": float("nan")}], mode="full")
+        mn, mx, _ = self._min_max(table, file)
+        self.assertEqual((mn[1], mx[1]), (1.0, 1.0))
+
+
 if __name__ == "__main__":
     unittest.main()

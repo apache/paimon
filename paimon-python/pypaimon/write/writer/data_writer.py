@@ -560,6 +560,20 @@ class DataWriter(ABC):
         converted = dict(column_stats)
         for field in fields:
             raw = column_stats[field.name]
+            if raw.get('min_max_unreliable'):
+                # Arrow min/max cannot produce a sound bound for this column
+                # (a float column containing NaN, or a nanosecond timestamp
+                # whose sub-microsecond part is lost on serialization). Keep
+                # the null count but omit min/max rather than publish a bound
+                # that would wrongly prune files -- matching the baseline,
+                # which wrote no value bounds for this option. ``full`` keeps
+                # its existing behavior (handled by the early return above).
+                converted[field.name] = {
+                    'min_values': None,
+                    'max_values': None,
+                    'null_counts': raw['null_counts'],
+                }
+                continue
             min_v, max_v, null_count = stats_mode.convert_col_stats(
                 self._stats_mode_kind, self._stats_mode_length,
                 raw['min_values'], raw['max_values'], raw['null_counts'])
@@ -599,20 +613,22 @@ class DataWriter(ABC):
                 "min_values": None,
                 "max_values": None,
                 "null_counts": column_array.null_count,
+                "min_max_unreliable": False,
             }
-        
+
         column_type = column_array.type
         supports_minmax = not (
             pa.types.is_nested(column_type) or pa.types.is_map(column_type) or pa.types.is_large_binary(column_type)
         )
-        
+
         if not supports_minmax:
             return {
                 "min_values": None,
                 "max_values": None,
                 "null_counts": column_array.null_count,
+                "min_max_unreliable": False,
             }
-        
+
         min_values = pc.min(column_array).as_py()
         max_values = pc.max(column_array).as_py()
         null_counts = column_array.null_count
@@ -620,7 +636,23 @@ class DataWriter(ABC):
             "min_values": min_values,
             "max_values": max_values,
             "null_counts": null_counts,
+            # min/max from these columns are not a sound bound: Arrow min/max
+            # skip NaN (a float file with a NaN keeps a finite min/max, and an
+            # all-NaN file yields none), and a Python datetime drops a
+            # nanosecond timestamp's sub-microsecond part. Only the value-stats
+            # path (never key stats) consumes this to omit the bound.
+            "min_max_unreliable": DataWriter._min_max_unreliable(column_array),
         }
+
+    @staticmethod
+    def _min_max_unreliable(column_array) -> bool:
+        column_type = column_array.type
+        if pa.types.is_floating(column_type):
+            has_nan = pc.any(pc.is_nan(column_array)).as_py()
+            return bool(has_nan)
+        if pa.types.is_timestamp(column_type) and column_type.unit == "ns":
+            return True
+        return False
 
 
 class SequenceGenerator:
