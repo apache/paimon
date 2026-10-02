@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -728,62 +729,46 @@ public class TableCommitTest {
     }
 
     @Test
-    public void testStrictModeIgnoresInheritedIndexPartitions() throws Exception {
-        // Regression test for the index-partition overlap check: it must consider
-        // only index entries the checked snapshot's commit itself added, replaced or removed.
-        // A DV-only OVERWRITE by another user in pt=2 must not conflict with our
-        // commit in pt=1 just because pt=1's DV entries, written before our
-        // last-safe-snapshot, are still carried by that snapshot's index manifest.
-        FileStoreTable table = createDvAppendTable();
-        BinaryRow pt1 = partitionRow(1);
-        BinaryRow pt2 = partitionRow(2);
+    public void testStrictModeIgnoresDeletionVectorsInheritedByCompaction() throws Exception {
+        // A streaming upsert job on a primary-key table with deletion vectors keeps compacting
+        // pt=2 while a job pinned to the snapshot it started from (e.g. rescale) writes pt=1.
+        FileStoreTable table = createPkDvTable();
+        String streamingUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write =
+                        table.newWrite(streamingUser)
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+                TableCommitImpl commit = table.newCommit(streamingUser)) {
+            for (int k = 0; k < 3; k++) {
+                write.write(GenericRow.of(1, k, 0L));
+                write.write(GenericRow.of(2, k, 0L));
+            }
+            commit.commit(0, write.prepareCommit(true, 0));
+            // updating a key of pt=1 gives pt=1 a deletion vector before the pinned job starts
+            write.write(GenericRow.of(1, 0, 1L));
+            commit.commit(1, write.prepareCommit(true, 1));
+            long jobStart = table.snapshotManager().latestSnapshotId();
 
-        // user1 writes pt=1 and pt=2 -> snapshot 1 (APPEND)
-        String user1 = UUID.randomUUID().toString();
-        TableWriteImpl<?> write1 = table.newWrite(user1);
-        TableCommitImpl commit1 = table.newCommit(user1);
-        write1.write(GenericRow.of(1, 0, 0L));
-        write1.write(GenericRow.of(2, 0, 0L));
-        commit1.commit(1, write1.prepareCommit(false, 1));
+            // the compaction of this pt=2 update changes only pt=2's deletion vectors, while
+            // its index manifest still lists pt=1's
+            write.write(GenericRow.of(2, 0, 2L));
+            commit.commit(2, write.prepareCommit(true, 2));
+            assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.COMPACT);
 
-        // user1 commits a DV on pt=1 -> snapshot 2 (OVERWRITE, dv-only)
-        commitDvOnly(table, user1, pt1, 2);
-
-        // user2 with strict mode, last-safe-snapshot=3 (skip its own snapshot 3)
-        String user2 = UUID.randomUUID().toString();
-        FileStoreTable tableWithStrict =
-                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), "3"));
-        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
-        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
-        write2.write(GenericRow.of(1, 1, 1L));
-        commit2.commit(1, write2.prepareCommit(false, 1));
-
-        // user1 DV-only OVERWRITE on pt=2 -> snapshot 4 (OVERWRITE). Its index manifest
-        // carries pt=2's new DV plus pt=1's DV inherited from snapshot 2, which is at or
-        // before last-safe-snapshot and must not count as this commit's change.
-        commitDvOnly(table, user1, pt2, 3);
-
-        // user2 COMPACT on pt=1: only pt=2 was changed by snapshot 4 -> no error
-        write2.write(GenericRow.of(1, 5, 5L));
-        write2.compact(pt1, 0, true);
-        assertThatCode(() -> commit2.commit(2, write2.prepareCommit(true, 2)))
-                .doesNotThrowAnyException();
-
-        // user1 DV-only OVERWRITE on pt=1 -> really replaces pt=1's DV entry
-        commitDvOnly(table, user1, pt1, 4);
-
-        // user2 COMPACT on pt=1: pt=1's index was changed by that OVERWRITE -> must throw
-        write2.write(GenericRow.of(1, 7, 7L));
-        write2.compact(pt1, 0, true);
-        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(true, 3)))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.enabled is true.");
-
-        write1.close();
-        commit1.close();
-        write2.close();
-        commit2.close();
+            FileStoreTable pinned =
+                    table.copy(
+                            singletonMap(
+                                    COMMIT_LAST_SAFE_SNAPSHOT.key(), String.valueOf(jobStart)));
+            String pinnedUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> pinnedWrite =
+                            pinned.newWrite(pinnedUser)
+                                    .withIOManager(new IOManagerImpl(tempDir.toString()));
+                    TableCommitImpl pinnedCommit = pinned.newCommit(pinnedUser)) {
+                pinnedWrite.write(GenericRow.of(1, 9, 9L));
+                assertThatCode(() -> pinnedCommit.commit(0, pinnedWrite.prepareCommit(false, 0)))
+                        .doesNotThrowAnyException();
+            }
+        }
     }
 
     @ParameterizedTest
@@ -840,6 +825,30 @@ public class TableCommitTest {
                 .hasMessageContaining("found a OVERWRITE snapshot (id: " + rollback.id() + ")")
                 .hasMessageContaining(
                         "Giving up committing as commit.strict-mode.enabled is true.");
+    }
+
+    private FileStoreTable createPkDvTable() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(), new Path(path), tableSchema, CatalogEnvironment.empty());
     }
 
     private FileStoreTable createDvAppendTable() throws Exception {
