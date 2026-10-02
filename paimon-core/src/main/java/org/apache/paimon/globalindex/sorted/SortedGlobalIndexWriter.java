@@ -86,7 +86,9 @@ public class SortedGlobalIndexWriter implements Serializable {
                 indexField,
                 table.fullName());
         this.indexField = rowType.getField(indexField);
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, this.indexField, options);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(
+                        indexType, Collections.singletonList(this.indexField), options);
         checkArgument(
                 indexer instanceof SortedGlobalIndexer,
                 "Index algorithm %s does not expose sorted index keys.",
@@ -131,7 +133,8 @@ public class SortedGlobalIndexWriter implements Serializable {
     }
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {
-        GlobalIndexWriter indexWriter = createIndexWriter(table, indexType, indexField, options);
+        GlobalIndexWriter indexWriter =
+                createIndexWriter(table, indexType, Collections.singletonList(indexField), options);
         if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
             throw new RuntimeException(
                     "Unexpected implementation, the index writer of "

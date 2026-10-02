@@ -419,16 +419,15 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     private Collection<GlobalIndexReader> createReaders(
             GlobalIndexFileReader indexFileReadWrite, IndexMetaFileGroup group, RowType rowType) {
-        DataField indexField = group.indexField(rowType);
-        List<DataField> extraFields = group.extraFields(rowType);
+        List<DataField> indexFields =
+                group.fieldIds.stream().map(rowType::getField).collect(Collectors.toList());
 
         Set<GlobalIndexReader> readers = new HashSet<>();
         for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : group.metas.entrySet()) {
             String indexType = entry.getKey();
             Map<Range, List<IndexFileMeta>> metas = entry.getValue();
             GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(indexType);
-            GlobalIndexer globalIndexer =
-                    globalIndexerFactory.create(indexField, extraFields, options);
+            GlobalIndexer globalIndexer = globalIndexerFactory.create(indexFields, options);
 
             List<CompletableFuture<GlobalIndexReader>> futures = new ArrayList<>(metas.size());
             for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {

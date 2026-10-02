@@ -1057,7 +1057,7 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
@@ -1098,8 +1098,7 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
-                                Collections.singletonList(idField),
+                                Arrays.asList(vectorField, idField),
                                 options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(i, GenericRow.of(new GenericArray(vectors[i]), (int) (rowRange.from + i)));

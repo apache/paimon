@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -104,7 +105,8 @@ public class PkSortedIndexBuilder {
             sourceFiles.add(
                     new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
         }
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, options);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(indexType, Collections.singletonList(indexField), options);
         checkArgument(
                 indexer instanceof SortedGlobalIndexer,
                 "Index algorithm %s does not expose sorted index keys.",
