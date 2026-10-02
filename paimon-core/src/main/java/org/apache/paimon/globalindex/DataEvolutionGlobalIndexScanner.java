@@ -50,6 +50,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,7 +63,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes on data-evolution tables. */
@@ -80,6 +80,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private final IndexPathFactory indexPathFactory;
     private final DataEvolutionGlobalIndexCoverage coverage;
     private final FileStoreTable table;
+    private final List<IndexFileMeta> indexFiles;
+    private final FileIO fileIO;
 
     private DataEvolutionGlobalIndexScanner(
             FileStoreTable table,
@@ -113,6 +115,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             Collection<IndexFileMeta> coverageIndexFiles,
             Collection<IndexFileMeta> indexFiles) {
         this.table = table;
+        this.indexFiles = new ArrayList<>(indexFiles);
+        this.fileIO = fileIO;
         this.options = options;
         this.rowType = rowType;
         this.executor =
@@ -147,23 +151,15 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     /** Groups metadata for both planning-time readers and reader-side query plans. */
     static Map<Integer, List<IndexMetaFileGroup>> groupIndexFiles(
             Collection<IndexFileMeta> indexFiles) {
-        Map<Integer, IndexMetaFileGroup> primaryGroups = new HashMap<>();
+        Map<List<Integer>, IndexMetaFileGroup> primaryGroups = new LinkedHashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             int indexFieldId = meta.indexFieldId();
             List<Integer> fieldIds = meta.getIndexedFieldIds();
-            IndexMetaFileGroup group = primaryGroups.get(indexFieldId);
+            IndexMetaFileGroup group = primaryGroups.get(fieldIds);
             if (group == null) {
                 group = new IndexMetaFileGroup(indexFieldId, fieldIds);
-                primaryGroups.put(indexFieldId, group);
-            } else {
-                checkArgument(
-                        group.fieldIds.equals(fieldIds),
-                        "Primary field %s owns multiple indexes with different columns %s and %s; "
-                                + "a primary column can own at most one index.",
-                        indexFieldId,
-                        group.fieldIds,
-                        fieldIds);
+                primaryGroups.put(fieldIds, group);
             }
             group.addFile(indexFile.indexType(), meta.rowRange(), indexFile);
         }
@@ -224,12 +220,30 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return create(table, null, null, indexFiles);
     }
 
+    /** Search pre-filters use per-column coverage, so they require single-field definitions. */
+    public static Optional<DataEvolutionGlobalIndexScanner> createForScalarFilters(
+            FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles) {
+        return create(
+                table,
+                pinnedSnapshot,
+                partitionFilter,
+                indexFiles.stream()
+                        .filter(file -> !isMultiFieldIndex(file))
+                        .collect(Collectors.toList()));
+    }
+
     public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table,
             @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
-        List<IndexFileMeta> globalIndexFiles = globalIndexFiles(indexFiles);
+        List<IndexFileMeta> globalIndexFiles =
+                globalIndexFiles(indexFiles).stream()
+                        .filter(file -> isIndexInSchema(table.rowType(), file))
+                        .collect(Collectors.toList());
         if (globalIndexFiles.isEmpty()) {
             return Optional.empty();
         }
@@ -325,6 +339,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
             return globalIndex != null
                     && globalIndex.indexFieldId() == fieldId
+                    && (globalIndex.extraFieldIds() == null
+                            || globalIndex.extraFieldIds().length == 0)
                     && BTreeGlobalIndexerFactory.IDENTIFIER.equals(indexFile.indexType());
         };
     }
@@ -343,11 +359,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         return false;
                     }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-                    if (globalIndex == null) {
+                    if (globalIndex == null
+                            || !isIndexInSchema(table.rowType(), entry.indexFile())) {
                         return false;
                     }
                     // Collect indexes whose primary column is filtered, and also multi-column
-                    // indexes that have a filtered column as an extra (used as a fallback).
+                    // indexes that have a filtered column as an extra.
                     if (filterFieldIds.contains(globalIndex.indexFieldId())) {
                         return true;
                     }
@@ -363,6 +380,17 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return indexFileFilter;
     }
 
+    private static boolean isMultiFieldIndex(IndexFileMeta file) {
+        GlobalIndexMeta meta = file.globalIndexMeta();
+        return meta != null && meta.extraFieldIds() != null && meta.extraFieldIds().length > 0;
+    }
+
+    /** Dropped indexed columns leave manifest entries that cannot serve the current schema. */
+    static boolean isIndexInSchema(RowType rowType, IndexFileMeta file) {
+        return file.globalIndexMeta().getIndexedFieldIds().stream()
+                .allMatch(rowType::containsField);
+    }
+
     private static List<IndexFileMeta> globalIndexFiles(Collection<IndexFileMeta> indexFiles) {
         return indexFiles.stream()
                 .filter(indexFile -> indexFile.globalIndexMeta() != null)
@@ -370,10 +398,29 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
-        return globalIndexEvaluator.evaluate(predicate);
+        return scanWithCoverage(predicate).map(GlobalIndexEvaluator.Evaluation::result);
     }
 
     public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
+        GlobalIndexQuery query =
+                predicate == null
+                                || indexFiles.stream()
+                                        .noneMatch(
+                                                DataEvolutionGlobalIndexScanner::isMultiFieldIndex)
+                        ? null
+                        : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
+        if (query != null && query.hasCompositeQuery()) {
+            try {
+                return query.evaluateWithCoverage(
+                        fileIO,
+                        options,
+                        indexFiles.stream()
+                                .map(file -> file.globalIndexMeta().rowRange())
+                                .collect(Collectors.toList()));
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to evaluate composite global index query", e);
+            }
+        }
         return globalIndexEvaluator.evaluateWithContributingFields(predicate);
     }
 
@@ -393,10 +440,36 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     public GlobalIndexResult unindexedRows(Predicate predicate) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        for (Range range : coverage.unindexedRanges(rowType, predicate)) {
+        GlobalIndexQuery query =
+                predicate == null
+                        ? null
+                        : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
+        if (query != null && query.hasCompositeQuery() && query.hasScalarQuery()) {
+            // Scalar shards can decline a predicate at runtime, so the legacy API must use
+            // evaluated coverage as well. Internal callers retain the evaluation directly.
+            Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanWithCoverage(predicate);
+            return evaluation.isPresent()
+                    ? unindexedRowsForEvaluation(evaluation.get())
+                    : GlobalIndexResult.fromRanges(
+                            coverage.unindexedRangesFromCoverage(Collections.emptyList(), null));
+        }
+        List<Range> unindexed =
+                query != null && query.hasCompositeQuery()
+                        ? coverage.unindexedRangesFromCoverage(query.coveredRanges(), null)
+                        : coverage.unindexedRanges(rowType, predicate);
+        for (Range range : unindexed) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);
+    }
+
+    public GlobalIndexResult unindexedRowsForEvaluation(
+            GlobalIndexEvaluator.Evaluation evaluation) {
+        if (evaluation.coveredRanges() == null) {
+            return unindexedRowsForContributingFields(evaluation.contributingFieldIds());
+        }
+        return GlobalIndexResult.fromRanges(
+                coverage.unindexedRangesFromCoverage(evaluation.coveredRanges(), null));
     }
 
     public GlobalIndexResult unindexedRowsForContributingFields(
@@ -421,6 +494,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             GlobalIndexFileReader indexFileReadWrite, IndexMetaFileGroup group, RowType rowType) {
         List<DataField> indexFields =
                 group.fieldIds.stream().map(rowType::getField).collect(Collectors.toList());
+        if (indexFields.size() > 1) {
+            return Collections.emptyList();
+        }
 
         Set<GlobalIndexReader> readers = new HashSet<>();
         for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : group.metas.entrySet()) {

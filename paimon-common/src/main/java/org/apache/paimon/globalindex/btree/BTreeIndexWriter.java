@@ -20,7 +20,6 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -149,27 +148,19 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter, Closeabl
             return;
         }
 
-        boolean differentKey = lastKey == null || comparator.compare(key, lastKey) != 0;
-        if (lastKey != null && differentKey) {
+        if (lastKey != null && comparator.compare(key, lastKey) != 0) {
             try {
                 flush();
             } catch (IOException e) {
                 throw new RuntimeException("Error in writing btree index files.", e);
             }
         }
-        if (differentKey || !(keySerializer instanceof CompositeKeySerializer)) {
-            // Sorted engine iterators can reuse the row backing a tuple key.
-            lastKey =
-                    keySerializer instanceof CompositeKeySerializer
-                            ? keySerializer.deserialize(
-                                    MemorySlice.wrap(keySerializer.serialize(key)))
-                            : key;
-        }
+        lastKey = key;
         currentRowIds.add(rowId);
 
         // update stats
         if (firstKey == null) {
-            firstKey = lastKey;
+            firstKey = key;
         }
     }
 

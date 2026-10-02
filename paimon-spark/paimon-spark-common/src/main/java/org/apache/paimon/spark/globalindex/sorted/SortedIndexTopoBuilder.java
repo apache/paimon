@@ -103,7 +103,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             throws IOException {
         SortedGlobalIndexScanner indexScanner =
                 new SortedGlobalIndexScanner(table, indexType, options)
-                        .withIndexField(indexField.name());
+                        .withIndexFields(Collections.singletonList(indexField.name()));
         if (partitionPredicate != null) {
             indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
         }
@@ -145,7 +145,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
         SortedGlobalIndexWriter indexWriter =
                 new SortedGlobalIndexWriter(table, indexType, options)
-                        .withIndexField(indexField.name());
+                        .withIndexFields(Collections.singletonList(indexField.name()));
         final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
         if (keyExtractor.isIdentity()) {
             List<SortedBuildTask> buildTasks = new ArrayList<>();
