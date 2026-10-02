@@ -78,6 +78,7 @@ class CompositeBTreeIndexProcedureTest extends PaimonSparkTestBase {
           s"CALL sys.create_global_index(table => 'test.T', index_column => '$columns', index_type => 'btree')")
       }
       insert(0, 40)
+      sql("INSERT INTO T VALUES (100, NULL, 7), (101, 'category-a', NULL)")
       build("category")
       build("item_number")
       build("category,item_number")
@@ -85,10 +86,29 @@ class CompositeBTreeIndexProcedureTest extends PaimonSparkTestBase {
       assert(indexes.exists(_.indexFile().globalIndexMeta().getIndexedFieldIds().size() == 2))
       for (inReader <- Seq(false, true)) {
         sql(
-          s"ALTER TABLE T SET TBLPROPERTIES ('global-index.query-in-reader.enabled' = '$inReader')")
+          s"ALTER TABLE T SET TBLPROPERTIES ('global-index.query-in-reader.enabled' = '$inReader', 'scalar-index.search-mode' = 'fast')")
         checkAnswer(
           sql("SELECT id FROM T WHERE item_number = 7 AND category = 'category-a'"),
           Seq(Row(7), Row(27)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE item_number > 7 AND category = 'category-a'"),
+          Seq(Row(8), Row(9), Row(28), Row(29)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number IN (7, 8)"),
+          Seq(Row(7), Row(8), Row(27), Row(28)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category IS NOT NULL AND item_number BETWEEN 7 AND 8"),
+          Seq(Row(7), Row(8), Row(17), Row(18), Row(27), Row(28), Row(37), Row(38))
+        )
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category = 'category-a'"),
+          (0 until 40).filter(i => (i / 10) % 2 == 0).map(Row(_)) :+ Row(101))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category IS NULL AND item_number = 7"),
+          Seq(Row(100)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number IS NULL"),
+          Seq(Row(101)))
       }
       insert(40, 60)
       build("category,item_number")

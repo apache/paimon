@@ -380,7 +380,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return indexFileFilter;
     }
 
-    private static boolean isCompositeBTree(IndexFileMeta file) {
+    static boolean isCompositeBTree(IndexFileMeta file) {
         GlobalIndexMeta meta = file.globalIndexMeta();
         return "btree".equals(file.indexType())
                 && meta != null
@@ -411,7 +411,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                         .noneMatch(
                                                 DataEvolutionGlobalIndexScanner::isCompositeBTree)
                         ? null
-                        : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
+                        : GlobalIndexQuery.create(
+                                rowType, predicate, indexFiles, indexPathFactory, options);
         if (query != null && query.hasCompositeQuery()) {
             try {
                 return query.evaluateWithCoverage(
@@ -446,9 +447,13 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         GlobalIndexQuery query =
                 predicate == null
                         ? null
-                        : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
-        if (query != null && query.hasCompositeQuery() && query.hasScalarQuery()) {
-            // Scalar shards can decline a predicate at runtime, so the legacy API must use
+                        : GlobalIndexQuery.create(
+                                rowType, predicate, indexFiles, indexPathFactory, options);
+        if (query != null
+                && query.requiresPlanningEvaluation()
+                && indexFiles.stream()
+                        .anyMatch(DataEvolutionGlobalIndexScanner::isCompositeBTree)) {
+            // Scalar predicates and composite scans can decline at runtime, so use
             // evaluated coverage as well. Internal callers retain the evaluation directly.
             Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanWithCoverage(predicate);
             return evaluation.isPresent()

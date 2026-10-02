@@ -18,24 +18,18 @@
 
 package org.apache.paimon.globalindex.btree;
 
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileMetaSelector;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 /** The {@link GlobalIndexerFactory} for btree index. */
 public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -57,23 +51,8 @@ public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
             List<DataField> fields = new ArrayList<>();
             fields.add(indexField);
             fields.addAll(extraFields);
-            Optional<List<LeafPredicate>> matched =
-                    CompositeBTreePredicate.match(fields, predicate);
-            if (!matched.isPresent()) {
-                return files;
-            }
-            if (CompositeBTreePredicate.isContradictory(fields, predicate)) {
-                return Collections.emptyList();
-            }
-            if (files.stream().anyMatch(file -> file.metadata() == null)) {
-                return files;
-            }
-            KeySerializer serializer = new CompositeKeySerializer(new RowType(fields));
-            Object[] values = matched.get().stream().map(leaf -> leaf.literals().get(0)).toArray();
-            return new SortedFileMetaSelector(files, serializer)
-                    .visitEqual(
-                            new FieldRef(0, indexField.name(), new RowType(fields)),
-                            GenericRow.of(values))
+            return CompositeBTreePredicate.plan(fields, predicate)
+                    .map(plan -> plan.selectFiles(files))
                     .orElse(files);
         }
         return SortedFileMetaSelector.selectFiles(

@@ -388,10 +388,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         table.rowType(),
                         indexFilter,
                         indexFiles,
-                        table.store().pathFactory().globalIndexFileFactory());
-        // Scalar reader support can depend on global file coverage and scan budgets. Resolve it
-        // before split pruning so unsupported residuals cannot discard composite matches.
-        if (indexQuery == null || (indexQuery.hasCompositeQuery() && indexQuery.hasScalarQuery())) {
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions().toConfiguration());
+        // Scalar and composite range support can depend on coverage and scan budgets. Resolve it
+        // before split pruning, including scalar alternatives after a composite scan is rejected.
+        if (indexQuery == null
+                || (indexQuery.requiresPlanningEvaluation()
+                        && indexFiles.stream()
+                                .anyMatch(DataEvolutionGlobalIndexScanner::isCompositeBTree))) {
             return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
         }
         List<Range> unindexed =

@@ -60,6 +60,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     private final Comparator<Object> comparator;
     private final long totalRowCount;
     @Nullable private final Pair<Object, Object> fullRangeBounds;
+    private final List<GlobalIndexIOMeta> indexFiles;
+    private final long fallbackScanMaxSize;
 
     public LazyFilteredBTreeReader(
             List<GlobalIndexIOMeta> files,
@@ -74,11 +76,33 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.indexFiles = files;
+        this.fallbackScanMaxSize = fallbackScanMaxSize;
         this.rowIdFilter =
                 rowRanges == null ? null : GlobalIndexResult.fromRanges(rowRanges).results();
         this.comparator = keySerializer.createComparator();
         this.totalRowCount = totalRowCount;
         this.fullRangeBounds = fullRangeBounds(files);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitComposite(
+            org.apache.paimon.predicate.Predicate predicate) {
+        if (!(keySerializer instanceof CompositeKeySerializer)) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        Optional<CompositeBTreePredicate.Plan> planned =
+                CompositeBTreePredicate.plan(
+                        ((CompositeKeySerializer) keySerializer).rowType().getFields(), predicate);
+        if (!planned.isPresent()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        CompositeBTreePredicate.Plan plan = planned.get();
+        List<GlobalIndexIOMeta> selected = plan.selectFiles(indexFiles);
+        if (!plan.canScan(selected, fallbackScanMaxSize)) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        return visitSelectedFiles(Optional.of(selected), reader -> reader.visitComposite(plan));
     }
 
     @Nullable

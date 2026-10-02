@@ -161,26 +161,54 @@ WHERE category = 'category-a'
   AND item_number = 107;
 ```
 
-The index stores typed tuples and one row-ID posting list for each distinct tuple.
-An AND containing equality conditions for every indexed column uses a single
-composite point lookup, regardless of the SQL condition order. This avoids
-materializing the individual columns' posting lists before intersecting them.
-Additional predicates remain filters, and OR branches can each use their own
-composite lookup. When several composite indexes match, the query prefers the
-one with the most columns.
+The index stores typed tuples in lexicographic column order and one row-ID posting
+list for each distinct tuple. Conditions are matched by column name, regardless of
+the SQL condition order. For an index on `(category, item_number, tag)`:
 
-Queries combining a composite lookup with another indexed scalar condition are
-evaluated during planning, so unsupported scalar predicates and scan budgets
-retain the usual fallback behavior across data splits. Pure composite lookups
-can still use reader-side index evaluation.
+| Conditions | Index access |
+|---|---|
+| Equality on all key columns | Point lookup; avoids expanding individual columns' posting lists. |
+| `category = 'category-a'` | Scan the matching leading prefix. |
+| `category = 'category-a' AND item_number > 107` | Equality prefix followed by a range. `>=`, `<`, `<=`, and `BETWEEN` are also supported. |
+| `category IN ('category-a', 'category-b') AND item_number BETWEEN 10 AND 20` | One range for each equality/IN prefix. |
+| `category IS NULL AND item_number = 107` | NULL is a fixed prefix value. `IS NOT NULL` can bound a range. |
+| `category = 'category-a' AND item_number > 107 AND tag = 'x'` | Scan the prefix/range and test `tag` on index keys before decoding row IDs. |
+| `category = 'category-a' AND tag = 'x'` | Scan the category prefix; test `tag` on index keys. The gap prevents `tag` from narrowing the scan interval. |
+| Conditions on only `item_number` or `tag` | Use available single-column indexes or ordinary scans. No skip scan is performed. |
+
+Leading `=`, `IN`, and `IS NULL` conditions extend the lookup prefix. The first
+range column ends interval construction. Supported conditions on later index
+columns are still evaluated on keys before expanding postings; they do not
+narrow the scanned interval. Other conditions remain data filters. OR branches
+can each choose their own index path. String predicates such as `LIKE` can filter
+keys within a selected prefix/range; they do not construct composite prefix
+ranges by themselves.
+
+IN expansion is limited to 256 intervals per composite index lookup. The limit applies
+to the product of distinct, matching values in consecutive key columns.
+Exceeding the limit falls back to available single-column indexes or ordinary
+scans. Prefix and range scans also obey `btree-index.fallback-scan-max-size`,
+using the total file bytes remaining after min/max pruning, per index row-range
+group. Complete point lookups do not use this scan budget. Budget-ineligible
+composite paths are excluded before selecting an index, preserving available
+single-column alternatives.
+
+Selection uses metadata heuristics: more bounded leading columns, more indexed
+filter columns, broader row-ID coverage, complete point probes, fewer intervals,
+then fewer selected file bytes and fewer total key columns. A single-column
+BTree is preferred when only the composite leading column is filtered and the
+single-column index covers all of the composite candidate's row ranges. This is
+not a statistics-based cost optimizer.
+
+Composite prefix/range queries and queries combining composite and scalar
+conditions, including scalar alternatives after a composite path is rejected,
+are evaluated during planning, so runtime support and scan budgets
+are resolved before data-split pruning. Pure composite point queries, including
+bounded IN combinations and NULL prefixes, can use reader-side evaluation.
 
 Vector and full-text search pre-filters currently use single-column indexes or
 the usual data fallback; they do not evaluate composite BTree indexes.
-
 Composite indexes can coexist with single-column indexes on the same columns.
-The current composite query path requires equality conditions for all key
-columns; prefix queries, ranges, and conditions on only some key columns use
-available single-column indexes or ordinary table scans.
 
 Coverage is determined by the selected index. In `full` and `detail` modes, rows
 outside the composite index's coverage are scanned even when single-column
@@ -201,7 +229,7 @@ supported in PyPaimon.
 | `btree-index.bloom-filter.enabled` | `false` | Whether to write a Bloom filter to accelerate BTree equality and `IN` lookups. |
 | `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |
 | `btree-index.high-priority-pool-ratio` | `0.1` | Fraction of `btree-index.cache-size` reserved for high-priority data such as index blocks; the rest caches data blocks. Must be in `[0, 1)`. |
-| `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans. Set to `0 b` to disable fallback scans. |
+| `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans, including composite prefix/range scans. Set to `0 b` to disable these scans; complete point probes remain supported. |
 | `btree-index.compression` | `none` | Compression algorithm used by BTree index blocks. |
 | `btree-index.compression-level` | `1` | Compression level used by codecs that support levels, such as `zstd`. |
 

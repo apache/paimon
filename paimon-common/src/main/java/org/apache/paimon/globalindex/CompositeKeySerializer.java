@@ -30,12 +30,15 @@ import java.util.Comparator;
 /** Length-delimited tuple keys, compared by their typed components with nulls first. */
 public class CompositeKeySerializer implements KeySerializer {
 
+    private final RowType rowType;
+
     private final KeySerializer[] serializers;
     private final InternalRow.FieldGetter[] getters;
     private final Comparator<Object>[] comparators;
 
     @SuppressWarnings("unchecked")
     public CompositeKeySerializer(RowType type) {
+        this.rowType = type;
         int count = type.getFieldCount();
         serializers = new KeySerializer[count];
         getters = new InternalRow.FieldGetter[count];
@@ -45,6 +48,10 @@ public class CompositeKeySerializer implements KeySerializer {
             getters[i] = InternalRow.createFieldGetter(type.getTypeAt(i), i);
             comparators[i] = serializers[i].createComparator();
         }
+    }
+
+    public RowType rowType() {
+        return rowType;
     }
 
     @Override

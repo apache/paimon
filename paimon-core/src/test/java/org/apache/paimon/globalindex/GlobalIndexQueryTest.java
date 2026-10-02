@@ -87,6 +87,72 @@ class GlobalIndexQueryTest {
 
     @TempDir java.nio.file.Path tempDir;
 
+    @Test
+    void testCompositeChoiceUsesUsefulPrefixCoverageAndBytes() throws Exception {
+        RowType type = RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        PredicateBuilder builder = new PredicateBuilder(type);
+        Predicate joint = PredicateBuilder.and(builder.equal(0, 7), builder.equal(1, 8));
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(
+                                        "index/"
+                                                + invocation
+                                                        .<IndexFileMeta>getArgument(0)
+                                                        .fileName()));
+        IndexFileMeta ab = compositeFile("ab", 1000, 99, 0, new int[] {1});
+        IndexFileMeta abc = compositeFile("abc", 1, 99, 0, new int[] {1, 2});
+        IndexFileMeta ba = compositeFile("ba", 100, 99, 1, new int[] {0});
+        // AB is a point lookup, whereas ABC has an unconstrained trailing column.
+        assertQueryFiles(type, joint, paths, Arrays.asList(abc, ab), "ab", "abc");
+        // Equivalent point lookups prefer fewer selected bytes, independently of metadata order.
+        assertQueryFiles(type, joint, paths, Arrays.asList(ab, ba), "ba", "ab");
+        assertQueryFiles(type, joint, paths, Arrays.asList(ba, ab), "ba", "ab");
+        IndexFileMeta covered = compositeFile("covered", 10000, 199, 1, new int[] {0});
+        GlobalIndexQuery query =
+                GlobalIndexQuery.create(type, joint, Arrays.asList(ab, covered), paths);
+        assertThat(query.coveredRanges()).containsExactly(new Range(0, 199));
+        assertQueryFiles(type, joint, paths, Arrays.asList(ab, covered), "covered", "ab");
+        IndexFileMeta scalar = compositeFile("scalar", 10, 99, 0, null);
+        GlobalIndexQuery scalarQuery =
+                GlobalIndexQuery.create(
+                        type, builder.equal(0, 7), Arrays.asList(ab, scalar), paths);
+        assertThat(scalarQuery.hasCompositeQuery()).isFalse();
+        assertQueryFiles(
+                type, builder.equal(0, 7), paths, Arrays.asList(ab, scalar), "scalar", "ab");
+    }
+
+    private IndexFileMeta compositeFile(
+            String name, long bytes, long lastRow, int field, int[] extras) {
+        return new IndexFileMeta(
+                "btree",
+                name,
+                bytes,
+                lastRow + 1,
+                new GlobalIndexMeta(0, lastRow, field, extras, null),
+                null);
+    }
+
+    private void assertQueryFiles(
+            RowType type,
+            Predicate predicate,
+            IndexPathFactory paths,
+            List<IndexFileMeta> files,
+            String selected,
+            String skipped)
+            throws Exception {
+        GlobalIndexQuery query = GlobalIndexQuery.create(type, predicate, files, paths);
+        DataOutputSerializer output = new DataOutputSerializer(256);
+        query.serialize(output);
+        String serialized = new String(output.getCopyOfBuffer(), StandardCharsets.ISO_8859_1);
+        assertThat(serialized).contains("index/" + selected).doesNotContain("index/" + skipped);
+        GlobalIndexQuery restored =
+                GlobalIndexQuery.deserialize(
+                        new org.apache.paimon.io.DataInputDeserializer(output.getCopyOfBuffer()));
+        assertThat(restored).isEqualTo(query);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
     void testPrunesSortedFilesBeforeSplitSerialization(String indexType) throws Exception {

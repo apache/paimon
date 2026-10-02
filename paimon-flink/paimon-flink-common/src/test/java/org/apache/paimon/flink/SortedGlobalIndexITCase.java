@@ -36,6 +36,7 @@ import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -98,7 +99,10 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                                                 (i / 10) % 2 == 0 ? "category-a" : "category-b",
                                                 i % 10))
                         .collect(Collectors.joining(","));
-        sql("INSERT INTO T_COMPOSITE VALUES " + values);
+        sql(
+                "INSERT INTO T_COMPOSITE VALUES "
+                        + values
+                        + ", (100, CAST(NULL AS STRING), 7), (101, 'category-a', CAST(NULL AS INT))");
         sql(
                 "CALL sys.create_global_index(`table` => 'default.T_COMPOSITE', index_column => 'category,item_number', index_type => 'btree')");
         assertThat(
@@ -113,11 +117,43 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                             assertThat(entry.indexFile().globalIndexMeta().rowRange().count())
                                     .isLessThanOrEqualTo(13);
                         });
-        sql("ALTER TABLE T_COMPOSITE SET ('global-index.query-in-reader.enabled' = 'true')");
-        assertThat(
-                        sql(
-                                "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 7"))
-                .containsExactlyInAnyOrder(Row.of(7), Row.of(27));
+        for (boolean inReader : Arrays.asList(false, true)) {
+            sql(
+                    "ALTER TABLE T_COMPOSITE SET ('global-index.query-in-reader.enabled' = '"
+                            + inReader
+                            + "', 'scalar-index.search-mode' = 'fast')");
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 7"))
+                    .containsExactlyInAnyOrder(Row.of(7), Row.of(27));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE item_number > 7 AND category = 'category-a'"))
+                    .containsExactlyInAnyOrder(Row.of(8), Row.of(9), Row.of(28), Row.of(29));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number IN (7, 8)"))
+                    .containsExactlyInAnyOrder(Row.of(7), Row.of(8), Row.of(27), Row.of(28));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE category IS NOT NULL AND item_number BETWEEN 7 AND 8"))
+                    .containsExactlyInAnyOrder(
+                            Row.of(7),
+                            Row.of(8),
+                            Row.of(17),
+                            Row.of(18),
+                            Row.of(27),
+                            Row.of(28),
+                            Row.of(37),
+                            Row.of(38));
+            assertThat(sql("SELECT id FROM T_COMPOSITE WHERE category = 'category-a'")).hasSize(21);
+            assertThat(sql("SELECT id FROM T_COMPOSITE WHERE category IS NULL AND item_number = 7"))
+                    .containsExactly(Row.of(100));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number IS NULL"))
+                    .containsExactly(Row.of(101));
+        }
     }
 
     @Test
