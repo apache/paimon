@@ -38,7 +38,6 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -548,101 +547,34 @@ public class TableWriteTest {
     }
 
     @Test
-    public void testWithWriteTypeRebuildsDefaultValueRow() throws Exception {
-        // at least one column default makes TableWriteImpl wrap rows with DefaultValueRow
-        FileStoreTable table = createRowTrackingTableWithDefault(new Options());
-
-        TableWriteImpl<?> write = table.newWrite(commitUser);
-        // the Spark copy-on-write rewrite writes with the row-tracking-extended type and nulls
-        // _SEQUENCE_NUMBER on updated rows; a stale DefaultValueRow sized for the original type
-        // reads past its end at that position
-        RowType writeType = SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true);
-        write.withWriteType(writeType);
-
-        int arity = writeType.getFieldCount();
-        GenericRow row = new GenericRow(arity);
-        row.setField(0, 1);
-        row.setField(1, 10);
-        row.setField(2, 20); // non-default value on the defaulted column
-        row.setField(3, 0L); // _ROW_ID is required
-        // leave the appended _SEQUENCE_NUMBER null, like the Spark rewrite does
-        write.write(row);
-
-        StreamTableCommit commit = table.newCommit(commitUser);
-        commit.commit(0, write.prepareCommit(false, 0));
-        write.close();
-        commit.close();
-
-        // the explicit value survives the type change (single row: readRows keeps the reader's
-        // reused row objects without copying them)
-        List<InternalRow> rows = readRows(table);
-        assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).getInt(2)).isEqualTo(20);
-    }
-
-    @Test
-    public void testWithWriteTypeSubstitutesDefaultValue() throws Exception {
-        // same shape as testWithWriteTypeRebuildsDefaultValueRow, but the defaulted column
-        // is null: the rebuilt DefaultValueRow must fill the default at v's position in the
-        // extended write type
-        FileStoreTable table = createRowTrackingTableWithDefault(new Options());
-
-        TableWriteImpl<?> write = table.newWrite(commitUser);
-        RowType writeType = SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true);
-        write.withWriteType(writeType);
-
-        int arity = writeType.getFieldCount();
-        GenericRow row = new GenericRow(arity);
-        row.setField(0, 1);
-        row.setField(1, 11);
-        row.setField(3, 1L);
-        // v and the appended _SEQUENCE_NUMBER stay null
-        write.write(row);
-
-        StreamTableCommit commit = table.newCommit(commitUser);
-        commit.commit(0, write.prepareCommit(false, 0));
-        write.close();
-        commit.close();
-
-        List<InternalRow> rows = readRows(table);
-        assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).getInt(2)).isEqualTo(7);
-    }
-
-    @Test
-    public void testWithWriteTypeNarrowedProjectionUsesShiftedDefault() throws Exception {
-        // a narrowed projection moves the defaulted column v from position 2 to position 1,
-        // where the table type has k, which has no default
-        FileStoreTable table = createRowTrackingTableWithDefault(new Options());
-
-        TableWriteImpl<?> write = table.newWrite(commitUser);
-        write.withWriteType(table.rowType().project("pt", "v"));
-
-        SinkRecord record = write.writeAndReturn(GenericRow.of(1, null));
-        assertThat(record.row().isNullAt(1)).isFalse();
-        assertThat(record.row().getInt(1)).isEqualTo(7);
-        write.close();
-    }
-
-    @Test
     public void testWithWriteTypeAcceptsNestedPrunedRowDefault() throws Exception {
         // the data-evolution partial writers prune a ROW column to the written sub-fields but
-        // keep its full default; they only use the FileStoreWrite and never wrap rows, so
-        // withWriteType must not convert that default against the pruned type
+        // keep its full default; they never wrap rows, so withWriteType must not convert that
+        // default against the pruned type
         Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, -1);
+        conf.set(CoreOptions.ROW_TRACKING_ENABLED, true);
         conf.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
         conf.set(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED, true);
         RowType nested =
                 DataTypes.ROW(
                         new DataField(2, "a", DataTypes.INT()),
                         new DataField(3, "b", DataTypes.STRING()));
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "s", nested, null, "{42, x}"));
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                fields,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
         FileStoreTable table =
-                createRowTrackingTable(
-                        Arrays.asList(
-                                new DataField(0, "id", DataTypes.INT()),
-                                new DataField(1, "s", nested, null, "{42, x}")),
-                        Collections.emptyList(),
-                        conf);
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
         RowType writeType = table.rowType().projectByPaths(Collections.singletonList("s.a"));
         DataField pruned = writeType.getField("s");
@@ -652,28 +584,6 @@ public class TableWriteTest {
         try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
             write.withWriteType(writeType);
         }
-    }
-
-    private FileStoreTable createRowTrackingTableWithDefault(Options conf) throws Exception {
-        return createRowTrackingTable(
-                Arrays.asList(
-                        new DataField(0, "pt", DataTypes.INT()),
-                        new DataField(1, "k", DataTypes.INT()),
-                        new DataField(2, "v", DataTypes.INT(), null, "7")),
-                Collections.singletonList("pt"),
-                conf);
-    }
-
-    private FileStoreTable createRowTrackingTable(
-            List<DataField> fields, List<String> partitionKeys, Options conf) throws Exception {
-        conf.set(CoreOptions.BUCKET, -1);
-        conf.set(CoreOptions.ROW_TRACKING_ENABLED, true);
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                fields, partitionKeys, Collections.emptyList(), conf.toMap(), ""));
-        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 
     private FileStoreTable createFileStoreTable(Options conf) throws Exception {

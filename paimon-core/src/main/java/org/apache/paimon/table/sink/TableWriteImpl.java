@@ -135,10 +135,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.withWriteType(writeType);
         this.writeType = writeType;
         updateNotNullFieldIndexes();
-        // the default value row must follow the positions and arity of the write type; rebuild
-        // it lazily when the next row is wrapped, since callers that only use the FileStoreWrite
-        // (e.g. the data-evolution partial writers, whose pruned ROW types cannot convert the
-        // full ROW default) never wrap rows with it
+        // rebuilt lazily: the data-evolution partial writers pass pruned ROW types that cannot
+        // convert the full ROW default, but they never wrap rows with it
         this.defaultValueRowOutdated = true;
         return this;
     }
