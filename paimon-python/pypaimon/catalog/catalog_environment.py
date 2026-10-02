@@ -101,6 +101,9 @@ class CatalogEnvironment:
         context = getattr(self.catalog_loader, "context", None)
         return context() if callable(context) else None
 
+    def blob_index_cache(self):
+        return getattr(self.catalog_context(), "blob_index_cache", None)
+
     def dependency_read_context(self) -> Optional[CatalogContext]:
         context = self.catalog_context()
         if self.identifier is None or context is None:
@@ -123,12 +126,7 @@ class CatalogEnvironment:
         dependency_options.to_map()[self._READ_VIA_OPTION] = RESTUtil.encode_string(
             JSON.to_json(self.identifier, separators=(",", ":"))
         )
-        return CatalogContext.create(
-            dependency_options,
-            context.hadoop_conf,
-            context.prefer_io_loader,
-            context.fallback_io_loader,
-        )
+        return context.with_options(dependency_options)
 
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """
