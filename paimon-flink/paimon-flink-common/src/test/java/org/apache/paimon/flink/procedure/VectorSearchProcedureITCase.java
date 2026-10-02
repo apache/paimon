@@ -686,8 +686,14 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                         .map(RawVectorSearchSplit.class::cast)
                         .collect(Collectors.toList());
         assertThat(rawSplits).hasSize(1);
-        assertThat(rawSplits.get(0).rowRanges()).containsExactly(new Range(8, 11));
-        assertThat(rawSplits.get(0).scalarIndexFiles()).isEmpty();
+        // Multi-field definitions do not supply single-field coverage, so FULL search retains
+        // these rows on the raw fallback path as well.
+        assertThat(rawSplits.get(0).rowRanges()).containsExactly(new Range(0, 11));
+        assertThat(rawSplits.get(0).scalarIndexFiles())
+                .containsExactlyInAnyOrderElementsOf(
+                        indexSplits.stream()
+                                .flatMap(split -> split.vectorIndexFiles().stream())
+                                .collect(Collectors.toList()));
 
         List<String> rows =
                 sql(

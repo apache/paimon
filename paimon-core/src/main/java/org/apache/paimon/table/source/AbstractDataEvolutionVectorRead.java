@@ -242,7 +242,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return null;
@@ -286,7 +286,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return null;

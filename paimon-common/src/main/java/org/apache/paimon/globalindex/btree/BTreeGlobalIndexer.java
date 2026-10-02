@@ -41,6 +41,7 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -74,12 +75,14 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
     private static final double BLOOM_FILTER_FPP = 0.05;
 
     private final KeySerializer keySerializer;
+    private final List<DataField> fields;
     private final GlobalIndexKeyExtractor keyExtractor;
     private final Options options;
     private final long fallbackScanMaxSize;
     private final LazyField<CacheManager> cacheManager;
 
     public BTreeGlobalIndexer(List<DataField> fields, Options options) {
+        this.fields = new ArrayList<>(fields);
         checkArgument(!fields.isEmpty(), "BTree index requires at least one field.");
         for (DataField field : fields) {
             if (field.type() instanceof RowType) {
@@ -140,6 +143,7 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
             ExecutorService executor) {
         return new LazyFilteredBTreeReader(
                 files,
+                fields,
                 keySerializer,
                 fileReader,
                 cacheManager.get(),
