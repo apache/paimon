@@ -196,6 +196,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
+        requirePartitionBucketCount(partition);
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
         write(container, data);
     }
@@ -501,10 +502,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     protected WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
-        requirePartitionBucketCount(partition);
         Map<Integer, WriterContainer<T>> buckets = getWriterContainers(partition);
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket));
+                bucket, k -> createMaintenanceWriterContainer(partition.copy(), bucket));
     }
 
     private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket, int totalBuckets) {
@@ -533,6 +533,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     public WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
         requirePartitionBucketCount(partition);
+        return createMaintenanceWriterContainer(partition, bucket);
+    }
+
+    private WriterContainer<T> createMaintenanceWriterContainer(BinaryRow partition, int bucket) {
         return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck, false);
     }
 

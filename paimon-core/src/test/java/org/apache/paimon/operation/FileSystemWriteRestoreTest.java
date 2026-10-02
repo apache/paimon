@@ -247,6 +247,30 @@ public class FileSystemWriteRestoreTest {
     }
 
     @Test
+    public void testNotifyNewFilesRestoresWriterWithPartitionBucketCount() throws Exception {
+        FileStoreTable table = createPartitionedPkTable(4, false);
+        commitOneRow(table, 1, 1);
+        commitOneRow(table, 1, 2);
+
+        int emptyBucket = findEmptyBucket(table, 1, /* totalBuckets */ 4);
+        table = withBucket(table, 32, true);
+
+        BinaryRow partition = binaryRow(1);
+        try (TableWriteImpl<?> write = table.newWrite(UUID.randomUUID().toString())) {
+            // notifyNewFiles is a maintenance path. It must restore an empty bucket from the
+            // partition mapping instead of rejecting the legacy (partition, bucket) lookup.
+            write.notifyNewFiles(
+                    table.snapshotManager().latestSnapshotId(),
+                    partition,
+                    emptyBucket,
+                    Collections.emptyList());
+
+            assertThat(((AbstractFileStoreWrite<?>) write.getWrite()).getActiveBuckets())
+                    .containsEntry(partition, Collections.singletonList(emptyBucket));
+        }
+    }
+
+    @Test
     public void testNonEmptyBucketReportsManifestTotalBuckets() throws Exception {
         // Sanity test: when a bucket has files, totalBuckets must come from the
         // manifest entries (not from the fallback path). This guards against
