@@ -288,6 +288,39 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
                 .containsExactly((Float) null);
     }
 
+    @Test
+    public void testPartialUpdateWithMissingVectorRangeWithoutDeletionVectors() throws Exception {
+        // Same partial-vector layout as testPartialUpdateWithMissingVectorRange but without
+        // deletion vectors: embedding_v2 is populated only for rows [2, 3], so projecting it must
+        // still emit rows [0, 1] as NULL. Without the fix the anchor is dropped and the vector read
+        // planner takes the sequential path, which rejects the mismatched row count.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        write(getTableDefault(), GenericRow.of(0, vector(1)), GenericRow.of(1, vector(1)));
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        write(
+                getTableDefault(),
+                GenericRow.of(2, vector(1), vector(10)),
+                GenericRow.of(3, vector(1), vector(10)));
+        updateVectors(
+                2,
+                Collections.singletonList("embedding_v2"),
+                GenericRow.of(vector(200)),
+                GenericRow.of(vector(200)));
+        compactVectorTable();
+
+        ReadBuilder builder = getTableDefault().newReadBuilder().withProjection(new int[] {2});
+        List<Split> splits = builder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        DataSplit split = (DataSplit) splits.get(0);
+        assertThat(readVectorValues(builder.newRead().createReader(split)))
+                .containsExactly(null, null, 200F, 200F);
+    }
+
     private List<Float> readVectorValues(RecordReader<InternalRow> reader) throws IOException {
         List<Float> actual = new ArrayList<>();
         try (RecordReader<InternalRow> closeable = reader) {

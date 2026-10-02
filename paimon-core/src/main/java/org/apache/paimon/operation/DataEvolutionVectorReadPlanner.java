@@ -93,12 +93,26 @@ class DataEvolutionVectorReadPlanner {
             }
         }
 
-        // Keep the sequential path for disjoint column groups, including rolled vector files.
-        if (!overlappingGroups) {
-            return null;
-        }
         if (logicalRange == null) {
             logicalRange = new Range(firstRowId, lastRowId);
+        }
+
+        // A projected vector store that covers only a sub-range of the group cannot use the
+        // sequential path: its bunch has fewer rows than the anchor, so the union reader rejects
+        // the mismatched row count. Plan explicit ranges so the uncovered rows are NULL-filled.
+        boolean partialVector = false;
+        for (Candidate candidate : candidates) {
+            Range range = candidate.file.nonNullRowIdRange();
+            if (range.from > logicalRange.from || range.to < logicalRange.to) {
+                partialVector = true;
+                break;
+            }
+        }
+
+        // Keep the sequential path for disjoint column groups that each span the whole range,
+        // including rolled vector files.
+        if (!overlappingGroups && !partialVector) {
+            return null;
         }
 
         // Resolve the original files before VectorFileBunch can discard older overlapping files.
