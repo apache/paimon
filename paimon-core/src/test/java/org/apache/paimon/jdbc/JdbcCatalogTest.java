@@ -88,6 +88,10 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     private JdbcCatalog initCatalog(Map<String, String> props, String uri) {
+        return initCatalog(props, uri, "test-jdbc-catalog");
+    }
+
+    private JdbcCatalog initCatalog(Map<String, String> props, String uri, String catalogKey) {
         Map<String, String> properties = Maps.newHashMap();
         properties.put(CatalogOptions.URI.key(), uri);
 
@@ -100,7 +104,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
         JdbcCatalog catalog =
                 new JdbcCatalog(
                         fileIO,
-                        "test-jdbc-catalog",
+                        catalogKey,
                         CatalogContext.create(Options.fromMap(properties)),
                         warehouse);
         assertThat(catalog.warehouse()).isEqualTo(warehouse);
@@ -879,6 +883,31 @@ public class JdbcCatalogTest extends CatalogTestBase {
         assertThat(localPath(jdbcCatalog.getTableLocation(unregistered))).exists();
         jdbcCatalog.repairDatabase(databaseName);
         assertThat(jdbcCatalog.listTables(databaseName)).containsExactly("u");
+    }
+
+    @Test
+    public void testDropDatabaseKeepsTablesOfAnotherCatalogKey() throws Exception {
+        String uri =
+                "jdbc:sqlite:file:"
+                        + UUID.randomUUID().toString().replace("-", "")
+                        + "?mode=memory&cache=shared";
+        JdbcCatalog catalogA = initCatalog(Maps.newHashMap(), uri, "catalog_a");
+        JdbcCatalog catalogB = initCatalog(Maps.newHashMap(), uri, "catalog_b");
+
+        // both catalogs share the JDBC database and the warehouse, so their same-named
+        // databases map to the same directory
+        String databaseName = "shared_db";
+        catalogA.createDatabase(databaseName, false);
+        catalogB.createDatabase(databaseName, false);
+        Identifier tableOfB = Identifier.create(databaseName, "b_table");
+        catalogB.createTable(
+                tableOfB, Schema.newBuilder().column("k", DataTypes.INT()).build(), false);
+
+        catalogA.dropDatabase(databaseName, false, false);
+
+        assertThat(localPath(catalogB.getTableLocation(tableOfB))).exists();
+        assertThat(catalogB.listTables(databaseName)).containsExactly("b_table");
+        assertDoesNotThrow(() -> catalogB.getTable(tableOfB));
     }
 
     @Test
