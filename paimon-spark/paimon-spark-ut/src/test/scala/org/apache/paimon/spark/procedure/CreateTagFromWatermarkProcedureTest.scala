@@ -82,7 +82,8 @@ class CreateTagFromWatermarkProcedureTest extends PaimonSparkTestBase {
     val commitTime1 = table.snapshotManager.snapshot(1).timeMillis
     spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'historical', snapshot => 1)")
     writeWithWatermark(table, 2L, 1000L, GenericRow.of(2, BinaryString.fromString("row2")))
-    spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+    spark.sql(
+      "CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1, retain_min => 1)")
     assert(!table.snapshotManager.snapshotExists(1))
 
     // The first qualifying snapshot for watermark 500 is snapshot 1 (smaller id,
