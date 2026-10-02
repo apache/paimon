@@ -74,9 +74,7 @@ class CompositeBTreeIndexTest {
         options.set(BTreeIndexOptions.BTREE_INDEX_FILE_VERSION, version);
         options.set(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED, true);
         options.set(BTreeIndexOptions.BTREE_INDEX_COMPRESSION, "lz4");
-        GlobalIndexer indexer =
-                GlobalIndexer.create(
-                        "btree", type.getFields().get(0), type.getFields().subList(1, 3), options);
+        GlobalIndexer indexer = GlobalIndexer.create("btree", type.getFields(), options);
         LocalFileIO io = LocalFileIO.create();
         Path directory = new Path(tempPath.toUri());
         GlobalIndexFileWriter files =
@@ -110,8 +108,7 @@ class CompositeBTreeIndexTest {
         assertThat(
                         new BTreeGlobalIndexerFactory()
                                 .selectFiles(
-                                        type.getFields().get(0),
-                                        type.getFields().subList(1, 3),
+                                        type.getFields(),
                                         new PredicateBuilder(type)
                                                 .equal(0, BinaryString.fromString("category-a")),
                                         Collections.singletonList(meta)))
@@ -212,11 +209,7 @@ class CompositeBTreeIndexTest {
                                 new DataField(30, "tag", DataTypes.STRING())));
         SortedGlobalIndexer indexer =
                 (SortedGlobalIndexer)
-                        GlobalIndexer.create(
-                                "btree",
-                                type.getFields().get(0),
-                                type.getFields().subList(1, 3),
-                                new Options());
+                        GlobalIndexer.create("btree", type.getFields(), new Options());
         KeySerializer serializer =
                 new CompositeKeySerializer((RowType) indexer.keyExtractor().keyType());
         Comparator<Object> comparator = serializer.createComparator();
@@ -244,22 +237,43 @@ class CompositeBTreeIndexTest {
         assertThat(comparator.compare(nullable, first)).isNegative();
         assertThat(serializer.serialize(row("a", 1, "bc")))
                 .isNotEqualTo(serializer.serialize(row("ab", 1, "c")));
-        assertThat(
+        SortedGlobalIndexer scalarIndexer =
+                (SortedGlobalIndexer)
                         GlobalIndexer.create(
                                 "btree",
-                                type.getFields().get(0),
-                                Collections.emptyList(),
-                                new Options()))
-                .isInstanceOf(BTreeGlobalIndexer.class);
-        assertThat(GlobalIndexer.create("btree", type.getFields().get(0), null, new Options()))
-                .isInstanceOf(BTreeGlobalIndexer.class);
+                                Collections.singletonList(type.getFields().get(0)),
+                                new Options());
+        assertThat(scalarIndexer.keyExtractor().keyType()).isEqualTo(DataTypes.STRING());
+        assertThat(indexer.keyExtractor().keyType()).isEqualTo(type);
+    }
+
+    @Test
+    void testFactoryRejectsUnsupportedFieldLists() {
+        assertThatThrownBy(
+                        () -> GlobalIndexer.create("btree", Collections.emptyList(), new Options()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one field");
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(10, "category", DataTypes.STRING()),
+                        new DataField(20, "item_number", DataTypes.INT()));
+        for (String indexType : Arrays.asList("bitmap", "multivalue", "fm")) {
+            assertThatThrownBy(() -> GlobalIndexer.create(indexType, fields, new Options()))
+                    .isInstanceOf(UnsupportedOperationException.class)
+                    .hasMessageContaining("exactly one index field");
+        }
     }
 
     @Test
     void testCompositeSupportDoesNotEnablePhysicalRowIndexes() {
         DataField field = new DataField(40, "nested", RowType.of(DataTypes.INT()));
         for (String indexType : Arrays.asList("btree", "bitmap")) {
-            assertThatThrownBy(() -> GlobalIndexer.create(indexType, field, new Options()))
+            assertThatThrownBy(
+                            () ->
+                                    GlobalIndexer.create(
+                                            indexType,
+                                            Collections.singletonList(field),
+                                            new Options()))
                     .isInstanceOf(UnsupportedOperationException.class);
         }
     }

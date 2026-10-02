@@ -214,7 +214,10 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
         Range rowRange = rowRange(split);
         GlobalIndexWriter indexWriter =
                 GlobalIndexBuilderUtils.createIndexWriter(
-                        table, INDEX_TYPE, indexField, table.coreOptions().toConfiguration());
+                        table,
+                        INDEX_TYPE,
+                        Collections.singletonList(indexField),
+                        table.coreOptions().toConfiguration());
         GlobalIndexSingleColumnWriter writer = (GlobalIndexSingleColumnWriter) indexWriter;
         InternalRow.FieldGetter fieldGetter =
                 InternalRow.createFieldGetter(

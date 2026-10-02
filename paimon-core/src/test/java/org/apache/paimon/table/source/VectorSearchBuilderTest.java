@@ -658,7 +658,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 MultiValueGlobalIndexerFactory.IDENTIFIER,
-                                tagsField,
+                                Collections.singletonList(tagsField),
                                 options);
         for (int row = 0; row < rowCount; row++) {
             writer.write(BinaryString.fromString("t" + row), row);
@@ -1906,7 +1906,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
@@ -1949,7 +1949,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = 0; i < mid; i++) {
             writer1.write(vectors[i], i);
@@ -1972,7 +1972,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = mid; i < vectors.length; i++) {
             writer2.write(vectors[i], i - mid);
@@ -2128,8 +2128,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                             GlobalIndexBuilderUtils.createIndexWriter(
                                     table,
                                     TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                    vectorField,
-                                    indexFields.subList(1, indexFields.size()),
+                                    indexFields,
                                     options);
             for (int i = 0; i < vectors.length; i++) {
                 writer.write(
@@ -2144,7 +2143,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                             GlobalIndexBuilderUtils.createIndexWriter(
                                     table,
                                     TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                    vectorField,
+                                    Collections.singletonList(vectorField),
                                     options);
             for (int i = 0; i < vectors.length; i++) {
                 writer.write(vectors[i], i);
@@ -2184,7 +2183,10 @@ public class VectorSearchBuilderTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(idField),
+                                options);
         for (int id : ids) {
             long relativeRowId = id - rowRange.from;
             writer.write(id, relativeRowId);
@@ -2225,7 +2227,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);

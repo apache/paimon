@@ -41,10 +41,10 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * The {@link GlobalIndexer} for btree index. We do not build a B-tree directly in memory, instead,
@@ -79,23 +79,17 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
     private final long fallbackScanMaxSize;
     private final LazyField<CacheManager> cacheManager;
 
-    public BTreeGlobalIndexer(DataField dataField, Options options) {
-        this(dataField, Collections.emptyList(), options);
-    }
-
-    public BTreeGlobalIndexer(DataField dataField, List<DataField> extraFields, Options options) {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(dataField);
-        fields.addAll(extraFields);
+    public BTreeGlobalIndexer(List<DataField> fields, Options options) {
+        checkArgument(!fields.isEmpty(), "BTree index requires at least one field.");
         for (DataField field : fields) {
             if (field.type() instanceof RowType) {
                 throw new UnsupportedOperationException(
                         "BTree index columns must have scalar types: " + field.name());
             }
         }
-        DataType keyType = extraFields.isEmpty() ? dataField.type() : new RowType(fields);
+        DataType keyType = fields.size() == 1 ? fields.get(0).type() : new RowType(fields);
         this.keySerializer =
-                extraFields.isEmpty()
+                fields.size() == 1
                         ? KeySerializer.create(keyType)
                         : new CompositeKeySerializer((RowType) keyType);
         this.keyExtractor = GlobalIndexKeyExtractor.identity(keyType);

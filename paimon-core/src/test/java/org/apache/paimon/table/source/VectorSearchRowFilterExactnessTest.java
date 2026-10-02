@@ -467,7 +467,7 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (long rowId = rowRange.from; rowId <= rowRange.to; rowId++) {
             writer.write(vectors[(int) rowId], rowId - rowRange.from);
@@ -491,7 +491,10 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, nameField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(nameField),
+                                options);
         // The btree writer needs sorted keys.
         Integer[] order = new Integer[names.length];
         for (int i = 0; i < names.length; i++) {
@@ -519,7 +522,10 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(idField),
+                                options);
         for (int i = 0; i < rowCount; i++) {
             writer.write(i, i);
         }
