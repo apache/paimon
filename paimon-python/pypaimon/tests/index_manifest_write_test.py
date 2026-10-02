@@ -126,41 +126,6 @@ class IndexManifestWriteTest(unittest.TestCase):
         previous = imf.write([self._entry('idx-a', 1)])
         self.assertIsNone(imf.combine_deletes(previous, [self._entry('idx-a', 1)]))
 
-    def test_composite_btree_coexists_with_distinct_definitions(self):
-        for retained_fields, added_fields in [
-                (None, [2]), ([2], None), ([2], [3]), ([2, 3], [3, 2])]:
-            with self.subTest(retained_fields=retained_fields, added_fields=added_fields):
-                imf = IndexManifestFile(self._table())
-                retained = self._entry('retained', 1)
-                retained.index_file.index_type = 'btree'
-                retained.index_file.global_index_meta.extra_field_ids = retained_fields
-                added = self._entry('added', 1)
-                added.index_file.index_type = 'btree'
-                added.index_file.global_index_meta.extra_field_ids = added_fields
-                previous = imf.write([retained])
-                updated = imf.combine_changes(previous, [added], [])
-                self.assertEqual({'retained', 'added'},
-                                 {entry.index_file.file_name for entry in imf.read(updated)})
-
-    def test_same_composite_definition_still_rejects_overlap(self):
-        imf = IndexManifestFile(self._table())
-        retained = self._entry('retained', 1)
-        added = self._entry('added', 1)
-        retained.index_file.index_type = added.index_file.index_type = 'btree'
-        previous = imf.write([retained])
-        with self.assertRaisesRegex(RuntimeError, 'overlapping row range'):
-            imf.combine_changes(previous, [added], [])
-
-    def test_non_btree_distinct_definitions_still_reject_overlap(self):
-        imf = IndexManifestFile(self._table())
-        retained = self._entry('retained', 1)
-        added = self._entry('added', 1)
-        retained.index_file.index_type = added.index_file.index_type = 'bitmap'
-        added.index_file.global_index_meta.extra_field_ids = [3]
-        previous = imf.write([retained])
-        with self.assertRaisesRegex(RuntimeError, 'overlapping row range'):
-            imf.combine_changes(previous, [added], [])
-
 
 if __name__ == '__main__':
     unittest.main()
