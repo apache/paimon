@@ -45,6 +45,60 @@ INSERT INTO my_table SELECT product_id, price, sales, dt FROM source_table;
 Short checkpoint intervals can produce many small data files. Choose a compaction approach together with your
 checkpoint interval and write parallelism.
 
+### Materialize Changelog Records as Events
+
+Some pipelines consume changelog payloads as independent events. Enable `sink.changelog-as-append` to store each
+received `INSERT`, `UPDATE_BEFORE`, `UPDATE_AFTER` and `DELETE` payload as an `INSERT` in a non-keyed file-store table.
+Duplicate payloads remain separate records. For example, `+I(value=0), -U(value=0), +U(value=1000)` produces three
+append events, including two records with `value=0`. A delete becomes a recorded event; it does not remove an earlier
+event. This option is disabled by default and applies only to the Flink SQL table sink.
+
+Declare two nullable physical fields for the generated values: a `STRING` (or `VARCHAR` of at least 13 characters)
+for the original row kind and a `BIGINT` for conversion-time epoch milliseconds. Configure their names and supply
+typed nulls in the insert. The sink fills these fields, overwriting any supplied values:
+
+```sql
+CREATE TABLE change_events (
+    entity_id STRING,
+    total BIGINT,
+    original_kind STRING,
+    emitted_ms BIGINT
+) WITH (
+    'bucket' = '-1',
+    'sink.changelog-as-append' = 'true',
+    'sink.changelog-as-append.kind-field' = 'original_kind',
+    'sink.changelog-as-append.time-field' = 'emitted_ms'
+);
+
+INSERT INTO change_events
+SELECT entity_id, SUM(amount), CAST(NULL AS STRING), CAST(NULL AS BIGINT)
+FROM source_updates
+GROUP BY entity_id;
+```
+
+Readers see an insert-only event relation. `original_kind` contains `INSERT`, `UPDATE_BEFORE`, `UPDATE_AFTER` or
+`DELETE` as ordinary data; it does not control the sign of a downstream aggregation. Consumers can derive a timestamp
+with `TO_TIMESTAMP_LTZ(emitted_ms, 3)`.
+
+The sink requests before-images and full delete payloads where the planner and source can provide them. It preserves
+records actually delivered to the sink, not necessarily every original source event: upstream operators can combine
+changes, and missing payloads or history cannot be reconstructed. Retaining before-images and equal duplicates can
+increase storage volume compared with keyed state.
+
+The mode rejects primary-key tables, format tables, `INSERT OVERWRITE`, `ignore-delete=true`, `rowkind.field`, and
+`sink.key-only-deletes.enabled=true`. The generated fields cannot be partition fields. Normal append and keyed-table
+behavior is unchanged when the option is disabled.
+
+:::note Conversion time and replay
+
+`emitted_ms` is wall-clock time at the conversion operator, not source event time or checkpoint commit time. It is not
+globally ordered across subtasks. Records reprocessed after failure or replay can receive a new timestamp, potentially
+changing downstream time-window assignment. This mode does not promise deterministic timestamps across recovery.
+Adding or removing the conversion operator changes the job topology; assess savepoint compatibility before changing
+the mode on an existing job.
+
+:::
+
 ## Manage Small Files
 
 | Approach | When it runs | How to select it |
