@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
+import org.apache.paimon.globalindex.IndexQuerySplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
@@ -165,6 +166,26 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                     .containsExactly("p7");
             for (String mode : Arrays.asList("full", "detail")) {
                 FileStoreTable configured = configured(table, mode, inReader);
+                if (inReader) {
+                    assertThat(
+                                    configured
+                                            .newReadBuilder()
+                                            .withFilter(conjunction)
+                                            .newScan()
+                                            .plan()
+                                            .splits())
+                            .isNotEmpty()
+                            .allMatch(IndexQuerySplit.class::isInstance);
+                    assertThat(
+                                    configured
+                                            .newReadBuilder()
+                                            .withFilter(union)
+                                            .newScan()
+                                            .plan()
+                                            .splits())
+                            .isNotEmpty()
+                            .allMatch(IndexQuerySplit.class::isInstance);
+                }
                 assertThat(read(configured, conjunction)).containsExactlyInAnyOrder("p7", "p27");
                 assertThat(read(configured, union))
                         .containsExactlyInAnyOrderElementsOf(read(withoutIndex, union));
@@ -216,6 +237,43 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
             for (String mode : Arrays.asList("full", "detail")) {
                 assertThat(read(configured(table, mode, inReader), supported))
                         .containsExactlyInAnyOrder("p7", "p27");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    void testReaderFallbackWithMatchingIndexCoverage(String mode) throws Exception {
+        createTableDefault();
+        FileStoreTable table = configured(table(), mode, true);
+        append(table, 0, 40);
+        build(table, "f1", "f0");
+        build(table, "f2");
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate joint = query(predicates, "category-a", 7);
+        FileStoreTable budgeted =
+                table.copy(Collections.singletonMap("btree-index.fallback-scan-max-size", "0 b"));
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        for (Predicate residual :
+                Arrays.asList(
+                        predicates.notLike(2, BinaryString.fromString("p1%")),
+                        predicates.contains(2, BinaryString.fromString("3")))) {
+            for (Predicate predicate :
+                    Arrays.asList(
+                            PredicateBuilder.and(joint, residual),
+                            PredicateBuilder.or(joint, residual))) {
+                assertThat(
+                                budgeted.newReadBuilder()
+                                        .withFilter(predicate)
+                                        .newScan()
+                                        .plan()
+                                        .splits())
+                        .isNotEmpty()
+                        .allMatch(IndexQuerySplit.class::isInstance);
+                assertThat(read(budgeted, predicate))
+                        .containsExactlyInAnyOrderElementsOf(read(withoutIndex, predicate));
             }
         }
     }

@@ -527,7 +527,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
-    public void testBudgetFailureIsDeferredToReader(String indexType) throws Exception {
+    public void testBudgetFallbackIsDeferredToReader(String indexType) throws Exception {
         write(10);
         appendRows(10, 1000);
         FileStoreTable table = smallSplits(getTableDefault());
@@ -550,14 +550,93 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         long max = Collections.max(sizes.values());
         assertThat(max).isGreaterThan(min);
         String budgetKey = indexType + "-index.fallback-scan-max-size";
-        table = table.copy(Collections.singletonMap(budgetKey, min + " b"));
+        Map<String, String> options = new HashMap<>();
+        options.put(budgetKey, min + " b");
+        options.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full");
+        table = table.copy(options);
         Predicate predicate = new PredicateBuilder(table.rowType()).contains(1, str("5"));
         ReadBuilder read = table.newReadBuilder().withFilter(predicate);
         ReadBuilder indexQueryRead = distributedTable(table).newReadBuilder().withFilter(predicate);
         List<Split> splits = indexQueryRead.newScan().plan().splits();
         assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(read(read, read.newScan().plan().splits())).isNotEmpty();
-        assertThatThrownBy(() -> read(indexQueryRead, splits)).isInstanceOf(IOException.class);
+        ReadBuilder withoutIndex =
+                table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"))
+                        .newReadBuilder()
+                        .withFilter(predicate);
+        List<Integer> expected = read(withoutIndex, withoutIndex.newScan().plan().splits());
+        assertThat(expected).hasSize(271);
+        assertThat(read(read, read.newScan().plan().splits()))
+                .containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(read(indexQueryRead, splits)).containsExactlyInAnyOrderElementsOf(expected);
+        // One split containing both a supported and an over-budget shard must use actual
+        // evaluated coverage, rather than the complete metadata coverage from planning.
+        ReadBuilder combinedRead =
+                distributedTable(
+                                table.copy(
+                                        Collections.singletonMap(
+                                                "source.split.target-size", "1 gb")))
+                        .newReadBuilder()
+                        .withFilter(predicate);
+        List<Split> combinedSplits = combinedRead.newScan().plan().splits();
+        assertThat(combinedSplits).hasSize(1).allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(combinedRead, combinedSplits))
+                .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    public void testFastUnsupportedAlternativeIndexKeepsGlobalFallback() throws Exception {
+        write(100);
+        createIndex("btree", "f1");
+        createFMIndex(getTableDefault());
+        appendRows(100, 200);
+        FileStoreTable table =
+                smallSplits(getTableDefault())
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast"));
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, str("a150"));
+        assertThat(table.newScan().plan().splits()).hasSize(2);
+        for (FileStoreTable configured : Arrays.asList(table, distributedTable(table))) {
+            ReadBuilder read = configured.newReadBuilder().withFilter(predicate);
+            List<Split> splits = read.newScan().plan().splits();
+            assertThat(read(read, splits)).containsExactly(150);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testFastUnsupportedSingleIndexKeepsUnindexedSplits(String indexType)
+            throws Exception {
+        write(100);
+        createIndex(indexType, "f1");
+        appendRows(100, 200);
+        FileStoreTable table =
+                smallSplits(getTableDefault())
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast"));
+        Predicate predicate = new PredicateBuilder(table.rowType()).notLike(1, str("a0"));
+        assertThat(table.newScan().plan().splits()).hasSize(2);
+        for (FileStoreTable configured : Arrays.asList(table, distributedTable(table))) {
+            ReadBuilder read = configured.newReadBuilder().withFilter(predicate);
+            assertThat(read(read, read.newScan().plan().splits()))
+                    .hasSize(199)
+                    .contains(99, 100, 199)
+                    .doesNotContain(0);
+        }
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                indexType + "-index.fallback-scan-max-size", "0 b"));
+        predicate = new PredicateBuilder(table.rowType()).contains(1, str("5"));
+        for (FileStoreTable configured : Arrays.asList(table, distributedTable(table))) {
+            ReadBuilder read = configured.newReadBuilder().withFilter(predicate);
+            assertThat(read(read, read.newScan().plan().splits()))
+                    .hasSize(38)
+                    .contains(5, 50, 150, 195);
+        }
     }
 
     @ParameterizedTest
@@ -827,6 +906,38 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
     public void testFMFallbackAndMixedDistributedIndex() throws Exception {
         write(100);
         FileStoreTable table = getTableDefault();
+        createFMIndex(table);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full");
+        options.put(FMGlobalIndexOptions.LOCATE_COST_RATIO.key(), "1");
+        table = distributedTable(table.copy(options));
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        b.contains(1, str("5")),
+                        b.contains(1, str("1")),
+                        b.startsWith(2, str("b")));
+        ReadBuilder read = table.newReadBuilder().withFilter(predicate);
+        List<Split> fmSplits = read.newScan().plan().splits();
+        assertThat(fmSplits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(read, fmSplits)).containsExactly(15, 51);
+
+        createIndex("btree", "f2");
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(read, splits)).containsExactly(15, 51);
+
+        ReadBuilder orRead =
+                table.newReadBuilder()
+                        .withFilter(
+                                PredicateBuilder.or(
+                                        b.contains(1, str("5")), b.equal(2, str("b10"))));
+        List<Split> orSplits = orRead.newScan().plan().splits();
+        assertThat(orSplits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(orRead, orSplits)).contains(5, 10, 15, 55, 95).hasSize(20);
+    }
+
+    private void createFMIndex(FileStoreTable table) throws Exception {
         GlobalIndexFileReadWrite io =
                 new GlobalIndexFileReadWrite(
                         table.fileIO(), table.store().pathFactory().globalIndexFileFactory());
@@ -864,34 +975,6 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                                     DataIncrement.indexIncrement(indexes),
                                     CompactIncrement.emptyIncrement())));
         }
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full");
-        options.put(FMGlobalIndexOptions.LOCATE_COST_RATIO.key(), "1");
-        table = distributedTable(table.copy(options));
-        PredicateBuilder b = new PredicateBuilder(table.rowType());
-        Predicate predicate =
-                PredicateBuilder.and(
-                        b.contains(1, str("5")),
-                        b.contains(1, str("1")),
-                        b.startsWith(2, str("b")));
-        ReadBuilder read = table.newReadBuilder().withFilter(predicate);
-        List<Split> fmSplits = read.newScan().plan().splits();
-        assertThat(fmSplits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(read(read, fmSplits)).containsExactly(15, 51);
-
-        createIndex("btree", "f2");
-        List<Split> splits = read.newScan().plan().splits();
-        assertThat(splits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(read(read, splits)).containsExactly(15, 51);
-
-        ReadBuilder orRead =
-                table.newReadBuilder()
-                        .withFilter(
-                                PredicateBuilder.or(
-                                        b.contains(1, str("5")), b.equal(2, str("b10"))));
-        List<Split> orSplits = orRead.newScan().plan().splits();
-        assertThat(orSplits).isNotEmpty().allMatch(IndexQuerySplit.class::isInstance);
-        assertThat(read(orRead, orSplits)).contains(5, 10, 15, 55, 95).hasSize(20);
     }
 
     private List<Integer> read(ReadBuilder read, List<Split> splits) throws Exception {

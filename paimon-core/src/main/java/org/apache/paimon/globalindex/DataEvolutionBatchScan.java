@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -389,9 +390,17 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         indexFilter,
                         indexFiles,
                         table.store().pathFactory().globalIndexFileFactory());
-        // Scalar reader support can depend on global file coverage and scan budgets. Resolve it
-        // before split pruning so unsupported residuals cannot discard composite matches.
-        if (indexQuery == null || (indexQuery.hasCompositeQuery() && indexQuery.hasScalarQuery())) {
+        // FAST must resolve support globally when groups differ or some data lacks an index.
+        // Otherwise a locally unsupported branch could change the indexed-only result.
+        if (indexQuery == null
+                || (table.coreOptions().scalarIndexSearchMode()
+                                == CoreOptions.GlobalIndexSearchMode.FAST
+                        && indexQuery.requiresGlobalEvaluation(
+                                GlobalIndexBuilderUtils.calcRowRanges(
+                                        splits.stream()
+                                                .map(DataEvolutionBatchScan::dataSplit)
+                                                .collect(Collectors.toList())),
+                                Options.fromMap(table.options())))) {
             return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
         }
         List<Range> unindexed =

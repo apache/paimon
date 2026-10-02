@@ -295,6 +295,31 @@ class GlobalIndexQuery {
                 || children.stream().anyMatch(GlobalIndexQuery::hasScalarQuery);
     }
 
+    /** Whether reader support outside one data split can affect this query's FAST result. */
+    boolean requiresGlobalEvaluation(List<Range> dataRanges, Options options) {
+        if (predicate != null) {
+            if (groups.stream()
+                    .allMatch(
+                            group ->
+                                    group.files.isEmpty()
+                                            || GlobalIndexerFactoryUtils.supportsPredicate(
+                                                    group.type,
+                                                    group.indexFields(),
+                                                    predicate,
+                                                    group.files,
+                                                    options))) {
+                return false;
+            }
+            return groups.size() > 1 || !Range.and(coveredRanges(), dataRanges).equals(dataRanges);
+        }
+        for (GlobalIndexQuery child : children) {
+            if (child.requiresGlobalEvaluation(dataRanges, options)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Coverage of the selected query paths, including files pruned safely by key metadata. */
     List<Range> coveredRanges() {
         if (predicate != null) {
