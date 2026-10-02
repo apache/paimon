@@ -76,7 +76,8 @@ Please note that
 
 :::warning
   Per-partition bucket counts are currently supported by the **Flink** engine only. Spark rejects writes
-  to a table with `'bucket.per-partition-count-enabled' = 'true'`; use Flink to write such a table.
+  to a **partitioned** table with `'bucket.per-partition-count-enabled' = 'true'`; use Flink to write such
+  a table. For unpartitioned tables, this option is a no-op and Spark writes remain supported.
 :::
 - **Unpartitioned tables** require a full rescale before writing. If you change the bucket number and attempt
   to write without reorganizing the data first, a `RuntimeException` will be thrown:

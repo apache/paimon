@@ -127,7 +127,7 @@ case class PaimonSparkWriter(
   }
 
   def write(data: DataFrame): Seq[CommitMessage] = {
-    if (coreOptions.bucketPerPartitionCountEnabled()) {
+    if (coreOptions.bucketPerPartitionCountEnabled() && !table.partitionKeys().isEmpty) {
       throw new UnsupportedOperationException(
         "Spark does not support writing tables with per-partition bucket counts. " +
           "Use Flink to write this table or disable 'bucket.per-partition-count-enabled'.")
