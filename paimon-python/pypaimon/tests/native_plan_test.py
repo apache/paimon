@@ -33,6 +33,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.read.native_plan import (
     _catalog_options,
+    _configure_native_read_builder,
     _native_read_builder,
     _predicate_to_native,
     _resolved_schema_json,
@@ -91,6 +92,29 @@ def _scan(native_enabled, file_scanner):
 
 
 class NativePlanTest(unittest.TestCase):
+
+    def test_native_builder_receives_variant_fields_with_projection(self):
+        builder = Mock()
+        builder.with_projection.return_value = builder
+        variant_fields = {
+            'payload': {
+                'paths': ['$.ratio'],
+                'target_type': object(),
+                'fail_on_error': False,
+            }
+        }
+
+        result = _configure_native_read_builder(
+            builder,
+            predicate=None,
+            limit=None,
+            projection=['id', 'payload'],
+            variant_fields=variant_fields,
+        )
+
+        self.assertIs(result, builder)
+        builder.with_projection.assert_called_once_with(
+            ['id', 'payload'], variant_fields=variant_fields)
 
     def setUp(self):
         # Make the real capability probe see a split-API-capable pypaimon-rust so

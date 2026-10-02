@@ -19,10 +19,13 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class _ReadBuilderTestBase(unittest.TestCase):
@@ -59,6 +62,48 @@ class _ReadBuilderTestBase(unittest.TestCase):
 
 
 class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
+
+    def test_variant_fields_are_validated_and_copied(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+        ]
+        paths = ['$.ratio', '$.age']
+        builder = ReadBuilder(table).with_projection(
+            ['id', 'payload'],
+            variant_fields={
+                'payload': {
+                    'paths': paths,
+                    'target_type': pa.float32(),
+                }
+            },
+        )
+
+        paths.append('$.later')
+        self.assertEqual(
+            ['$.ratio', '$.age'],
+            builder._variant_fields['payload']['paths'])
+        self.assertFalse(
+            builder._variant_fields['payload']['fail_on_error'])
+
+    def test_variant_fields_require_projected_variant_column(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+        ]
+
+        with self.assertRaisesRegex(ValueError, 'not in the projection'):
+            ReadBuilder(table).with_projection(
+                ['id'],
+                variant_fields={
+                    'payload': {
+                        'paths': ['$.ratio'],
+                        'target_type': pa.float32(),
+                    }
+                },
+            )
 
     def test_no_projection_returns_full_schema(self):
         rb = self.table.new_read_builder()
