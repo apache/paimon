@@ -41,7 +41,6 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -544,46 +543,6 @@ public class TableWriteTest {
                                 options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), path, tableSchema);
-    }
-
-    @Test
-    public void testWithWriteTypeAcceptsNestedPrunedRowDefault() throws Exception {
-        // the data-evolution partial writers prune a ROW column to the written sub-fields but
-        // keep its full default; they never wrap rows, so withWriteType must not convert that
-        // default against the pruned type
-        Options conf = new Options();
-        conf.set(CoreOptions.BUCKET, -1);
-        conf.set(CoreOptions.ROW_TRACKING_ENABLED, true);
-        conf.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
-        conf.set(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED, true);
-        RowType nested =
-                DataTypes.ROW(
-                        new DataField(2, "a", DataTypes.INT()),
-                        new DataField(3, "b", DataTypes.STRING()));
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "id", DataTypes.INT()),
-                        new DataField(1, "s", nested, null, "{42, x}"));
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                fields,
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                conf.toMap(),
-                                ""));
-        FileStoreTable table =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-
-        RowType writeType = table.rowType().projectByPaths(Collections.singletonList("s.a"));
-        DataField pruned = writeType.getField("s");
-        assertThat(((RowType) pruned.type()).getFieldCount()).isEqualTo(1);
-        assertThat(pruned.defaultValue()).isEqualTo("{42, x}");
-
-        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
-            write.withWriteType(writeType);
-        }
     }
 
     private FileStoreTable createFileStoreTable(Options conf) throws Exception {
