@@ -116,6 +116,7 @@ import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.leavesRowsWithoutRowIds;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.storesRowIds;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -1065,6 +1066,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        if (options.dataEvolutionEnabled()) {
+            deltaFiles = stampFilesOfWritersBeforeDataEvolution(newSnapshotId, deltaFiles);
+        }
+
         if (latestSnapshot == null) {
             conflictDetection.checkSameBucketWithinDelta(deltaFiles);
         }
@@ -1440,6 +1445,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     /**
+     * A data-evolution writer starts the sequence numbers of every file at 0, so that the commit
+     * stamps the file with its snapshot id, and a later column update of the same rows wins. A
+     * writer that loaded the table before {@code sys.enable_data_evolution} converted it numbers
+     * the rows of all files it rolls in one sequence, and the commit keeps the numbers of a file
+     * that does not start at 0. They can exceed the snapshot ids of later commits and hide later
+     * column updates. A committer loaded after the conversion can still commit such files, for
+     * example when a job restores them from a checkpoint taken before the conversion. Their rows
+     * are new and get their row ids from this commit, so stamp them like a data-evolution writer's.
+     */
+    private List<ManifestEntry> stampFilesOfWritersBeforeDataEvolution(
+            long snapshotId, List<ManifestEntry> deltaFiles) {
+        Map<Long, Boolean> dataEvolutionSchemas = new HashMap<>();
+        List<ManifestEntry> result = new ArrayList<>(deltaFiles.size());
+        for (ManifestEntry entry : deltaFiles) {
+            DataFileMeta file = entry.file();
+            if (entry.kind() == FileKind.ADD
+                    && file.firstRowId() == null
+                    && file.fileSource().map(FileSource.APPEND::equals).orElse(false)
+                    && !storesRowIds(file)
+                    && !dataEvolutionSchemas.computeIfAbsent(
+                            file.schemaId(),
+                            id ->
+                                    CoreOptions.fromMap(schemaManager.schema(id).options())
+                                            .dataEvolutionEnabled())) {
+                result.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            } else {
+                result.add(entry);
+            }
+        }
+        return result;
+    }
+
+    /**
      * A data-evolution read derives every row id from the first row id of its file. A commit
      * assigns one to every new {@link FileSource#APPEND} file, while a compaction must carry the
      * first row id of its input over to its output. The output of a compactor that does not would
@@ -1622,6 +1660,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 manifestEntry.totalBuckets(),
                                 manifestEntry.file()));
             }
+        }
+
+        TableSchema latestSchema =
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
+        if (DataEvolutionUtils.convertedToDataEvolution(schemaManager, latestSchema)) {
+            // Only the files that the rollback adds back matter: the others keep the metadata
+            // of the latest snapshot.
+            DataEvolutionUtils.checkRollbackFilesKeepDataEvolution(
+                    tableName,
+                    targetSnapshot.id(),
+                    deltaFiles.iterator(),
+                    Collections.emptySet(),
+                    schemaManager::schema);
         }
 
         Pair<String, Long> baseManifestList =

@@ -21,6 +21,9 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
@@ -36,6 +39,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -410,5 +414,89 @@ public class DataEvolutionUtils {
                         "Cannot roll back table %s to snapshot %d: it was committed with schema %d, "
                                 + "%s.",
                         tableName, target.id(), target.schemaId(), reason));
+    }
+
+    /**
+     * Whether {@code sys.enable_data_evolution} converted the table: its latest schema enables data
+     * evolution but its first one does not. Data evolution cannot be switched on otherwise.
+     */
+    public static boolean convertedToDataEvolution(
+            SchemaManager schemaManager, TableSchema latestSchema) {
+        if (!CoreOptions.fromMap(latestSchema.options()).dataEvolutionEnabled()) {
+            return false;
+        }
+        List<Long> ids = schemaManager.listAllIds();
+        return !ids.isEmpty()
+                && !CoreOptions.fromMap(schemaManager.schema(Collections.min(ids)).options())
+                        .dataEvolutionEnabled();
+    }
+
+    /**
+     * Whether a data file still needs what {@code sys.enable_data_evolution} gives the files of a
+     * converted table: a first row id, or, for a file of a row-tracking-only writer, a sequence
+     * baseline older than every data-evolution update. Mirrors the plan of the conversion.
+     */
+    public static boolean needsDataEvolutionConversion(
+            DataFileMeta file, Function<Long, TableSchema> schemaLoader) {
+        if (file.firstRowId() == null) {
+            return true;
+        }
+        if (file.minSequenceNumber() == Snapshot.FIRST_SNAPSHOT_ID
+                && file.maxSequenceNumber() == Snapshot.FIRST_SNAPSHOT_ID) {
+            return false;
+        }
+        CoreOptions fileOptions =
+                CoreOptions.fromMap(schemaLoader.apply(file.schemaId()).options());
+        return fileOptions.rowTrackingEnabled() && !fileOptions.dataEvolutionEnabled();
+    }
+
+    /** The files among {@code files} that still need the conversion. */
+    public static Set<FileEntry.Identifier> filesNeedingDataEvolutionConversion(
+            Iterator<ManifestEntry> files, Function<Long, TableSchema> schemaLoader) {
+        Function<Long, TableSchema> cachedLoader = cached(schemaLoader);
+        Set<FileEntry.Identifier> result = new HashSet<>();
+        while (files.hasNext()) {
+            ManifestEntry entry = files.next();
+            if (entry.kind() == FileKind.ADD
+                    && needsDataEvolutionConversion(entry.file(), cachedLoader)) {
+                result.add(entry.identifier());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Refuses a rollback of a converted table that would make {@code files} live again while one of
+     * them still needs the conversion, see {@link #needsDataEvolutionConversion}, unless the latest
+     * snapshot holds that file in the same state already ({@code unconvertedInLatest}). A snapshot
+     * on a data-evolution schema can still hold such files: the fence of the conversion is
+     * committed before the files of writers that committed during the conversion are repaired.
+     */
+    public static void checkRollbackFilesKeepDataEvolution(
+            String tableName,
+            long targetSnapshotId,
+            Iterator<ManifestEntry> files,
+            Set<FileEntry.Identifier> unconvertedInLatest,
+            Function<Long, TableSchema> schemaLoader) {
+        Function<Long, TableSchema> cachedLoader = cached(schemaLoader);
+        while (files.hasNext()) {
+            ManifestEntry entry = files.next();
+            if (entry.kind() == FileKind.ADD
+                    && needsDataEvolutionConversion(entry.file(), cachedLoader)
+                    && !unconvertedInLatest.contains(entry.identifier())) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Cannot roll back table %s to snapshot %d: its data file %s "
+                                        + "has no row id or a sequence number from before "
+                                        + "sys.enable_data_evolution converted the table, which "
+                                        + "would hide later data-evolution updates.",
+                                tableName, targetSnapshotId, entry.file().fileName()));
+            }
+        }
+    }
+
+    private static Function<Long, TableSchema> cached(Function<Long, TableSchema> schemaLoader) {
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        return id -> schemas.computeIfAbsent(id, schemaLoader);
     }
 }

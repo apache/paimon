@@ -1051,6 +1051,98 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
+    public void testRestoredAppendOfWriterBeforeConversionIsStampedWithItsSnapshot()
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "10");
+        FileStoreTable staleTable = createTable(options);
+        // a row-tracking-only writer numbers the rows of all files it rolls in one sequence
+        CommitMessage message;
+        BatchWriteBuilder staleBuilder = staleTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = staleBuilder.newWrite()) {
+            for (int i = 0; i < 20; i++) {
+                write.write(row(i, "old" + i, "p1"));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            assertThat(messages).hasSize(1);
+            message = messages.get(0);
+        }
+        assertThat(((CommitMessageImpl) message).newFilesIncrement().newFiles())
+                .extracting(DataFileMeta::maxSequenceNumber)
+                .contains(19L);
+        // the append is pending in a checkpoint of the job
+        ManifestCommittable pending = new ManifestCommittable(1L);
+        pending.addFileCommittable(message);
+        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
+        byte[] checkpoint = serializer.serialize(pending);
+
+        enabler().run(false);
+        FileStoreTable table = loadTable();
+        ManifestCommittable restored = serializer.deserialize(serializer.getVersion(), checkpoint);
+        try (TableCommitImpl commit = table.newCommit("job")) {
+            assertThat(commit.filterAndCommitMultiple(Collections.singletonList(restored), true))
+                    .isEqualTo(1);
+        }
+        assertNoDuplicateOrMissingRowIds(loadTable(), 20);
+        Map<Integer, Long> rowIds = rowIdsById(loadTable());
+        for (int i = 0; i < 20; i++) {
+            assertThat(rowIds).containsEntry(i, (long) i);
+        }
+
+        // a later column update of the rows of the second file must win
+        overwriteColumnV(10, "new", 10);
+        assertColumnV(0, 10, "old");
+        assertColumnV(10, 20, "new");
+    }
+
+    @Test
+    public void testRollbackToFenceBeforeRepairIsRefused() throws Exception {
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        FileStoreTable staleWriter = loadTable();
+        AtomicBoolean written = new AtomicBoolean();
+        new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        // after the row ids were committed, before the schema changes
+                        () -> {
+                            if (written.compareAndSet(false, true)) {
+                                writeRowsUnchecked(staleWriter, row(2, "b", "p1"));
+                            }
+                        })
+                .run(false);
+        // 2: row ids, 3: the stale write, 4: the fence, 5: row ids for the stale write
+        table = loadTable();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
+        assertThat(table.snapshotManager().snapshot(4).schemaId()).isEqualTo(1L);
+        table.createTag("fence", 4);
+        writeRows(table, row(3, "c", "p1"));
+        Map<Integer, Long> rowIds = rowIdsById(loadTable());
+
+        // The fence is on the data-evolution schema, but the stale write has no row id in it.
+        assertThatThrownBy(() -> loadTable().rollbackTo(4))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("has no row id");
+        assertThatThrownBy(() -> loadTable().rollbackTo("fence"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("has no row id");
+        assertThat(rowIdsById(loadTable())).isEqualTo(rowIds);
+
+        // Rolling back as latest keeps the repaired metadata of files that are still live.
+        FileStoreTable latest = loadTable();
+        try (TableCommitImpl commit = latest.newCommit(commitUser)) {
+            assertThat(commit.rollbackToAsLatest(latest.tagManager().getOrThrow("fence"))).isTrue();
+        }
+        assertNoDuplicateOrMissingRowIds(loadTable(), 2);
+
+        // a snapshot after the repair can be restored
+        loadTable().rollbackTo(5);
+        assertNoDuplicateOrMissingRowIds(loadTable(), 2);
+    }
+
+    @Test
     public void testRepairRowTrackingOnlySequencesPreservesConcurrentColumnUpdate()
             throws Exception {
         Map<String, String> options = new HashMap<>();

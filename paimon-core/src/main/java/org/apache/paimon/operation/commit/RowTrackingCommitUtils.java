@@ -137,11 +137,16 @@ public class RowTrackingCommitUtils {
         if (file.firstRowId() != null) {
             return false;
         }
-        List<String> writeCols = file.writeCols();
-        if (writeCols != null && writeCols.contains(SpecialFields.ROW_ID.name())) {
+        if (storesRowIds(file)) {
             return false;
         }
         return !file.fileSource().map(FileSource.APPEND::equals).orElse(false);
+    }
+
+    /** Whether the file stores the row id field physically, instead of deriving it. */
+    public static boolean storesRowIds(DataFileMeta file) {
+        List<String> writeCols = file.writeCols();
+        return writeCols != null && writeCols.contains(SpecialFields.ROW_ID.name());
     }
 
     /** Assigned results. */
