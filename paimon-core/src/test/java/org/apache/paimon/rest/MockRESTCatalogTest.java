@@ -68,6 +68,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BuildVersions;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -1629,6 +1630,53 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         // Perform an operation that will trigger REST request
         restCatalog.listDatabases();
         checkHeader(customHeaderName, customHeaderValue);
+    }
+
+    @Test
+    void testDefaultUserAgentInRequests() throws Exception {
+        restCatalogServer.clearReceivedHeaders();
+        initCatalog(false).listDatabases();
+
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .isNotEmpty()
+                .allSatisfy(
+                        headers ->
+                                assertThat(headers)
+                                        .containsEntry(
+                                                "user-agent",
+                                                HttpClientUtils.userAgent(new Options())));
+    }
+
+    @Test
+    void testCatalogWideUserAgentOptionsInRequests() throws Exception {
+        options.set(CatalogOptions.USER_AGENT_FEATURES, "Flink");
+        options.set(CatalogOptions.USER_AGENT_EXTENDED, "vvr");
+        restCatalogServer.clearReceivedHeaders();
+        initCatalog(false).listDatabases();
+
+        String expected =
+                "Paimon/"
+                        + BuildVersions.PAIMON
+                        + "(Apache-HttpClient/"
+                        + BuildVersions.HTTP_CLIENT
+                        + ";Flink) vvr";
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .isNotEmpty()
+                .allSatisfy(headers -> assertThat(headers).containsEntry("user-agent", expected));
+    }
+
+    @Test
+    void testConfiguredUserAgentWins() throws Exception {
+        options.set(RESTCatalogOptions.HTTP_USER_AGENT, "starrocks/user");
+        options.set(CatalogOptions.USER_AGENT_EXTENDED, "vvr");
+        restCatalogServer.clearReceivedHeaders();
+        initCatalog(false).listDatabases();
+
+        assertThat(restCatalogServer.getReceivedHeaders())
+                .isNotEmpty()
+                .allSatisfy(
+                        headers ->
+                                assertThat(headers).containsEntry("user-agent", "starrocks/user"));
     }
 
     @Test
