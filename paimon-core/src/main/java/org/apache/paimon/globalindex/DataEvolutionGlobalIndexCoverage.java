@@ -70,20 +70,13 @@ public class DataEvolutionGlobalIndexCoverage {
             if (!DataEvolutionGlobalIndexScanner.isIndexInSchema(table.rowType(), indexFile)) {
                 continue;
             }
-            // Tuple indexes cannot answer an individual column's scalar predicate.
-            // Their coverage is supplied explicitly by the selected composite query.
-            if ("btree".equals(indexFile.indexType())
-                    && meta.extraFieldIds() != null
-                    && meta.extraFieldIds().length > 0) {
+            // Single-field coverage belongs to single-field index definitions. Multi-field
+            // query paths supply their actual coverage explicitly.
+            if (meta.extraFieldIds() != null && meta.extraFieldIds().length > 0) {
                 continue;
             }
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             addCoverage(meta.indexFieldId(), range);
-            if (meta.extraFieldIds() != null) {
-                for (int extra : meta.extraFieldIds()) {
-                    addCoverage(extra, range);
-                }
-            }
         }
     }
 

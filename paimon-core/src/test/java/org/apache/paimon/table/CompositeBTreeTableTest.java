@@ -266,6 +266,54 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
     }
 
     @ParameterizedTest
+    @CsvSource({"btree,full", "btree,detail", "test-scalar,full", "test-scalar,detail"})
+    void testMultiFieldIndexesDoNotSupplySingleFieldCoverage(String indexType, String mode)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = configured(table(), mode, false);
+        append(table, 0, 40);
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        new IndexFileMeta(
+                                indexType,
+                                "multi",
+                                1,
+                                40,
+                                new GlobalIndexMeta(0, 39, 0, new int[] {1}, null),
+                                null),
+                        new IndexFileMeta(
+                                indexType,
+                                "primary",
+                                1,
+                                10,
+                                new GlobalIndexMeta(0, 9, 0, null, null),
+                                null),
+                        new IndexFileMeta(
+                                indexType,
+                                "extra",
+                                1,
+                                10,
+                                new GlobalIndexMeta(20, 29, 1, new int[0], null),
+                                null));
+        DataEvolutionGlobalIndexCoverage coverage =
+                new DataEvolutionGlobalIndexCoverage(
+                        table,
+                        table.snapshotManager().latestSnapshot(),
+                        null,
+                        files,
+                        table.coreOptions().scalarIndexSearchMode());
+        assertThat(coverage.unindexedRanges(0)).containsExactly(new Range(10, 39));
+        assertThat(coverage.unindexedRanges(1))
+                .containsExactly(new Range(0, 19), new Range(30, 39));
+        assertThat(coverage.unindexedRanges(Arrays.asList(0, 1), null))
+                .containsExactly(new Range(0, 39));
+        assertThat(
+                        coverage.unindexedRangesFromCoverage(
+                                Collections.singletonList(new Range(0, 19)), null))
+                .containsExactly(new Range(20, 39));
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"full", "detail"})
     void testDroppedDefinitionDoesNotCoverSurvivingExtraColumn(String mode) throws Exception {
         createTableDefault();
