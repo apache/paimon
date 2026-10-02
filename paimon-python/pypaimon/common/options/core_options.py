@@ -1692,13 +1692,13 @@ class CoreOptions:
         )
         if value is None:
             return None
-        parts = value.split(",")
+        parts = value.rstrip(",").split(",")
         weights = []
         for part in parts:
             parsed = int(part.strip())
-            if parsed <= 0:
+            if parsed <= 0 or parsed > 2147483647:
                 raise ValueError(
-                    f"Weight must be positive, got: {parsed}"
+                    f"Weight must be a positive 32-bit integer, got: {parsed}"
                 )
             weights.append(parsed)
         return weights

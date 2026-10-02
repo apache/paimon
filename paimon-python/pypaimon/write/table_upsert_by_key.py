@@ -524,7 +524,8 @@ class TableUpsertByKey:
         if partition_spec:
             predicate_builder = read_builder.new_predicate_builder()
             sub_predicates = [
-                predicate_builder.equal(k, v)
+                (predicate_builder.is_null(k) if v is None
+                 else predicate_builder.equal(k, v))
                 for k, v in partition_spec.items()
             ]
             partition_predicate = predicate_builder.and_predicates(sub_predicates)

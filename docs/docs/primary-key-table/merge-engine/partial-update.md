@@ -236,5 +236,10 @@ Set `partial-update.remove-record-on-sequence-group` to a comma-separated list o
 field names from the groups whose deletes should remove the whole row. For the `profiles`
 schema above, using `profile_version` allows an accepted profile delete to remove the row.
 
+While merging a deleted row, subsequent retractions or updates to other groups do not cancel
+the whole-row deletion. An `INSERT` or `UPDATE_AFTER` for a configured deletion group can
+restore the row only when its group version passes the normal newer-or-equal comparison.
+An older update or a group with all-null ordering fields cannot restore the row.
+
 `partial-update.remove-record-on-delete` cannot be combined with sequence groups. Neither
 whole-row removal option can be combined with `ignore-delete`.

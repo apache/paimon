@@ -306,7 +306,7 @@ class TableUpdate:
             from pypaimon.write.native_update import create_native_predicate_update
             try:
                 native = create_native_predicate_update(
-                    self.table, self.commit_user, list(assignments.keys()), predicate)
+                    self.table, self.commit_user, predicate)
             except Exception as error:
                 logger.debug('Native predicate update preparation failed: %s', error)
             else:
@@ -683,7 +683,6 @@ class TableUpdate:
         splits = scan.plan_for_write().splits()
         if (splits
                 and self.table.options.native_write_enabled()
-                and self.table.options.data_file_path_directory() is None
                 and not any(isinstance(split, QueryAuthSplit)
                             for split in splits)):
             try:
