@@ -35,6 +35,7 @@ import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV
 import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.util.QueryExecutionListener
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Assertions
 
 import scala.collection.JavaConverters._
@@ -781,6 +782,42 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           .deletionVectors()
           .asScala
     }.toMap
+  }
+
+  test("Paimon deletionVector: strict mode ignores deletion vectors a concurrent delete inherits") {
+    sql("""
+          |CREATE TABLE T (id INT, pt INT)
+          |PARTITIONED BY (pt)
+          |TBLPROPERTIES (
+          | 'deletion-vectors.enabled' = 'true',
+          | 'bucket-key' = 'id',
+          | 'bucket' = '1'
+          |)
+          |""".stripMargin)
+    sql("INSERT INTO T VALUES (1, 1), (2, 1), (5, 1), (1, 2), (2, 2)")
+    // pt=1 gets a deletion vector before the job below starts
+    sql("DELETE FROM T WHERE pt = 1 AND id = 1")
+
+    // A rescale or postpone job pins commit.last-safe-snapshot to the snapshot it started from,
+    // and strict mode then checks the snapshots other users committed after it.
+    val jobStart = loadTable("T").snapshotManager().latestSnapshotId()
+    // While the job runs, another user deletes from pt=2. This deletion-vector-only OVERWRITE
+    // still carries pt=1's deletion vector in its index manifest.
+    sql("DELETE FROM T WHERE pt = 2 AND id = 1")
+    withSparkSQLConf("spark.paimon.commit.last-safe-snapshot" -> jobStart.toString) {
+      sql("INSERT INTO T VALUES (3, 1)")
+    }
+    checkAnswer(
+      sql("SELECT id, pt FROM T ORDER BY pt, id"),
+      Seq(Row(2, 1), Row(3, 1), Row(5, 1), Row(2, 2)))
+
+    // a delete that does change pt=1's deletion vector after the job started is still rejected
+    val secondJobStart = loadTable("T").snapshotManager().latestSnapshotId()
+    sql("DELETE FROM T WHERE pt = 1 AND id = 2")
+    withSparkSQLConf("spark.paimon.commit.last-safe-snapshot" -> secondJobStart.toString) {
+      assertThatThrownBy(() => sql("INSERT INTO T VALUES (4, 1)"))
+        .hasMessageContaining("Giving up committing as commit.strict-mode.enabled is true")
+    }
   }
 
   private def getFilePathAndRowIndex(condition: String): Map[String, Array[Long]] = {
