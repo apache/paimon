@@ -131,7 +131,17 @@ class CatalogOptions:
         "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
-        "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+        "header.User-Agent").string_type().no_default_value().with_description(
+        "The User-Agent of REST catalog requests, replacing Paimon's unified one")
+    USER_AGENT_MODULE = ConfigOptions.key(
+        "user-agent.module").string_type().no_default_value().with_description(
+        "The module of Paimon's unified User-Agent, 'pypaimon/<version>' by default")
+    USER_AGENT_FEATURES = ConfigOptions.key(
+        "user-agent.features").string_type().no_default_value().with_description(
+        "Space-separated features of Paimon's unified User-Agent")
+    USER_AGENT_EXTENDED = ConfigOptions.key(
+        "user-agent.extended").string_type().no_default_value().with_description(
+        "Free text appended to Paimon's unified User-Agent")
     SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
         "Sync all table properties to the catalog metastore")
     RESOLVING_FILE_IO_ENABLED = (
