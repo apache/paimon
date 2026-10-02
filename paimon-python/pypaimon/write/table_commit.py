@@ -66,6 +66,9 @@ class TableCommit:
             commit_messages: List[CommitMessage],
             commit_identifier: int = BATCH_COMMIT_IDENTIFIER,
             snapshot_properties: Optional[Dict[str, str]] = None):
+        """Release native-writer cleanup ownership before publication can start."""
+        for message in commit_messages:
+            message._native_write_pending = False
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
         commit_kwargs = {
             "commit_messages": non_empty_messages,
@@ -116,11 +119,6 @@ class TableCommit:
     def _prepare_native_commit(self, messages):
         if (not self.table.options.native_commit_enabled()
                 or self._commit_callbacks):
-            return None
-        # data-file.path-directory keeps the whole pipeline on the Python
-        # path (which resolves the relocated directory); see the matching
-        # write / read / plan fallbacks.
-        if self.table.options.data_file_path_directory() is not None:
             return None
         try:
             from pypaimon.write.native_commit import (

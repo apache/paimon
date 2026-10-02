@@ -202,7 +202,7 @@ class RowIdConflictRewriter:
                 ):
                     key = (
                         base_key,
-                        base.file.external_path or base.file.file_path
+                        base.file.physical_path()
                         or base.file.file_name,
                     )
                     affected[key] = base.file
@@ -274,7 +274,7 @@ class RowIdConflictRewriter:
     def _abort(self, messages):
         for message in messages:
             for file in message.new_files:
-                path = file.external_path or file.file_path
+                path = file.physical_path()
                 if path:
                     self.table.file_io.delete_quietly(path)
 

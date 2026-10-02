@@ -240,19 +240,15 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
             bucket = entries_in_group[0].bucket
             # Materialize file_path once per unique file in this group.
             seen_paths: set = set()
+            unresolved_files = []
             for entry in entries_in_group:
                 f = entry.file
                 if f.file_name in seen_paths:
                     continue
                 seen_paths.add(f.file_name)
                 if not f.file_path:
-                    f.set_file_path(
-                        self.table.table_path,
-                        partition_row,
-                        bucket,
-                        self.default_part_value,
-                        self.table.options.data_file_path_directory(),
-                    )
+                    unresolved_files.append(f)
+            self._set_data_file_paths(unresolved_files, partition_row, bucket)
             for segments in self._slice_group_into_chunks(entries_in_group):
                 all_chunks.append(_Chunk(partition_row, bucket, segments))
 

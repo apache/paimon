@@ -68,7 +68,10 @@ def _table(tmp_path, layout, first_partition='a', partition_type=None, legacy_pa
     catalog.create_table('db.t', Schema.from_pyarrow_schema(
         schema, partition_keys=['p'], options=options), False)
     table = catalog.get_table('db.t')
-    builder = table.new_batch_write_builder()
+    # Seed the legacy Python partition paths and deterministic row-id ordering
+    # which these compatibility/decoy tests deliberately reference. Updates and
+    # reads below still exercise the configured native backend.
+    builder = table.copy({'write.native.enabled': 'false'}).new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
         writer.write_arrow(pa.Table.from_pydict({
@@ -125,7 +128,8 @@ def test_delete_paths_preserve_repeated_deletes_and_historical_reads(tmp_path, p
         else:
             expected = Path(table.table_path) / 'index' / file.file_name
         assert expected.is_file()
-        assert file.external_path == ('file://' + str(expected) if 'external' in layout else None)
+        assert file.external_path == (('file:' if layout == 'bucket-external' else 'file://')
+                                      + str(expected) if 'external' in layout else None)
         # Obsolete locations with the same name must never shadow canonical or
         # explicit paths. Invalid bytes make a wrong-path read fail observably.
         if layout != 'table':

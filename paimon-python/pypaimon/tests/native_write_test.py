@@ -16,7 +16,7 @@
 
 """End-to-end coverage of the optional native data writer bridge."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -79,7 +79,7 @@ def test_sequence_validation_precedes_native_selection(tmp_path, streaming, sequ
 
 @pytest.mark.parametrize('type_,order,supported', [
     (pa.int64(), 'ascending', True),
-    (pa.int64(), 'descending', False),
+    (pa.int64(), 'descending', True),
     (pa.float32(), 'ascending', False),
     (pa.float64(), 'ascending', False),
 ])
@@ -130,12 +130,19 @@ def test_batch_native_write_commits_through_both_committers(
 
 
 @requires_native
-def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog):
+@pytest.mark.parametrize('directory', [None, 'relative', 'absolute', 'uri'])
+def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, directory):
     catalog = native_rest_catalog
+    options = {'file.format': 'parquet', 'write.native.enabled': 'true',
+               'commit.native.enabled': 'true'}
+    if directory is not None:
+        options['data-file.path-directory'] = {
+            'relative': 'data/nested', 'absolute': str(tmp_path / 'relocated'),
+            'uri': (tmp_path / 'relocated').as_uri(),
+        }[directory]
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
         pa.schema([('id', pa.int64()), ('pt', pa.string())]),
-        options={'file.format': 'parquet', 'write.native.enabled': 'true',
-                 'commit.native.enabled': 'true'}, partition_keys=['pt']), False)
+        options=options, partition_keys=['pt']), False)
     table = catalog.get_table('default.t')
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
@@ -251,6 +258,53 @@ def test_native_overwrite_and_empty_overwrite(tmp_path):
 
 
 @requires_native
+@pytest.mark.parametrize('failure', [None, 'before-publication', 'after-publication'])
+def test_writer_abort_preserves_native_commit_files(native_rest_catalog, failure):
+    native_rest_catalog.create_table('default.abort_handoff', Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('pt', pa.string())]), options={
+            'write.native.enabled': 'true', 'commit.native.enabled': 'true',
+        }), False)
+    table = native_rest_catalog.get_table('default.abort_handoff')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        assert isinstance(writer, NativeTableWrite)
+        writer.write_arrow_batch(_batch([1, 2], ['a', 'b']))
+        messages = writer.prepare_commit()
+        prepared = commit._prepare_native_commit(messages)
+        assert prepared is not None
+        native, native_messages = prepared
+        proxy = Mock(wraps=native)
+
+        def publish(*args):
+            if failure != 'before-publication':
+                native.commit(*args)
+            if failure:
+                raise RuntimeError('Native commit outcome is unknown')
+
+        proxy.commit.side_effect = publish
+        with patch.object(commit, '_prepare_native_commit', return_value=(proxy, native_messages)), \
+                patch.object(commit.file_store_commit, 'commit',
+                             side_effect=AssertionError('Python commit fallback')):
+            if failure:
+                with pytest.raises(RuntimeError, match='Native commit outcome is unknown'):
+                    commit.commit(messages)
+            else:
+                commit.commit(messages)
+        proxy.commit.assert_called_once()
+        writer.abort()
+        assert all(table.file_io.exists(file.file_path)
+                   for message in messages for file in message.new_files)
+        if failure != 'before-publication':
+            assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
+        else:
+            assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+        commit.close()
+
+
+@requires_native
 def test_advanced_api_switches_before_write_and_rejects_late_switch(tmp_path):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
@@ -314,12 +368,7 @@ def test_external_data_paths_fall_back_before_native_write(tmp_path):
 
 @pytest.mark.parametrize('options', [
     {'bucket': '-1'},
-    {'merge-engine': 'first-row'},
-    {'merge-engine': 'partial-update'},
-    {'merge-engine': 'aggregation'},
-    {'target-file-row-num': '5'},
     {'changelog-file.format': 'orc'},
-    {'metadata.stats-mode': 'full'},
 ])
 def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(
         tmp_path, options):
@@ -351,6 +400,18 @@ def test_native_write_validates_input_schema_before_writing(tmp_path):
 def test_deletion_vectors_with_merge_engine_fall_back(tmp_path, engine):
     table = _table(tmp_path).copy({
         'deletion-vectors.enabled': 'true', 'merge-engine': engine})
+    with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
+            patch('pypaimon.write.native_write.create_native_write_table',
+                  side_effect=AssertionError('must not reconstruct')):
+        writer = table.new_batch_write_builder().new_write()
+    assert not isinstance(writer, NativeTableWrite)
+    writer.close()
+
+
+def test_data_evolution_row_sidecar_falls_back_before_native_write(tmp_path):
+    table = _table(tmp_path).copy({
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'data-evolution.row-sidecar.enabled': 'true'})
     with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
             patch('pypaimon.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):

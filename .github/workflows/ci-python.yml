@@ -196,10 +196,10 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust with native update support
+      - name: Build paimon-rust from main
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@780bc7957f24a78828b7910369e079bbff30e92c#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@main#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |

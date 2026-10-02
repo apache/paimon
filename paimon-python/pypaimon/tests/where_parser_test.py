@@ -508,6 +508,9 @@ class WhereParserScanTest(unittest.TestCase):
         # any stored value; it must return no rows rather than round into a match.
         self.assertEqual(self._scan_ids("price = 99.999"), [])
 
+    def test_decimal_fractional_range_uses_column_scale(self) -> None:
+        self.assertEqual(self._scan_ids("price < 50.001"), [2])
+
     def test_high_precision_decimal_integer_literal_matches(self):
         # A DECIMAL(38, 2) integer-form literal exceeds the default decimal
         # context; it must still rescale and match the stored scale-2 value.

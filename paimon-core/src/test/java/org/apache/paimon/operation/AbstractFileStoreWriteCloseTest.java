@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
@@ -27,6 +28,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.mergetree.compact.KvCompactionManagerFactory;
+import org.apache.paimon.metrics.MetricGroupImpl;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.metrics.BlobFetchMetrics;
+import org.apache.paimon.operation.metrics.WriterBufferMetric;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
@@ -36,10 +42,13 @@ import org.apache.paimon.utils.RecordWriter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -116,6 +125,88 @@ public class AbstractFileStoreWriteCloseTest {
         assertThat(write.writers()).isEmpty();
     }
 
+    @Test
+    public void testAppendCloseRunsBlobMetricCleanupAfterWriterFailure() throws Exception {
+        BucketedAppendFileStoreWrite write = newWrite();
+        RecordingWriter failing = new RecordingWriter("bucket-0", true);
+        putWriters(write, failing);
+
+        AtomicBoolean blobMetricClosed = new AtomicBoolean();
+        MetricRegistry metricRegistry =
+                (groupName, variables) ->
+                        new MetricGroupImpl(groupName, variables) {
+                            @Override
+                            public void close() {
+                                if (BlobFetchMetrics.GROUP_NAME.equals(groupName)) {
+                                    blobMetricClosed.set(true);
+                                }
+                            }
+                        };
+        Field blobMetricField = BaseAppendFileStoreWrite.class.getDeclaredField("blobFetchMetrics");
+        blobMetricField.setAccessible(true);
+        blobMetricField.set(write, new BlobFetchMetrics(metricRegistry, "test"));
+
+        assertThatThrownBy(write::close).hasMessage("close failed in bucket-0");
+        assertThat(blobMetricClosed).isTrue();
+    }
+
+    @Test
+    public void testKeyValueCloseRunsOuterCleanupAfterWriterFailure() throws Exception {
+        KeyValueFileStoreWrite write = newKeyValueWrite();
+        AtomicBoolean metricClosed = new AtomicBoolean();
+        MetricRegistry metricRegistry =
+                (groupName, variables) ->
+                        new MetricGroupImpl(groupName, variables) {
+                            @Override
+                            public void close() {
+                                if (WriterBufferMetric.GROUP_NAME.equals(groupName)) {
+                                    metricClosed.set(true);
+                                }
+                            }
+                        };
+        write.withMetricRegistry(metricRegistry);
+
+        @SuppressWarnings("unchecked")
+        RecordWriter<KeyValue> failingWriter =
+                (RecordWriter<KeyValue>)
+                        Proxy.newProxyInstance(
+                                RecordWriter.class.getClassLoader(),
+                                new Class<?>[] {RecordWriter.class},
+                                (proxy, method, args) -> {
+                                    if ("close".equals(method.getName())) {
+                                        throw new Exception("writer close failed");
+                                    }
+                                    return null;
+                                });
+        HashMap<Integer, AbstractFileStoreWrite.WriterContainer<KeyValue>> bucketWriters =
+                new HashMap<>();
+        bucketWriters.put(
+                0,
+                new AbstractFileStoreWrite.WriterContainer<>(
+                        failingWriter, 1, null, null, null, null));
+        write.writers().put(partition(0), bucketWriters);
+
+        AtomicBoolean factoryClosed = new AtomicBoolean();
+        KvCompactionManagerFactory compactManagerFactory =
+                (KvCompactionManagerFactory)
+                        Proxy.newProxyInstance(
+                                KvCompactionManagerFactory.class.getClassLoader(),
+                                new Class<?>[] {KvCompactionManagerFactory.class},
+                                (proxy, method, args) -> {
+                                    if ("close".equals(method.getName())) {
+                                        factoryClosed.set(true);
+                                    }
+                                    return null;
+                                });
+        Field factoryField = KeyValueFileStoreWrite.class.getDeclaredField("compactManagerFactory");
+        factoryField.setAccessible(true);
+        factoryField.set(write, compactManagerFactory);
+
+        assertThatThrownBy(write::close).hasMessage("writer close failed");
+        assertThat(metricClosed).isTrue();
+        assertThat(factoryClosed).isTrue();
+    }
+
     private void putWriters(BucketedAppendFileStoreWrite write, RecordingWriter... writers) {
         HashMap<Integer, AbstractFileStoreWrite.WriterContainer<InternalRow>> bucketWriters =
                 new HashMap<>();
@@ -129,7 +220,11 @@ public class AbstractFileStoreWriteCloseTest {
     }
 
     private BucketedAppendFileStoreWrite newWrite() throws Exception {
-        return (BucketedAppendFileStoreWrite) createFileStoreTable().store().newWrite("ss");
+        return (BucketedAppendFileStoreWrite) createFileStoreTable(false).store().newWrite("ss");
+    }
+
+    private KeyValueFileStoreWrite newKeyValueWrite() throws Exception {
+        return (KeyValueFileStoreWrite) createFileStoreTable(true).store().newWrite("ss");
     }
 
     private static BinaryRow partition(int i) {
@@ -140,17 +235,20 @@ public class AbstractFileStoreWriteCloseTest {
         return binaryRow;
     }
 
-    private FileStoreTable createFileStoreTable() throws Exception {
+    private FileStoreTable createFileStoreTable(boolean primaryKey) throws Exception {
         Catalog catalog = new FileSystemCatalog(LocalFileIO.create(), new Path(tempDir.toString()));
-        Schema schema =
+        Schema.Builder schemaBuilder =
                 Schema.newBuilder()
                         .column("f0", DataTypes.INT())
                         .column("f1", DataTypes.INT())
                         .column("f2", DataTypes.INT())
                         .partitionKeys("f0")
                         .option("bucket", "100")
-                        .option("bucket-key", "f1")
-                        .build();
+                        .option("bucket-key", "f1");
+        if (primaryKey) {
+            schemaBuilder.primaryKey("f0", "f1");
+        }
+        Schema schema = schemaBuilder.build();
         Identifier identifier = Identifier.create("default", "test");
         catalog.createDatabase("default", false);
         catalog.createTable(identifier, schema, false);

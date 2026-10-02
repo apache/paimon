@@ -295,7 +295,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             }
         )
         self.catalog.create_table('test_db.blob_detection_test', schema, False)
-        table = self.catalog.get_table('test_db.blob_detection_test')
+        # This test inspects the Python writer's internal column routing.
+        table = self.catalog.get_table('test_db.blob_detection_test').copy(
+            {'write.native.enabled': 'false'})
 
         # Use proper table API to create writer
         write_builder = table.new_batch_write_builder()
@@ -322,6 +324,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
+    @pytest.mark.python_write
     def test_dedicated_format_writer_no_blob_column(self):
         """Test that DedicatedFormatWriter raises error when no blob column is found."""
         from pypaimon import Schema
@@ -2493,7 +2496,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
-        result = table_read.to_arrow(splits)
+        # Scans do not promise an ordering across partitions.
+        result = table_read.to_arrow(splits).sort_by('id')
 
         # Verify the data was read back correctly
         self.assertEqual(result.num_rows, 5, "Should have 5 rows")
