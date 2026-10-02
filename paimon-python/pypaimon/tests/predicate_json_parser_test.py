@@ -896,6 +896,16 @@ class TestStringTransforms(unittest.TestCase):
             ["hello"])
         self.assertEqual(three, ["hXXlo"])
 
+    def test_overlay_position_arithmetic_overflows_like_java(self):
+        # pos + replaced overflows 32-bit int in Java's OverlayTransform:
+        # OVERLAY('hello', 'x', 1, 2147483647) is 'xhell' there (the wrapped
+        # end position lands inside the string), not 'x'. The auth rule must
+        # admit the same rows in PyPaimon.
+        out = self._apply(
+            {"name": "OVERLAY", "inputs": [self._field(), "x", 1, 2147483647]},
+            ["hello"])
+        self.assertEqual(out, ["xhell"])
+
     def test_pad_left_right_and_truncate(self):
         left = self._apply(
             {"name": "PAD", "inputs": [self._field(), 5, "ab"], "direction": "LEFT"},

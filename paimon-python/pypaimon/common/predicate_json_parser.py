@@ -28,6 +28,17 @@ _MAX_STOP = 2 ** 31 - 1
 
 _INT_MIN, _INT_MAX = -2 ** 31, 2 ** 31 - 1
 
+
+def _wrap_int32(value: int) -> int:
+    """Wrap ``value`` into signed 32-bit, mirroring Java ``int`` overflow.
+
+    OVERLAY's position arithmetic (``pos - 1`` and ``pos + replaced``) is
+    evaluated by ``OverlayTransform.transform`` as 32-bit ``int``, so a large
+    position wraps rather than growing unboundedly. Query-auth rules must admit
+    exactly the rows Java admits, so compute these the same way.
+    """
+    return ((value + 2 ** 31) % 2 ** 32) - 2 ** 31
+
 # Integer.parseInt syntax: an optional sign and Unicode decimal digits, which
 # Character.digit accepts, but no whitespace or underscore, which int() would.
 # Java reads UTF-16 chars, so a supplementary-plane digit fails there.
@@ -503,8 +514,11 @@ def _overlay(inputs, batch: pa.RecordBatch) -> pa.Array:
         pos = _int_position(raw_pos)
         length = _int_position(lengths.value(i)) if has_length else None
         replaced = len(repl) if (length is None or length < 0) else length
-        head = _substring_sql(value, 1, pos - 1)
-        tail = _substring_sql(value, pos + replaced, _INT_MAX)
+        # pos - 1 and pos + replaced are 32-bit int expressions in Java's
+        # OverlayTransform; wrap them so a boundary position overflows exactly
+        # as Java's does (otherwise an auth rule admits different rows here).
+        head = _substring_sql(value, 1, _wrap_int32(pos - 1))
+        tail = _substring_sql(value, _wrap_int32(pos + replaced), _INT_MAX)
         result.append(head + repl + tail)
     return pa.array(result, type=pa.string())
 
