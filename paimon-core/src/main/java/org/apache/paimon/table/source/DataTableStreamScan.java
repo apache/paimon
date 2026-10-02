@@ -61,6 +61,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     private final CoreOptions options;
     private final StreamScanMode scanMode;
     private final SnapshotManager snapshotManager;
+    private final ChangelogManager changelogManager;
     private final boolean supportStreamingReadOverwrite;
     private final NextSnapshotFetcher nextSnapshotProvider;
     private final boolean hasPk;
@@ -91,6 +92,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         this.options = options;
         this.scanMode = options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         this.snapshotManager = snapshotManager;
+        this.changelogManager = changelogManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.nextSnapshotProvider =
                 new NextSnapshotFetcher(
@@ -315,6 +317,35 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     @Override
     public void restore(@Nullable Long nextSnapshotId) {
+        if (nextSnapshotId != null) {
+            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+            if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
+                // The restored snapshot has already been expired. Whether the consumer can still
+                // resume from it depends on the changelog lifecycle.
+                if (options.changelogLifecycleDecoupled()
+                        && changelogManager.longLivedChangelogExists(nextSnapshotId)) {
+                    // The long-lived changelog outlives the snapshot, so keep reading from the
+                    // changelog instead of replaying data the consumer has already committed.
+                    LOG.warn(
+                            "The restored snapshot with id {} has expired, but its long-lived "
+                                    + "changelog is still available. Resuming from the changelog.",
+                            nextSnapshotId);
+                    this.nextSnapshotId = nextSnapshotId;
+                    return;
+                }
+                // No changelog to fall back on. Keeping the expired id would make every restart
+                // fail with OutOfRangeException, so the job could never self-recover; restart the
+                // scan from the starting scanner instead.
+                LOG.warn(
+                        "The restored snapshot with id {} has expired. "
+                                + "The earliest snapshot is {}. "
+                                + "Falling back to starting scanner.",
+                        nextSnapshotId,
+                        earliestSnapshotId);
+                this.nextSnapshotId = null;
+                return;
+            }
+        }
         this.nextSnapshotId = nextSnapshotId;
     }
 
