@@ -29,7 +29,6 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -243,6 +242,7 @@ public class IndexManifestFileHandler {
                 if (retainedMeta == null) {
                     continue;
                 }
+                List<Integer> retainedFieldIds = retainedMeta.getIndexedFieldIds();
 
                 for (IndexManifestEntry added : addedIndexFiles) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
@@ -253,22 +253,12 @@ public class IndexManifestFileHandler {
                                             retainedMeta.sourceMeta())
                                     && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
                                             addedMeta.sourceMeta()))
-                            || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
-                            || (!Arrays.equals(
-                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
-                                    && (("btree".equals(retained.indexFile().indexType())
-                                                    && retainedMeta.extraFieldIds() != null
-                                                    && retainedMeta.extraFieldIds().length > 0)
-                                            || ("btree".equals(added.indexFile().indexType())
-                                                    && addedMeta.extraFieldIds() != null
-                                                    && addedMeta.extraFieldIds().length > 0)))
-                            || (Arrays.equals(
-                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
-                                    && !Range.intersect(
-                                            retainedMeta.rowRangeStart(),
-                                            retainedMeta.rowRangeEnd(),
-                                            addedMeta.rowRangeStart(),
-                                            addedMeta.rowRangeEnd()))) {
+                            || !Range.intersect(
+                                    retainedMeta.rowRangeStart(),
+                                    retainedMeta.rowRangeEnd(),
+                                    addedMeta.rowRangeStart(),
+                                    addedMeta.rowRangeEnd())
+                            || !retainedFieldIds.equals(addedMeta.getIndexedFieldIds())) {
                         continue;
                     }
 
