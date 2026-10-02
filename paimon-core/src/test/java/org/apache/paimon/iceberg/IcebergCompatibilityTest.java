@@ -1832,16 +1832,18 @@ public class IcebergCompatibilityTest {
         write.write(GenericRow.of(1, 10));
         commit.commit(1, write.prepareCommit(false, 1));
 
-        table.createTag("first", 1);
-        table.createTag("second", 1);
+        // create the tags without the Iceberg tag callback, so v1 metadata carries no refs and
+        // only the next commit's rebuild from the tag list can produce them
+        Snapshot snapshot = table.snapshotManager().snapshot(1);
+        table.tagManager().createTag(snapshot, "first", null, Collections.emptyList(), false);
+        table.tagManager().createTag(snapshot, "second", null, Collections.emptyList(), false);
 
-        // a later write commit rebuilds the refs from all tags; both sibling tags must
-        // survive, not only the first one of the snapshot
         write.write(GenericRow.of(2, 20));
         commit.commit(2, write.prepareCommit(false, 2));
 
         long latestSnapshotId = table.snapshotManager().latestSnapshotId();
         Map<String, IcebergRef> refs = getIcebergRefsFromSnapshot(table, latestSnapshotId);
+        assertThat(refs).containsOnlyKeys("first", "second");
         assertThat(refs.get("first").snapshotId()).isEqualTo(1);
         assertThat(refs.get("second").snapshotId()).isEqualTo(1);
     }
