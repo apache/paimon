@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -31,6 +32,8 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Range;
@@ -38,6 +41,8 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -75,8 +80,25 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
     private final LazyField<CacheManager> cacheManager;
 
     public BTreeGlobalIndexer(DataField dataField, Options options) {
-        this.keySerializer = KeySerializer.create(dataField.type());
-        this.keyExtractor = GlobalIndexKeyExtractor.identity(dataField.type());
+        this(dataField, Collections.emptyList(), options);
+    }
+
+    public BTreeGlobalIndexer(DataField dataField, List<DataField> extraFields, Options options) {
+        List<DataField> fields = new ArrayList<>();
+        fields.add(dataField);
+        fields.addAll(extraFields);
+        for (DataField field : fields) {
+            if (field.type() instanceof RowType) {
+                throw new UnsupportedOperationException(
+                        "BTree index columns must have scalar types: " + field.name());
+            }
+        }
+        DataType keyType = extraFields.isEmpty() ? dataField.type() : new RowType(fields);
+        this.keySerializer =
+                extraFields.isEmpty()
+                        ? KeySerializer.create(keyType)
+                        : new CompositeKeySerializer((RowType) keyType);
+        this.keyExtractor = GlobalIndexKeyExtractor.identity(keyType);
         this.options = options;
         this.fallbackScanMaxSize =
                 options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes();
