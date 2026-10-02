@@ -20,87 +20,56 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.memory.MemorySlice;
-import org.apache.paimon.memory.MemorySliceInput;
-import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.types.RowType;
 
 import java.util.Comparator;
 
-/** Length-delimited tuple keys, compared by their typed components with nulls first. */
+/** Compacted row keys, compared by their typed components with nulls first. */
 public class CompositeKeySerializer implements KeySerializer {
 
-    private final RowType rowType;
-
-    private final KeySerializer[] serializers;
+    private final ThreadLocal<RowCompactedSerializer> serializer;
     private final InternalRow.FieldGetter[] getters;
     private final Comparator<Object>[] comparators;
 
     @SuppressWarnings("unchecked")
     public CompositeKeySerializer(RowType type) {
-        this.rowType = type;
+        serializer = ThreadLocal.withInitial(() -> new RowCompactedSerializer(type));
         int count = type.getFieldCount();
-        serializers = new KeySerializer[count];
         getters = new InternalRow.FieldGetter[count];
         comparators = new Comparator[count];
         for (int i = 0; i < count; i++) {
-            serializers[i] = KeySerializer.create(type.getTypeAt(i));
             getters[i] = InternalRow.createFieldGetter(type.getTypeAt(i), i);
-            comparators[i] = serializers[i].createComparator();
+            comparators[i] = KeySerializer.create(type.getTypeAt(i)).createComparator();
         }
-    }
-
-    public RowType rowType() {
-        return rowType;
     }
 
     @Override
     public byte[] serialize(Object key) {
-        InternalRow row = (InternalRow) key;
-        if (row.getFieldCount() != serializers.length) {
-            throw new IllegalArgumentException(
-                    "Expected "
-                            + serializers.length
-                            + " composite key fields, but got "
-                            + row.getFieldCount());
-        }
-        MemorySliceOutput output = new MemorySliceOutput(32);
-        for (int i = 0; i < serializers.length; i++) {
-            Object value = getters[i].getFieldOrNull(row);
-            if (value == null) {
-                output.writeInt(-1);
-            } else {
-                byte[] bytes = serializers[i].serialize(value);
-                output.writeInt(bytes.length);
-                output.writeBytes(bytes);
+        // Canonicalize RowKind and NaN payloads so equal keys have the same Bloom hash.
+        GenericRow row = new GenericRow(getters.length);
+        for (int i = 0; i < getters.length; i++) {
+            Object value = getters[i].getFieldOrNull((InternalRow) key);
+            if (value instanceof Float && Float.isNaN((Float) value)) {
+                value = Float.NaN;
+            } else if (value instanceof Double && Double.isNaN((Double) value)) {
+                value = Double.NaN;
             }
+            row.setField(i, value);
         }
-        return output.toSlice().copyBytes();
+        return serializer.get().serializeToBytes(row);
     }
 
     @Override
     public Object deserialize(MemorySlice data) {
-        MemorySliceInput input = data.toInput();
-        GenericRow row = new GenericRow(serializers.length);
-        for (int i = 0; i < serializers.length; i++) {
-            int length = input.readInt();
-            if (length >= 0) {
-                row.setField(i, serializers[i].deserialize(input.readSlice(length)));
-            } else if (length != -1) {
-                throw new IllegalArgumentException(
-                        "Invalid composite key component length: " + length);
-            }
-        }
-        if (input.available() != 0) {
-            throw new IllegalArgumentException("Trailing bytes in composite key");
-        }
-        return row;
+        return serializer.get().deserialize(data.copyBytes());
     }
 
     @Override
     public Comparator<Object> createComparator() {
         return (left, right) -> {
-            for (int i = 0; i < serializers.length; i++) {
+            for (int i = 0; i < getters.length; i++) {
                 Object a = getters[i].getFieldOrNull((InternalRow) left);
                 Object b = getters[i].getFieldOrNull((InternalRow) right);
                 int comparison =

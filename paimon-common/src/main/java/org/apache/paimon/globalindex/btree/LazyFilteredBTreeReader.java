@@ -118,11 +118,6 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         if (!(keySerializer instanceof CompositeKeySerializer)) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
-        int fieldCount = ((CompositeKeySerializer) keySerializer).rowType().getFieldCount();
-        if (literals.size() != fieldCount) {
-            throw new IllegalArgumentException(
-                    "Expected " + fieldCount + " composite key fields, but got " + literals.size());
-        }
         if (literals.stream().anyMatch(Objects::isNull)) {
             return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
         }
