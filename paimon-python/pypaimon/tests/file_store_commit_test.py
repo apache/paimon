@@ -19,10 +19,13 @@ import unittest
 import uuid
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, Mock, patch
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
@@ -78,14 +81,48 @@ class TestRowIdCheckFromMessages(unittest.TestCase):
 
 class TestAbortCommitMessages(unittest.TestCase):
 
+    @staticmethod
+    def _file_meta(**kwargs):
+        return DataFileMeta(
+            file_name='data.parquet', file_size=1, row_count=1,
+            min_key=None, max_key=None, key_stats=None, value_stats=None,
+            min_sequence_number=0, max_sequence_number=0, schema_id=0,
+            level=0, extra_files=kwargs.pop('extra_files', []), **kwargs)
+
     def test_reconstructs_local_path_after_wire_decode(self):
         table = Mock()
         table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
-        file = Mock(file_name='data.parquet', external_path=None, file_path=None)
+        file = self._file_meta()
         message = CommitMessage((1,), 0, [file])
         _abort_commit_messages(table, [message])
         table.file_io.delete_quietly.assert_called_once_with(
             '/table/p=1/bucket-0/data.parquet')
+
+    def test_reconstructs_aligned_sidecars_after_wire_decode(self):
+        table = Mock()
+        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
+        file = self._file_meta(extra_files=['data.parquet.index'])
+        _abort_commit_messages(table, [CommitMessage((1,), 0, [file])])
+        self.assertEqual(table.file_io.delete_quietly.call_args_list, [
+            unittest.mock.call('/table/p=1/bucket-0/data.parquet'),
+            unittest.mock.call('/table/p=1/bucket-0/data.parquet.index'),
+        ])
+
+    def test_deletes_literal_external_paths_and_preserves_metadata(self):
+        with TemporaryDirectory() as directory:
+            parent = Path(directory) / 'pt=a%2Fb%25%3F%23'
+            parent.mkdir()
+            paths = [parent / 'data.parquet', parent / 'data.parquet.index']
+            for path in paths:
+                path.touch()
+            external_path = 'file:' + paths[0].as_posix()
+            file = self._file_meta(external_path=external_path, extra_files=[paths[1].name])
+            table = Mock(file_io=LocalFileIO())
+            _abort_commit_messages(table, [CommitMessage(('a/b%?#',), 0, [file])])
+            self.assertFalse(any(path.exists() for path in paths))
+            self.assertEqual(file.external_path, external_path)
+            self.assertEqual(file.extra_files, [paths[1].name])
+            table.path_factory.assert_not_called()
 
     def test_index_path_failure_does_not_escape_abort(self):
         table = Mock()

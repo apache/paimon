@@ -153,7 +153,9 @@ public class SortedIndexTopoBuilder {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (String indexColumn : indexColumns) {
             SortedGlobalIndexScanner indexScanner =
-                    indexScannerSupplier.get().withIndexField(indexColumn);
+                    indexScannerSupplier
+                            .get()
+                            .withIndexFields(Collections.singletonList(indexColumn));
             if (partitionPredicate != null) {
                 indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
             }
@@ -183,7 +185,9 @@ public class SortedIndexTopoBuilder {
             String buildTaskIdField = buildTaskIdFieldName(dataReadType);
             GlobalIndexer indexer =
                     GlobalIndexer.create(
-                            indexType, table.rowType().getField(indexColumn), userOptions);
+                            indexType,
+                            Collections.singletonList(table.rowType().getField(indexColumn)),
+                            userOptions);
             if (!(indexer instanceof SortedGlobalIndexer)) {
                 throw new IllegalArgumentException(
                         "Index algorithm " + indexType + " does not expose sorted index keys.");
@@ -245,7 +249,7 @@ public class SortedIndexTopoBuilder {
                             splitTasks,
                             readBuilder,
                             new SortedGlobalIndexWriter(table, indexType, userOptions)
-                                    .withIndexField(indexColumn),
+                                    .withIndexFields(Collections.singletonList(indexColumn)),
                             scanResult.scanSnapshotId(),
                             partitionFieldSize,
                             taskIdPos,

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
@@ -27,7 +28,10 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -40,7 +44,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -51,6 +54,7 @@ import java.util.function.Supplier;
 public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIndexReader> {
 
     private final KeySerializer keySerializer;
+    private final List<DataField> indexFields;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
     @Nullable private final RoaringNavigableMap64 rowIdFilter;
@@ -60,6 +64,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
 
     public LazyFilteredBTreeReader(
             List<GlobalIndexIOMeta> files,
+            List<DataField> indexFields,
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
             CacheManager cacheManager,
@@ -71,6 +76,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
+        this.indexFields = indexFields;
         this.rowIdFilter =
                 rowRanges == null ? null : GlobalIndexResult.fromRanges(rowRanges).results();
         this.comparator = keySerializer.createComparator();
@@ -107,6 +113,23 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             }
         }
         return remaining == 0 ? Pair.of(min, max) : null;
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitComposite(Predicate predicate) {
+        if (indexFields.size() < 2) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        Optional<List<LeafPredicate>> matched =
+                CompositeBTreePredicate.match(indexFields, predicate);
+        if (!matched.isPresent()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        if (CompositeBTreePredicate.isContradictory(indexFields, predicate)) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        Object[] values = matched.get().stream().map(leaf -> leaf.literals().get(0)).toArray();
+        return visitEqual((FieldRef) null, GenericRow.of(values));
     }
 
     @Override
@@ -163,7 +186,7 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
 
     // Only use for predicates whose matching keys form one contiguous interval.
     private CompletableFuture<Optional<GlobalIndexResult>> visitWithAllMatch(
-            Predicate<Object> predicate,
+            java.util.function.Predicate<Object> predicate,
             Supplier<CompletableFuture<Optional<GlobalIndexResult>>> fallback) {
         if (fullRangeBounds != null
                 && predicate.test(fullRangeBounds.getLeft())
