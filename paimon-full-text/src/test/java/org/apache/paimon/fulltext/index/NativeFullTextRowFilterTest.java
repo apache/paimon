@@ -450,7 +450,7 @@ public class NativeFullTextRowFilterTest {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 NativeFullTextGlobalIndexerFactory.IDENTIFIER,
-                                contentField,
+                                Collections.singletonList(contentField),
                                 table.coreOptions().toConfiguration());
         for (int i = 0; i < fullTextIndexedRows; i++) {
             textWriter.write(BinaryString.fromString(contents.get(i)), i);
@@ -472,7 +472,7 @@ public class NativeFullTextRowFilterTest {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 BTreeGlobalIndexerFactory.IDENTIFIER,
-                                categoryField,
+                                Collections.singletonList(categoryField),
                                 table.coreOptions().toConfiguration());
         // The btree writer is an SST writer: keys must arrive in sorted order.
         List<Integer> rowIdsByCategory = new ArrayList<>(rowCount);

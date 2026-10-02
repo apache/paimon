@@ -63,7 +63,17 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
 
         Callable<Boolean> callable =
                 () -> {
-                    boolean committed = fileIO.tryToWriteAtomic(newSnapshotPath, snapshot.toJson());
+                    boolean committed;
+                    try {
+                        committed = fileIO.tryToWriteAtomic(newSnapshotPath, snapshot.toJson());
+                    } catch (IOException e) {
+                        // the rename may have succeeded even if the file system reports an
+                        // error, check the snapshot file below
+                        if (!fileIO.exists(newSnapshotPath)) {
+                            throw e;
+                        }
+                        committed = false;
+                    }
                     if (!committed) {
                         if (!fileIO.exists(newSnapshotPath)) {
                             throw new IOException(

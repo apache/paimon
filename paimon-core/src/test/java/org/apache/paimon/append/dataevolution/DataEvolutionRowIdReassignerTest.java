@@ -3368,7 +3368,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     private void createBTreeIndex(FileStoreTable table) throws Exception {
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, "btree").withIndexField("id");
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexFields(Collections.singletonList("id"));
         ScanResult<DataSplit> scanResult =
                 builder.scan()
                         .orElseThrow(

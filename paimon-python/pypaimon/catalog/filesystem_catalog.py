@@ -50,12 +50,17 @@ from pypaimon.table.table import Table
 
 
 class FileSystemCatalog(Catalog):
-    def __init__(self, catalog_options: Options):
+    def __init__(self, catalog_options: Options,
+                 catalog_context: Optional[CatalogContext] = None):
         if not catalog_options.contains(CatalogOptions.WAREHOUSE):
             raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE.key()}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
-        self.catalog_context = CatalogContext.create_from_options(catalog_options)
+        self.catalog_context = (
+            catalog_context
+            if catalog_context is not None
+            else CatalogContext.create_from_options(catalog_options)
+        )
         self._cache_manager = CachingFileIO.create_cache_manager(self.catalog_options)
         self.file_io = CachingFileIO.wrap_with_caching_if_needed(
             FileIO.get(self.warehouse, self.catalog_options), self.catalog_options,

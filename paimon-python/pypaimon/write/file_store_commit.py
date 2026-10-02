@@ -93,13 +93,10 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                      + list(message.compact_changelog_files)):
             path = None
             try:
-                path = file.external_path or file.file_path
-                if not path:
-                    bucket_path = table.path_factory().bucket_path(
-                        tuple(message.partition), message.bucket)
-                    path = '%s/%s' % (bucket_path.rstrip('/'), file.file_name)
-                if path:
-                    table.file_io.delete_quietly(str(path))
+                bucket_path = None if file.physical_path() else table.path_factory().bucket_path(
+                    tuple(message.partition), message.bucket)
+                for path in file.collect_files(bucket_path):
+                    table.file_io.delete_quietly(path)
             except Exception as error:
                 logger.warning(
                     "Failed to clean up file %s during abort: %s",
@@ -897,7 +894,7 @@ class FileStoreCommit:
                         path_factory = self.table.path_factory()
                         for entry in entries:
                             file = entry.file
-                            file.file_path = file.external_path or "%s/%s" % (
+                            file.file_path = file.physical_path() if file.external_path else "%s/%s" % (
                                 path_factory.bucket_path(
                                     tuple(entry.partition.values),
                                     entry.bucket,

@@ -20,7 +20,6 @@ import os
 import shutil
 import tempfile
 import unittest
-import random
 from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
@@ -228,8 +227,12 @@ class ReaderBasicTest(unittest.TestCase):
         pd.testing.assert_frame_equal(
             actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
+    @parameterized.expand([
+        ('full',),
+        ('none',),
+    ])
     @pytest.mark.python_plan
-    def test_full_data_types(self):
+    def test_full_data_types(self, stats_mode):
         simple_pa_schema = pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
@@ -246,11 +249,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('f12', pa.date32()),
             ('f13', pa.time32('ms')),
         ])
-        stats_enabled = random.random() < 0.5
-        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        options = {'metadata.stats-mode': stats_mode}
         schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
-        self.catalog.create_table('default.test_full_data_types', schema, False)
-        table = self.catalog.get_table('default.test_full_data_types')
+        table_name = f'default.test_full_data_types_{stats_mode}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
 
         # to test read and write
         write_builder = table.new_batch_write_builder()
@@ -302,8 +305,7 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
 
-        # Python write does not produce value stats
-        if stats_enabled:
+        if stats_mode == 'full':
             self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
             min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
                                                                 table.fields).values

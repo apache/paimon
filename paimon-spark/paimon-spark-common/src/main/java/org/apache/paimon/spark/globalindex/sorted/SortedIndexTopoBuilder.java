@@ -103,7 +103,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             throws IOException {
         SortedGlobalIndexScanner indexScanner =
                 new SortedGlobalIndexScanner(table, indexType, options)
-                        .withIndexField(indexField.name());
+                        .withIndexFields(Collections.singletonList(indexField.name()));
         if (partitionPredicate != null) {
             indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
         }
@@ -131,7 +131,8 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         int maxParallelism = options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
         List<CommitMessage> allMessages = new ArrayList<>();
-        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, options);
+        GlobalIndexer indexer =
+                GlobalIndexer.create(indexType, Collections.singletonList(indexField), options);
         if (!(indexer instanceof SortedGlobalIndexer)) {
             throw new IllegalArgumentException(
                     "Index algorithm " + indexType + " does not expose sorted index keys.");
@@ -144,7 +145,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
         SortedGlobalIndexWriter indexWriter =
                 new SortedGlobalIndexWriter(table, indexType, options)
-                        .withIndexField(indexField.name());
+                        .withIndexFields(Collections.singletonList(indexField.name()));
         final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
         if (keyExtractor.isIdentity()) {
             List<SortedBuildTask> buildTasks = new ArrayList<>();
