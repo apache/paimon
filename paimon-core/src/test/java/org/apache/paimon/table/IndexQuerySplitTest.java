@@ -294,10 +294,16 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                                 .newScan()
                                 .plan();
                 List<Integer> actual = read(read, indexQueryPlan.splits());
+                List<Integer> expected = read(read, read.newScan().plan().splits());
+                // In the Reader, f2 covers the tail where f1 has no local index group.
+                if (mode.equals("fast") && predicate.equals(predicates.get(1))) {
+                    expected = Arrays.asList(50, 150, 250);
+                } else if (mode.equals("fast") && predicate.equals(predicates.get(2))) {
+                    expected = Arrays.asList(50, 150, 250, 251);
+                }
                 assertThat(actual)
                         .as("%s / %s / %s", indexType, mode, predicate)
-                        .containsExactlyInAnyOrderElementsOf(
-                                read(read, read.newScan().plan().splits()));
+                        .containsExactlyInAnyOrderElementsOf(expected);
                 if (!mode.equals("fast")) {
                     ReadBuilder full =
                             configured
@@ -586,7 +592,7 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testFastUnsupportedAlternativeIndexKeepsGlobalFallback() throws Exception {
+    public void testUnsupportedAlternativeIndexUsesSupportedCandidates() throws Exception {
         write(100);
         createIndex("btree", "f1");
         createFMIndex(getTableDefault());
@@ -596,19 +602,19 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                         .copy(
                                 Collections.singletonMap(
                                         CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast"));
-        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, str("a150"));
+        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, str("a50"));
         assertThat(table.newScan().plan().splits()).hasSize(2);
-        for (FileStoreTable configured : Arrays.asList(table, distributedTable(table))) {
-            ReadBuilder read = configured.newReadBuilder().withFilter(predicate);
-            List<Split> splits = read.newScan().plan().splits();
-            assertThat(read(read, splits)).containsExactly(150);
-        }
+        ReadBuilder read = distributedTable(table).newReadBuilder().withFilter(predicate);
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).hasSize(1).allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(((IndexQuerySplit) splits.get(0)).evaluate(table.fileIO()).rowRanges())
+                .containsExactly(new Range(50, 50));
+        assertThat(read(read, splits)).containsExactly(50);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
-    public void testFastUnsupportedSingleIndexKeepsUnindexedSplits(String indexType)
-            throws Exception {
+    public void testFastUnsupportedPredicateScansCoveredRows(String indexType) throws Exception {
         write(100);
         createIndex(indexType, "f1");
         appendRows(100, 200);
@@ -619,24 +625,19 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
                                         CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "fast"));
         Predicate predicate = new PredicateBuilder(table.rowType()).notLike(1, str("a0"));
         assertThat(table.newScan().plan().splits()).hasSize(2);
-        for (FileStoreTable configured : Arrays.asList(table, distributedTable(table))) {
-            ReadBuilder read = configured.newReadBuilder().withFilter(predicate);
-            assertThat(read(read, read.newScan().plan().splits()))
-                    .hasSize(199)
-                    .contains(99, 100, 199)
-                    .doesNotContain(0);
-        }
+        ReadBuilder read = distributedTable(table).newReadBuilder().withFilter(predicate);
+        List<Split> splits = read.newScan().plan().splits();
+        assertThat(splits).hasSize(1).allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(read, splits)).hasSize(99).contains(1, 99).doesNotContain(0, 100, 199);
         table =
                 table.copy(
                         Collections.singletonMap(
                                 indexType + "-index.fallback-scan-max-size", "0 b"));
         predicate = new PredicateBuilder(table.rowType()).contains(1, str("5"));
-        for (FileStoreTable configured : Arrays.asList(table, distributedTable(table))) {
-            ReadBuilder read = configured.newReadBuilder().withFilter(predicate);
-            assertThat(read(read, read.newScan().plan().splits()))
-                    .hasSize(38)
-                    .contains(5, 50, 150, 195);
-        }
+        read = distributedTable(table).newReadBuilder().withFilter(predicate);
+        splits = read.newScan().plan().splits();
+        assertThat(splits).hasSize(1).allMatch(IndexQuerySplit.class::isInstance);
+        assertThat(read(read, splits)).hasSize(19).contains(5, 50, 95).doesNotContain(150, 195);
     }
 
     @ParameterizedTest

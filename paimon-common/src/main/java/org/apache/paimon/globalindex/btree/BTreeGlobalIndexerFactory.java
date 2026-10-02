@@ -75,22 +75,6 @@ public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public boolean supportsPredicate(
-            List<DataField> indexFields,
-            Predicate predicate,
-            List<GlobalIndexIOMeta> files,
-            Options options) {
-        if (indexFields.size() > 1) {
-            return CompositeBTreePredicate.match(indexFields, predicate).isPresent();
-        }
-        return SortedFileMetaSelector.supportsPredicate(
-                predicate,
-                files,
-                KeySerializer.create(indexFields.get(0).type()),
-                options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes());
-    }
-
-    @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
         return new BTreeGlobalIndexer(indexFields, options);
     }

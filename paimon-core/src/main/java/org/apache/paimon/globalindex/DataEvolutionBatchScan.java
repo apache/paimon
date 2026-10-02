@@ -28,7 +28,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -333,7 +332,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
-    /** Plan complete data splits while deferring supported scalar index evaluation to readers. */
+    /** Plan complete data splits while deferring index evaluation to readers. */
     private Plan planWithIndexQuery() {
         if (queryAuthEnabled()
                 || filter == null
@@ -390,47 +389,26 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         indexFilter,
                         indexFiles,
                         table.store().pathFactory().globalIndexFileFactory());
-        // FAST must resolve support globally when groups differ or some data lacks an index.
-        // Otherwise a locally unsupported branch could change the indexed-only result.
-        if (indexQuery == null
-                || (table.coreOptions().scalarIndexSearchMode()
-                                == CoreOptions.GlobalIndexSearchMode.FAST
-                        && indexQuery.requiresGlobalEvaluation(
-                                GlobalIndexBuilderUtils.calcRowRanges(
-                                        splits.stream()
-                                                .map(DataEvolutionBatchScan::dataSplit)
-                                                .collect(Collectors.toList())),
-                                Options.fromMap(table.options())))) {
-            return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
+        if (indexQuery == null) {
+            return dataPlan;
         }
-        List<Range> unindexed =
-                new DataEvolutionGlobalIndexCoverage(
-                                table,
-                                snapshot,
-                                partitionFilter,
-                                indexFiles,
-                                table.coreOptions().scalarIndexSearchMode())
-                        .unindexedRangesFromCoverage(
-                                indexQuery.coveredRanges(),
-                                table.coreOptions().scalarIndexSearchMode()
-                                                == CoreOptions.GlobalIndexSearchMode.DETAIL
-                                        ? GlobalIndexBuilderUtils.calcRowRanges(
-                                                splits.stream()
-                                                        .map(DataEvolutionBatchScan::dataSplit)
-                                                        .collect(Collectors.toList()))
-                                        : Collections.emptyList());
         List<Split> indexQuerySplits = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = dataSplit(split);
             List<Range> ranges =
                     GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
             GlobalIndexQuery splitQuery = indexQuery.forRanges(ranges);
-            List<Range> splitUnindexed = Range.and(unindexed, ranges);
-            if (splitQuery.isEmpty() && splitUnindexed.isEmpty()) {
+            List<Range> queryRanges =
+                    table.coreOptions().scalarIndexSearchMode()
+                                    == CoreOptions.GlobalIndexSearchMode.FAST
+                            ? Range.and(ranges, splitQuery.indexedRanges())
+                            : ranges;
+            if (queryRanges.isEmpty() || splitQuery.isEmpty(queryRanges)) {
                 continue;
             }
             Split indexQuerySplit =
-                    new IndexQuerySplit(dataSplit, splitQuery, table.options(), splitUnindexed);
+                    new IndexQuerySplit(
+                            dataSplit, splitQuery, table.options(), Collections.emptyList());
             indexQuerySplits.add(withAuth(split, indexQuerySplit));
         }
         return () -> indexQuerySplits;
@@ -465,42 +443,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
             default:
                 // Creation-time scans may filter files instead of reading a complete snapshot.
                 return false;
-        }
-    }
-
-    private Plan planEagerIndex(
-            Plan dataPlan,
-            Snapshot snapshot,
-            PartitionPredicate partitionFilter,
-            List<IndexFileMeta> indexFiles,
-            Predicate indexFilter) {
-        try (DataEvolutionGlobalIndexScanner scanner =
-                DataEvolutionGlobalIndexScanner.create(table, snapshot, partitionFilter, indexFiles)
-                        .get()) {
-            Optional<GlobalIndexEvaluator.Evaluation> result =
-                    scanner.scanWithCoverage(indexFilter);
-            if (!result.isPresent()) {
-                return dataPlan;
-            }
-            GlobalIndexResult candidates =
-                    result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
-            RowRangeIndex rowRangeIndex = RowRangeIndex.create(candidates.results().toRangeList());
-            ScoreGetter scores =
-                    candidates instanceof ScoredGlobalIndexResult
-                            ? ((ScoredGlobalIndexResult) candidates).scoreGetter()
-                            : null;
-            List<Split> indexed = new ArrayList<>();
-            for (Split split : dataPlan.splits()) {
-                DataSplit dataSplit = dataSplit(split);
-                if (dataSplit.dataFiles().stream()
-                        .map(DataFileMeta::nonNullRowIdRange)
-                        .anyMatch(range -> rowRangeIndex.intersects(range.from, range.to))) {
-                    indexed.add(withAuth(split, wrap(dataSplit, rowRangeIndex, scores)));
-                }
-            }
-            return () -> indexed;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 

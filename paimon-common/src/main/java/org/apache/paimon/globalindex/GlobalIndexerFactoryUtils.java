@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 
@@ -67,16 +66,5 @@ public class GlobalIndexerFactoryUtils {
             List<GlobalIndexIOMeta> files) {
         GlobalIndexerFactory factory = factories.get(type);
         return factory == null ? files : factory.selectFiles(indexFields, predicate, files);
-    }
-
-    /** Unrecognized algorithms cannot guarantee predicate support from metadata. */
-    public static boolean supportsPredicate(
-            String type,
-            List<DataField> indexFields,
-            Predicate predicate,
-            List<GlobalIndexIOMeta> files,
-            Options options) {
-        GlobalIndexerFactory factory = factories.get(type);
-        return factory != null && factory.supportsPredicate(indexFields, predicate, files, options);
     }
 }

@@ -42,24 +42,6 @@ import java.util.stream.Collectors;
  */
 public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<GlobalIndexIOMeta>>> {
 
-    /** Check the sorted reader's support and scan budget without opening index files. */
-    public static boolean supportsPredicate(
-            org.apache.paimon.predicate.Predicate predicate,
-            List<GlobalIndexIOMeta> files,
-            KeySerializer keySerializer,
-            long fallbackScanMaxSize) {
-        if (files.stream().anyMatch(file -> file.metadata() == null)) {
-            return false;
-        }
-        try {
-            return predicate
-                    .visit(new SortedFileIndexPlanner(files, keySerializer, fallbackScanMaxSize))
-                    .isPresent();
-        } catch (UnsupportedOperationException e) {
-            return false;
-        }
-    }
-
     /** Select files conservatively before distributing a query to data splits. */
     public static List<GlobalIndexIOMeta> selectFiles(
             org.apache.paimon.predicate.Predicate predicate,

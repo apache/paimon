@@ -47,21 +47,6 @@ public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public boolean supportsPredicate(
-            List<DataField> indexFields,
-            Predicate predicate,
-            List<GlobalIndexIOMeta> files,
-            Options options) {
-        return indexFields.size() == 1
-                && SortedFileMetaSelector.supportsPredicate(
-                        predicate,
-                        files,
-                        KeySerializer.create(indexFields.get(0).type()),
-                        options.get(BitmapGlobalIndexOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE)
-                                .getBytes());
-    }
-
-    @Override
     public GlobalIndexer create(List<DataField> indexFields, Options options) {
         if (indexFields.size() != 1) {
             throw new UnsupportedOperationException(

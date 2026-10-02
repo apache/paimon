@@ -92,21 +92,16 @@ public class IndexQuerySplit implements Split {
         List<Range> ranges =
                 GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
         Options options = Options.fromMap(indexOptions);
-        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
-                indexQuery.evaluateWithCoverage(fileIO, options, ranges);
-        if (!evaluation.isPresent()) {
+        if (new CoreOptions(options).scalarIndexSearchMode()
+                == CoreOptions.GlobalIndexSearchMode.FAST) {
+            ranges = Range.and(ranges, indexQuery.indexedRanges());
+        }
+        Optional<GlobalIndexResult> result = indexQuery.evaluateCandidates(fileIO, options, ranges);
+        if (!result.isPresent()) {
             // No safe index query remains, including an OR with an unsupported branch.
             return new IndexedSplit(dataSplit, ranges, null);
         }
-        GlobalIndexEvaluator.Evaluation result = evaluation.get();
-        List<Range> candidates = new ArrayList<>(result.result().results().toRangeList());
-        if (new CoreOptions(options).scalarIndexSearchMode()
-                != CoreOptions.GlobalIndexSearchMode.FAST) {
-            // Reader support and scan budgets can reduce the metadata coverage at runtime.
-            for (Range range : ranges) {
-                candidates.addAll(range.exclude(result.coveredRanges()));
-            }
-        }
+        List<Range> candidates = new ArrayList<>(result.get().results().toRangeList());
         candidates.addAll(unindexedRanges);
         return new IndexedSplit(dataSplit, Range.sortAndMergeOverlap(candidates, true), null);
     }

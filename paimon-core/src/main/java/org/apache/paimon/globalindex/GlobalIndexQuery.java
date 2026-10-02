@@ -276,13 +276,16 @@ class GlobalIndexQuery {
         return new GlobalIndexQuery(predicate, false, Collections.emptyList(), selectedGroups);
     }
 
-    boolean isEmpty() {
+    /** Only prune when metadata proves no match throughout the requested row ranges. */
+    boolean isEmpty(List<Range> ranges) {
         if (predicate != null) {
-            return groups.stream().allMatch(group -> group.files.isEmpty());
+            return !groups.isEmpty()
+                    && groups.stream().allMatch(group -> group.files.isEmpty())
+                    && Range.and(coveredRanges(), ranges).equals(ranges);
         }
         return union
-                ? children.stream().allMatch(GlobalIndexQuery::isEmpty)
-                : children.stream().anyMatch(GlobalIndexQuery::isEmpty);
+                ? children.stream().allMatch(child -> child.isEmpty(ranges))
+                : children.stream().anyMatch(child -> child.isEmpty(ranges));
     }
 
     boolean hasCompositeQuery() {
@@ -295,29 +298,15 @@ class GlobalIndexQuery {
                 || children.stream().anyMatch(GlobalIndexQuery::hasScalarQuery);
     }
 
-    /** Whether reader support outside one data split can affect this query's FAST result. */
-    boolean requiresGlobalEvaluation(List<Range> dataRanges, Options options) {
-        if (predicate != null) {
-            if (groups.stream()
-                    .allMatch(
-                            group ->
-                                    group.files.isEmpty()
-                                            || GlobalIndexerFactoryUtils.supportsPredicate(
-                                                    group.type,
-                                                    group.indexFields(),
-                                                    predicate,
-                                                    group.files,
-                                                    options))) {
-                return false;
-            }
-            return groups.size() > 1 || !Range.and(coveredRanges(), dataRanges).equals(dataRanges);
-        }
-        for (GlobalIndexQuery child : children) {
-            if (child.requiresGlobalEvaluation(dataRanges, options)) {
-                return true;
-            }
-        }
-        return false;
+    /** Rows covered by any selected index path, independent of predicate support. */
+    List<Range> indexedRanges() {
+        return predicate != null
+                ? coveredRanges()
+                : Range.sortAndMergeOverlap(
+                        children.stream()
+                                .flatMap(child -> child.indexedRanges().stream())
+                                .collect(Collectors.toList()),
+                        true);
     }
 
     /** Coverage of the selected query paths, including files pruned safely by key metadata. */
@@ -368,7 +357,7 @@ class GlobalIndexQuery {
         for (GlobalIndexQuery child : children) {
             selectedChildren.add(child.forRanges(ranges));
         }
-        // A query without a local group evaluates to an empty result.
+        // Keep children without local groups so readers can retain their uncertain candidates.
         return new GlobalIndexQuery(predicate, union, selectedChildren, selected);
     }
 
@@ -377,6 +366,47 @@ class GlobalIndexQuery {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         return evaluateWithExecutor(fileIO, options, ranges, executor, false).get().result();
+    }
+
+    /** Retain candidates wherever a child predicate cannot be evaluated by an index. */
+    Optional<GlobalIndexResult> evaluateCandidates(
+            FileIO fileIO, Options options, List<Range> ranges) throws IOException {
+        if (ranges.isEmpty()) {
+            return Optional.of(GlobalIndexResult.createEmpty());
+        }
+        if (predicate == null) {
+            GlobalIndexResult result = null;
+            for (GlobalIndexQuery child : children) {
+                Optional<GlobalIndexResult> candidates =
+                        child.evaluateCandidates(fileIO, options, ranges);
+                if (!candidates.isPresent()) {
+                    if (union) {
+                        return Optional.empty();
+                    }
+                    continue;
+                }
+                result =
+                        result == null
+                                ? candidates.get()
+                                : union
+                                        ? result.or(candidates.get())
+                                        : result.and(candidates.get());
+            }
+            return Optional.ofNullable(result);
+        }
+        if (groups.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<Evaluation> evaluation = evaluateWithCoverage(fileIO, options, ranges);
+        return evaluation.map(
+                supported -> {
+                    List<Range> uncovered = new ArrayList<>();
+                    for (Range range : ranges) {
+                        uncovered.addAll(range.exclude(supported.coveredRanges()));
+                    }
+                    // Add gaps before AND/OR combination, so another index can still prune them.
+                    return supported.result().or(GlobalIndexResult.fromRanges(uncovered));
+                });
     }
 
     /** Preserve unsupported-reader fallback and coverage of the paths that actually contributed. */

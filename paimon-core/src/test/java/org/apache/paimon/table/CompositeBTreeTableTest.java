@@ -163,7 +163,10 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                         Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
         for (boolean inReader : Arrays.asList(false, true)) {
             assertThat(read(configured(table, "fast", inReader), conjunction))
-                    .containsExactly("p7");
+                    .containsExactlyInAnyOrderElementsOf(
+                            inReader
+                                    ? Arrays.asList("p7", "p27")
+                                    : Collections.singletonList("p7"));
             for (String mode : Arrays.asList("full", "detail")) {
                 FileStoreTable configured = configured(table, mode, inReader);
                 if (inReader) {
@@ -223,7 +226,12 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
         for (boolean inReader : Arrays.asList(false, true)) {
             FileStoreTable configured = configured(table, "fast", inReader);
             assertThat(read(configured, unsupported)).containsExactlyInAnyOrder("p7", "p27");
-            assertThat(read(configured, supported)).containsExactly("p7");
+            // The composite index covers the tail; the missing scalar group cannot rule it out.
+            assertThat(read(configured, supported))
+                    .containsExactlyInAnyOrderElementsOf(
+                            inReader
+                                    ? Arrays.asList("p7", "p27")
+                                    : Collections.singletonList("p7"));
             FileStoreTable budgeted =
                     configured.copy(
                             Collections.singletonMap("btree-index.fallback-scan-max-size", "0 b"));
@@ -274,6 +282,49 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                         .allMatch(IndexQuerySplit.class::isInstance);
                 assertThat(read(budgeted, predicate))
                         .containsExactlyInAnyOrderElementsOf(read(withoutIndex, predicate));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    void testReaderKeepsCandidatesOutsideResidualCoverage(String mode) throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 20);
+        build(table, "f2");
+        append(table, 20, 40);
+        build(table, "f1", "f0");
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate joint = query(predicates, "category-a", 7);
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        for (String targetSize : Arrays.asList("1 b", "1 gb")) {
+            FileStoreTable configured =
+                    configured(table, mode, true)
+                            .copy(Collections.singletonMap("source.split.target-size", targetSize));
+            // The scalar metadata proves no match only in the first twenty rows.
+            for (Predicate residual :
+                    Arrays.asList(
+                            predicates.equal(2, BinaryString.fromString("p27")),
+                            predicates.notLike(2, BinaryString.fromString("p1%")))) {
+                for (Predicate predicate :
+                        Arrays.asList(
+                                PredicateBuilder.and(joint, residual),
+                                PredicateBuilder.or(joint, residual))) {
+                    assertThat(
+                                    configured
+                                            .newReadBuilder()
+                                            .withFilter(predicate)
+                                            .newScan()
+                                            .plan()
+                                            .splits())
+                            .isNotEmpty()
+                            .allMatch(IndexQuerySplit.class::isInstance);
+                    assertThat(read(configured, predicate))
+                            .containsExactlyInAnyOrderElementsOf(read(withoutIndex, predicate));
+                }
             }
         }
     }
