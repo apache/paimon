@@ -189,7 +189,8 @@ public class GlobalIndexEvaluator implements Closeable {
                             }
                             return compoundResult.map(
                                     result ->
-                                            new Evaluation(result, Collections.singleton(fieldId)));
+                                            new Evaluation(
+                                                    result, Collections.singleton(fieldId), null));
                         });
     }
 
@@ -279,7 +280,7 @@ public class GlobalIndexEvaluator implements Closeable {
                 compoundResult = compoundResult.or(child.get().result());
                 contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            return Optional.of(new Evaluation(compoundResult, contributingFieldIds));
+            return Optional.of(new Evaluation(compoundResult, contributingFieldIds, null));
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<Evaluation> child : results) {
@@ -296,7 +297,7 @@ public class GlobalIndexEvaluator implements Closeable {
                     break;
                 }
             }
-            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds));
+            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds, null));
         }
     }
 
@@ -308,10 +309,6 @@ public class GlobalIndexEvaluator implements Closeable {
         private final GlobalIndexResult result;
         private final Set<Integer> contributingFieldIds;
         @Nullable private final List<Range> coveredRanges;
-
-        Evaluation(GlobalIndexResult result, Collection<Integer> contributingFieldIds) {
-            this(result, contributingFieldIds, null);
-        }
 
         Evaluation(
                 GlobalIndexResult result,
