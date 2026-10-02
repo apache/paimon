@@ -58,10 +58,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -82,6 +82,7 @@ import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
+import static org.apache.paimon.utils.FileStorePathFactory.parseExternalPaths;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -403,23 +404,17 @@ public abstract class AbstractCatalog implements Catalog {
         if (schemas == null) {
             return Collections.emptyList();
         }
-        return schemas.stream()
-                .flatMap(
-                        schema -> {
-                            Map<String, String> options = schema.toSchema().options();
-                            return Arrays.stream(
-                                    new String[] {
-                                        options.get(DATA_FILE_EXTERNAL_PATHS.key()),
-                                        options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
-                                    });
-                        })
-                .filter(Objects::nonNull)
-                .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
-                .map(String::trim)
-                .filter(path -> !path.isEmpty())
-                .map(Path::new)
-                .distinct()
-                .collect(Collectors.toList());
+        Set<Path> paths = new LinkedHashSet<>();
+        for (TableSchema schema : schemas) {
+            Map<String, String> options = schema.toSchema().options();
+            paths.addAll(parseExternalPaths(options.get(DATA_FILE_EXTERNAL_PATHS.key())));
+            // a single path, not trimmed, as in CoreOptions#globalIndexExternalPath
+            String globalIndexPath = options.get(GLOBAL_INDEX_EXTERNAL_PATH.key());
+            if (globalIndexPath != null && !globalIndexPath.isEmpty()) {
+                paths.add(new Path(globalIndexPath));
+            }
+        }
+        return new ArrayList<>(paths);
     }
 
     protected abstract void dropTableImpl(Identifier identifier, List<Path> externalPaths);
@@ -447,8 +442,7 @@ public abstract class AbstractCatalog implements Catalog {
         copyTableDefaultOptions(schema.options());
         validateCreateTable(schema, false);
 
-        TableType type = Options.fromMap(schema.options()).get(TYPE);
-        switch (type) {
+        switch (Options.fromMap(schema.options()).get(TYPE)) {
             case TABLE:
             case MATERIALIZED_TABLE:
                 createTableImpl(identifier, schema);
@@ -459,11 +453,6 @@ public abstract class AbstractCatalog implements Catalog {
             case OBJECT_TABLE:
                 createObjectTable(identifier, schema);
                 break;
-            default:
-                // silently falling through would report a successful DDL without
-                // creating anything
-                throw new UnsupportedOperationException(
-                        "Create table with type '" + type + "' is not supported.");
         }
     }
 

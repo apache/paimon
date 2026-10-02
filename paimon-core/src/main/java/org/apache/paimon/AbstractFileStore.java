@@ -164,8 +164,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         String specificFS = options.externalSpecificFS();
 
         List<Path> paths = new ArrayList<>();
-        for (String pathString : externalPaths.split(",")) {
-            Path path = new Path(pathString.trim());
+        for (Path path : FileStorePathFactory.parseExternalPaths(externalPaths)) {
             String scheme = path.toUri().getScheme();
             if (scheme == null) {
                 throw new IllegalArgumentException("scheme should not be null: " + path);

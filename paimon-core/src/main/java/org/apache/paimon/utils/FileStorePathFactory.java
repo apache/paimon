@@ -36,6 +36,8 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -226,6 +228,24 @@ public class FileStorePathFactory {
 
     public List<Path> getExternalPaths() {
         return externalPaths;
+    }
+
+    /**
+     * Parses the value of {@link CoreOptions#DATA_FILE_EXTERNAL_PATHS}: comma separated, each
+     * element trimmed, blank elements skipped.
+     */
+    public static List<Path> parseExternalPaths(@Nullable String externalPaths) {
+        if (externalPaths == null) {
+            return Collections.emptyList();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String pathString : externalPaths.split(",")) {
+            String trimmed = pathString.trim();
+            if (!trimmed.isEmpty()) {
+                paths.add(new Path(trimmed));
+            }
+        }
+        return paths;
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {

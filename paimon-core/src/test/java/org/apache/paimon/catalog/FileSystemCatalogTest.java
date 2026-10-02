@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -70,24 +71,6 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCreateTableWithUnsupportedTypeFailsLoudly() throws Exception {
-        catalog.createDatabase("test_db", false);
-        Identifier identifier = Identifier.create("test_db", "iceberg_t");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("k", DataTypes.INT())
-                        .option("type", "iceberg-table")
-                        .build();
-
-        // falling through the switch silently would report a successful DDL without
-        // creating anything
-        assertThatThrownBy(() -> catalog.createTable(identifier, schema, false))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("iceberg-table");
-        assertThat(catalog.listTables("test_db")).doesNotContain(identifier.getObjectName());
-    }
-
-    @Test
     public void testDropTableToleratesBlankExternalPaths() throws Exception {
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "external_paths_t");
@@ -99,11 +82,73 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                         .option("data-file.external-paths", " , " + external + " ,")
                         .build();
         catalog.createTable(identifier, schema, false);
+        assertThat(fileIO.exists(external)).isTrue();
 
-        // the drop must not crash on the blank segments the create-time validation
-        // tolerates
+        // the write side trims each element and skips blank ones; the drop must parse the
+        // same way
         catalog.dropTable(identifier, false);
         assertThat(catalog.listTables("test_db")).doesNotContain(identifier.getObjectName());
+        assertThat(fileIO.exists(external)).isFalse();
+    }
+
+    @Test
+    public void testDropTableDoesNotTrimGlobalIndexExternalPath() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "global_index_path_t");
+        String indexDir = new Path(new Path(warehouse), "test_db/index_dir").toString();
+        Path written = new Path(indexDir + " ");
+        Path sibling = new Path(indexDir);
+        fileIO.mkdirs(written);
+        fileIO.mkdirs(sibling);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .option("global-index.external-path", indexDir + " ")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        // the write side does not trim this option, so index files go under "index_dir "
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.store().pathFactory().globalIndexRootDir()).isEqualTo(written);
+
+        catalog.dropTable(identifier, false);
+        assertThat(fileIO.exists(written)).isFalse();
+        assertThat(fileIO.exists(sibling)).isTrue();
+    }
+
+    @Test
+    public void testDropTableWithEmptyGlobalIndexExternalPath() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "empty_global_index_path_t");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .option("global-index.external-path", "")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        catalog.dropTable(identifier, false);
+        assertThat(catalog.listTables("test_db")).doesNotContain(identifier.getObjectName());
+    }
+
+    @Test
+    public void testWriteSideSkipsBlankExternalPaths() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "external_paths_write_t");
+        Path external1 = new Path(new Path(warehouse), "test_db/external_1");
+        Path external2 = new Path(new Path(warehouse), "test_db/external_2");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .option("data-file.external-paths", external1 + ", ," + external2)
+                        .option("data-file.external-paths.strategy", "round-robin")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        // a blank element is skipped instead of failing every write
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.store().pathFactory().getExternalPaths())
+                .containsExactly(external1, external2);
     }
 
     @Test

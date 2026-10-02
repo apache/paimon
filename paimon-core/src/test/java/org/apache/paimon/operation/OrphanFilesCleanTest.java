@@ -114,6 +114,36 @@ public class OrphanFilesCleanTest {
     }
 
     @Test
+    public void testListPaimonFileDirsTrimsExternalPaths() throws Exception {
+        Path tablePath = new Path(tempDir.newFolder().toURI());
+        Path external1 = new Path(tempDir.newFolder().toURI());
+        Path external2 = new Path(tempDir.newFolder().toURI());
+        FileIO fileIO = LocalFileIO.create();
+        Path bucket1 = new Path(external1, "part1=0/part2=a/bucket-0");
+        Path bucket2 = new Path(external2, "part1=0/part2=a/bucket-0");
+        fileIO.mkdirs(bucket1);
+        fileIO.mkdirs(bucket2);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()
+                        },
+                        new String[] {"pk", "part1", "part2", "value"});
+        Options conf = new Options();
+        // the strategy stays NONE, so only orphan clean parses this value here
+        conf.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, external1 + " , , " + external2 + " ,");
+        FileStoreTable table = createFileStoreTable(fileIO, tablePath, rowType, conf);
+
+        java.lang.reflect.Method method =
+                LocalOrphanFilesClean.class.getSuperclass().getDeclaredMethod("listPaimonFileDirs");
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<Path> dirs = (List<Path>) method.invoke(new LocalOrphanFilesClean(table));
+
+        assertThat(dirs).contains(bucket1, bucket2);
+    }
+
+    @Test
     public void testDeleteNonEmptyDir() throws Exception {
         Path dir = new Path(tempDir.newFolder().toURI().toString(), "part1=0");
         FileIO fileIO = LocalFileIO.create();

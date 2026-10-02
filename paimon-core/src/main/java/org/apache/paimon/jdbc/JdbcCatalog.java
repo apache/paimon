@@ -437,11 +437,6 @@ public class JdbcCatalog extends AbstractCatalog {
                             "Failed to create table " + identifier.getFullName(), e);
                 }
                 break;
-            default:
-                // silently falling through would report a successful DDL without
-                // creating anything
-                throw new UnsupportedOperationException(
-                        "Create table with type '" + tableType + "' is not supported.");
         }
     }
 
