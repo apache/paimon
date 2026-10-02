@@ -557,6 +557,28 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testSingleFileIndexSkipsBeforeReadingDeletionVector() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_bitmap_before_dv", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit split = (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        Path deletionVectorPath =
+                split.deletionFiles().get().stream()
+                        .filter(Objects::nonNull)
+                        .map(file -> new Path(file.path()))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(latest.fileIO().delete(deletionVectorPath, false)).isTrue();
+
+        // The bitmap index already rejects this value, so the missing DV file must not be read.
+        assertThat(readWithFilter(table, equalF1(MISSING_F1))).isEmpty();
+    }
+
+    @Test
     public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
         FileStoreTable table = createTable("overwritten", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
