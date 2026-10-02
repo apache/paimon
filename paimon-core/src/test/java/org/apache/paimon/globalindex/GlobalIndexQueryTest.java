@@ -568,21 +568,14 @@ class GlobalIndexQueryTest {
     }
 
     @Test
-    void testGroupsRejectInconsistentIndexedFields() {
-        assertThatThrownBy(
-                        () ->
-                                DataEvolutionGlobalIndexScanner.groupIndexFiles(
-                                        Arrays.asList(
-                                                indexFile(
-                                                        "es-index",
-                                                        "first",
-                                                        0,
-                                                        99,
-                                                        10,
-                                                        new int[] {20}),
-                                                indexFile("es-index", "tail", 100, 199, 10, null))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("different columns");
+    void testGroupsAllowSingleAndCompositeIndexesWithTheSamePrimaryField() {
+        Map<Integer, List<IndexMetaFileGroup>> groups =
+                DataEvolutionGlobalIndexScanner.groupIndexFiles(
+                        Arrays.asList(
+                                indexFile("btree", "composite", 0, 99, 10, new int[] {20}),
+                                indexFile("btree", "single", 100, 199, 10, null)));
+        assertThat(groups.get(10)).hasSize(2);
+        assertThat(groups.get(20)).hasSize(1);
     }
 
     @Test

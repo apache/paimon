@@ -25,6 +25,7 @@ from pypaimon.globalindex.data_evolution_global_index_coverage import (
 )
 from pypaimon.globalindex.data_evolution_global_index_scanner import (
     DataEvolutionGlobalIndexScanner,
+    _supported_scalar_index_files,
 )
 from pypaimon.utils.range import Range
 
@@ -57,6 +58,17 @@ def _scanner(coverage):
 
 
 class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
+
+    def test_composite_btree_is_skipped_before_scalar_decoding(self):
+        single = SimpleNamespace(
+            index_type="btree", global_index_meta=SimpleNamespace(extra_field_ids=None))
+        composite = SimpleNamespace(
+            index_type="btree", global_index_meta=SimpleNamespace(extra_field_ids=[2]))
+        bitmap = SimpleNamespace(
+            index_type="bitmap", global_index_meta=SimpleNamespace(extra_field_ids=[2]))
+        self.assertEqual([single, bitmap],
+                         _supported_scalar_index_files([single, composite, bitmap]))
+        self.assertIsNone(DataEvolutionGlobalIndexScanner.create(None, [composite]))
 
     def test_default_values(self):
         options = CoreOptions(Options.from_none())

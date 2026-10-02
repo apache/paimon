@@ -389,7 +389,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         indexFilter,
                         indexFiles,
                         table.store().pathFactory().globalIndexFileFactory());
-        if (indexQuery == null) {
+        // Scalar reader support can depend on global file coverage and scan budgets. Resolve it
+        // before split pruning so unsupported residuals cannot discard composite matches.
+        if (indexQuery == null || (indexQuery.hasCompositeQuery() && indexQuery.hasScalarQuery())) {
             return planEagerIndex(dataPlan, snapshot, partitionFilter, indexFiles, indexFilter);
         }
         List<Range> unindexed =
@@ -399,8 +401,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                 partitionFilter,
                                 indexFiles,
                                 table.coreOptions().scalarIndexSearchMode())
-                        .unindexedRanges(
-                                indexQuery.contributingFieldIds(table.rowType()),
+                        .unindexedRangesFromCoverage(
+                                indexQuery.coveredRanges(),
                                 table.coreOptions().scalarIndexSearchMode()
                                                 == CoreOptions.GlobalIndexSearchMode.DETAIL
                                         ? GlobalIndexBuilderUtils.calcRowRanges(
@@ -472,11 +474,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 return dataPlan;
             }
             GlobalIndexResult candidates =
-                    result.get()
-                            .result()
-                            .or(
-                                    scanner.unindexedRowsForContributingFields(
-                                            result.get().contributingFieldIds()));
+                    result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
             RowRangeIndex rowRangeIndex = RowRangeIndex.create(candidates.results().toRangeList());
             ScoreGetter scores =
                     candidates instanceof ScoredGlobalIndexResult
@@ -553,11 +551,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             if (result.isPresent()) {
                 long coverageStart = System.nanoTime();
                 GlobalIndexResult finalResult =
-                        result.get()
-                                .result()
-                                .or(
-                                        scanner.unindexedRowsForContributingFields(
-                                                result.get().contributingFieldIds()));
+                        result.get().result().or(scanner.unindexedRowsForEvaluation(result.get()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(

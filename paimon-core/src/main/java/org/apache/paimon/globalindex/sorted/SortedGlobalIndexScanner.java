@@ -58,7 +58,7 @@ public class SortedGlobalIndexScanner implements Serializable {
     private final RowType rowType;
     private final Options options;
 
-    private DataField indexField;
+    private List<DataField> indexFields;
 
     @Nullable private Snapshot snapshot;
 
@@ -76,12 +76,20 @@ public class SortedGlobalIndexScanner implements Serializable {
     }
 
     public SortedGlobalIndexScanner withIndexField(String indexField) {
-        checkArgument(
-                rowType.containsField(indexField),
-                "Column '%s' does not exist in table '%s'.",
-                indexField,
-                table.fullName());
-        this.indexField = rowType.getField(indexField);
+        return withIndexFields(Collections.singletonList(indexField));
+    }
+
+    public SortedGlobalIndexScanner withIndexFields(List<String> fieldNames) {
+        checkArgument(!fieldNames.isEmpty(), "At least one index column is required.");
+        this.indexFields = new ArrayList<>();
+        for (String name : fieldNames) {
+            checkArgument(
+                    rowType.containsField(name),
+                    "Column '%s' does not exist in table '%s'.",
+                    name,
+                    table.fullName());
+            indexFields.add(rowType.getField(name));
+        }
         return this;
     }
 
@@ -132,25 +140,16 @@ public class SortedGlobalIndexScanner implements Serializable {
         }
         snapshotReader = withManifestEntryFilter(snapshotReader.withSnapshot(snapshot));
 
-        Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
+        Preconditions.checkArgument(indexFields != null, "indexFields must be set before scan.");
         List<IndexManifestEntry> currentIndexes =
-                currentIndexEntries(
-                        table,
-                        snapshot,
-                        indexType,
-                        Collections.singletonList(indexField),
-                        partitionPredicate);
+                currentIndexEntries(table, snapshot, indexType, indexFields, partitionPredicate);
         List<Range> rangesToBuild = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
         List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
         if (detectDataFileChange()) {
             // Scans data manifests through reusable binary views without materializing entries.
             deletedIndexEntries =
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
-                            table,
-                            snapshot,
-                            partitionPredicate,
-                            currentIndexes,
-                            Collections.singletonList(indexField));
+                            table, snapshot, partitionPredicate, currentIndexes, indexFields);
             for (IndexManifestEntry entry : deletedIndexEntries) {
                 rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
             }

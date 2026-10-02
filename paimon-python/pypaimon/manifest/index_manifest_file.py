@@ -332,7 +332,8 @@ def _validate_retained_global_index_files(
                 or added_meta is None
                 or added_file.index_type != retained_file.index_type
                 or retained_meta.index_field_id != added_meta.index_field_id
-                or _can_keep_existing_global_index(retained_meta, added_meta)
+                or _can_keep_existing_global_index(
+                    retained_meta, added_meta, added_file.index_type)
             ):
                 continue
 
@@ -386,9 +387,13 @@ def _is_global_index(index_type: str) -> bool:
     return index_type not in (IndexManifestFile.DELETION_VECTORS_INDEX, _HASH_INDEX)
 
 
-def _can_keep_existing_global_index(retained_meta, added_meta) -> bool:
+def _can_keep_existing_global_index(retained_meta, added_meta, index_type: str) -> bool:
+    retained_fields = _extra_field_ids(retained_meta)
+    added_fields = _extra_field_ids(added_meta)
+    if index_type == 'btree' and retained_fields != added_fields:
+        return True
     return (
-        _extra_field_ids(retained_meta) == _extra_field_ids(added_meta)
+        retained_fields == added_fields
         and not _row_ranges_intersect(retained_meta, added_meta)
     )
 

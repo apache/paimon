@@ -254,6 +254,14 @@ public class IndexManifestFileHandler {
                                     && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
                                             addedMeta.sourceMeta()))
                             || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
+                            || (!Arrays.equals(
+                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
+                                    && (("btree".equals(retained.indexFile().indexType())
+                                                    && retainedMeta.extraFieldIds() != null
+                                                    && retainedMeta.extraFieldIds().length > 0)
+                                            || ("btree".equals(added.indexFile().indexType())
+                                                    && addedMeta.extraFieldIds() != null
+                                                    && addedMeta.extraFieldIds().length > 0)))
                             || (Arrays.equals(
                                             retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
                                     && !Range.intersect(

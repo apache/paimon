@@ -374,6 +374,10 @@ def is_supported_scalar_index(index_file):
     return (
         index_file.global_index_meta is not None
         and index_file.index_type in _SUPPORTED_SCALAR_INDEX_TYPES
+        # Composite keys are only decoded by the Java reader. Skip these files
+        # so a scalar lookup cannot interpret tuple bytes as a column value.
+        and not (index_file.index_type == "btree"
+                 and getattr(index_file.global_index_meta, "extra_field_ids", None))
     )
 
 
