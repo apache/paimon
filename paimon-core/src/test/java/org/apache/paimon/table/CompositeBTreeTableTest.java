@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
@@ -262,6 +263,71 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                     .containsExactly(new Range(7, 7));
             assertThat(scanner.unindexedRows(query).results().toRangeList())
                     .containsExactly(new Range(20, 39));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "test-scalar"})
+    void testScalarReadersDoNotOpenMultiFieldIndexFiles(String indexType) throws Exception {
+        createTableDefault();
+        FileStoreTable table = configured(table(), "full", false);
+        append(table, 0, 40);
+        List<IndexFileMeta> files =
+                Collections.singletonList(
+                        new IndexFileMeta(
+                                indexType,
+                                "missing-multi-field-index",
+                                1,
+                                40,
+                                new GlobalIndexMeta(0, 39, 0, new int[] {1}, null),
+                                null));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(table, files).get()) {
+            for (Predicate predicate :
+                    Arrays.asList(
+                            predicates.equal(0, 7),
+                            predicates.equal(1, BinaryString.fromString("category-a")))) {
+                assertThat(scanner.scan(predicate)).isEmpty();
+                assertThat(scanner.unindexedRows(predicate).results().toRangeList())
+                        .containsExactly(new Range(0, 39));
+            }
+        }
+        assertThat(DataEvolutionGlobalIndexScanner.createForScalarFilters(table, null, null, files))
+                .isEmpty();
+    }
+
+    @Test
+    void testCompositeQueryDoesNotOpenMultiFieldResidualIndex() throws Exception {
+        createTableDefault();
+        FileStoreTable table = configured(table(), "full", false);
+        append(table, 0, 40);
+        build(table, "f1", "f0");
+        List<IndexFileMeta> files =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        files.add(
+                new IndexFileMeta(
+                        "test-scalar",
+                        "missing-multi-field-residual",
+                        1,
+                        40,
+                        new GlobalIndexMeta(0, 39, 2, new int[] {0}, null),
+                        null));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        query(predicates, "category-a", 7),
+                        predicates.equal(2, BinaryString.fromString("p7")));
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(table, files).get()) {
+            GlobalIndexEvaluator.Evaluation evaluation = scanner.scanWithCoverage(predicate).get();
+            assertThat(evaluation.result().results().toRangeList())
+                    .containsExactly(new Range(7, 7), new Range(27, 27));
+            assertThat(evaluation.contributingFieldIds()).containsExactlyInAnyOrder(0, 1);
+            assertThat(evaluation.coveredRanges()).containsExactly(new Range(0, 39));
+            assertThat(scanner.unindexedRows(predicate).results().isEmpty()).isTrue();
         }
     }
 

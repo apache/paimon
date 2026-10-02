@@ -220,7 +220,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return create(table, null, null, indexFiles);
     }
 
-    /** Search pre-filters use per-column coverage, so they require scalar BTree definitions. */
+    /** Search pre-filters use per-column coverage, so they require single-field definitions. */
     public static Optional<DataEvolutionGlobalIndexScanner> createForScalarFilters(
             FileStoreTable table,
             @Nullable Snapshot pinnedSnapshot,
@@ -231,7 +231,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 pinnedSnapshot,
                 partitionFilter,
                 indexFiles.stream()
-                        .filter(file -> !isCompositeBTree(file))
+                        .filter(file -> !isMultiFieldIndex(file))
                         .collect(Collectors.toList()));
     }
 
@@ -364,7 +364,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         return false;
                     }
                     // Collect indexes whose primary column is filtered, and also multi-column
-                    // indexes that have a filtered column as an extra (used as a fallback).
+                    // indexes that have a filtered column as an extra.
                     if (filterFieldIds.contains(globalIndex.indexFieldId())) {
                         return true;
                     }
@@ -380,12 +380,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return indexFileFilter;
     }
 
-    private static boolean isCompositeBTree(IndexFileMeta file) {
+    private static boolean isMultiFieldIndex(IndexFileMeta file) {
         GlobalIndexMeta meta = file.globalIndexMeta();
-        return "btree".equals(file.indexType())
-                && meta != null
-                && meta.extraFieldIds() != null
-                && meta.extraFieldIds().length > 0;
+        return meta != null && meta.extraFieldIds() != null && meta.extraFieldIds().length > 0;
     }
 
     /** Dropped indexed columns leave manifest entries that cannot serve the current schema. */
@@ -409,7 +406,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 predicate == null
                                 || indexFiles.stream()
                                         .noneMatch(
-                                                DataEvolutionGlobalIndexScanner::isCompositeBTree)
+                                                DataEvolutionGlobalIndexScanner::isMultiFieldIndex)
                         ? null
                         : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
         if (query != null && query.hasCompositeQuery()) {
@@ -421,7 +418,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                 .map(file -> file.globalIndexMeta().rowRange())
                                 .collect(Collectors.toList()));
             } catch (IOException e) {
-                throw new RuntimeException("Failed to evaluate composite BTree query", e);
+                throw new RuntimeException("Failed to evaluate composite global index query", e);
             }
         }
         return globalIndexEvaluator.evaluateWithContributingFields(predicate);
@@ -497,13 +494,13 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             GlobalIndexFileReader indexFileReadWrite, IndexMetaFileGroup group, RowType rowType) {
         List<DataField> indexFields =
                 group.fieldIds.stream().map(rowType::getField).collect(Collectors.toList());
+        if (indexFields.size() > 1) {
+            return Collections.emptyList();
+        }
 
         Set<GlobalIndexReader> readers = new HashSet<>();
         for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : group.metas.entrySet()) {
             String indexType = entry.getKey();
-            if ("btree".equals(indexType) && indexFields.size() > 1) {
-                continue;
-            }
             Map<Range, List<IndexFileMeta>> metas = entry.getValue();
             GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(indexType);
             GlobalIndexer globalIndexer = globalIndexerFactory.create(indexFields, options);

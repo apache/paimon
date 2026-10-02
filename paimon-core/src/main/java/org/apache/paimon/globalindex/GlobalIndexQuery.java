@@ -265,8 +265,8 @@ class GlobalIndexQuery {
         }
         List<IndexGroup> selectedGroups = new ArrayList<>();
         for (IndexGroup group : fieldGroups) {
-            // Non-leading columns cannot serve a scalar lookup in a tuple BTree.
-            if (!group.isCompositeBTree()) {
+            // Scalar lookups use independent single-field index definitions.
+            if (group.extraFields.isEmpty()) {
                 selectedGroups.add(group.selectFiles(predicate));
             }
         }
