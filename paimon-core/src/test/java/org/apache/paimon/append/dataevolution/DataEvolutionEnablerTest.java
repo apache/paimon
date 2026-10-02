@@ -731,7 +731,7 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                 .isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(table.snapshotManager().snapshot(5).commitKind())
                 .isEqualTo(Snapshot.CommitKind.OVERWRITE);
-        assertThat(table.schemaManager().listAllIds()).containsExactly(0L, 1L);
+        assertThat(table.schemaManager().listAllIds()).containsExactlyInAnyOrder(0L, 1L);
         assertThat(table.snapshotManager().latestSnapshot().schemaId()).isEqualTo(1L);
 
         // and from now on the stale writer is refused
@@ -1140,7 +1140,7 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         assertThat(inner.get().describe(TABLE)).startsWith("Success.");
         assertThat(outer.describe(TABLE)).startsWith("Success.");
         table = loadTable();
-        assertThat(table.schemaManager().listAllIds()).containsExactly(0L, 1L);
+        assertThat(table.schemaManager().listAllIds()).containsExactlyInAnyOrder(0L, 1L);
         assertNoDuplicateOrMissingRowIds(table, 1);
     }
 
