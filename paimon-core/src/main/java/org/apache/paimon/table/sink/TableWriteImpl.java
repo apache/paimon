@@ -123,6 +123,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         return this;
     }
 
+    public TableWriteImpl<T> withPartitionBucketMapping(
+            PartitionBucketMapping partitionBucketMapping) {
+        write.withPartitionBucketMapping(partitionBucketMapping);
+        return this;
+    }
+
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
@@ -231,8 +237,25 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         return writeAndReturn(row, bucket, Integer.valueOf(totalBuckets));
     }
 
+    /** Write a row using a partition bucket mapping after applying column default values. */
+    @Nullable
+    public SinkRecord writeAndReturn(InternalRow row, PartitionBucketMapping partitionBucketMapping)
+            throws Exception {
+        return writeAndReturn(row, -1, null, partitionBucketMapping);
+    }
+
     @Nullable
     private SinkRecord writeAndReturn(InternalRow row, int bucket, @Nullable Integer totalBuckets)
+            throws Exception {
+        return writeAndReturn(row, bucket, totalBuckets, null);
+    }
+
+    @Nullable
+    private SinkRecord writeAndReturn(
+            InternalRow row,
+            int bucket,
+            @Nullable Integer totalBuckets,
+            @Nullable PartitionBucketMapping partitionBucketMapping)
             throws Exception {
         InternalRow wrappedRow = wrapDefaultValue(row);
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, wrappedRow);
@@ -240,8 +263,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         if (rowKindFilter != null && !rowKindFilter.test(rowKind)) {
             return null;
         }
-        SinkRecord record =
-                bucket == -1 ? toSinkRecord(wrappedRow) : toSinkRecord(wrappedRow, bucket);
+        SinkRecord record;
+        if (partitionBucketMapping == null) {
+            record = bucket == -1 ? toSinkRecord(wrappedRow) : toSinkRecord(wrappedRow, bucket);
+        } else {
+            record = toSinkRecord(wrappedRow);
+            totalBuckets = partitionBucketMapping.resolveNumBuckets(record.partition());
+        }
         T extracted = recordExtractor.extract(record, rowKind);
         if (totalBuckets == null) {
             write.write(record.partition(), record.bucket(), extracted);
