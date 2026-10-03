@@ -41,6 +41,7 @@ Sections
 """
 
 import io
+import inspect
 import json
 import os
 import shutil
@@ -74,6 +75,7 @@ from pypaimon.data.variant_shredding import (
     rebuild_value,
     shredding_schema_to_arrow_type,
 )
+from pypaimon.read.native_plan import native_split_bridge_available
 from pypaimon.schema.data_types import (
     AtomicType,
     DataField,
@@ -99,6 +101,17 @@ def _variant_arrow_type() -> pa.StructType:
         pa.field('value', pa.binary(), nullable=False),
         pa.field('metadata', pa.binary(), nullable=False),
     ])
+
+
+def _native_variant_projection_available() -> bool:
+    if not native_split_bridge_available():
+        return False
+    try:
+        from pypaimon_rust.datafusion import ReadBuilder as NativeReadBuilder
+        return ('variant_fields' in inspect.signature(
+            NativeReadBuilder.with_projection).parameters)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return False
 
 
 def _make_metadata(*keys: str) -> bytes:
@@ -1237,7 +1250,8 @@ class TestVariantPaimonTable(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
                     read.to_torch(splits, streaming=False)
 
-    def test_variant_projection_literal_top_level_names_bridge(self):
+    def _check_variant_projection_literal_top_level_names(
+            self, suffix, native_read):
         pa_schema = pa.schema([
             pa.field('id.dot', pa.int64()),
             pa.field('payload', _variant_arrow_type()),
@@ -1246,7 +1260,7 @@ class TestVariantPaimonTable(unittest.TestCase):
         ])
         schema = Schema.from_pyarrow_schema(
             pa_schema, options={'read.native.enabled': 'true'})
-        identifier = 'default.variant_projection_literal_names'
+        identifier = 'default.variant_projection_literal_names_' + suffix
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
         values = GenericVariant.to_arrow_array([
@@ -1283,15 +1297,26 @@ class TestVariantPaimonTable(unittest.TestCase):
                 self.assertEqual(
                     read._output_arrow_schema().field(column).type,
                     pa.struct([pa.field('0', pa.float32())]))
-                projected = read.to_arrow(splits)
-                self.assertEqual(projected.column_names, projection)
-                self.assertEqual(
-                    projected[column].combine_chunks().field(0).to_pylist(),
-                    [1.25])
+                if native_read:
+                    projected = read.to_arrow(splits)
+                    self.assertEqual(projected.column_names, projection)
+                    self.assertEqual(
+                        projected[column].combine_chunks().field(0).to_pylist(),
+                        [1.25])
                 plain = table.new_read_builder().with_projection(projection)
                 self.assertEqual(
                     plain.new_read().to_arrow(splits).column_names,
                     projection)
+
+    def test_variant_projection_literal_top_level_names_bridge(self):
+        self._check_variant_projection_literal_top_level_names(
+            'bridge', native_read=False)
+
+    @unittest.skipUnless(_native_variant_projection_available(),
+                         'compatible native Variant projection API not installed')
+    def test_variant_projection_literal_top_level_names_native(self):
+        self._check_variant_projection_literal_top_level_names(
+            'native', native_read=True)
 
     def test_plain_variant_write_and_read(self):
         """Plain VARIANT: GenericVariant → write_arrow → to_arrow → GenericVariant."""
