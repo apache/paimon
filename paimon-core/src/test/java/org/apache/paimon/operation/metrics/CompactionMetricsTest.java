@@ -366,8 +366,7 @@ public class CompactionMetricsTest {
                             }
 
                             @Override
-                            public void close() {
-                            }
+                            public void close() {}
                         };
 
         CompactionMetrics metrics = new CompactionMetrics(registry, "myTable");
