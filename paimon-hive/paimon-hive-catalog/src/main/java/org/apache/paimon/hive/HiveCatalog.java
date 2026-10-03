@@ -258,6 +258,20 @@ public class HiveCatalog extends AbstractCatalog {
         return Pair.of(location, externalTable);
     }
 
+    /**
+     * Returns a location whose scheme is explicitly resolved. A {@code CREATE TABLE ... LOCATION
+     * '/path'} carries no scheme, and {@link FileIO#get(Path, CatalogContext)} treats a schemeless
+     * path as a local one - so on a cluster the schema files would be written to the driver's local
+     * filesystem instead of the configured default filesystem, and the table would be created
+     * against a location no other engine can read.
+     */
+    private Path resolveLocationScheme(Path location) {
+        if (location.toUri().getScheme() != null) {
+            return location;
+        }
+        return new Path(FileSystem.getDefaultUri(hiveConf).toString(), location);
+    }
+
     private Path getTableLocation(Identifier identifier, @Nullable Table table) {
         try {
             String databaseName = identifier.getDatabaseName();
@@ -1129,7 +1143,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void createObjectTable(Identifier identifier, Schema schema) {
         Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
-        Path location = pair.getLeft();
+        Path location = resolveLocationScheme(pair.getLeft());
         boolean externalTable = pair.getRight();
         schema.options().putIfAbsent(PATH.key(), location.toString());
         Schema objectSchema = buildObjectTableSchema(schema);
@@ -1244,7 +1258,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
-        Path location = pair.getLeft();
+        Path location = resolveLocationScheme(pair.getLeft());
         boolean externalTable = pair.getRight();
         TableSchema tableSchema;
         try {
@@ -1271,14 +1285,48 @@ public class HiveCatalog extends AbstractCatalog {
                                                     location,
                                                     externalTable)));
         } catch (Exception e) {
-            try {
-                if (!externalTable) {
-                    fileIO(location).deleteDirectoryQuietly(location);
-                }
-            } catch (Exception ee) {
-                LOG.error("Delete directory[{}] fail for table {}", location, identifier, ee);
-            }
+            cleanupOnCreateTableFailure(identifier, location, externalTable);
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
+        }
+    }
+
+    /**
+     * Rolls back the table registration after {@code createHiveTable} failed, so no zombie entry is
+     * left behind in the metastore. The metastore registration is the commit point of {@link
+     * #createTableImpl(Identifier, Schema)}: the schema is written first, so removing the table
+     * (and the schema files that have just been written for a managed table) restores the pre-call
+     * state.
+     */
+    @VisibleForTesting
+    void cleanupOnCreateTableFailure(Identifier identifier, Path location, boolean externalTable) {
+        try {
+            clients()
+                    .execute(
+                            client ->
+                                    client.dropTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            true,
+                                            false));
+        } catch (Exception e) {
+            LOG.warn(
+                    "Failed to clean up the metastore entry [{}] after a failed create table.",
+                    identifier.getFullName(),
+                    e);
+        }
+        if (!externalTable) {
+            // For a managed table the schema files and the location were created by this call, so
+            // they must be removed as well - otherwise a retry would either fail or silently reuse
+            // the stale schema.
+            try {
+                fileIO(location).deleteDirectoryQuietly(location);
+            } catch (Exception e) {
+                LOG.error(
+                        "Delete directory[{}] fail for table {}",
+                        location,
+                        identifier.getFullName(),
+                        e);
+            }
         }
     }
 
