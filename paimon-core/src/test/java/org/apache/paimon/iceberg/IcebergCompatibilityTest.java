@@ -20,6 +20,7 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -44,6 +45,7 @@ import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -1908,6 +1910,51 @@ public class IcebergCompatibilityTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testTagsWithLocalCacheOfAllFileTypes() throws Exception {
+        // Tag changes rewrite v{N}.metadata.json in place, so the local cache must not serve it.
+        Options catalogOptions = new Options();
+        catalogOptions.set(CatalogOptions.LOCAL_CACHE_ENABLED, true);
+        catalogOptions.set(CatalogOptions.LOCAL_CACHE_WHITELIST, "*");
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .primaryKey("k")
+                        .options(options)
+                        .build();
+
+        try (FileSystemCatalog catalog =
+                new FileSystemCatalog(
+                        LocalFileIO.create(),
+                        new Path(tempDir.toString()),
+                        CatalogContext.create(catalogOptions))) {
+            catalog.createDatabase("mydb", false);
+            Identifier identifier = Identifier.create("mydb", "t");
+            catalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, 10));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            table.createTag("t1", 1);
+            table.createTag("t2", 1);
+            table.createTag("t3", 1);
+            table.deleteTag("t2");
+
+            Path metadata = new Path(table.location(), "metadata/v1.metadata.json");
+            assertThat(IcebergMetadata.fromPath(LocalFileIO.create(), metadata).refs().keySet())
+                    .containsExactlyInAnyOrder("t1", "t3");
+        }
     }
 
     // Create snapshots and Iceberg metadata
