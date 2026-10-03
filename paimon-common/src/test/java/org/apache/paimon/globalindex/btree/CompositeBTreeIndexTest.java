@@ -34,7 +34,9 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -60,6 +62,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,6 +86,7 @@ class CompositeBTreeIndexTest {
         options.set(BTreeIndexOptions.BTREE_INDEX_FILE_VERSION, version);
         options.set(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED, true);
         options.set(BTreeIndexOptions.BTREE_INDEX_COMPRESSION, "lz4");
+        options.set(BTreeIndexOptions.BTREE_INDEX_BLOCK_SIZE, MemorySize.ofBytes(64));
         GlobalIndexer indexer = GlobalIndexer.create("btree", type.getFields(), options);
         LocalFileIO io = LocalFileIO.create();
         Path directory = new Path(tempPath.toUri());
@@ -125,6 +129,33 @@ class CompositeBTreeIndexTest {
         Path path = new Path(directory, result.fileName());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, io.getFileSize(path), result.rowCount(), result.meta());
+        AtomicInteger deserializations = new AtomicInteger();
+        KeySerializer countingSerializer =
+                new CompositeKeySerializer(type) {
+                    @Override
+                    public Object deserialize(MemorySlice data) {
+                        deserializations.incrementAndGet();
+                        return super.deserialize(data);
+                    }
+                };
+        try (CacheManager cache = new CacheManager(MemorySize.ofMebiBytes(1), 0.1);
+                BTreeIndexReader reader =
+                        new BTreeIndexReader(
+                                countingSerializer,
+                                file -> io.newInputStream(file.filePath()),
+                                meta,
+                                cache,
+                                null)) {
+            int onOpen = deserializations.get();
+            assertThat(reader.visitEqual(row("category-a", -1, "")).get().results().toRangeList())
+                    .containsExactly(new Range(0, 0));
+            assertThat(reader.visitEqual(row("category-a", 7, "tag")).get().results().toRangeList())
+                    .containsExactly(new Range(2, 3));
+            assertThat(reader.visitEqual(row("category-b", 7, "tag")).get().results().toRangeList())
+                    .containsExactly(new Range(4, 4));
+            assertThat(reader.visitEqual(row("category-a", 8, "tag")).get().results()).isEmpty();
+            assertThat(deserializations.get()).isEqualTo(onOpen);
+        }
         assertThat(
                         new BTreeGlobalIndexerFactory()
                                 .selectFiles(
@@ -364,6 +395,7 @@ class CompositeBTreeIndexTest {
     void testConcurrentRoundTrips() throws Exception {
         RowType type = RowType.of(DataTypes.STRING(), DataTypes.INT(), DataTypes.STRING());
         KeySerializer serializer = new CompositeKeySerializer(type);
+        Comparator<MemorySlice> sliceComparator = serializer.createSliceComparator();
         ExecutorService executor = Executors.newFixedThreadPool(8);
         CountDownLatch start = new CountDownLatch(1);
         List<Future<?>> tasks = new ArrayList<>();
@@ -386,6 +418,14 @@ class CompositeBTreeIndexTest {
                                         Object restored =
                                                 serializer.deserialize(MemorySlice.wrap(bytes));
                                         assertThat(restored).isEqualTo(key);
+                                        byte[] next =
+                                                serializer.serialize(
+                                                        row("category-" + worker, i + 1, null));
+                                        assertThat(
+                                                        sliceComparator.compare(
+                                                                MemorySlice.wrap(bytes),
+                                                                MemorySlice.wrap(next)))
+                                                .isNegative();
                                         assertThat(
                                                         serializer
                                                                 .createComparator()
