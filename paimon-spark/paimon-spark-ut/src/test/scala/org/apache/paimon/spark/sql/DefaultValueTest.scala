@@ -92,6 +92,18 @@ class DefaultValueTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Default Value: update a row-tracking table") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, data INT, c INT DEFAULT 5)
+            |TBLPROPERTIES ('row-tracking.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 1, 10), (2, 2, 20)")
+
+      sql("UPDATE t SET data = 22 WHERE id = 2")
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 1, 10), Row(2, 22, 20)))
+    }
+  }
+
   test("Default Value: unsupported default value") {
     withTimeZone("Asia/Shanghai") {
       withTable("t") {

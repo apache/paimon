@@ -67,7 +67,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private int[] notNullFieldIndex;
     private int[] deleteNotNullFieldIndex;
 
-    private final @Nullable DefaultValueRow defaultValueRow;
+    private @Nullable DefaultValueRow defaultValueRow;
+    private boolean defaultValueRowOutdated;
     private final @Nullable Set<String> deleteNotNullFieldNames;
 
     public TableWriteImpl(
@@ -134,6 +135,9 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.withWriteType(writeType);
         this.writeType = writeType;
         updateNotNullFieldIndexes();
+        // rebuilt lazily: the data-evolution partial writers pass pruned ROW types that cannot
+        // convert the full ROW default, but they never wrap rows with it
+        this.defaultValueRowOutdated = true;
         return this;
     }
 
@@ -264,6 +268,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private InternalRow wrapDefaultValue(InternalRow row) {
+        if (defaultValueRowOutdated) {
+            defaultValueRow = DefaultValueRow.create(writeType);
+            defaultValueRowOutdated = false;
+        }
         return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
     }
 
