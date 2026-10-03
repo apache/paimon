@@ -41,6 +41,7 @@ Sections
 """
 
 import io
+import inspect
 import json
 import os
 import shutil
@@ -74,6 +75,7 @@ from pypaimon.data.variant_shredding import (
     rebuild_value,
     shredding_schema_to_arrow_type,
 )
+from pypaimon.read.native_plan import native_split_bridge_available
 from pypaimon.schema.data_types import (
     AtomicType,
     DataField,
@@ -99,6 +101,17 @@ def _variant_arrow_type() -> pa.StructType:
         pa.field('value', pa.binary(), nullable=False),
         pa.field('metadata', pa.binary(), nullable=False),
     ])
+
+
+def _native_variant_projection_available() -> bool:
+    if not native_split_bridge_available():
+        return False
+    try:
+        from pypaimon_rust.datafusion import ReadBuilder as NativeReadBuilder
+        return ('variant_fields' in inspect.signature(
+            NativeReadBuilder.with_projection).parameters)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return False
 
 
 def _make_metadata(*keys: str) -> bytes:
@@ -1193,6 +1206,117 @@ class TestVariantPaimonTable(unittest.TestCase):
             pa.field('id', pa.int64()),
             pa.field('payload', _variant_arrow_type()),
         ])
+
+    def test_native_variant_projection_rejects_row_readers(self):
+        for mode, options in (
+            ('append', {}),
+            ('lazy', {
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            }),
+        ):
+            with self.subTest(mode=mode):
+                identifier = 'default.variant_projection_row_' + mode
+                schema = Schema.from_pyarrow_schema(
+                    self._pa_schema(), options=options)
+                self.catalog.create_table(identifier, schema, False)
+                table = self.catalog.get_table(identifier)
+                data = pa.table({
+                    'id': [1],
+                    'payload': GenericVariant.to_arrow_array([
+                        GenericVariant.from_python({'ratio': 1.25})]),
+                }, schema=self._pa_schema())
+                write_builder = table.new_batch_write_builder()
+                writer = write_builder.new_write()
+                commit = write_builder.new_commit()
+                writer.write_arrow(data)
+                commit.commit(writer.prepare_commit())
+                writer.close()
+                commit.close()
+
+                builder = table.new_read_builder().with_projection(
+                    ['payload'], variant_fields={'payload': {
+                        'paths': ['$.ratio'],
+                        'target_type': pa.float32(),
+                    }})
+                splits = builder.new_scan().plan().splits()
+                self.assertTrue(splits)
+                read = builder.new_read()
+
+                with self.assertRaisesRegex(RuntimeError, 'to_iterator'):
+                    read.to_iterator(splits)
+                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
+                    read.to_torch(splits, streaming=True)
+                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
+                    read.to_torch(splits, streaming=False)
+
+    def _check_variant_projection_literal_top_level_names(
+            self, suffix, native_read):
+        pa_schema = pa.schema([
+            pa.field('id.dot', pa.int64()),
+            pa.field('payload', _variant_arrow_type()),
+            pa.field('payload.dot', _variant_arrow_type()),
+            pa.field('payload[raw]', _variant_arrow_type()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, options={'read.native.enabled': 'true'})
+        identifier = 'default.variant_projection_literal_names_' + suffix
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        values = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({'ratio': 1.25})])
+        data = pa.Table.from_arrays([
+            pa.array([1], type=pa.int64()), values, values, values,
+        ], schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        for projection, column in (
+            (['payload.dot'], 'payload.dot'),
+            (['payload[raw]'], 'payload[raw]'),
+            (['id.dot', 'payload'], 'payload'),
+        ):
+            with self.subTest(projection=projection):
+                builder = table.new_read_builder().with_projection(
+                    projection, variant_fields={column: {
+                        'paths': ['$.ratio'],
+                        'target_type': pa.float32(),
+                    }})
+                splits = builder.new_scan().plan().splits()
+                self.assertTrue(splits)
+                read = builder.new_read()
+                kwargs = read._native_read_kwargs()
+                self.assertEqual(kwargs['projection'], projection)
+                self.assertNotIn('nested_projection', kwargs)
+                self.assertIn(column, kwargs['variant_fields'])
+                self.assertEqual(
+                    read._output_arrow_schema().field(column).type,
+                    pa.struct([pa.field('0', pa.float32())]))
+                if native_read:
+                    projected = read.to_arrow(splits)
+                    self.assertEqual(projected.column_names, projection)
+                    self.assertEqual(
+                        projected[column].combine_chunks().field(0).to_pylist(),
+                        [1.25])
+                plain = table.new_read_builder().with_projection(projection)
+                self.assertEqual(
+                    plain.new_read().to_arrow(splits).column_names,
+                    projection)
+
+    def test_variant_projection_literal_top_level_names_bridge(self):
+        self._check_variant_projection_literal_top_level_names(
+            'bridge', native_read=False)
+
+    @unittest.skipUnless(_native_variant_projection_available(),
+                         'compatible native Variant projection API not installed')
+    def test_variant_projection_literal_top_level_names_native(self):
+        self._check_variant_projection_literal_top_level_names(
+            'native', native_read=True)
 
     def test_plain_variant_write_and_read(self):
         """Plain VARIANT: GenericVariant → write_arrow → to_arrow → GenericVariant."""

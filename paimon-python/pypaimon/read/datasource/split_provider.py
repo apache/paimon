@@ -26,7 +26,7 @@ bridge (which already has a fully resolved ``TableRead``).
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pypaimon.read.split import Split
 
@@ -80,6 +80,10 @@ class SplitProvider(ABC):
         flattened leaf names as missing top-level columns and reads every
         projected leaf as NULL.
         """
+        return None
+
+    def variant_fields(self) -> Optional[Dict[str, Dict[str, Any]]]:
+        """Typed VARIANT path projections, or ``None``."""
         return None
 
 
@@ -217,6 +221,7 @@ class PreResolvedSplitProvider(SplitProvider):
 
     def __init__(self, table, splits: List[Split], read_type, predicate=None,
                  limit: Optional[int] = None, nested_name_paths=None,
+                 variant_fields=None,
                  include_row_kind: bool = False):
         self._table = table
         self._splits = splits
@@ -224,6 +229,7 @@ class PreResolvedSplitProvider(SplitProvider):
         self._predicate = predicate
         self._limit = limit
         self._nested_name_paths = nested_name_paths
+        self._variant_fields = variant_fields
         self._include_row_kind = include_row_kind
 
     def table(self):
@@ -237,6 +243,9 @@ class PreResolvedSplitProvider(SplitProvider):
 
     def nested_name_paths(self) -> Optional[List[List[str]]]:
         return self._nested_name_paths
+
+    def variant_fields(self) -> Optional[Dict[str, Dict[str, Any]]]:
+        return self._variant_fields
 
     def include_row_kind(self) -> bool:
         return self._include_row_kind

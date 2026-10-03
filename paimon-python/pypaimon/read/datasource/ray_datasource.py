@@ -125,6 +125,7 @@ class RayDatasource(Datasource):
         predicate = self._split_provider.predicate()
         read_type = self._split_provider.read_type()
         nested_name_paths = self._split_provider.nested_name_paths()
+        variant_fields = self._split_provider.variant_fields()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
         include_row_kind = self._split_provider.include_row_kind()
@@ -133,6 +134,10 @@ class RayDatasource(Datasource):
 
         if self._schema is None:
             self._schema = PyarrowFieldParser.from_paimon_schema(read_type)
+            if variant_fields:
+                from pypaimon.read.table_read import TableRead
+                self._schema = TableRead._apply_variant_fields_to_schema(
+                    self._schema, variant_fields)
             if include_row_kind:
                 from pypaimon.read.table_read import TableRead
                 self._schema = TableRead._add_row_kind_to_schema(self._schema)
@@ -154,6 +159,7 @@ class RayDatasource(Datasource):
                 schema=schema,
                 limit=limit,
                 nested_name_paths=nested_name_paths,
+                variant_fields=variant_fields,
                 include_row_kind=include_row_kind,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
@@ -165,6 +171,7 @@ class RayDatasource(Datasource):
             worker_table_read = TableRead(
                 table, predicate, read_type, limit=limit,
                 nested_name_paths=nested_name_paths,
+                variant_fields=variant_fields,
                 include_row_kind=include_row_kind)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
@@ -193,6 +200,7 @@ class RayDatasource(Datasource):
             schema=schema,
             limit=limit,
             nested_name_paths=nested_name_paths,
+            variant_fields=variant_fields,
             include_row_kind=include_row_kind,
         )
 

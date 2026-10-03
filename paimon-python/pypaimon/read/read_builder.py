@@ -16,7 +16,9 @@
 # under the License.
 
 import ast
-from typing import List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
+
+import pyarrow
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -34,6 +36,10 @@ from pypaimon.utils.projection import MapKey, Projection, is_row_type
 
 
 ProjectionPath = Sequence[Union[int, MapKey]]
+
+
+def _is_supported_variant_target_type(target_type: pyarrow.DataType) -> bool:
+    return target_type == pyarrow.float32()
 
 
 class _ReadPredicateBuilder(PredicateBuilder):
@@ -64,6 +70,7 @@ class ReadBuilder:
         # in ``read_type()`` and downstream consumers.
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[ProjectionPath]] = None
+        self._variant_fields: Optional[Dict[str, Dict[str, Any]]] = None
         self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
@@ -75,23 +82,30 @@ class ReadBuilder:
         self._partition_filter = partition_filter
         return self
 
-    def with_projection(self, projection: List[str]) -> 'ReadBuilder':
-        """Project to the given column names.
+    def with_projection(
+        self,
+        projection: List[str],
+        *,
+        variant_fields: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> 'ReadBuilder':
+        """Project columns, nested ROW fields, or literal MAP keys.
 
-        Names containing a dot (e.g. ``"struct.subfield"``) walk into ROW
-        children. A quoted bracket selector on a top-level
-        ``MAP<STRING, ...>`` selects one literal key (e.g.
-        ``"attrs['key.with.dots']"``). Unknown names are silently skipped to
-        preserve the pre-existing contract.
-
-        An exact top-level field match takes precedence over both forms.
+        Use ``struct.field`` for ROW or ``attrs['key']`` for string-key MAP.
+        Exact column names take precedence; unknown names are skipped.
+        ``variant_fields`` maps projected VARIANT columns to ``paths``,
+        ``target_type`` (float32 only), and optional ``fail_on_error``.
+        It requires native reading and returns a typed Arrow struct.
         """
         self._projection = projection
         if projection and any(
                 '.' in name or '[' in name for name in projection):
-            self._nested_paths = self._resolve_projection_paths(projection)
+            paths = self._resolve_projection_paths(projection)
+            self._nested_paths = (paths if any(len(path) > 1 for path in paths)
+                                  else None)
         else:
             self._nested_paths = None
+        self._variant_fields = self._validate_variant_fields(
+            projection, variant_fields)
         return self
 
     def with_limit(self, limit: int) -> 'ReadBuilder':
@@ -116,6 +130,7 @@ class ReadBuilder:
             predicate=self._predicate,
             read_type=self.read_type(),
             nested_name_paths=self._nested_name_paths(),
+            variant_fields=self._variant_fields,
             limit=self._limit,
         )
 
@@ -185,6 +200,71 @@ class ReadBuilder:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _validate_variant_fields(
+        self,
+        projection: List[str],
+        variant_fields: Optional[Dict[str, Dict[str, Any]]],
+    ) -> Optional[Dict[str, Dict[str, Any]]]:
+        if variant_fields is None:
+            return None
+        if not isinstance(variant_fields, dict):
+            raise TypeError("variant_fields must be a dict")
+        if self._nested_paths:
+            raise ValueError(
+                "variant_fields cannot be combined with nested column projection")
+
+        field_map = {field.name: field for field in self.table.fields}
+        normalized = {}
+        for column, options in variant_fields.items():
+            if not isinstance(column, str):
+                raise TypeError(
+                    "variant_fields keys must be VARIANT column names")
+            if column not in projection:
+                raise ValueError(
+                    "variant_fields column %r is not in the projection" % column)
+            field = field_map.get(column)
+            if (field is None
+                    or not isinstance(field.type, AtomicType)
+                    or field.type.type.upper() != 'VARIANT'):
+                raise ValueError(
+                    "variant_fields column %r must be a VARIANT column" % column)
+            if not isinstance(options, dict):
+                raise TypeError(
+                    "variant_fields[%r] must be a dict" % column)
+            unknown = set(options) - {
+                'paths', 'target_type', 'fail_on_error'}
+            if unknown:
+                raise ValueError(
+                    "unknown variant_fields[%r] option %r"
+                    % (column, sorted(unknown)[0]))
+            paths = options.get('paths')
+            if (not isinstance(paths, (list, tuple))
+                    or not paths
+                    or any(not isinstance(path, str) for path in paths)):
+                raise TypeError(
+                    "variant_fields[%r]['paths'] must be a non-empty "
+                    "sequence of strings" % column)
+            target_type = options.get('target_type')
+            if not isinstance(target_type, pyarrow.DataType):
+                raise TypeError(
+                    "variant_fields[%r]['target_type'] must be a PyArrow "
+                    "data type" % column)
+            if not _is_supported_variant_target_type(target_type):
+                raise ValueError(
+                    "variant_fields[%r]['target_type'] must be float32"
+                    % column)
+            fail_on_error = options.get('fail_on_error', False)
+            if not isinstance(fail_on_error, bool):
+                raise TypeError(
+                    "variant_fields[%r]['fail_on_error'] must be a boolean"
+                    % column)
+            normalized[column] = {
+                'paths': list(paths),
+                'target_type': target_type,
+                'fail_on_error': fail_on_error,
+            }
+        return normalized
 
     def _resolve_projection_paths(self, names: List[str]) -> List[ProjectionPath]:
         """Translate ROW paths and MAP-key selectors into internal paths."""

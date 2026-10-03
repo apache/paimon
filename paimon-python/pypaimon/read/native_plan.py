@@ -26,7 +26,7 @@ import json
 import os
 from threading import Lock
 from types import SimpleNamespace
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from packaging.version import InvalidVersion, Version
 
@@ -350,10 +350,19 @@ def _native_read_builder(table):
 
 def _configure_native_read_builder(builder, predicate, limit, projection,
                                    nested_projection=None,
+                                   variant_fields=None,
                                    include_row_kind=False):
+    if variant_fields is not None:
+        if nested_projection is not None:
+            raise ValueError(
+                "variant_fields cannot be combined with nested projection")
+        if projection is None:
+            raise ValueError("variant_fields requires a projection")
+        builder = builder.with_projection(
+            projection, variant_fields=variant_fields)
     if nested_projection is not None:
         builder = builder.with_nested_projection(nested_projection)
-    elif projection is not None:
+    elif projection is not None and variant_fields is None:
         builder = builder.with_projection(projection)
     if predicate is not None:
         builder = builder.with_filter(_predicate_to_native(predicate))
@@ -369,6 +378,8 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
                          projection: Optional[List[str]] = None,
                          blob_parallelism: Optional[int] = None,
                          nested_projection: Optional[List[List[str]]] = None,
+                         variant_fields: Optional[
+                             Dict[str, Dict[str, Any]]] = None,
                          include_row_kind: bool = False):
     """Create one Rust reader reusable across split groups."""
     if not native_reader_available():
@@ -377,6 +388,7 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, limit, projection,
         nested_projection=nested_projection,
+        variant_fields=variant_fields,
         include_row_kind=include_row_kind)
     if blob_parallelism is not None:
         builder = builder.with_blob_parallelism(blob_parallelism)
@@ -390,11 +402,18 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
                 projection: Optional[List[str]] = None,
                 blob_parallelism: Optional[int] = None,
                 nested_projection: Optional[List[List[str]]] = None,
+                variant_fields: Optional[Dict[str, Dict[str, Any]]] = None,
                 include_row_kind: bool = False):
     """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
     read_splits = _prepare_native_read(
-        table, predicate, limit, projection, blob_parallelism,
-        nested_projection, include_row_kind)
+        table,
+        predicate=predicate,
+        limit=limit,
+        projection=projection,
+        blob_parallelism=blob_parallelism,
+        nested_projection=nested_projection,
+        variant_fields=variant_fields,
+        include_row_kind=include_row_kind)
     return read_splits(splits)
 
 

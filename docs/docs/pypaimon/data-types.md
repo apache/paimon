@@ -233,6 +233,28 @@ Field names are literal (`state.x` is not a nested path). Missing fields are
 omitted; VARIANT NULL is `None`. Values use natural Python types, even when
 types differ between rows. This does not reduce Parquet I/O.
 
+To return selected numeric VARIANT fields instead of the full value, use native
+projection:
+
+```python
+import pyarrow as pa
+
+read_builder = table.new_read_builder().with_projection(
+    ['payload'],
+    variant_fields={
+        'payload': {
+            'paths': ["$['state.x']", "$['action.y']"],
+            'target_type': pa.float32(),
+        },
+    },
+)
+```
+
+Requires `read.native.enabled=true` and a compatible `pypaimon-rust`; there is
+no Python fallback. The result is an Arrow struct with children `"0"`, `"1"`,
+... in path order. Only `pa.float32()` is supported; `fail_on_error` defaults to
+`False`. Row iterators and Torch row format are not supported.
+
 ### Read and update typed paths
 
 Read existing paths as Arrow arrays, use Arrow compute, and replace them

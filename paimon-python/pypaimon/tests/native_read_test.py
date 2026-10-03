@@ -47,6 +47,7 @@ def _table_read(limit=None):
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
     read.nested_name_paths = None
+    read.variant_fields = None
     read.limit = limit
     read._read_parallelism = 1
     read._deferred_blob_fields = set()
@@ -67,6 +68,65 @@ def _blob_table_read(limit=None):
 def _id_batch(values):
     return pa.record_batch(
         [pa.array(values, type=pa.int32())], names=['id'])
+
+
+def test_native_read_projects_variant_fields_before_python():
+    read = _table_read()
+    read.read_type = [
+        DataField(0, 'id', AtomicType('INT')),
+        DataField(1, 'payload', AtomicType('VARIANT')),
+    ]
+    read._scan_read_type = read.read_type
+    read._output_column_names = ['id', 'payload']
+    read.variant_fields = {
+        'payload': {
+            'paths': ['$.ratio', '$.missing'],
+            'target_type': pa.float32(),
+            'fail_on_error': False,
+        }
+    }
+    split = _Split()
+    split._native_split = object()
+    payload_type = pa.struct([
+        pa.field('0', pa.float32()),
+        pa.field('1', pa.float32()),
+    ])
+    batch = pa.record_batch([
+        pa.array([1, 2], type=pa.int32()),
+        pa.array([
+            {'0': 1.25, '1': None},
+            {'0': 2.5, '1': None},
+        ], type=payload_type),
+    ], names=['id', 'payload'])
+
+    with patch('pypaimon.read.native_plan.native_read',
+               return_value=[batch]) as native:
+        result = read.to_arrow([split])
+
+    assert result.schema.field('payload').type == payload_type
+    assert result.column('payload').to_pylist() == [
+        {'0': 1.25, '1': None},
+        {'0': 2.5, '1': None},
+    ]
+    assert native.call_args.kwargs['variant_fields'] == read.variant_fields
+
+
+def test_variant_fields_never_silently_falls_back_to_python():
+    read = _table_read()
+    read.read_type = [DataField(0, 'payload', AtomicType('VARIANT'))]
+    read._scan_read_type = read.read_type
+    read._output_column_names = ['payload']
+    read.variant_fields = {
+        'payload': {
+            'paths': ['$.ratio'],
+            'target_type': pa.float32(),
+            'fail_on_error': False,
+        }
+    }
+    read.table.options.native_read_enabled.return_value = False
+
+    with pytest.raises(RuntimeError, match='read.native.enabled is false'):
+        read.to_arrow([_Split()])
 
 
 @pytest.mark.parametrize('type_', ['FLOAT', 'DOUBLE'])
