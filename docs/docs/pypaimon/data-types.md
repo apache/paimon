@@ -254,8 +254,7 @@ read_builder = table.new_read_builder().with_projection(
 The projected VARIANT column is an Arrow struct whose children are named
 `"0"`, `"1"`, ... in path order. This requires `read.native.enabled=true` and
 a compatible `pypaimon-rust`; PyPaimon raises instead of silently falling back.
-Target types must retain their exact Arrow type; timestamps are supported only
-at microsecond precision, with no timezone or UTC.
+Currently, `variant_fields` supports only `pa.float32()` as `target_type`.
 
 ### Read and update typed paths
 

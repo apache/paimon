@@ -39,17 +39,7 @@ ProjectionPath = Sequence[Union[int, MapKey]]
 
 
 def _is_supported_variant_target_type(target_type: pyarrow.DataType) -> bool:
-    if target_type in (
-            pyarrow.bool_(), pyarrow.int8(), pyarrow.int16(),
-            pyarrow.int32(), pyarrow.int64(), pyarrow.float32(),
-            pyarrow.float64(), pyarrow.string(), pyarrow.binary(),
-            pyarrow.date32()):
-        return True
-    if pyarrow.types.is_decimal128(target_type):
-        return 0 <= target_type.scale <= target_type.precision
-    return (pyarrow.types.is_timestamp(target_type)
-            and target_type.unit == 'us'
-            and target_type.tz in (None, 'UTC'))
+    return target_type == pyarrow.float32()
 
 
 class _ReadPredicateBuilder(PredicateBuilder):
@@ -109,9 +99,10 @@ class ReadBuilder:
         An exact top-level field match takes precedence over both forms.
 
         ``variant_fields`` optionally replaces a projected VARIANT column with
-        a typed Arrow struct. Each entry contains ``paths``, ``target_type``,
-        and optional ``fail_on_error``. Extraction is performed by the native
-        reader before the full VARIANT value crosses into Python.
+        a typed Arrow struct. Each entry contains ``paths``, ``target_type``
+        (currently only ``pyarrow.float32()``), and optional
+        ``fail_on_error``. Extraction is performed by the native reader before
+        the full VARIANT value crosses into Python.
         """
         self._projection = projection
         if projection and any(
@@ -267,8 +258,8 @@ class ReadBuilder:
                     "data type" % column)
             if not _is_supported_variant_target_type(target_type):
                 raise ValueError(
-                    "variant_fields[%r]['target_type'] must be a supported "
-                    "scalar type returned unchanged" % column)
+                    "variant_fields[%r]['target_type'] must be float32"
+                    % column)
             fail_on_error = options.get('fail_on_error', False)
             if not isinstance(fail_on_error, bool):
                 raise TypeError(

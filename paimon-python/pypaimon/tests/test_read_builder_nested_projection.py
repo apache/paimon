@@ -87,28 +87,29 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         self.assertFalse(
             builder._variant_fields['payload']['fail_on_error'])
 
-    def test_variant_target_types_match_native_output(self):
+    def test_variant_target_type_matches_native_float32_only(self):
         table = Mock()
         table.fields = [DataField(1, 'payload', AtomicType('VARIANT'))]
 
-        for target_type in (pa.float32(), pa.string(), pa.timestamp('us'),
-                            pa.timestamp('us', tz='UTC')):
-            with self.subTest(target_type=target_type):
-                builder = ReadBuilder(table).with_projection(
-                    ['payload'], variant_fields={'payload': {
-                        'paths': ['$.x'], 'target_type': target_type}})
-                self.assertEqual(
-                    target_type,
-                    builder._variant_fields['payload']['target_type'])
+        builder = ReadBuilder(table).with_projection(
+            ['payload'], variant_fields={'payload': {
+                'paths': ['$.x'], 'target_type': pa.float32()}})
+        self.assertEqual(pa.float32(),
+                         builder._variant_fields['payload']['target_type'])
 
-        for target_type in (pa.large_string(), pa.large_binary(),
+        for target_type in (pa.bool_(), pa.int32(), pa.int64(),
+                            pa.float64(), pa.string(), pa.binary(),
+                            pa.decimal128(10, 2), pa.date32(),
+                            pa.timestamp('us'),
+                            pa.timestamp('us', tz='UTC'),
+                            pa.large_string(), pa.large_binary(),
                             pa.binary(4),
                             pa.dictionary(pa.int8(), pa.string()),
                             pa.timestamp('s'), pa.timestamp('ms'),
                             pa.timestamp('ns'),
                             pa.timestamp('us', tz='Asia/Shanghai')):
             with self.subTest(target_type=target_type):
-                with self.assertRaisesRegex(ValueError, 'supported scalar'):
+                with self.assertRaisesRegex(ValueError, 'must be float32'):
                     ReadBuilder(table).with_projection(
                         ['payload'], variant_fields={'payload': {
                             'paths': ['$.x'], 'target_type': target_type}})
