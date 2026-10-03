@@ -99,7 +99,9 @@ class ReadBuilder:
         self._projection = projection
         if projection and any(
                 '.' in name or '[' in name for name in projection):
-            self._nested_paths = self._resolve_projection_paths(projection)
+            paths = self._resolve_projection_paths(projection)
+            self._nested_paths = (paths if any(len(path) > 1 for path in paths)
+                                  else None)
         else:
             self._nested_paths = None
         self._variant_fields = self._validate_variant_fields(

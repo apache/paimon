@@ -19,13 +19,14 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.read.read_builder import ReadBuilder
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.read.stream_read_builder import StreamReadBuilder
+from pypaimon.schema.data_types import AtomicType, DataField, RowType
 
 
 class _ReadBuilderTestBase(unittest.TestCase):
@@ -132,6 +133,66 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
                 },
             )
 
+    def test_variant_fields_accept_literal_top_level_punctuation(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id.dot', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+            DataField(2, 'payload.dot', AtomicType('VARIANT')),
+            DataField(3, 'payload[raw]', AtomicType('VARIANT')),
+        ]
+        table.options.row_tracking_enabled.return_value = False
+
+        for projection, column in (
+            (['payload.dot'], 'payload.dot'),
+            (['payload[raw]'], 'payload[raw]'),
+            (['id.dot', 'payload'], 'payload'),
+        ):
+            options = {column: {
+                'paths': ['$.ratio'], 'target_type': pa.float32()}}
+            with self.subTest(projection=projection):
+                batch = ReadBuilder(table).with_projection(
+                    projection, variant_fields=options)
+                stream = StreamReadBuilder(table).with_projection(
+                    projection, variant_fields=options)
+                self.assertIsNone(batch._nested_paths)
+                self.assertIsNone(batch._nested_name_paths())
+                self.assertEqual(
+                    projection, [field.name for field in batch.read_type()])
+                self.assertIsNone(stream._nested_name_paths())
+                self.assertEqual(
+                    projection, [field.name for field in stream.read_type()])
+                with patch('pypaimon.read.read_builder.TableRead') as read:
+                    batch.new_read()
+                    self.assertIsNone(
+                        read.call_args.kwargs['nested_name_paths'])
+                    self.assertIn(column,
+                                  read.call_args.kwargs['variant_fields'])
+                with patch('pypaimon.read.stream_read_builder.TableRead') as read:
+                    stream.new_read()
+                    self.assertIsNone(
+                        read.call_args.kwargs['nested_name_paths'])
+                    self.assertIn(column,
+                                  read.call_args.kwargs['variant_fields'])
+
+    def test_variant_fields_still_reject_nested_projection(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'row', RowType(True, [
+                DataField(1, 'value', AtomicType('INT'))])),
+            DataField(2, 'payload', AtomicType('VARIANT')),
+        ]
+        table.options.row_tracking_enabled.return_value = False
+        options = {'payload': {
+            'paths': ['$.ratio'], 'target_type': pa.float32()}}
+
+        with self.assertRaisesRegex(ValueError, 'nested column projection'):
+            ReadBuilder(table).with_projection(
+                ['row.value', 'payload'], variant_fields=options)
+        with self.assertRaisesRegex(ValueError, 'nested column projection'):
+            StreamReadBuilder(table).with_projection(
+                ['row.value', 'payload'], variant_fields=options).new_read()
+
     def test_no_projection_returns_full_schema(self):
         rb = self.table.new_read_builder()
         fields = rb.read_type()
@@ -163,8 +224,8 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
     def test_dotted_name_unknown_top_silently_skipped(self):
         rb = self.table.new_read_builder().with_projection(
             ['nope.x', 'val'])
-        # Only 'val' resolved; the dot trigger still populates _nested_paths.
-        self.assertEqual(rb._nested_paths, [[2]])
+        # Only 'val' resolved, with no nested field actually selected.
+        self.assertIsNone(rb._nested_paths)
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['val'])
 
@@ -172,7 +233,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         rb = self.table.new_read_builder().with_projection(
             ['mv.no_such_subfield', 'pk'])
         # The bad path drops out, the plain name survives.
-        self.assertEqual(rb._nested_paths, [[0]])
+        self.assertIsNone(rb._nested_paths)
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['pk'])
 
