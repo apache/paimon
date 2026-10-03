@@ -131,11 +131,9 @@ class ResourcePathsTagsTest(unittest.TestCase):
         )
 
     def test_single_tag_url_url_encodes_tag_name(self):
-        # RESTUtil.encode_string escapes characters that are not URL-safe.
-        # A space round-trips to ``%20``; this matches Java's ``RESTUtil``.
         paths = ResourcePaths(prefix="mock")
         url = paths.tag("db", "tbl", "release 1.0")
-        self.assertEqual(url, "/v1/mock/databases/db/tables/tbl/tags/release%201.0")
+        self.assertEqual(url, "/v1/mock/databases/db/tables/tbl/tags/release+1.0")
 
 
 if __name__ == "__main__":

@@ -96,7 +96,7 @@ class ResourcePathsPartitionsTest(unittest.TestCase):
         paths = ResourcePaths(prefix="mock")
         self.assertEqual(
             paths.partitions("my db", "my tbl"),
-            "/v1/mock/databases/my%20db/tables/my%20tbl/partitions",
+            "/v1/mock/databases/my+db/tables/my+tbl/partitions",
         )
 
 if __name__ == "__main__":

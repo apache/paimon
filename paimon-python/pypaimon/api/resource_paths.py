@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import urllib.parse
 from typing import Optional
 
 from pypaimon.api.rest_util import RESTUtil
@@ -38,10 +37,8 @@ class ResourcePaths:
     PERMISSIONS = "permissions"
 
     def __init__(self, prefix: str):
-        # Java encodes the prefix once with URLEncoder, so it stays one path segment. '~' stays raw:
-        # requests un-escapes %7E before sending, and the signature must cover the path sent.
         if prefix:
-            prefix = urllib.parse.quote_plus(prefix, safe="*~", errors="replace")
+            prefix = RESTUtil.encode_string(prefix)
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
 
     @classmethod
@@ -71,7 +68,8 @@ class ResourcePaths:
                 self.TABLES, RESTUtil.encode_string(table_name)))
 
     def table_details(self, database_name: str) -> str:
-        return "{}/{}/{}/{}".format(self.base_path, self.DATABASES, database_name, self.TABLE_DETAILS)
+        return "{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name), self.TABLE_DETAILS)
 
     def table_token(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/token".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),

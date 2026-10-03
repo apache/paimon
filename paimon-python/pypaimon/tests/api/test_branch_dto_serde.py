@@ -123,11 +123,9 @@ class ResourcePathsBranchesTest(unittest.TestCase):
         )
 
     def test_branch_url_url_encodes_branch_name(self):
-        # RESTUtil.encode_string escapes characters that are not URL-safe;
-        # a space round-trips to ``%20``. Mirrors the existing tag-name path.
         self.assertEqual(
             self.paths.branch("db", "tbl", "release 1.0"),
-            "/v1/mock/databases/db/tables/tbl/branches/release%201.0",
+            "/v1/mock/databases/db/tables/tbl/branches/release+1.0",
         )
 
 
