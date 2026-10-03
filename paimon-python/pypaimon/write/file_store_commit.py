@@ -672,7 +672,8 @@ class FileStoreCommit:
         changelog_record_count = None
         try:
             new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
-            self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
+            delta_manifest_list_size = self.manifest_list_manager.write(
+                delta_manifest_list, new_manifest_file_metas)
 
             # Write changelog manifest if changelog entries exist
             if changelog_entries:
@@ -680,11 +681,8 @@ class FileStoreCommit:
                 changelog_manifest_file_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
-                self.manifest_list_manager.write(
+                changelog_manifest_list_size = self.manifest_list_manager.write(
                     changelog_manifest_list_name, changelog_manifest_file_metas)
-                manifest_path = self.manifest_list_manager.manifest_path
-                changelog_manifest_list_size = self.table.file_io.get_file_size(
-                    f"{manifest_path}/{changelog_manifest_list_name}")
                 # kind==0 means ADD; pypaimon producers only support additions currently
                 changelog_record_count = sum(
                     entry.file.row_count for entry in changelog_entries if entry.kind == 0)
@@ -699,7 +697,8 @@ class FileStoreCommit:
                 if previous_record_count:
                     total_record_count += previous_record_count
 
-            self.manifest_list_manager.write(base_manifest_list, existing_manifests)
+            base_manifest_list_size = self.manifest_list_manager.write(
+                base_manifest_list, existing_manifests)
 
             delta_record_count = 0
             for entry in commit_entries:
@@ -723,7 +722,9 @@ class FileStoreCommit:
                 id=new_snapshot_id,
                 schema_id=self.table.table_schema.id,
                 base_manifest_list=base_manifest_list,
+                base_manifest_list_size=base_manifest_list_size,
                 delta_manifest_list=delta_manifest_list,
+                delta_manifest_list_size=delta_manifest_list_size,
                 changelog_manifest_list=changelog_manifest_list_name,
                 changelog_manifest_list_size=changelog_manifest_list_size,
                 changelog_record_count=changelog_record_count,
@@ -890,7 +891,8 @@ class FileStoreCommit:
                         for manifest in self.manifest_list_manager.read_delta(
                                 snapshot):
                             entries.extend(self.manifest_file_manager.read(
-                                manifest.file_name, drop_stats=False))
+                                manifest.file_name, drop_stats=False,
+                                file_size=manifest.file_size))
                         path_factory = self.table.path_factory()
                         for entry in entries:
                             file = entry.file

@@ -121,7 +121,7 @@ class CommitScanner:
         mfm = ManifestFileManager(self.table)
         entries = []
         for mf in delta_manifests:
-            for entry in mfm.read(mf.file_name):
+            for entry in mfm.read(mf.file_name, file_size=mf.file_size):
                 if partition_filter is not None and not partition_filter.test(entry.partition):
                     continue
                 entries.append(entry)
