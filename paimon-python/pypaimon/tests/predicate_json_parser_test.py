@@ -806,7 +806,8 @@ class TestConcatWsAllNull(unittest.TestCase):
 
 
 class TestDateExtractTransforms(unittest.TestCase):
-    """YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER / DAY_OF_YEAR,
+    """YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER / DAY_OF_YEAR /
+    WEEKDAY / ISO_DAY_OF_WEEK / DAY_OF_WEEK / WEEK / YEAR_OF_WEEK,
     mirroring Java's DateExtractTransform subclasses."""
 
     def _ts_batch(self):
@@ -831,6 +832,26 @@ class TestDateExtractTransforms(unittest.TestCase):
         self.assertEqual(self._apply("SECOND", batch), [0, 5, None])
         self.assertEqual(self._apply("QUARTER", batch), [1, 3, None])
         self.assertEqual(self._apply("DAY_OF_YEAR", batch), [1, 183, None])
+
+    def test_week_family_parts(self):
+        # 2024-01-01 Monday, 2023-01-01 Sunday, 2021-01-01 Friday (ISO week 53
+        # of the 2020 week-based year), plus null. Numbering matches java.time.
+        batch = pa.RecordBatch.from_pydict({
+            "d": pa.array(
+                [datetime.date(2024, 1, 1), datetime.date(2023, 1, 1),
+                 datetime.date(2021, 1, 1), None],
+                type=pa.date32()),
+        })
+        # WEEKDAY Monday=0..Sunday=6
+        self.assertEqual(self._apply("WEEKDAY", batch, "d", "DATE"), [0, 6, 4, None])
+        # ISO_DAY_OF_WEEK Monday=1..Sunday=7
+        self.assertEqual(self._apply("ISO_DAY_OF_WEEK", batch, "d", "DATE"), [1, 7, 5, None])
+        # DAY_OF_WEEK Sunday=1..Saturday=7
+        self.assertEqual(self._apply("DAY_OF_WEEK", batch, "d", "DATE"), [2, 1, 6, None])
+        # WEEK: ISO week of the week-based year
+        self.assertEqual(self._apply("WEEK", batch, "d", "DATE"), [1, 52, 53, None])
+        # YEAR_OF_WEEK: ISO week-based year
+        self.assertEqual(self._apply("YEAR_OF_WEEK", batch, "d", "DATE"), [2024, 2022, 2020, None])
 
     def test_date_field_starts_at_midnight(self):
         # epoch day 19723 == 2024-01-01; a DATE has no time, so HOUR is 0.

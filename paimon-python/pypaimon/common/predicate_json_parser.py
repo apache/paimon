@@ -45,7 +45,11 @@ _TRIM_OPS = {
 
 # Calendar-field extractions on a DATE / TIMESTAMP field, mirroring Java's
 # DateExtractTransform subclasses (name -> the Arrow kernel over a timestamp).
-# QUARTER matches (month - 1) / 3 + 1; the rest map one to one.
+# QUARTER matches (month - 1) / 3 + 1; the day-of-week variants match Java's
+# java.time numbering: WEEKDAY is Monday=0..Sunday=6, ISO_DAY_OF_WEEK is
+# Monday=1..Sunday=7, DAY_OF_WEEK is Sunday=1..Saturday=7. WEEK / YEAR_OF_WEEK
+# are the ISO week-of-week-based-year and the ISO week-based year. The rest map
+# one to one.
 _DATE_EXTRACT = {
     "YEAR": pc.year,
     "MONTH": pc.month,
@@ -55,6 +59,11 @@ _DATE_EXTRACT = {
     "SECOND": pc.second,
     "QUARTER": pc.quarter,
     "DAY_OF_YEAR": pc.day_of_year,
+    "WEEKDAY": lambda c: pc.day_of_week(c, count_from_zero=True, week_start=1),
+    "ISO_DAY_OF_WEEK": lambda c: pc.day_of_week(c, count_from_zero=False, week_start=1),
+    "DAY_OF_WEEK": lambda c: pc.day_of_week(c, count_from_zero=False, week_start=7),
+    "WEEK": pc.iso_week,
+    "YEAR_OF_WEEK": pc.iso_year,
 }
 
 
