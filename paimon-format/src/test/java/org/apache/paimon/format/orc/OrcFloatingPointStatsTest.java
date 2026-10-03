@@ -98,6 +98,20 @@ class OrcFloatingPointStatsTest {
         assertThat(stats.max()).isEqualTo(3.0f);
     }
 
+    @Test
+    public void testDoubleNegativeZeroUpperBoundDoesNotHidePositiveZero() throws Exception {
+        SimpleColStats stats = extract(DataTypes.DOUBLE(), new Double[] {-1.0d, -0.0d, 0.0d});
+
+        assertThat(stats.max()).as("max %s hides a +0.0 that was written", stats.max()).isNull();
+    }
+
+    @Test
+    public void testFloatNegativeZeroUpperBoundDoesNotHidePositiveZero() throws Exception {
+        SimpleColStats stats = extract(DataTypes.FLOAT(), new Float[] {-1.0f, -0.0f, 0.0f});
+
+        assertThat(stats.max()).as("max %s hides a +0.0 that was written", stats.max()).isNull();
+    }
+
     private SimpleColStats extract(DataType type, Object[] values) throws Exception {
         FileFormat format = FileFormat.fromIdentifier("orc", new Options());
         RowType rowType = RowType.of(type);

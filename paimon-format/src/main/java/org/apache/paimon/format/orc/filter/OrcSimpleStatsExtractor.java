@@ -248,17 +248,25 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
 
     /**
      * ORC updates double min/max with primitive {@code <} / {@code >}. NaN never replaces a finite
-     * bound, and {@code -0.0} never replaces {@code +0.0}. Either case can make a predicate skip a
-     * file that still contains a matching row. A missing bound is not used for skipping.
+     * bound, {@code -0.0} never replaces {@code +0.0} as a minimum, and {@code +0.0} never replaces
+     * {@code -0.0} as a maximum. Any of those can make a predicate skip a file that still contains
+     * a matching row. A missing bound is not used for skipping.
      */
     private static boolean orcFloatingPointBoundsUnusable(DoubleColumnStatistics stats) {
         double minimum = stats.getMinimum();
-        if (Double.isNaN(minimum)
-                || Double.isNaN(stats.getMaximum())
-                || Double.isNaN(stats.getSum())) {
+        double maximum = stats.getMaximum();
+        if (Double.isNaN(minimum) || Double.isNaN(maximum) || Double.isNaN(stats.getSum())) {
             return true;
         }
-        return Double.doubleToRawLongBits(minimum) == Double.doubleToRawLongBits(0.0d);
+        return isPositiveZero(minimum) || isNegativeZero(maximum);
+    }
+
+    private static boolean isPositiveZero(double value) {
+        return Double.doubleToRawLongBits(value) == Double.doubleToRawLongBits(0.0d);
+    }
+
+    private static boolean isNegativeZero(double value) {
+        return Double.doubleToRawLongBits(value) == Double.doubleToRawLongBits(-0.0d);
     }
 
     private void assertStatsClass(
