@@ -1145,6 +1145,13 @@ class CoreOptions:
         )
     )
 
+    LOCAL_CACHE_EXCLUDE_EXTENSIONS: ConfigOption[str] = (
+        ConfigOptions.key("local-cache.exclude-extensions")
+        .string_type()
+        .default_value("")
+        .with_description("Comma-separated file extensions to bypass in the local cache.")
+    )
+
     READ_BATCH_SIZE: ConfigOption[int] = (
         ConfigOptions.key("read.batch-size")
         .int_type()
@@ -1925,6 +1932,9 @@ class CoreOptions:
 
     def local_cache_whitelist(self) -> str:
         return self.options.get(CoreOptions.LOCAL_CACHE_WHITELIST)
+
+    def local_cache_exclude_extensions(self) -> str:
+        return self.options.get(CoreOptions.LOCAL_CACHE_EXCLUDE_EXTENSIONS)
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
