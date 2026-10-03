@@ -10,10 +10,25 @@ This PyPi package contains the Python APIs for using Paimon.
 
 Pypaimon requires Python 3.6+.
 
-# Dependencies
+# Build
 
-The core dependencies are listed in `dev/requirements.txt`.
-The development dependencies are listed in `dev/requirements-dev.txt`.
+Run from `paimon-python/` with pip supporting dependency groups.
+
+Normal build:
+
+```shell
+python -m pip install --group build
+python -m build
+```
+
+Development build (editable installation with development dependencies):
+
+```shell
+python -m pip install -e . --group dev
+python -m build
+```
+
+Both produce a source archive and wheel in `dist/`.
 
 # OSS metadata commits
 
@@ -88,22 +103,6 @@ change is not guaranteed to produce an error and can invalidate the conditional-
 All concurrent writers must use conditional creation. Older Python clients or
 other clients that overwrite snapshot objects can still overwrite a successful
 commit. This change does not add conditional writes for other object stores.
-
-# Build
-
-You can build the source package by executing the following command:
-
-```commandline
-python3 setup.py sdist
-```
-
-The package is under `dist/`. Then you can install the package by executing the following command:
-
-```commandline
-pip3 install dist/*.tar.gz
-```
-
-The command will install the package and core dependencies to your local Python environment.
 
 # Row ID column updates
 

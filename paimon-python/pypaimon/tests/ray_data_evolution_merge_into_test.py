@@ -68,7 +68,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         cls.catalog = CatalogFactory.create(cls.catalog_options)
         cls.catalog.create_database('default', True)
         if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True, num_cpus=2)
+            # Nested joins and the final shuffle retain actors while scheduling tasks.
+            ray.init(ignore_reinit_error=True, num_cpus=4)
 
     @classmethod
     def tearDownClass(cls):

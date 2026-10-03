@@ -1,4 +1,4 @@
-################################################################################
+##########################################################################
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
 #  distributed with this work for additional information
@@ -14,12 +14,6 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 # limitations under the License.
-################################################################################
-include LICENSE
-include NOTICE
-include pyproject.toml
-include README.md
-recursive-include pypaimon *.py
-recursive-include pypaimon/sample/data *.jsonl
-recursive-exclude pypaimon/tests *
-recursive-exclude pypaimon/acceptance *
+##########################################################################
+# Base version; development distributions append the Git commit date.
+VERSION = "2.2.dev"
