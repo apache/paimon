@@ -124,7 +124,8 @@ class GlobalIndexQueryTest {
                         builder.equal(0, 25),
                         PredicateBuilder.and(
                                 builder.greaterThan(0, 15), builder.lessThan(0, 35)))) {
-            GlobalIndexQuery query = GlobalIndexQuery.create(rowType, predicate, files, paths);
+            GlobalIndexQuery query =
+                    GlobalIndexQuery.create(rowType, predicate, files, paths, new Options());
             assertThat(query).isNotNull();
             DataOutputSerializer out = new DataOutputSerializer(256);
             query.forRanges(Collections.singletonList(new Range(0, 99))).serialize(out);
@@ -152,7 +153,8 @@ class GlobalIndexQueryTest {
                         invocation ->
                                 new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
         Options options = new Options();
-        GlobalIndexQuery plan = GlobalIndexQuery.create(rowType, range, files, paths);
+        GlobalIndexQuery plan =
+                GlobalIndexQuery.create(rowType, range, files, paths, new Options());
         assertThat(plan).isNotNull();
         IndexQuerySplit split =
                 new IndexQuerySplit(dataSplit(), plan, options.toMap(), Collections.emptyList());
@@ -189,7 +191,11 @@ class GlobalIndexQueryTest {
 
         assertThat(
                         GlobalIndexQuery.create(
-                                rowType, PredicateBuilder.or(lower, upper), files, paths))
+                                rowType,
+                                PredicateBuilder.or(lower, upper),
+                                files,
+                                paths,
+                                new Options()))
                 .isNotNull();
     }
 
@@ -249,7 +255,8 @@ class GlobalIndexQueryTest {
                 Arrays.asList(b.isNotNull(0), b.notEqual(0, 1), b.notIn(0, Arrays.asList(1, 3)));
         for (int i = 0; i < predicates.size(); i++) {
             GlobalIndexQuery plan =
-                    GlobalIndexQuery.create(rowType, predicates.get(i), files, paths);
+                    GlobalIndexQuery.create(
+                            rowType, predicates.get(i), files, paths, new Options());
             List<Range> ranges = Collections.singletonList(new Range(100, 102));
             assertThat(plan).isNotNull();
             assertThat(plan.evaluate(fileIO, new Options(), ranges).results().toRangeList())
@@ -608,7 +615,8 @@ class GlobalIndexQueryTest {
                         rowType,
                         PredicateBuilder.and(supportedLeaf, unsupportedLeaf),
                         files,
-                        paths);
+                        paths,
+                        new Options());
         assertThat(andPlan).isNotNull();
         assertThat(andPlan.contributingFieldIds(rowType)).containsExactlyInAnyOrder(0, 1);
         IndexQuerySplit split =
@@ -620,20 +628,22 @@ class GlobalIndexQueryTest {
                                 rowType,
                                 PredicateBuilder.or(supportedLeaf, unsupportedLeaf),
                                 files,
-                                paths))
+                                paths,
+                                new Options()))
                 .isNotNull();
         assertThat(
                         GlobalIndexQuery.create(
                                 rowType,
                                 supportedLeaf,
                                 Arrays.asList(supported, indexFile("fm", "fm", 0, 99, 0, null)),
-                                paths))
+                                paths,
+                                new Options()))
                 .isNotNull();
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"btree", "custom-index"})
-    void testScalarPlansUseOnlySingleFieldDefinitions(String indexType) {
+    void testCompositePrefixEligibilityIsSeparateFromScalarDefinitions(String indexType) {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
         PredicateBuilder builder = new PredicateBuilder(rowType);
         IndexFileMeta multi = indexFile(indexType, "multi", 0, 99, 0, new int[] {1});
@@ -644,10 +654,19 @@ class GlobalIndexQueryTest {
                                 new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
         for (int field : new int[] {0, 1}) {
             Predicate predicate = builder.equal(field, 7);
-            assertThat(
-                            GlobalIndexQuery.create(
-                                    rowType, predicate, Collections.singletonList(multi), paths))
-                    .isNull();
+            GlobalIndexQuery prefix =
+                    GlobalIndexQuery.create(
+                            rowType,
+                            predicate,
+                            Collections.singletonList(multi),
+                            paths,
+                            new Options());
+            if (field == 0 && "btree".equals(indexType)) {
+                assertThat(prefix).isNotNull();
+                assertThat(prefix.hasCompositeQuery()).isTrue();
+            } else {
+                assertThat(prefix).isNull();
+            }
             Range dedicatedRange = new Range(20 + field * 20, 39 + field * 20);
             IndexFileMeta dedicated =
                     indexFile(
@@ -659,11 +678,48 @@ class GlobalIndexQueryTest {
                             null);
             GlobalIndexQuery query =
                     GlobalIndexQuery.create(
-                            rowType, predicate, Arrays.asList(multi, dedicated), paths);
+                            rowType,
+                            predicate,
+                            Arrays.asList(multi, dedicated),
+                            paths,
+                            new Options());
             assertThat(query).isNotNull();
-            assertThat(query.coveredRanges()).containsExactly(dedicatedRange);
-            assertThat(query.hasCompositeQuery()).isFalse();
+            if (field == 0 && "btree".equals(indexType)) {
+                // Partial scalar coverage must not replace a fully covered composite prefix.
+                assertThat(query.coveredRanges()).containsExactly(new Range(0, 99));
+                assertThat(query.hasCompositeQuery()).isTrue();
+            } else {
+                assertThat(query.coveredRanges()).containsExactly(dedicatedRange);
+                assertThat(query.hasCompositeQuery()).isFalse();
+            }
         }
+    }
+
+    @Test
+    void testDedicatedLeadingIndexPreferredOnlyWithCompleteCoverage() {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 7);
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
+        IndexFileMeta composite = indexFile("btree", "composite", 0, 99, 0, new int[] {1});
+        IndexFileMeta first = indexFile("btree", "first", 0, 49, 0, null);
+        IndexFileMeta second = indexFile("bitmap", "second", 50, 99, 0, null);
+        GlobalIndexQuery partial =
+                GlobalIndexQuery.create(
+                        rowType, predicate, Arrays.asList(composite, first), paths, new Options());
+        assertThat(partial.hasCompositeQuery()).isTrue();
+        GlobalIndexQuery complete =
+                GlobalIndexQuery.create(
+                        rowType,
+                        predicate,
+                        Arrays.asList(composite, first, second),
+                        paths,
+                        new Options());
+        assertThat(complete.hasCompositeQuery()).isFalse();
+        assertThat(complete.coveredRanges()).containsExactly(new Range(0, 99));
     }
 
     private IndexFileMeta indexFile(
@@ -720,6 +776,7 @@ class GlobalIndexQueryTest {
                         return false;
                     }
                 };
-        return GlobalIndexQuery.create(rowType, predicate, Collections.singletonList(file), paths);
+        return GlobalIndexQuery.create(
+                rowType, predicate, Collections.singletonList(file), paths, new Options());
     }
 }

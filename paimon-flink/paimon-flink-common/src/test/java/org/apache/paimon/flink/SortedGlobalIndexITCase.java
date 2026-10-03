@@ -152,6 +152,17 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                             sql(
                                     "SELECT id FROM T_COMPOSITE WHERE category = 'absent' AND item_number = 7"))
                     .isEmpty();
+            assertThat(sql("SELECT id FROM T_COMPOSITE WHERE item_number = 7"))
+                    .containsExactlyInAnyOrder(
+                            Row.of(7), Row.of(17), Row.of(27), Row.of(37), Row.of(100));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category > 'category-a'"))
+                    .containsExactlyInAnyOrder(Row.of(17), Row.of(37));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category BETWEEN 'category-a' AND 'category-b'"))
+                    .containsExactlyInAnyOrder(Row.of(7), Row.of(17), Row.of(27), Row.of(37));
         }
         insertCompositeRows(40, 60);
         buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");

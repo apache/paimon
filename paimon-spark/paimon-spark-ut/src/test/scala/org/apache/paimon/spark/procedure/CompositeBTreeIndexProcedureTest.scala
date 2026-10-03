@@ -99,6 +99,15 @@ class CompositeBTreeIndexProcedureTest extends PaimonSparkTestBase {
         checkAnswer(
           sql("SELECT id FROM T WHERE category = 'absent' AND item_number = 7"),
           Seq.empty)
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category = 'category-a'"),
+          ((0 until 10) ++ (20 until 30) :+ 101).map(Row(_)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number > 7"),
+          Seq(Row(8), Row(9), Row(28), Row(29)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number BETWEEN 6 AND 8"),
+          Seq(Row(6), Row(7), Row(8), Row(26), Row(27), Row(28)))
       }
       insert(40, 60)
       build("category,item_number")

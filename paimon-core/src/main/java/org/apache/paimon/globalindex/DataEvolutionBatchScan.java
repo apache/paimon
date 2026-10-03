@@ -388,7 +388,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         table.rowType(),
                         indexFilter,
                         indexFiles,
-                        table.store().pathFactory().globalIndexFileFactory());
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions().toConfiguration());
         if (indexQuery == null) {
             return dataPlan;
         }
