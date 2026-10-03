@@ -137,6 +137,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 String.format(
                         "retainMax (%s) must not be less than retainMin (%s).",
                         retainMax, retainMin));
+        Preconditions.checkArgument(
+                maxDeletes >= 1,
+                String.format("snapshot.expire.limit (%s) must be at least 1.", maxDeletes));
 
         // the min snapshot to retain from 'snapshot.num-retained.max'
         // (the maximum number of snapshots to retain)
