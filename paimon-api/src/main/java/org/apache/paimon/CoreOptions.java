@@ -3955,7 +3955,10 @@ public class CoreOptions implements Serializable {
     }
 
     public long dynamicBucketTargetRowNum() {
-        return options.get(DYNAMIC_BUCKET_TARGET_ROW_NUM);
+        long targetRowNum = options.get(DYNAMIC_BUCKET_TARGET_ROW_NUM);
+        checkArgument(
+                targetRowNum > 0, "%s must be positive.", DYNAMIC_BUCKET_TARGET_ROW_NUM.key());
+        return targetRowNum;
     }
 
     public ChangelogProducer changelogProducer() {

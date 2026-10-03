@@ -402,4 +402,15 @@ public class CoreOptionsTest {
                     .hasMessageContaining("64");
         }
     }
+
+    @Test
+    public void testDynamicBucketTargetRowNumRejectsNonPositive() {
+        for (long invalid : new long[] {0L, -1L}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).dynamicBucketTargetRowNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("dynamic-bucket.target-row-num must be positive.");
+        }
+    }
 }
