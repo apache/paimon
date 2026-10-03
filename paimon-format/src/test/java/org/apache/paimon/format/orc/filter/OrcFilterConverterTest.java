@@ -298,6 +298,34 @@ public class OrcFilterConverterTest {
     }
 
     @Test
+    public void testSignedZeroIsNotPushedDown() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(0, "floatField", new FloatType()),
+                                        new DataField(1, "doubleField", new DoubleType()))));
+
+        assertThat(builder.equal(0, 0.0f).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.equal(0, -0.0f).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.greaterThan(0, -0.0f).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.equal(1, 0.0d).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.equal(1, -0.0d).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.greaterThan(1, -0.0d).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(
+                        builder.in(1, Arrays.asList(-1.0d, 0.0d))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.equal(1, 1.0d).visit(OrcPredicateFunctionVisitor.VISITOR)).isPresent();
+    }
+
+    @Test
     public void testNotLike() {
         PredicateBuilder builder =
                 new PredicateBuilder(
