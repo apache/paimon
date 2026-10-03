@@ -496,6 +496,21 @@ class NativePlanTest(unittest.TestCase):
             self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
 
+    def test_plan_propagates_native_fork_safety_error(self):
+        class ForkSafetyError(RuntimeError):
+            pass
+
+        module = ModuleType('pypaimon_rust')
+        module.ForkSafetyError = ForkSafetyError
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        with patch.dict(sys.modules, {'pypaimon_rust': module}), patch(
+                'pypaimon.read.native_plan.native_plan',
+                side_effect=ForkSafetyError('cannot reuse Jindo after fork')):
+            with self.assertRaises(ForkSafetyError):
+                scan.plan()
+        fs.scan.assert_not_called()
+
     def test_plan_uses_resolved_schema_for_jdbc_catalog_loader(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(native_enabled=True, file_scanner=fs)

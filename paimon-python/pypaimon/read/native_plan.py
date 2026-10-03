@@ -39,6 +39,22 @@ from pypaimon.read.split_serializer import (
     deserialize_split_v1, serialize_split_v1)
 
 
+def _raise_if_native_fork_safety_error(error):
+    """Propagate native fork errors instead of using inherited SDK state."""
+    try:
+        from pypaimon_rust import ForkSafetyError
+    except ImportError:
+        return
+
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ForkSafetyError):
+            raise current
+        current = current.__cause__ or current.__context__
+
+
 def native_runtime_available() -> bool:
     """Whether an installed pypaimon-rust exposes the full split-planning API.
 
