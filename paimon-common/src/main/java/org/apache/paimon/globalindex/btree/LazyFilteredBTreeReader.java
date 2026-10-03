@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex.btree;
 
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
@@ -28,7 +27,6 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.DataField;
@@ -60,6 +58,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Nullable private final RoaringNavigableMap64 rowIdFilter;
     private final Comparator<Object> comparator;
     private final long totalRowCount;
+    private final List<GlobalIndexIOMeta> indexFiles;
+    private final long fallbackScanMaxSize;
     @Nullable private final Pair<Object, Object> fullRangeBounds;
 
     public LazyFilteredBTreeReader(
@@ -77,6 +77,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
         this.indexFields = indexFields;
+        this.indexFiles = files;
+        this.fallbackScanMaxSize = fallbackScanMaxSize;
         this.rowIdFilter =
                 rowRanges == null ? null : GlobalIndexResult.fromRanges(rowRanges).results();
         this.comparator = keySerializer.createComparator();
@@ -99,6 +101,9 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 return null;
             }
             remaining -= file.rowCount();
+            if (file.metadata() == null) {
+                return null;
+            }
             SortedIndexFileMeta meta = SortedIndexFileMeta.deserialize(file.metadata());
             if (meta.hasNulls() || meta.firstKey() == null || meta.lastKey() == null) {
                 return null;
@@ -120,16 +125,20 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
         if (indexFields.size() < 2) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
-        Optional<List<LeafPredicate>> matched =
-                CompositeBTreePredicate.match(indexFields, predicate);
-        if (!matched.isPresent()) {
+        Optional<CompositeBTreePredicate.Plan> planned =
+                CompositeBTreePredicate.plan(indexFields, predicate);
+        if (!planned.isPresent()) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
-        if (CompositeBTreePredicate.isContradictory(indexFields, predicate)) {
-            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        CompositeBTreePredicate.Plan plan = planned.get();
+        if (plan.isPointLookup() && !plan.isEmpty()) {
+            return visitEqual((FieldRef) null, plan.pointKey());
         }
-        Object[] values = matched.get().stream().map(leaf -> leaf.literals().get(0)).toArray();
-        return visitEqual((FieldRef) null, GenericRow.of(values));
+        List<GlobalIndexIOMeta> selected = plan.selectFiles(indexFiles);
+        if (!plan.canScan(selected, fallbackScanMaxSize)) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        return visitSelectedFiles(Optional.of(selected), reader -> reader.visitComposite(plan));
     }
 
     @Override

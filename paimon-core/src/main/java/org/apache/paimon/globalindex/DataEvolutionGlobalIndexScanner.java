@@ -408,7 +408,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                         .noneMatch(
                                                 DataEvolutionGlobalIndexScanner::isMultiFieldIndex)
                         ? null
-                        : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
+                        : GlobalIndexQuery.create(
+                                rowType, predicate, indexFiles, indexPathFactory, options);
         if (query != null && query.hasCompositeQuery()) {
             try {
                 return query.evaluateWithCoverage(
@@ -443,7 +444,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         GlobalIndexQuery query =
                 predicate == null
                         ? null
-                        : GlobalIndexQuery.create(rowType, predicate, indexFiles, indexPathFactory);
+                        : GlobalIndexQuery.create(
+                                rowType, predicate, indexFiles, indexPathFactory, options);
         if (query != null && query.hasCompositeQuery() && query.hasScalarQuery()) {
             // Scalar shards can decline a predicate at runtime, so the legacy API must use
             // evaluated coverage as well. Internal callers retain the evaluation directly.
