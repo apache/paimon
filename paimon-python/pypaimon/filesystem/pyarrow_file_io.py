@@ -35,6 +35,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options, SecurityOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
@@ -198,6 +199,8 @@ class PyArrowFileIO(FileIO):
             # Uses setdefault so that an explicit user setting is never overridden.
             # Note: this is process-wide and affects all AWS SDK clients.
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+        # S3FileSystem takes no User-Agent; this adds app/pypaimon/<version> to it, process-wide.
+        os.environ.setdefault("AWS_SDK_UA_APP_ID", oss_user_agent.identity())
 
         client_kwargs = {
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),

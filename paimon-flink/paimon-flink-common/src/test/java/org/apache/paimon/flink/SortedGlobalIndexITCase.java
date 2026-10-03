@@ -20,15 +20,30 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -36,6 +51,12 @@ import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.io.Closeable;
+import java.io.FileNotFoundException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +65,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for sorted global indexes. */
 public class SortedGlobalIndexITCase extends CatalogITCaseBase {
@@ -78,6 +100,251 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
 
         // assert select with filter
         assertThat(sql("SELECT * FROM T WHERE id = 100")).containsOnly(Row.of(100, "name_100"));
+    }
+
+    @Test
+    public void testCompositeBTreeIndex() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_COMPOSITE (id INT, category STRING, item_number INT) WITH ("
+                        + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE', "
+                        + "'sorted-index.records-per-file' = '13', 'sorted-index.build.max-parallelism' = '4', "
+                        + "'btree-index.bloom-filter.enabled' = 'true')");
+        insertCompositeRows(0, 40);
+        sql(
+                "INSERT INTO T_COMPOSITE VALUES "
+                        + "(100, CAST(NULL AS STRING), 7), (101, 'category-a', CAST(NULL AS INT))");
+        buildBTreeIndexForTable("T_COMPOSITE", "category");
+        // Reverse the schema order to verify the index preserves the requested key order.
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number, category");
+        List<IndexManifestEntry> compositeEntries =
+                paimonTable("T_COMPOSITE").store().newIndexFileHandler().scanEntries().stream()
+                        .filter(
+                                entry ->
+                                        entry.indexFile()
+                                                        .globalIndexMeta()
+                                                        .getIndexedFieldIds()
+                                                        .size()
+                                                == 2)
+                        .collect(Collectors.toList());
+        assertThat(compositeEntries).isNotEmpty();
+        assertThat(compositeEntries)
+                .allSatisfy(
+                        entry -> {
+                            assertThat(entry.indexFile().globalIndexMeta().getIndexedFieldIds())
+                                    .containsExactly(2, 1);
+                            assertThat(entry.indexFile().globalIndexMeta().rowRange().count())
+                                    .isLessThanOrEqualTo(13);
+                        });
+        assertThat(compositeEntries.stream().mapToLong(entry -> entry.indexFile().rowCount()).sum())
+                .isEqualTo(42);
+        // Keep the trailing scalar definition, but make its postings unavailable.
+        try (Closeable ignored =
+                SortedGlobalIndexTestUtils.deleteIndexFiles(paimonTable("T_COMPOSITE"), 1)) {
+            for (boolean inReader : Arrays.asList(false, true)) {
+                sql(
+                        "ALTER TABLE T_COMPOSITE SET ('global-index.query-in-reader.enabled' = '"
+                                + inReader
+                                + "', 'scalar-index.search-mode' = 'fast')");
+                assertCompositeBTreeQuery(
+                        "item_number = 7 AND category = 'category-a'", Row.of(7), Row.of(27));
+                assertCompositeBTreeQuery(
+                        "category = 'category-a' AND item_number = 7", Row.of(7), Row.of(27));
+                assertCompositeBTreeQuery("category = 'absent' AND item_number = 7");
+                assertCompositeBTreeQuery(
+                        "item_number = 7",
+                        Row.of(7),
+                        Row.of(17),
+                        Row.of(27),
+                        Row.of(37),
+                        Row.of(100));
+                assertCompositeBTreeQuery(
+                        "item_number = 7 AND category > 'category-a'", Row.of(17), Row.of(37));
+                assertCompositeBTreeQuery(
+                        "item_number = 7 AND category BETWEEN 'category-a' AND 'category-b'",
+                        Row.of(7),
+                        Row.of(17),
+                        Row.of(27),
+                        Row.of(37));
+                assertCompositeBTreeQuery(
+                        "item_number IN (7, 8) AND category IN ('category-a', 'category-b')",
+                        Row.of(7),
+                        Row.of(8),
+                        Row.of(17),
+                        Row.of(18),
+                        Row.of(27),
+                        Row.of(28),
+                        Row.of(37),
+                        Row.of(38));
+                assertCompositeBTreeQuery(
+                        "item_number IN (7, 8) AND category > 'category-a'",
+                        Row.of(17),
+                        Row.of(18),
+                        Row.of(37),
+                        Row.of(38));
+                assertCompositeBTreeQuery(
+                        "item_number IS NULL AND category = 'category-a'", Row.of(101));
+                assertCompositeBTreeQuery("item_number = 7 AND category IS NULL", Row.of(100));
+                assertCompositeBTreeQuery(
+                        "item_number IS NOT NULL AND category IS NULL", Row.of(100));
+            }
+        }
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number");
+        insertCompositeRows(40, 60);
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");
+        assertThat(
+                        sql(
+                                "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 7"))
+                .containsExactlyInAnyOrder(Row.of(7), Row.of(27), Row.of(47));
+        updateCompositeColumn(7, "item_number", 107);
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");
+        assertThat(
+                        sql(
+                                "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 107"))
+                .containsExactly(Row.of(7));
+        updateCompositeColumn(27, "category", BinaryString.fromString("category-c"));
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");
+        assertThat(
+                        sql(
+                                "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 7"))
+                .containsExactly(Row.of(47));
+        assertThat(
+                        sql(
+                                "SELECT id FROM T_COMPOSITE WHERE category = 'category-c' AND item_number = 7"))
+                .containsExactly(Row.of(27));
+        long snapshot = paimonTable("T_COMPOSITE").snapshotManager().latestSnapshot().id();
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");
+        assertThat(paimonTable("T_COMPOSITE").snapshotManager().latestSnapshot().id())
+                .isEqualTo(snapshot);
+        sql(
+                "CALL sys.drop_global_index(`table` => 'default.T_COMPOSITE', index_column => 'item_number,category', index_type => 'btree')");
+        List<IndexManifestEntry> remaining =
+                paimonTable("T_COMPOSITE").store().newIndexFileHandler().scanEntries();
+        assertThat(remaining)
+                .isNotEmpty()
+                .allSatisfy(
+                        entry ->
+                                assertThat(entry.indexFile().globalIndexMeta().getIndexedFieldIds())
+                                        .hasSize(1));
+        assertThat(
+                        remaining.stream()
+                                .map(entry -> entry.indexFile().globalIndexMeta().indexFieldId())
+                                .distinct()
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(1, 2);
+    }
+
+    private void assertCompositeBTreeQuery(String predicate, Row... expected) throws Exception {
+        String query = "SELECT id FROM T_COMPOSITE WHERE " + predicate;
+        assertThat(sql(query)).containsExactlyInAnyOrder(expected);
+        if (expected.length == 0) {
+            return;
+        }
+        FileStoreTable table = paimonTable("T_COMPOSITE");
+        List<String> compositeFiles =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> file.globalIndexMeta().getIndexedFieldIds().size() == 2)
+                        .map(IndexFileMeta::fileName)
+                        .collect(Collectors.toList());
+        try (Closeable ignored = SortedGlobalIndexTestUtils.deleteIndexFiles(table, 2)) {
+            assertThatThrownBy(() -> sql(query))
+                    .satisfies(
+                            failure -> {
+                                FileNotFoundException missing =
+                                        ExceptionUtils.findThrowable(
+                                                        failure, FileNotFoundException.class)
+                                                .orElseThrow(() -> new AssertionError(failure));
+                                assertThat(
+                                                compositeFiles.stream()
+                                                        .anyMatch(missing.getMessage()::contains))
+                                        .isTrue();
+                            });
+        }
+    }
+
+    private void insertCompositeRows(int from, int to) {
+        String values =
+                IntStream.range(from, to)
+                        .mapToObj(
+                                i ->
+                                        String.format(
+                                                "(%d, '%s', %d)",
+                                                i,
+                                                (i / 10) % 2 == 0 ? "category-a" : "category-b",
+                                                i % 10))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_COMPOSITE VALUES " + values);
+    }
+
+    private void updateCompositeColumn(int id, String column, Object value) throws Exception {
+        FileStoreTable table = paimonTable("T_COMPOSITE");
+        RowType readType =
+                RowType.of(
+                        table.rowType().getField("id"),
+                        table.rowType().getField(column),
+                        SpecialFields.ROW_ID);
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> rows.add((InternalRow) InternalRowUtils.copy(row, readType)));
+        }
+        List<Long> rowIds =
+                rows.stream()
+                        .filter(row -> row.getInt(0) == id)
+                        .map(row -> row.getLong(2))
+                        .collect(Collectors.toList());
+        assertThat(rowIds).hasSize(1);
+        long rowId = rowIds.get(0);
+        List<Range> ranges =
+                table.store().newScan().plan().files().stream()
+                        .map(entry -> entry.file().nonNullRowIdRange())
+                        .filter(range -> range.from <= rowId && rowId <= range.to)
+                        .distinct()
+                        .collect(Collectors.toList());
+        assertThat(ranges).hasSize(1);
+        Range range = ranges.get(0);
+        List<InternalRow> updatedRows =
+                rows.stream()
+                        .filter(row -> range.from <= row.getLong(2) && row.getLong(2) <= range.to)
+                        .sorted(Comparator.comparingLong(row -> row.getLong(2)))
+                        .collect(Collectors.toList());
+        assertThat(updatedRows).hasSize((int) range.count());
+        InternalRow.FieldGetter getter = InternalRow.createFieldGetter(readType.getTypeAt(1), 1);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(
+                                        table.rowType()
+                                                .project(Collections.singletonList(column)));
+                BatchTableCommit commit = builder.newCommit()) {
+            // Data Evolution partial-column writes preserve the original data file's row range.
+            for (InternalRow row : updatedRows) {
+                write.write(
+                        GenericRow.of(row.getInt(0) == id ? value : getter.getFieldOrNull(row)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            List<DataFileMeta> files =
+                    messages.stream()
+                            .flatMap(
+                                    message ->
+                                            ((CommitMessageImpl) message)
+                                                    .newFilesIncrement().newFiles().stream())
+                            .collect(Collectors.toList());
+            assertThat(files).hasSize(1);
+            assertThat(files.get(0).rowCount()).isEqualTo(range.count());
+            for (CommitMessage message : messages) {
+                List<DataFileMeta> newFiles =
+                        ((CommitMessageImpl) message).newFilesIncrement().newFiles();
+                if (!newFiles.isEmpty()) {
+                    newFiles.set(0, newFiles.get(0).assignFirstRowId(range.from));
+                }
+            }
+            commit.commit(messages);
+        }
     }
 
     @Test

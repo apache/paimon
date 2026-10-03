@@ -29,7 +29,6 @@ import org.apache.paimon.plugin.PluginLoader;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SensitiveConfigUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
@@ -72,10 +71,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
-    private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
     private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
-    private static final String DLF_ACCESS_TRACKING_EXTENDED_INFO =
-            "dlf.access-tracking.extended-info";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -154,17 +150,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             hadoopOptions.set(OSS_SHOW_DIR_TIMESTAMP, "false");
         }
 
-        String dlfAccessTrackingExtendedInfo =
-                context.options().get(DLF_ACCESS_TRACKING_EXTENDED_INFO);
-        if (!StringUtils.isNullOrWhitespaceOnly(dlfAccessTrackingExtendedInfo)) {
-            LOG.info("Adding DLF access tracking extended info: {}", dlfAccessTrackingExtendedInfo);
-            String existedUserAgentExtended = hadoopOptions.get(OSS_USER_AGENT_EXTENDED);
-            hadoopOptions.set(
-                    OSS_USER_AGENT_EXTENDED,
-                    StringUtils.isNullOrWhitespaceOnly(existedUserAgentExtended)
-                            ? dlfAccessTrackingExtendedInfo
-                            : existedUserAgentExtended + " " + dlfAccessTrackingExtendedInfo);
-        }
+        JindoUserAgent.apply(context.options(), hadoopOptions);
 
         // another config when enable cache
         hadoopOptionsWithCache = new Options(hadoopOptions.toMap());

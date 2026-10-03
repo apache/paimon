@@ -21,10 +21,19 @@ import pytest
 
 _NATIVE_PLAN_ENV = "PYPAIMON_TEST_NATIVE_PLAN"
 _NATIVE_READ_ENV = "PYPAIMON_TEST_NATIVE_READ"
+_NATIVE_WRITE_ENV = "PYPAIMON_TEST_NATIVE_WRITE"
+_NATIVE_UPDATE_ENV = "PYPAIMON_TEST_NATIVE_UPDATE"
+_NATIVE_COMMIT_ENV = "PYPAIMON_TEST_NATIVE_COMMIT"
 _native_plan_count = 0
 _native_read_count = 0
+_native_write_count = 0
+_native_commit_count = 0
+_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental'), 0)
 _force_native_for_test = False
 _force_native_read_for_test = False
+_force_native_write_for_test = False
+_force_native_commit_for_test = False
+_force_native_update_for_test = False
 
 
 def pytest_addoption(parser):
@@ -32,6 +41,31 @@ def pytest_addoption(parser):
         "--robomind-agilex-input",
         help="Downloaded RoboMIND AgileX directory for the optional sample test.",
     )
+
+
+@pytest.fixture
+def native_rest_catalog(tmp_path):
+    """A local REST catalog for native writer and committer integration tests."""
+    import uuid
+
+    from pypaimon import CatalogFactory
+    from pypaimon.api.api_response import ConfigResponse
+    from pypaimon.api.auth import BearTokenAuthProvider
+    from pypaimon.tests.rest.rest_server import RESTCatalogServer
+
+    token = str(uuid.uuid4())
+    server = RESTCatalogServer(
+        data_path=str(tmp_path), auth_provider=BearTokenAuthProvider(token),
+        config=ConfigResponse(defaults={'prefix': 'native-test'}), warehouse='warehouse')
+    server.start()
+    try:
+        catalog = CatalogFactory.create({
+            'metastore': 'rest', 'uri': server.get_url(), 'warehouse': 'warehouse',
+            'token.provider': 'bear', 'token': token, 'data-token.enabled': 'false'})
+        catalog.create_database('default', True)
+        yield catalog
+    finally:
+        server.shutdown()
 
 
 def _native_plan_enabled():
@@ -42,6 +76,18 @@ def _native_read_enabled():
     return os.environ.get(_NATIVE_READ_ENV) == "1"
 
 
+def _native_write_enabled():
+    return os.environ.get(_NATIVE_WRITE_ENV) == "1"
+
+
+def _native_commit_enabled():
+    return os.environ.get(_NATIVE_COMMIT_ENV) == "1"
+
+
+def _native_update_enabled():
+    return os.environ.get(_NATIVE_UPDATE_ENV) == "1"
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "python_plan: keep Python planner assertions on the Python lane")
@@ -49,6 +95,10 @@ def pytest_configure(config):
         "markers", "python_read: keep Python reader assertions on the Python lane")
     config.addinivalue_line(
         "markers", "native_plan: exercise the real Rust planner in the Rust main CI job")
+    config.addinivalue_line(
+        "markers", "python_write: keep Python writer assertions on the Python lane")
+    config.addinivalue_line(
+        "markers", "python_commit: keep Python committer assertions on the Python lane")
     if _native_plan_enabled():
         from pypaimon.read.table_scan import TableScan
 
@@ -77,6 +127,58 @@ def pytest_configure(config):
 
         TableRead._try_native_batches = tracked_read
 
+    if _native_write_enabled():
+        from pypaimon.write.native_write import NativeTableWrite
+
+        original_write = NativeTableWrite.write_arrow_batch
+
+        def tracked_write(self, data):
+            global _native_write_count
+            native = self._native_writer is not None
+            result = original_write(self, data)
+            if native and data.num_rows and _force_native_write_for_test:
+                _native_write_count += 1
+            return result
+
+        NativeTableWrite.write_arrow_batch = tracked_write
+
+    if _native_commit_enabled():
+        from pypaimon.write.table_commit import TableCommit
+
+        original_prepare = TableCommit._prepare_native_commit
+
+        def tracked_prepare(self, messages):
+            global _native_commit_count
+            prepared = original_prepare(self, messages)
+            if prepared is not None and _force_native_commit_for_test:
+                _native_commit_count += 1
+            return prepared
+
+        TableCommit._prepare_native_commit = tracked_prepare
+
+    if _native_update_enabled():
+        from pypaimon.write.native_update import (
+            NativeBatchTableUpdate, NativePredicateTableUpdate,
+            NativeTableUpdateByRowId, NativeTableUpsert,
+        )
+
+        def track_update(cls, method, kind):
+            original = getattr(cls, method)
+
+            def tracked(self, *args, **kwargs):
+                messages = original(self, *args, **kwargs)
+                if messages and _force_native_update_for_test:
+                    _native_update_counts[kind] += 1
+                return messages
+
+            setattr(cls, method, tracked)
+
+        track_update(NativeBatchTableUpdate, 'update_by_arrow_with_row_id', 'row_id')
+        track_update(NativeBatchTableUpdate, 'update_by_arrow_batches_with_row_id', 'grouped')
+        track_update(NativePredicateTableUpdate, 'update', 'predicate')
+        track_update(NativeTableUpsert, 'upsert', 'upsert')
+        track_update(NativeTableUpdateByRowId, 'update_columns', 'incremental')
+
 
 def pytest_collection_modifyitems(items):
     if _native_plan_enabled():
@@ -88,17 +190,25 @@ def pytest_collection_modifyitems(items):
 
 
 @pytest.fixture(autouse=True)
-def enable_native_plan_and_read(request, monkeypatch):
+def enable_native_backends(request, monkeypatch):
     global _force_native_for_test, _force_native_read_for_test
+    global _force_native_write_for_test, _force_native_commit_for_test
+    global _force_native_update_for_test
     python_plan = request.node.get_closest_marker("python_plan") is not None
     python_read = request.node.get_closest_marker("python_read") is not None
-    native_plan_test = request.path.name in (
+    python_write = request.node.get_closest_marker("python_write") is not None
+    python_commit = request.node.get_closest_marker("python_commit") is not None
+    # request.path requires pytest 7; Python 3.6 uses pytest 6.
+    native_plan_test = os.path.basename(request.node.location[0]) in (
         "native_plan_test.py", "native_plan_integration_test.py",
         "native_plan_capabilities_test.py")
     force_plan = _native_plan_enabled() and not python_plan and not native_plan_test
     force_read = (_native_read_enabled() and not python_plan and not python_read
                   and not native_plan_test)
-    if not (force_plan or force_read):
+    force_write = _native_write_enabled() and not python_write
+    force_commit = _native_commit_enabled() and not python_commit
+    force_update = _native_update_enabled() and not python_write
+    if not (force_plan or force_read or force_write or force_commit or force_update):
         yield
         return
 
@@ -118,19 +228,42 @@ def enable_native_plan_and_read(request, monkeypatch):
             return original_read(self, True if default is None else default)
 
         monkeypatch.setattr(CoreOptions, "native_read_enabled", read_enabled)
+    if force_write or force_update:
+        original_write = CoreOptions.native_write_enabled
+
+        def write_enabled(self, default=None):
+            return original_write(self, True if default is None else default)
+
+        monkeypatch.setattr(CoreOptions, "native_write_enabled", write_enabled)
+    if force_commit:
+        original_commit = CoreOptions.native_commit_enabled
+
+        def commit_enabled(self, default=None):
+            return original_commit(self, True if default is None else default)
+
+        monkeypatch.setattr(CoreOptions, "native_commit_enabled", commit_enabled)
     _force_native_for_test = force_plan
     _force_native_read_for_test = force_read
+    _force_native_write_for_test = force_write
+    _force_native_commit_for_test = force_commit
+    _force_native_update_for_test = force_update
     try:
         yield
     finally:
         _force_native_for_test = False
         _force_native_read_for_test = False
+        _force_native_write_for_test = False
+        _force_native_commit_for_test = False
+        _force_native_update_for_test = False
 
 
 def pytest_sessionfinish(session, exitstatus):
     if exitstatus == 0:
         if ((_native_plan_enabled() and _native_plan_count == 0)
-                or (_native_read_enabled() and _native_read_count == 0)):
+                or (_native_read_enabled() and _native_read_count == 0)
+                or (_native_write_enabled() and _native_write_count == 0)
+                or (_native_update_enabled() and not all(_native_update_counts.values()))
+                or (_native_commit_enabled() and _native_commit_count == 0)):
             session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
@@ -141,3 +274,13 @@ def pytest_terminal_summary(terminalreporter):
     if _native_read_enabled():
         terminalreporter.write_line(
             "native reads exercised: %d" % _native_read_count)
+    if _native_write_enabled():
+        terminalreporter.write_line(
+            "native writes exercised: %d" % _native_write_count)
+    if _native_commit_enabled():
+        terminalreporter.write_line(
+            "native commits exercised: %d" % _native_commit_count)
+    if _native_update_enabled():
+        terminalreporter.write_line(
+            "native updates exercised: " + ', '.join(
+                '%s=%d' % item for item in _native_update_counts.items()))

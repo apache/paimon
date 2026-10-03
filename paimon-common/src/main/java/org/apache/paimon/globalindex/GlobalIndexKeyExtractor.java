@@ -25,7 +25,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 
-/** Extracts zero or more normalized index keys from one source-column value. */
+/** Extracts zero or more normalized index keys from one source value or projected tuple. */
 public interface GlobalIndexKeyExtractor extends Serializable {
 
     /** Type of the normalized keys emitted by {@link #extract(Object, KeyConsumer)}. */

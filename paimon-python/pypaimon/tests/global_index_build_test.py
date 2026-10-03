@@ -1048,11 +1048,13 @@ class GlobalIndexBuildTest(
         dv_options['deletion-vectors.enabled'] = 'true'
         dv_table = self._create_table(pa_schema=schema, options=dv_options)
         with self.assertRaisesRegex(ValueError, 'deletion vectors'):
-            dv_table.create_global_index(
+            dv_table.copy({'data-evolution.enabled': 'false'}).create_global_index(
                 'embedding',
                 index_type='ivf-flat',
                 options={'ivf-flat.dimension': '2'},
             )
+        with self.assertRaisesRegex(ValueError, 'deletion vectors'):
+            dv_table.create_global_index('embedding', index_type=FULL_TEXT_IDENTIFIER)
 
     def test_vindex_native_options_follow_java_mapping(self):
         data_type = ArrayType(True, AtomicType('FLOAT'))

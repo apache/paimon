@@ -199,7 +199,11 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
                 long splitRowCount = mergedRowCount.getAsLong();
                 if (scannedRowCount >= pushDownLimit - splitRowCount) {
                     SnapshotReader.Plan newPlan =
-                            new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                            new PlanImpl(
+                                    plan.watermark(),
+                                    plan.snapshotId(),
+                                    plan.snapshot(),
+                                    limitedSplits);
                     LOG.info(
                             "Limit pushdown applied successfully. Original splits: {}, Limited splits: {}, Pushdown limit: {}",
                             splits.size(),
@@ -256,7 +260,8 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
         TopNDataSplitEvaluator evaluator = new TopNDataSplitEvaluator(schema, schemaManager);
         List<Split> topNSplits = new ArrayList<>(evaluator.evaluate(order, topN.limit(), splits));
-        SnapshotReader.Plan newPlan = new PlanImpl(plan.watermark(), plan.snapshotId(), topNSplits);
+        SnapshotReader.Plan newPlan =
+                new PlanImpl(plan.watermark(), plan.snapshotId(), plan.snapshot(), topNSplits);
         return Optional.of(new ScannedResult(newPlan));
     }
 

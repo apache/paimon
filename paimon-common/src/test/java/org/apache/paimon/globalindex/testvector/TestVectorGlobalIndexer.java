@@ -29,6 +29,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.List;
@@ -106,6 +107,7 @@ public class TestVectorGlobalIndexer implements VectorGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            List<Range> rowRanges,
             ExecutorService executor) {
         checkArgument(files.size() == 1, "Expected exactly one index file per shard");
         return new TestVectorGlobalIndexReader(

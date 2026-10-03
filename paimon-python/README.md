@@ -10,10 +10,25 @@ This PyPi package contains the Python APIs for using Paimon.
 
 Pypaimon requires Python 3.6+.
 
-# Dependencies
+# Build
 
-The core dependencies are listed in `dev/requirements.txt`.
-The development dependencies are listed in `dev/requirements-dev.txt`.
+Run from `paimon-python/` with pip supporting dependency groups.
+
+Normal build:
+
+```shell
+python -m pip install --group build
+python -m build
+```
+
+Development build (editable installation with development dependencies):
+
+```shell
+python -m pip install -e . --group dev
+python -m build
+```
+
+Both produce a source archive and wheel in `dist/`.
 
 # OSS metadata commits
 
@@ -89,21 +104,26 @@ All concurrent writers must use conditional creation. Older Python clients or
 other clients that overwrite snapshot objects can still overwrite a successful
 commit. This change does not add conditional writes for other object stores.
 
-# Build
+# Row ID column updates
 
-You can build the source package by executing the following command:
+For a batch update of selected columns in a data-evolution table with row
+tracking, pass an Arrow table containing `_ROW_ID` and the columns to update.
+Create the updater and committer from the same builder so they share a commit
+user:
 
-```commandline
-python3 setup.py sdist
+```python
+builder = table.new_batch_write_builder()
+updater = builder.new_update().new_update_by_row_id()
+messages = updater.update_columns(updates, ["name"])
+commit = builder.new_commit()
+try:
+    commit.commit(messages)
+finally:
+    commit.close()
 ```
 
-The package is under `dist/`. Then you can install the package by executing the following command:
-
-```commandline
-pip3 install dist/*.tar.gz
-```
-
-The command will install the package and core dependencies to your local Python environment.
+For stream updates, use `table.new_stream_write_builder()` and pass the stream
+commit identifier to `new_update().new_update_by_row_id(commit_identifier)`.
 
 # Parquet page-index reads
 
@@ -140,12 +160,35 @@ finally:
 The native writer returns ordinary PyPaimon commit messages, so the Python
 committer also works when `commit.native.enabled` is false. Batch overwrite and
 reusable stream writers retain the builder's commit user and identifier. Native
-write is currently limited to Parquet tables without BLOB fields or
-data-evolution mode, on the same filesystem/JDBC publication route as native
-commit. Writer methods requiring Python's specialized path select the Python
-writer before native data is written. If the runtime or table route is
+write supports Parquet append, primary-key and data-evolution tables, including
+top-level scalar BLOB Arrow columns, on the same filesystem/JDBC publication
+route as native commit. ARRAY/MAP BLOB, video and optional data-evolution row
+sidecars select the Python writer. Writer methods requiring Python's specialized
+path select the Python writer before native data is written. If the runtime or table route is
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
+
+Native writes honor `data-file.path-directory` and the configured
+`data-file.external-paths` strategy. Existing files keep their recorded locations
+when the write destinations change. Python and native readers and committers
+can exchange these files, including external data files and their index sidecars.
+
+BLOB Arrow values may contain payload bytes or serialized descriptors. Fields
+listed in `blob-descriptor-field` remain inline and require descriptors. HTTP(S)
+references use decoded response streams, including gzip and deflate. Blob
+files roll by payload size, independently of the normal Parquet files. Python
+`Blob` row objects can provide custom streams or URI readers; `write_row` on a
+BLOB table selects the Python writer before any native data is written. Switching
+to row writes after native Arrow writes is rejected. Use `write.native.enabled=false` when
+mixing Arrow batches and Python `Blob` objects in one writer.
+
+An explicit native writer `abort()` also deletes prepared files that have not
+been passed to a PyPaimon committer. Calling `close()` instead releases those
+files to the caller without deleting them; use `commit.abort(messages)` to
+discard them after closing the writer. Once a commit attempt starts, writer
+abort preserves its files even if the attempt raises, because a snapshot may
+already reference them. Stream writers retain cleanup ownership only for
+messages that have not been submitted to a committer.
 
 Both native options are disabled by default.
 
@@ -262,6 +305,8 @@ JDBC planning uses the resolved table location and storage properties without
 opening another database connection.
 REST tables use `Table.copy_with_resolved_schema()` to preserve the same schema
 and option semantics, including branches whose schemas are catalog-managed.
+Matching REST tables retain the native environment across scans and read-option
+copies, preserving FileIO caches. Worker deserialization creates a fresh environment.
 The native table retains REST credentials, token refresh and catalog snapshot
 resolution. Database and table names containing dots are passed as separate
 identifier components. REST snapshot results (including empty results) take precedence over

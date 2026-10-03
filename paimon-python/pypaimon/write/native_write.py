@@ -16,37 +16,76 @@
 
 """Optional Rust data writer behind PyPaimon's batch and stream builders."""
 
+from importlib import import_module
+
 import pyarrow as pa
 
-from pypaimon.read.native_plan import native_method_available
-from pypaimon.schema.arrow_schema import normalize_arrow_strings
-from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
-from pypaimon.write.commit_message_serializer import deserialize_commit_message
-from pypaimon.write.native_commit import create_native_write_table
+from pypaimon.common.options.core_options import MergeEngine
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
+from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field, is_blob_type
+from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.write.file_store_commit import _abort_commit_messages
+from pypaimon.write.native_commit import (
+    create_native_write_table, from_native_commit_messages,
+)
 from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_table
 
 
 def native_write_available() -> bool:
-    """Check every binding entry point used by the writer bridge."""
-    return all(native_method_available(type_name, method) for type_name, method in (
-        ('Table', 'from_resolved_schema'),
-        ('BatchWriteBuilder', '_with_commit_user'),
-        ('BatchWriteBuilder', 'with_overwrite'),
-        ('BatchTableWrite', 'write_arrow'),
-        ('BatchTableWrite', 'prepare_commit'),
-        ('StreamWriteBuilder', 'with_commit_user'),
-        ('StreamTableWrite', 'write_arrow'),
-        ('StreamTableWrite', 'prepare_commit'),
-        ('CommitMessage', 'serialize'),
-    ))
+    """Whether the optional Rust bindings are installed."""
+    try:
+        import_module('pypaimon_rust.datafusion')
+    except ImportError:
+        return False
+    return True
+
+
+def _native_partition_types_supported(schema, partition_keys):
+    """Partition keys which Rust can encode and use to locate existing files."""
+    return not any(
+        pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
+        or pa.types.is_fixed_size_binary(data_type) or pa.types.is_floating(data_type)
+        for data_type in (schema.field(name).type for name in partition_keys))
+
+
+def _native_map_layouts_supported(table, schema):
+    options = table.options.options.to_map()
+    for field in schema:
+        if table.options.map_storage_layout(field.name) != 'default':
+            return False
+        # Python rejects even an explicit default layout on a non-MAP field.
+        if (not pa.types.is_map(field.type)
+                and 'fields.{}.map.storage-layout'.format(field.name) in options):
+            return False
+    return True
 
 
 def create_native_write(table, commit_user, static_partition=None, stream=False):
     """Return a native writer if the table can use the filesystem write path."""
+    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    sequence_fields = table.options.sequence_field()
+    if (table.is_primary_key_table and any(
+            pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
+        return None
     if (not native_write_available()
-            or table.options.data_evolution_enabled()
+            # Rust does not produce the optional random-access .row sidecars.
+            or (table.options.data_evolution_enabled()
+                and table.options.data_evolution_row_sidecar_enabled())
+            or table.bucket_mode() not in (BucketMode.HASH_FIXED,
+                                           BucketMode.BUCKET_UNAWARE)
+            or (table.options.deletion_vectors_enabled()
+                and table.options.merge_engine() in (MergeEngine.PARTIAL_UPDATE,
+                                                     MergeEngine.AGGREGATE))
+            or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
-            or any(is_blob_file_field(field) for field in table.table_schema.fields)):
+            # The native writer does not implement MAP shared-shredding layouts.
+            or not _native_map_layouts_supported(table, schema)
+            # Rust cannot encode these partition keys yet.
+            or not _native_partition_types_supported(schema, table.partition_keys)
+            # Native dedicated files currently support top-level scalar Blob fields.
+            or table.options.video_frame_fields()
+            or any(is_blob_file_field(field) and not is_blob_type(field.type)
+                   for field in table.table_schema.fields)):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -77,6 +116,8 @@ class NativeTableWrite:
         self._native_writer = native_writer
         self._python_writer = None
         self._written = False
+        self._prepared_messages = []
+        self._schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
 
     def _switch_to_python(self):
         if self._python_writer is not None:
@@ -110,6 +151,13 @@ class NativeTableWrite:
     def write_arrow_batch(self, data):
         if self._python_writer is not None:
             return self._python_writer.write_arrow_batch(data)
+        if not arrow_schemas_compatible(
+                data.schema, self._schema, check_top_level_nullability=False,
+                allow_binary_compatibility=True):
+            raise ValueError(
+                "Input schema isn't consistent with table schema and write cols. "
+                f"Input schema is: {data.schema} Table schema is: {self._schema} "
+                "Write cols is: None")
         data = normalize_arrow_strings(data)
         if data.num_rows:
             # A failed native write may already have produced files. Never
@@ -126,6 +174,10 @@ class NativeTableWrite:
     def write_row(self, row):
         if self._python_writer is not None:
             return self._python_writer.write_row(row)
+        if any(is_blob_file_field(field) for field in self.table.table_schema.fields):
+            # Select the row-aware writer from the first row, including byte
+            # values: later rows may provide custom Blob streams or URI readers.
+            return self._switch_to_python().write_row(row)
         values = row_to_named_values(row, self.table.table_schema.fields)
         names = list(self.table.field_names)
         self.write_arrow_batch(row_values_to_arrow_table(
@@ -144,9 +196,13 @@ class NativeTableWrite:
             if commit_identifier is not None:
                 raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
             messages = self._native_writer.prepare_commit()
-        return [deserialize_commit_message(
-            message.serialize(), self.table.partition_keys_fields,
-            self.table.trimmed_primary_keys_fields) for message in messages]
+        messages = from_native_commit_messages(self.table, messages)
+        self._prepared_messages = [message for message in self._prepared_messages
+                                   if message._native_write_pending]
+        for message in messages:
+            message._native_write_pending = True
+        self._prepared_messages.extend(messages)
+        return messages
 
     def close(self):
         if self._python_writer is not None:
@@ -154,9 +210,15 @@ class NativeTableWrite:
         elif self._native_writer is not None:
             self._native_writer.close()
             self._native_writer = None
+        self._prepared_messages.clear()
 
     def abort(self):
         if self._python_writer is not None:
             self._python_writer.abort()
         else:
-            self.close()
+            messages = [message for message in self._prepared_messages
+                        if message._native_write_pending]
+            try:
+                self.close()
+            finally:
+                _abort_commit_messages(self.table, messages)

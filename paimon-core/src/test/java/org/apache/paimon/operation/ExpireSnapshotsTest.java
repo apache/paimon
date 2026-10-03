@@ -89,11 +89,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Objects.requireNonNull;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base test class for {@link ExpireSnapshotsImpl}. */
 public class ExpireSnapshotsTest {
@@ -736,6 +738,42 @@ public class ExpireSnapshotsTest {
         }
 
         store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireRejectsNonPositiveRetainMin() throws Exception {
+        TestFileStore inputStore = createStore(CoreOptions.ChangelogProducer.INPUT);
+        SnapshotManager snapshotManager = inputStore.snapshotManager();
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(inputStore, 5, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            rewriteSnapshotTime(inputStore.fileIO(), snapshotManager, i, 0);
+        }
+        Set<java.nio.file.Path> filesBefore = listFiles();
+
+        for (int retainMin : new int[] {0, -1}) {
+            ExpireConfig config =
+                    ExpireConfig.builder()
+                            .snapshotRetainMin(retainMin)
+                            .snapshotRetainMax(Integer.MAX_VALUE)
+                            .snapshotTimeRetain(Duration.ZERO)
+                            .build();
+            ExpireSnapshots expire = inputStore.newExpire(config);
+            assertThatThrownBy(expire::expire)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("retainMin (" + retainMin + ") must be at least 1.");
+        }
+
+        // nothing may be deleted, every snapshot must still be readable
+        assertThat(listFiles()).isEqualTo(filesBefore);
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+            assertSnapshot(inputStore, i, allData, snapshotPositions);
+        }
+        inputStore.assertCleaned();
     }
 
     @Test
@@ -1496,6 +1534,12 @@ public class ExpireSnapshotsTest {
                 snapshotDeletion,
                 store.newTagManager(),
                 store.options().scanManifestParallelism());
+    }
+
+    private Set<java.nio.file.Path> listFiles() throws IOException {
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            return files.filter(Files::isRegularFile).collect(Collectors.toSet());
+        }
     }
 
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {

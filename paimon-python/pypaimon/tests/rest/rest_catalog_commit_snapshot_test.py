@@ -24,6 +24,7 @@ from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import Schema
 from pypaimon.api.api_response import CommitTableResponse
@@ -398,6 +399,7 @@ class TestRESTCommit(RESTBaseTest):
         self.assertEqual(
             sorted(actual.column('id').to_pylist()), [1, 2, 3, 4, 5, 6])
 
+    @pytest.mark.python_commit
     def test_commit_succeeded_on_server_but_client_fails(self):
         pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
         opts = {

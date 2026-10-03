@@ -219,11 +219,15 @@ public final class OSSBlobPresigner {
     private static void validatePresignedUrl(
             OSSClient client, URL url, String bucket, String targetKey) throws Exception {
         URI endpoint = client.getEndpoint();
-        String expectedHost = bucket + "." + endpoint.getHost();
+        // With fs.oss.sld.enabled the client signs path-style URLs: the host is the endpoint and
+        // the bucket becomes the first path segment, so bucket and key are still both checked.
+        boolean pathStyle = client.getClientConfiguration().isSLDEnabled();
+        String expectedHost = pathStyle ? endpoint.getHost() : bucket + "." + endpoint.getHost();
+        String expectedPath = pathStyle ? "/" + bucket + "/" + targetKey : "/" + targetKey;
         if (!"https".equalsIgnoreCase(endpoint.getScheme())
                 || !"https".equalsIgnoreCase(url.getProtocol())
                 || !expectedHost.equalsIgnoreCase(url.getHost())
-                || !("/" + targetKey).equals(url.toURI().getPath())) {
+                || !expectedPath.equals(url.toURI().getPath())) {
             throw new IOException("OSS client generated a presigned URL for an invalid target.");
         }
     }

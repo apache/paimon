@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.List;
@@ -59,6 +60,7 @@ public class TestFullTextGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            List<Range> rowRanges,
             ExecutorService executor) {
         checkArgument(files.size() == 1, "Expected exactly one index file per shard");
         return new TestFullTextGlobalIndexReader(fileReader, files.get(0));

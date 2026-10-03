@@ -100,11 +100,30 @@ def reject_search_under_query_auth(table) -> None:
 class TableQueryAuthResult:
 
     def __init__(self, filter: Optional[List[str]], column_masking: Optional[Dict[str, str]]):
-        self.filter = [f for f in filter if f] if filter else filter
-        self.column_masking = (
-            {k: v for k, v in column_masking.items() if k and v}
-            if column_masking else column_masking
-        )
+        # A blank rule is a malformed response, not the absence of one: skipping it would read
+        # every row or return the column unmasked, so refuse the read as Java does.
+        if filter is not None and not isinstance(filter, list):
+            raise ValueError(
+                "Row filter must be a list, not {}; refusing to read.".format(
+                    type(filter).__name__))
+        if column_masking is not None and not isinstance(column_masking, dict):
+            raise ValueError(
+                "Column masking must be a map, not {}; refusing to read.".format(
+                    type(column_masking).__name__))
+        for rule in filter or []:
+            if not rule:
+                raise ValueError(
+                    "Row filter cannot be empty; refusing to read rather than returning "
+                    "every row.")
+        for column, transform in (column_masking or {}).items():
+            if not column:
+                raise ValueError("Column masking target cannot be empty; refusing to read.")
+            if not transform:
+                raise ValueError(
+                    "Column masking on '{}' cannot be empty; refusing to read rather than "
+                    "returning the column unmasked.".format(column))
+        self.filter = filter
+        self.column_masking = column_masking
 
     @property
     def has_restrictions(self):

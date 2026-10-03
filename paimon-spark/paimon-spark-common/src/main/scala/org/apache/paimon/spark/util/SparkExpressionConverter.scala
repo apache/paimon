@@ -240,7 +240,7 @@ object SparkExpressionConverter {
 
   /** Convert Spark [[Literal]] to Paimon literal. */
   def toPaimonLiteral(literal: Literal[_]): Object = {
-    if (literal == null) {
+    if (literal == null || literal.value() == null) {
       return null
     }
 

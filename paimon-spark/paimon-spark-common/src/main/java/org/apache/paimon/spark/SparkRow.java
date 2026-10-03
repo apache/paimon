@@ -208,7 +208,11 @@ public class SparkRow implements InternalRow, Serializable {
 
     private static int toPaimonDate(Object object) {
         if (object instanceof Date) {
-            return DateTimeUtils.toInternal((Date) object);
+            // Spark builds this java.sql.Date from its internal day through the hybrid calendar,
+            // which is Julian before 1582-10-15, so only Spark's own inverse recovers the day.
+            // Counting epoch days off the instant follows the java.time rules instead, which
+            // leaves a date from before the cutover stored days away from the one written.
+            return org.apache.spark.sql.catalyst.util.DateTimeUtils.fromJavaDate((Date) object);
         } else {
             return DateTimeUtils.toInternal((LocalDate) object);
         }
@@ -220,7 +224,14 @@ public class SparkRow implements InternalRow, Serializable {
             if (TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType()) {
                 return Timestamp.fromSQLTimestamp(ts);
             } else {
-                return Timestamp.fromInstant(ts.toInstant());
+                // Spark builds this java.sql.Timestamp from its internal micros through the
+                // hybrid calendar and the legacy time zone rules, so only Spark's own inverse
+                // recovers the instant. Instant#toInstant applies the java.time rules instead,
+                // which disagree wherever the two differ - a zone's pre-1900 offset was rarely a
+                // whole number of hours (Asia/Shanghai was +08:05:43 until 1901), and the hybrid
+                // calendar is Julian before 1582. The value would be stored shifted.
+                return Timestamp.fromMicros(
+                        org.apache.spark.sql.catalyst.util.DateTimeUtils.fromJavaTimestamp(ts));
             }
         } else if (object instanceof java.time.Instant) {
             Instant instant = (Instant) object;

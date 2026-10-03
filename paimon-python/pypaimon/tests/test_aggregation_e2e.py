@@ -32,12 +32,15 @@ identifiers) must raise ``NotImplementedError`` at TableRead
 construction rather than silently fall back to a wrong answer.
 """
 
+import glob
 import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 
@@ -232,8 +235,15 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         table = self._create_pk_table(
             table_name, extra_options=extra_options
         )
-        # Writing is fine — the guard fires when a reader is built.
-        self._write(table, [{'id': 1, 'total': 1, 'max_score': 1, 'label': 'a'}])
+        with self.assertRaises(error_type) as write_error:
+            self._write(table, [
+                {'id': 1, 'total': 10, 'max_score': 1, 'label': 'a'},
+                {'id': 1, 'total': 20, 'max_score': 2, 'label': 'b'},
+            ])
+        self.assertIn(expected_substring, str(write_error.exception))
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        self.assertEqual(glob.glob(
+            os.path.join(table.table_path, '**', '*.parquet'), recursive=True), [])
         rb = table.new_read_builder()
         with self.assertRaises(error_type) as cm:
             rb.new_read()
@@ -242,6 +252,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             self.assertIn('aggregation', msg)
         self.assertIn(expected_substring, msg)
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_remove_record_on_delete_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_remove_on_delete',
@@ -249,12 +261,66 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'aggregation.remove-record-on-delete',
         )
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_field_ignore_retract_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_ignore_retract',
             {'fields.total.ignore-retract': 'true'},
             'fields.total.ignore-retract',
         )
+
+    @pytest.mark.python_write
+    def test_unsupported_stream_write_rejected_at_construction(self):
+        table = self._create_pk_table(
+            'agg_stream_reject', field_aggs={'total': 'sum'},
+            extra_options={'aggregation.remove-record-on-delete': 'true'})
+        with self.assertRaisesRegex(
+                NotImplementedError, 'aggregation.remove-record-on-delete'):
+            table.new_stream_write_builder().new_write()
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        self.assertEqual(glob.glob(
+            os.path.join(table.table_path, '**', '*.parquet'), recursive=True), [])
+
+    @pytest.mark.python_write
+    def test_dynamic_bucket_rejected_before_index_creation(self):
+        from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+
+        for streaming in (False, True):
+            table = self._create_pk_table(
+                'agg_dynamic_reject_{}'.format(streaming), extra_options={
+                    'bucket': '-1',
+                    'aggregation.remove-record-on-delete': 'true',
+                })
+            builder = (table.new_stream_write_builder() if streaming
+                       else table.new_batch_write_builder())
+            writer_class = StreamTableWrite if streaming else BatchTableWrite
+            # A rejected writer must never create the bucket index maintainer,
+            # including callers that construct TableWrite directly.
+            with patch.object(table, 'create_row_key_extractor') as extractor:
+                for create in (builder.new_write, lambda: writer_class(table, 'test')):
+                    with self.subTest(streaming=streaming, create=create):
+                        with self.assertRaisesRegex(
+                                NotImplementedError, 'aggregation.remove-record-on-delete'):
+                            create()
+                extractor.assert_not_called()
+            self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+            self.assertEqual(glob.glob(os.path.join(table.table_path, 'index', '*')), [])
+            self.assertEqual(glob.glob(
+                os.path.join(table.table_path, '**', '*.parquet'), recursive=True), [])
+
+    @pytest.mark.python_write
+    def test_false_retract_options_remain_writable(self):
+        table = self._create_pk_table(
+            'agg_false_retract', field_aggs={'total': 'sum'}, extra_options={
+                'aggregation.remove-record-on-delete': 'false',
+                'fields.total.ignore-retract': 'false',
+            })
+        self._write(table, [{'id': 1, 'total': 10}])
+        self._write(table, [{'id': 1, 'total': 20}])
+        # This tests write acceptance. Native read support for false-valued
+        # retract options is independent of the write-side guard.
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 2)
 
     def test_sequence_field_supported(self):
         # Top-level sequence.field is honored by the aggregation engine:
@@ -286,6 +352,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             error_type=ValueError,
         )
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_field_sequence_group_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_sequence_group',
@@ -293,6 +361,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'fields.max_score.sequence-group',
         )
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_out_of_scope_field_aggregator_rejected(self):
         # rbm64 is the aggregator identifier this engine doesn't support
         # yet. The guard must reject the config rather than let the
@@ -303,6 +373,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'fields.label.aggregate-function',
         )
 
+    @pytest.mark.python_write
+    @pytest.mark.python_read
     def test_out_of_scope_default_aggregator_rejected(self):
         self._create_and_expect_unsupported(
             'agg_reject_default_rbm64',

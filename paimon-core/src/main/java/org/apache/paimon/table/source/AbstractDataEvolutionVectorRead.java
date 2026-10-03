@@ -130,7 +130,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     protected GlobalIndexer createGlobalIndexer(String indexType) {
         return GlobalIndexerFactoryUtils.load(indexType)
-                .create(vectorColumn, table.coreOptions().toConfiguration());
+                .create(
+                        Collections.singletonList(vectorColumn),
+                        table.coreOptions().toConfiguration());
     }
 
     private GlobalIndexer createGlobalIndexer(String indexType, GlobalIndexMeta meta) {
@@ -139,8 +141,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
         return GlobalIndexerFactoryUtils.load(indexType)
                 .create(
-                        meta.getIndexField(table.rowType()),
-                        meta.getExtraFields(table.rowType()),
+                        meta.getIndexedFields(table.rowType()),
                         table.coreOptions().toConfiguration());
     }
 
@@ -241,7 +242,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return null;
@@ -285,7 +286,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return null;
@@ -333,6 +334,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         indexFileReader,
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
+                        null,
                         executor);
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
@@ -366,6 +368,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         indexFileReader,
                         indexIOMetaList,
                         rowRangeEnd - rowRangeStart + 1,
+                        null,
                         executor);
         BatchVectorSearch batchVectorSearch =
                 new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)

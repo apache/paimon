@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
@@ -33,21 +34,15 @@ public interface GlobalIndexerFactory {
         return false;
     }
 
-    GlobalIndexer create(DataField indexField, Options options);
-
     /**
-     * Creates an indexer over a primary column plus optional extra columns. {@code indexField} is
-     * the primary column; {@code extraFields} holds the remaining columns and is empty for a
-     * single-column index.
+     * Select index files using metadata only. Implementations must retain every file that may
+     * match; the default keeps all files when no safe pruning is available.
      */
-    default GlobalIndexer create(
-            DataField indexField, List<DataField> extraFields, Options options) {
-        if (extraFields != null && !extraFields.isEmpty()) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Index type '%s' does not support multi-column index, got extra columns: %s",
-                            identifier(), extraFields));
-        }
-        return create(indexField, options);
+    default List<GlobalIndexIOMeta> selectFiles(
+            List<DataField> indexFields, Predicate predicate, List<GlobalIndexIOMeta> files) {
+        return files;
     }
+
+    /** Creates an indexer over a non-empty list of columns in index order. */
+    GlobalIndexer create(List<DataField> indexFields, Options options);
 }

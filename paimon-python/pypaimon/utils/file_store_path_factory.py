@@ -22,6 +22,7 @@ from typing import List, Optional, Tuple
 
 from pypaimon.casting.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.utils.path import resolve_path, to_file_io_path
 from pypaimon.schema.data_types import DataType
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import _is_ltz_type, _normalize_ltz, _parse_type_precision_scale
@@ -40,6 +41,22 @@ def _escape_partition_component(value: str) -> str:
     return ''.join('%{:02X}'.format(ord(char))
                    if ord(char) < 32 or ord(char) == 127 or char in escape_chars else char
                    for char in value)
+
+
+def canonical_data_file_path(table, partition, bucket, file_name):
+    """Locate a file in Java's escaped partition directory."""
+    bucket_path = table.path_factory().bucket_path(
+        tuple(partition), bucket, canonical_partition=True)
+    path = f"{bucket_path.rstrip('/')}/{file_name}"
+    root = resolve_path(table.path_factory().data_file_path(), '.').rstrip('/')
+    if (root.startswith('file:') and path.startswith(root + '/')
+            and '%' in path[len(root) + 1:]):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        # File I/O wrappers eventually decode %2F in file URIs. Rust stores
+        # the literal escaped component, so use its physical local path.
+        return str(LocalFileIO()._to_file(root) / path[len(root) + 1:])
+    return path
 
 
 def _floating_partition_string(value, single_precision: bool) -> str:
@@ -117,6 +134,8 @@ class FileStorePathFactory:
         self.changelog_file_prefix = changelog_file_prefix
         self.file_suffix_include_compression = file_suffix_include_compression
         self.file_compression = file_compression
+        if data_file_path_directory == '':
+            raise ValueError('data-file.path-directory must not be empty')
         self.data_file_path_directory = data_file_path_directory
         self.external_paths = external_paths or []
         self.external_path_strategy = external_path_strategy
@@ -143,9 +162,8 @@ class FileStorePathFactory:
         return f"{self._root}/{self.STATISTICS_PATH}"
 
     def data_file_path(self) -> str:
-        if self.data_file_path_directory:
-            return f"{self._root}/{self.data_file_path_directory}"
-        return self._root
+        path = resolve_path(self._root, self.data_file_path_directory)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def relative_bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         if canonical_partition and partition:
@@ -212,14 +230,19 @@ class FileStorePathFactory:
                 relative_parts = partition_parts + relative_parts
 
         # Add data file path directory if specified
+        relative = "/".join(relative_parts)
+        # Legacy Python timestamp partitions contain literal colons. Prefix a
+        # relative path so URI resolution cannot mistake the first field for a scheme.
+        if ':' in relative.split('/', 1)[0]:
+            relative = './' + relative
         if self.data_file_path_directory:
-            relative_parts = [self.data_file_path_directory] + relative_parts
-
-        return "/".join(relative_parts)
+            return resolve_path(self.data_file_path_directory, relative)
+        return relative
 
     def bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         relative_path = self.relative_bucket_path(partition, bucket, canonical_partition)
-        return f"{self._root}/{relative_path}"
+        path = resolve_path(self._root, relative_path)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def create_external_path_provider(
         self, partition: Tuple, bucket: int
@@ -265,7 +288,7 @@ class FileStorePathFactory:
     def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
         """Resolve an existing bucket index, including the legacy Python DV layout."""
         if index_file.external_path:
-            return index_file.external_path
+            return to_file_io_path(index_file.external_path)
         legacy_path = f"{self.index_path()}/{index_file.file_name}"
         if not self.index_file_in_data_file_dir:
             return legacy_path

@@ -26,6 +26,7 @@ from unittest.mock import Mock, patch
 
 from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
+import pytest
 from parameterized import parameterized
 
 from pypaimon.build_info import full_version as build_full_version
@@ -471,6 +472,7 @@ class TableWriteTest(unittest.TestCase):
         with patch.object(pa.TableGroupBy, 'aggregate', raise_missing_kernel):
             self.assertFalse(rk._probe_arrow_group_by())
 
+    @pytest.mark.python_commit
     def test_write_snapshot(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_write_snapshot', schema, False)
@@ -591,6 +593,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
 
+    @pytest.mark.python_write
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_parquet', schema, False)
@@ -715,6 +718,7 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_write
     def test_multi_prepare_commit_pk(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], primary_keys=['user_id', 'dt'],
                                             options={'bucket': '2'})
@@ -1970,6 +1974,7 @@ class TableWriteTest(unittest.TestCase):
         actual = self._read_sorted(table, 'id')
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_write
     def test_validate_schema_allows_binary_family_for_write_cols(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),

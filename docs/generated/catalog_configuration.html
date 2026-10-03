@@ -150,7 +150,7 @@ under the License.
             <td><h5>local-cache.whitelist</h5></td>
             <td style="word-wrap: break-word;">"meta,global-index"</td>
             <td>String</td>
-            <td>Comma-separated list of file types to cache. Supported values: meta, global-index, bucket-index, data, file-index.</td>
+            <td>Comma-separated list of file types to cache. Supported values: meta, global-index, bucket-index, data, file-index, or * for all of them.</td>
         </tr>
         <tr>
             <td><h5>lock-acquire-timeout</h5></td>
@@ -205,6 +205,24 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Uri of metastore server.</td>
+        </tr>
+        <tr>
+            <td><h5>user-agent.extended</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Free-form text appended to Paimon's unified User-Agent, sent on REST and object storage requests. For OSS, fs.oss.user.agent.extended takes precedence; for REST, header.User-Agent replaces the whole value.</td>
+        </tr>
+        <tr>
+            <td><h5>user-agent.features</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Space-separated features of Paimon's unified User-Agent, sent on REST and object storage requests. For OSS, fs.oss.user.agent.features takes precedence; for REST, header.User-Agent replaces the whole value.</td>
+        </tr>
+        <tr>
+            <td><h5>user-agent.module</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The module of Paimon's unified User-Agent, module(transport;features) extended, sent on REST and object storage requests. Defaults to the Paimon client and its version. For OSS, fs.oss.user.agent.module takes precedence; for REST, header.User-Agent replaces the whole value.</td>
         </tr>
         <tr>
             <td><h5>warehouse</h5></td>

@@ -18,11 +18,15 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.BuildVersions;
 import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import org.apache.hc.core5.util.VersionInfo;
 import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +64,42 @@ public class HttpClientUtilsTest {
         if (server != null) {
             server.stop(0);
         }
+    }
+
+    @Test
+    public void testUserAgent() throws Exception {
+        AtomicReference<String> userAgent = new AtomicReference<>();
+        registerHandler(
+                "/ua",
+                exchange -> {
+                    userAgent.set(exchange.getRequestHeaders().getFirst("User-Agent"));
+                    respond(exchange, 200, new byte[0]);
+                });
+
+        assertThat(HttpClientUtils.exists(url("/ua"))).isTrue();
+        assertThat(userAgent.get())
+                .isEqualTo(HttpClientUtils.userAgent(new Options()))
+                .isEqualTo(
+                        "Paimon/"
+                                + BuildVersions.PAIMON
+                                + "(Apache-HttpClient/"
+                                + BuildVersions.HTTP_CLIENT
+                                + ")");
+        Options options = new Options();
+        options.set(CatalogOptions.USER_AGENT_MODULE, "MyApp/1.0");
+        options.set(CatalogOptions.USER_AGENT_FEATURES, " Flink  Spark ");
+        options.set(CatalogOptions.USER_AGENT_EXTENDED, "vvr");
+        assertThat(HttpClientUtils.userAgent(options))
+                .isEqualTo(
+                        "MyApp/1.0(Apache-HttpClient/"
+                                + BuildVersions.HTTP_CLIENT
+                                + ";Flink;Spark) vvr");
+        assertThat(BuildVersions.PAIMON).matches("\\d+\\.\\d+\\S*");
+        assertThat(BuildVersions.HTTP_CLIENT)
+                .isEqualTo(
+                        VersionInfo.loadVersionInfo(
+                                        "org.apache.hc.client5", getClass().getClassLoader())
+                                .getRelease());
     }
 
     @Test
