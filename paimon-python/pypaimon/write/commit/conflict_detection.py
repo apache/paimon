@@ -301,7 +301,12 @@ class ConflictDetection:
 
     def check_hash_index_conflicts(
             self, latest_snapshot, delta_index_entries=None):
-        """Detect stale full-file replacements of dynamic-bucket HASH indexes."""
+        """Validate explicit HASH deletes and reject competing additions.
+
+        Java/Rust ADDs replace the complete bucket index without a DELETE.
+        A retained file alone does not prove a conflict; that protocol requires
+        one writer owner per bucket. Explicit DELETEs still detect stale writers.
+        """
         hash_entries = [
             entry for entry in (delta_index_entries or [])
             if entry.index_file.index_type == IndexManifestFile.HASH_INDEX
@@ -311,10 +316,6 @@ class ConflictDetection:
 
         delete_entries = [entry for entry in hash_entries if entry.kind == 1]
         add_entries = [entry for entry in hash_entries if entry.kind == 0]
-        delete_names = {
-            entry.index_file.file_name for entry in delete_entries
-        }
-
         current_entries = []
         if latest_snapshot is not None and latest_snapshot.index_manifest is not None:
             current_entries = [
@@ -352,22 +353,6 @@ class ConflictDetection:
                     )
                 )
             additions_by_bucket[key] = add
-
-            retained = [
-                entry for entry in current_entries
-                if entry.index_file.file_name not in delete_names
-                and tuple(entry.partition.values) == key[0]
-                and entry.bucket == key[1]
-            ]
-            if retained:
-                return RuntimeError(
-                    "HASH index conflict detected: partition {}, bucket {} "
-                    "already has newer index file {}.".format(
-                        key[0],
-                        key[1],
-                        retained[0].index_file.file_name,
-                    )
-                )
 
         return None
 

@@ -23,6 +23,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.index.dynamic_bucket import (
@@ -343,6 +344,7 @@ class DynamicBucketTest(unittest.TestCase):
             result = self._read_arrow(table).sort_by('id').to_pydict()
             self.assertEqual({'id': [1, 2], 'value': ['new', 'other']}, result)
 
+    @pytest.mark.python_write
     def test_regular_dynamic_writer_retains_only_requested_index_hashes(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'bounded_restore')
@@ -357,6 +359,7 @@ class DynamicBucketTest(unittest.TestCase):
             self.assertEqual(1, len(partition_index.hash_to_bucket))
             self.assertEqual({}, writer.row_key_extractor._index_maintainer._states)
 
+    @pytest.mark.python_write
     def test_legacy_dynamic_data_without_hash_index_fails_fast(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'legacy_no_index')
@@ -416,6 +419,7 @@ class DynamicBucketTest(unittest.TestCase):
 
             self.assertFalse(table.file_io.exists(index_path))
 
+    @pytest.mark.python_write
     def test_stream_writer_releases_prepared_hash_index_ownership(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'stream_prepared')
@@ -481,44 +485,21 @@ class DynamicBucketTest(unittest.TestCase):
                 [call.args[0] for call in hash_code.call_args_list],
             )
 
-    def test_concurrent_initial_hash_index_add_conflicts(self):
+    def test_hash_add_replaces_previous_index_without_explicit_delete(self):
+        # Java DynamicBucketIndexMaintainer sends only the complete new HASH
+        # file. Its bucket-owner protocol does not require an old-file DELETE.
         with tempfile.TemporaryDirectory() as root:
-            table = self._create_table(root, 'concurrent_initial')
-            writer1, commit1, messages1 = self._prepare_indexed_write(
-                table, [1]
-            )
-            writer2, commit2, messages2 = self._prepare_indexed_write(
-                table, [2]
-            )
-
-            commit1.commit(messages1)
-            stale_data_paths = [
-                file.file_path for message in messages2 for file in message.new_files
-            ]
-            stale_index_paths = [
-                entry.index_file.external_path
-                or table.path_factory().global_index_path_factory().to_path(
-                    entry.index_file.file_name
-                )
-                for message in messages2 for entry in message.index_adds
-            ]
-            with self.assertRaisesRegex(
-                RuntimeError, 'HASH index conflict detected'
-            ):
-                commit2.commit(messages2)
-
-            self.assertTrue(all(
-                table.file_io.exists(path)
-                for path in stale_data_paths + stale_index_paths
-            ))
-
+            table = self._create_table(root, 'implicit_hash_replace')
+            self._commit_arrow(table, [1], ['one'])
+            writer, commit, messages = self._prepare_indexed_write(table, [2])
+            self.assertEqual(1, len(messages[0].index_deletes))
+            messages[0].index_deletes.clear()
+            commit.commit(messages)
             indexes = self._hash_indexes(table)
             self.assertEqual(1, len(indexes))
-            self.assertEqual(1, indexes[0].index_file.row_count)
-            writer1.close()
-            writer2.close()
-            commit1.close()
-            commit2.close()
+            self.assertEqual(2, indexes[0].index_file.row_count)
+            writer.close()
+            commit.close()
 
     def test_concurrent_hash_index_replacement_conflicts(self):
         with tempfile.TemporaryDirectory() as root:
@@ -638,6 +619,7 @@ class DynamicBucketTest(unittest.TestCase):
     def test_retry_then_hash_index_conflict_preserves_prepared_files(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'retry_hash_conflict')
+            self._commit_arrow(table, [0], ['seed'])
             writer, commit, messages = self._prepare_indexed_write(table, [1])
             prepared_paths = [
                 file.file_path
@@ -694,7 +676,7 @@ class DynamicBucketTest(unittest.TestCase):
             invalid_schema = table.table_schema.copy(options)
 
             with self.assertRaisesRegex(
-                ValueError, 'bucket-key references unknown columns'
+                ValueError, "Cannot define 'bucket-key' in dynamic bucket mode"
             ):
                 DynamicBucketRowKeyExtractor(invalid_schema)
 

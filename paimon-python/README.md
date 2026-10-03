@@ -168,6 +168,15 @@ path select the Python writer before native data is written. If the runtime or t
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
 
+Primary-key dynamic buckets (`bucket=-1`, with partition fields included in the
+primary key) also support native writes. HASH indexes are restored across writer
+restarts; `dynamic-bucket.max-buckets` bounds bucket growth and reuses existing
+buckets after that limit. Dynamic buckets use the trimmed primary key, so
+`bucket-key` must not be configured. As in Java, each bucket must have one writer
+owner: a HASH ADD replaces the complete previous index and does not carry a
+concurrent-writer baseline. Partitions with existing data but missing HASH indexes
+must be rewritten before incremental writes.
+
 Native writes honor `data-file.path-directory` and the configured
 `data-file.external-paths` strategy. Existing files keep their recorded locations
 when the write destinations change. Python and native readers and committers
@@ -317,14 +326,15 @@ Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_range
 Watermark time travel requires Rust 0.4 or newer. Branch reads require the
 branch-aware binding exposing `Table.branch()`, and the resolved branch is
 checked before planning. Deletion-vector scans require `pypaimon-rust>=0.4.0`,
-which includes schema-aware decoding of Python-written index manifests and
-legacy bucket-index path compatibility. The reader honors explicit paths, then
-bucket paths, and can read older Python files placed in `table/index`.
+which includes schema-aware decoding of index manifests. Index paths follow
+Java: an explicit external path takes precedence; otherwise
+`index-file-in-data-file-dir` selects the bucket or table index directory.
 Bucket paths use the partition field types and `partition.legacy-name` to match
 Java formatting, including timestamp precision and different JVM float spellings.
-New Python writes honor `index-file-in-data-file-dir` and retain explicit paths
-when Python and Java partition-directory formatting differs. Older releases
-and prereleases before 0.4.0 use the Python planner for deletion vectors.
+Python bucket-index writes use Java partition paths. Explicit paths identify
+external files and floating partition directories whose spelling depends on the
+JDK version. Missing bucket indexes fail instead of searching Python layouts. Older releases and prereleases
+before 0.4.0 use the Python planner for deletion vectors.
 When using an unreleased 0.4.0 development wheel, rebuild it with these fixes;
 package version checks cannot distinguish local builds with identical versions.
 
