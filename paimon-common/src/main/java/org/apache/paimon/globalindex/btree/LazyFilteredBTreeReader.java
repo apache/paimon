@@ -131,8 +131,8 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             return CompletableFuture.completedFuture(Optional.empty());
         }
         CompositeBTreePredicate.Plan plan = planned.get();
-        if (plan.isPointLookup() && !plan.isEmpty()) {
-            return visitEqual((FieldRef) null, plan.pointKey());
+        if (plan.isPointLookup() && plan.intervals().size() == 1) {
+            return visitEqual((FieldRef) null, plan.intervals().get(0).pointKey());
         }
         List<GlobalIndexIOMeta> selected = plan.selectFiles(indexFiles);
         if (!plan.canScan(selected, fallbackScanMaxSize)) {

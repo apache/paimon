@@ -108,6 +108,25 @@ class CompositeBTreeIndexProcedureTest extends PaimonSparkTestBase {
         checkAnswer(
           sql("SELECT id FROM T WHERE category = 'category-a' AND item_number BETWEEN 6 AND 8"),
           Seq(Row(6), Row(7), Row(8), Row(26), Row(27), Row(28)))
+        checkAnswer(
+          sql(
+            "SELECT id FROM T WHERE category IN ('category-a', 'category-b') AND item_number IN (7, 8)"),
+          Seq(Row(7), Row(8), Row(17), Row(18), Row(27), Row(28), Row(37), Row(38))
+        )
+        checkAnswer(
+          sql(
+            "SELECT id FROM T WHERE category IN ('category-a', 'category-b') AND item_number > 7"),
+          Seq(Row(8), Row(9), Row(18), Row(19), Row(28), Row(29), Row(38), Row(39))
+        )
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category IS NULL AND item_number = 7"),
+          Seq(Row(100)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number IS NULL"),
+          Seq(Row(101)))
+        checkAnswer(
+          sql("SELECT id FROM T WHERE category IN ('category-a', NULL) AND item_number IN (7, 8)"),
+          Seq(Row(7), Row(8), Row(27), Row(28)))
       }
       insert(40, 60)
       build("category,item_number")

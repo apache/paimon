@@ -33,6 +33,7 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -55,13 +56,20 @@ class CompositeBTreePredicateTest {
         Predicate predicate =
                 PredicateBuilder.and(
                         builder.equal(1, -3), builder.equal(0, BinaryString.fromString("a")));
-        assertThat(CompositeBTreePredicate.plan(fields, predicate).get().pointKey())
+        assertThat(
+                        CompositeBTreePredicate.plan(fields, predicate)
+                                .get()
+                                .intervals()
+                                .get(0)
+                                .pointKey())
                 .isEqualTo(GenericRow.of(BinaryString.fromString("a"), -3));
         assertThat(CompositeBTreePredicate.plan(fields, predicate).get().isEmpty()).isFalse();
         assertThat(
                         CompositeBTreePredicate.plan(
                                         Arrays.asList(fields.get(1), fields.get(0)), predicate)
                                 .get()
+                                .intervals()
+                                .get(0)
                                 .pointKey())
                 .isEqualTo(GenericRow.of(-3, BinaryString.fromString("a")));
     }
@@ -195,6 +203,83 @@ class CompositeBTreePredicateTest {
     private Predicate equal(String category, int number) {
         return PredicateBuilder.and(
                 builder.equal(1, number), builder.equal(0, BinaryString.fromString(category)));
+    }
+
+    @Test
+    void testDiscreteDomainsIntersectDeduplicateAndBoundExpansion() {
+        List<Object> categories = new ArrayList<>();
+        List<Object> numbers = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            categories.add(BinaryString.fromString("category-" + i));
+            numbers.add(i);
+        }
+        Predicate first = builder.in(0, categories);
+        Predicate max = PredicateBuilder.and(first, builder.in(1, numbers));
+        assertThat(CompositeBTreePredicate.plan(fields, max).get().intervals()).hasSize(256);
+        numbers.add(null);
+        numbers.add(7);
+        assertThat(
+                        CompositeBTreePredicate.plan(
+                                        fields, PredicateBuilder.and(first, builder.in(1, numbers)))
+                                .get()
+                                .intervals())
+                .hasSize(256);
+        numbers.add(16);
+        Predicate overflow = PredicateBuilder.and(first, builder.in(1, numbers));
+        assertThat(CompositeBTreePredicate.plan(fields, overflow)).isEmpty();
+        assertThat(
+                        CompositeBTreePredicate.plan(
+                                        fields, PredicateBuilder.and(overflow, builder.equal(1, 7)))
+                                .get()
+                                .intervals())
+                .hasSize(16);
+        assertThat(
+                        CompositeBTreePredicate.plan(
+                                        fields,
+                                        PredicateBuilder.and(
+                                                overflow, builder.in(1, Arrays.asList(7, 8))))
+                                .get()
+                                .intervals())
+                .hasSize(32);
+        assertThat(
+                        CompositeBTreePredicate.plan(
+                                        fields,
+                                        PredicateBuilder.and(
+                                                first,
+                                                builder.in(
+                                                        0,
+                                                        Collections.singletonList(
+                                                                BinaryString.fromString(
+                                                                        "absent")))))
+                                .get()
+                                .isEmpty())
+                .isTrue();
+        List<DataField> nonNull =
+                Arrays.asList(
+                        new DataField(10, "category", DataTypes.STRING().notNull()), fields.get(1));
+        assertThat(CompositeBTreePredicate.plan(nonNull, builder.isNull(0)).get().isEmpty())
+                .isTrue();
+    }
+
+    @Test
+    void testIntervalFileUnionCountsEachFileOnce() {
+        GlobalIndexIOMeta first = file("first", "a", -3, "a", 7);
+        GlobalIndexIOMeta second = file("second", "a", 10, "b", 2);
+        GlobalIndexIOMeta third = file("third", "b", 3, "c", 4);
+        Predicate query =
+                PredicateBuilder.and(
+                        builder.in(
+                                0,
+                                Arrays.asList(
+                                        BinaryString.fromString("b"),
+                                        BinaryString.fromString("a"),
+                                        BinaryString.fromString("a"))),
+                        builder.between(1, 0, 2));
+        CompositeBTreePredicate.Plan plan = CompositeBTreePredicate.plan(fields, query).get();
+        List<GlobalIndexIOMeta> selected = plan.selectFiles(Arrays.asList(first, second, third));
+        assertThat(selected).containsExactly(first, second);
+        assertThat(plan.canScan(selected, 2)).isTrue();
+        assertThat(plan.canScan(selected, 1)).isFalse();
     }
 
     private GlobalIndexIOMeta file(

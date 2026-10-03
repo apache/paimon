@@ -163,6 +163,32 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                             sql(
                                     "SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category BETWEEN 'category-a' AND 'category-b'"))
                     .containsExactlyInAnyOrder(Row.of(7), Row.of(17), Row.of(27), Row.of(37));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE item_number IN (7, 8) AND category IN ('category-a', 'category-b')"))
+                    .containsExactlyInAnyOrder(
+                            Row.of(7),
+                            Row.of(8),
+                            Row.of(17),
+                            Row.of(18),
+                            Row.of(27),
+                            Row.of(28),
+                            Row.of(37),
+                            Row.of(38));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE item_number IN (7, 8) AND category > 'category-a'"))
+                    .containsExactlyInAnyOrder(Row.of(17), Row.of(18), Row.of(37), Row.of(38));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE item_number IS NULL AND category = 'category-a'"))
+                    .containsExactly(Row.of(101));
+            assertThat(sql("SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category IS NULL"))
+                    .containsExactly(Row.of(100));
+            assertThat(
+                            sql(
+                                    "SELECT id FROM T_COMPOSITE WHERE item_number IS NOT NULL AND category IS NULL"))
+                    .containsExactly(Row.of(100));
         }
         insertCompositeRows(40, 60);
         buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");
