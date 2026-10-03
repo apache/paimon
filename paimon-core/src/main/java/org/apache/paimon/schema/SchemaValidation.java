@@ -721,6 +721,14 @@ public class SchemaValidation {
                 MIN_ICEBERG_VARIANT_FORMAT_VERSION,
                 IcebergOptions.FORMAT_VERSION.key(),
                 MIN_ICEBERG_VARIANT_FORMAT_VERSION);
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                                != IcebergOptions.StorageType.REST_CATALOG
+                        || !containsType(dataType, type -> type.is(DataTypeRoot.VARIANT)),
+                "Variant columns do not support '%s'='%s' because the bundled Iceberg REST client "
+                        + "cannot parse the Iceberg variant type.",
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.REST_CATALOG);
     }
 
     private static boolean isUnpublishableType(DataType dataType) {

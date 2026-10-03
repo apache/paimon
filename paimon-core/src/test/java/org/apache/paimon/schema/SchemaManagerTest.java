@@ -253,6 +253,24 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testIcebergMetadataRefusesVariantThroughRestCatalog() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "rest-catalog");
+        options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.createTable(
+                                                        unpublishableSchema(
+                                                                options, DataTypes.VARIANT()))))
+                .hasStackTraceContaining(
+                        "do not support 'metadata.iceberg.storage'='rest-catalog'");
+    }
+
+    @Test
     public void testIcebergMetadataRefusesBlobColumns() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "-1");
