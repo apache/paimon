@@ -322,6 +322,73 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test("Paimon push down: filters on signed zeros agree with Spark") {
+    // Spark's own evaluation of each condition, as a projected column of the whole table, is the
+    // oracle: a pushed-down filter must not drop a row Spark keeps, and one consumed on a
+    // partition column must not keep a row Spark drops.
+    val tables = (for (format <- Seq("parquet", "orc", "avro"); primaryKey <- Seq(false, true))
+      yield (format, primaryKey, false)) :+ (("parquet", false, true))
+    for ((format, primaryKey, partitioned) <- tables) {
+      withTable("t") {
+        val pkProps = if (primaryKey) ", 'primary-key' = 'id', 'bucket' = '1'" else ""
+        val partitionedBy = if (partitioned) "PARTITIONED BY (d, f)" else ""
+        sql(s"""
+               |CREATE TABLE t (id INT, d DOUBLE, f FLOAT) USING paimon $partitionedBy
+               |TBLPROPERTIES ('file.format' = '$format'$pkProps)
+               |""".stripMargin)
+        // one file, or partition, per value
+        sql("INSERT INTO t VALUES (1, CAST('-0.0' AS DOUBLE), CAST('-0.0' AS FLOAT))")
+        sql("INSERT INTO t VALUES (2, CAST('0.0' AS DOUBLE), CAST('0.0' AS FLOAT))")
+        sql("INSERT INTO t VALUES (3, -1.0, -1.0)")
+        sql("INSERT INTO t VALUES (4, 1.0, 1.0)")
+        sql("INSERT INTO t VALUES (5, CAST('NaN' AS DOUBLE), CAST('NaN' AS FLOAT))")
+        val stored = sql("SELECT d, f FROM t WHERE id = 1").collect().head
+        assert(java.lang.Double.doubleToRawLongBits(stored.getDouble(0)) == 0x8000000000000000L)
+        assert(java.lang.Float.floatToRawIntBits(stored.getFloat(1)) == 0x80000000)
+
+        for ((column, dataType) <- Seq(("d", "DOUBLE"), ("f", "FLOAT"))) {
+          val negativeZero = s"CAST('-0.0' AS $dataType)"
+          val nan = s"CAST('NaN' AS $dataType)"
+          // more than spark.sql.optimizer.inSetConversionThreshold values turn IN into InSet
+          val manyWithZero = (0 to 11).map(i => s"$i.5").mkString("0.0, ", ", ", "")
+          val conditions = Seq(
+            "= 0.0",
+            "<> 0.0",
+            "< 0.0",
+            "<= 0.0",
+            "> 0.0",
+            ">= 0.0",
+            s"< $negativeZero",
+            s"<= $negativeZero",
+            s"> $negativeZero",
+            s">= $negativeZero",
+            "<=> 0.0",
+            "IN (0.0, 5.0)",
+            s"IN ($negativeZero, 5.0)",
+            s"IN ($manyWithZero)",
+            "NOT IN (0.0, 5.0)",
+            "BETWEEN 0.0 AND 0.5",
+            "NOT BETWEEN 0.0 AND 0.5",
+            "> 0.5",
+            "<> 1.0",
+            s"= $nan",
+            s"<> $nan"
+          ).map(condition => s"$column $condition")
+          val evaluated = sql(s"SELECT id, ${conditions.mkString(", ")} FROM t").collect()
+          for ((condition, i) <- conditions.zipWithIndex) {
+            val expected =
+              evaluated
+                .filter(row => !row.isNullAt(i + 1) && row.getBoolean(i + 1))
+                .map(_.getInt(0))
+            withClue(s"$format, primary key: $primaryKey, partitioned: $partitioned, $condition: ") {
+              checkAnswer(sql(s"SELECT id FROM t WHERE $condition"), expected.map(Row(_)).toSeq)
+            }
+          }
+        }
+      }
+    }
+  }
+
   test("Paimon pushDown: limit for append-only tables with deletion vector") {
     withTable("dv_test") {
       spark.sql(

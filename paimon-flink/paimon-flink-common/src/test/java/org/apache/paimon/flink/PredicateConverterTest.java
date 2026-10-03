@@ -51,6 +51,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -607,10 +608,141 @@ public class PredicateConverterTest {
         assertThat(PredicateConverter.convert(rowType, negatedNotEquals)).isEmpty();
         assertThat(PredicateConverter.convert(rowType, negatedEquals)).isEmpty();
 
-        // Non-negated equal stays on the pre-existing compareTo path.
+        // Non-negated equal is converted and, like Flink, treats the two zeros as equal.
         Predicate equal = call(BuiltInFunctionDefinitions.EQUALS, field, zero).accept(converter);
         assertThat(equal.test(GenericRow.of(0.0d))).isTrue();
-        assertThat(equal.test(GenericRow.of(-0.0d))).isFalse();
+        assertThat(equal.test(GenericRow.of(-0.0d))).isTrue();
+    }
+
+    @MethodSource("provideSignedZeroLiterals")
+    @ParameterizedTest
+    public void testComparisonsOnSignedZeroKeepBothZeros(
+            LogicalType fieldType,
+            DataType fieldDataType,
+            ResolvedExpression zero,
+            Object negativeZero,
+            Object positiveZero,
+            Object negative,
+            Object positive) {
+        RowType rowType = RowType.of(fieldType);
+        ResolvedExpression field = field(0, fieldDataType);
+        List<Object> zeros = Arrays.asList(negativeZero, positiveZero);
+
+        // Flink orders -0.0 below 0.0 in some plans (d < 0.0 against a DECIMAL literal) but not in
+        // others (d < 0), so a strict comparison against a zero keeps both zeros.
+        for (CallExpression lessThan :
+                Arrays.asList(
+                        call(BuiltInFunctionDefinitions.LESS_THAN, field, zero),
+                        call(BuiltInFunctionDefinitions.GREATER_THAN, zero, field),
+                        call(BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL, field, zero))) {
+            Predicate predicate = PredicateConverter.convert(rowType, lessThan).get();
+            assertAccepts(predicate, zeros, true);
+            assertAccepts(predicate, Collections.singletonList(negative), true);
+            assertAccepts(predicate, Collections.singletonList(positive), false);
+        }
+        for (CallExpression greaterThan :
+                Arrays.asList(
+                        call(BuiltInFunctionDefinitions.GREATER_THAN, field, zero),
+                        call(BuiltInFunctionDefinitions.LESS_THAN, zero, field),
+                        call(BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL, field, zero))) {
+            Predicate predicate = PredicateConverter.convert(rowType, greaterThan).get();
+            assertAccepts(predicate, zeros, true);
+            assertAccepts(predicate, Collections.singletonList(positive), true);
+            assertAccepts(predicate, Collections.singletonList(negative), false);
+        }
+
+        // Whether -0.0 <> 0.0 holds depends on the plan as well, so Flink evaluates it.
+        assertThat(
+                        PredicateConverter.convert(
+                                rowType, call(BuiltInFunctionDefinitions.NOT_EQUALS, field, zero)))
+                .isEmpty();
+        assertThat(
+                        PredicateConverter.convert(
+                                rowType, call(BuiltInFunctionDefinitions.NOT_EQUALS, zero, field)))
+                .isEmpty();
+
+        // A comparison against any other value stays strict.
+        ResolvedExpression positiveLiteral = literal(positive, fieldDataType);
+        Predicate lessThanPositive =
+                PredicateConverter.convert(
+                                rowType,
+                                call(BuiltInFunctionDefinitions.LESS_THAN, field, positiveLiteral))
+                        .get();
+        assertAccepts(lessThanPositive, Collections.singletonList(positive), false);
+        Predicate notEqualPositive =
+                PredicateConverter.convert(
+                                rowType,
+                                call(BuiltInFunctionDefinitions.NOT_EQUALS, field, positiveLiteral))
+                        .get();
+        assertAccepts(notEqualPositive, zeros, true);
+        assertAccepts(notEqualPositive, Collections.singletonList(positive), false);
+    }
+
+    public static Stream<Arguments> provideSignedZeroLiterals() {
+        ResolvedExpression decimalZero = literal(new BigDecimal("0.0"), DataTypes.DECIMAL(2, 1));
+        return Stream.of(
+                Arguments.of(
+                        new DoubleType(),
+                        DataTypes.DOUBLE(),
+                        literal(0.0d, DataTypes.DOUBLE()),
+                        -0.0d,
+                        0.0d,
+                        -1.0d,
+                        1.0d),
+                Arguments.of(
+                        new DoubleType(),
+                        DataTypes.DOUBLE(),
+                        literal(-0.0d, DataTypes.DOUBLE()),
+                        -0.0d,
+                        0.0d,
+                        -1.0d,
+                        1.0d),
+                Arguments.of(
+                        new DoubleType(),
+                        DataTypes.DOUBLE(),
+                        decimalZero,
+                        -0.0d,
+                        0.0d,
+                        -1.0d,
+                        1.0d),
+                Arguments.of(
+                        new DoubleType(),
+                        DataTypes.DOUBLE(),
+                        literal(0, DataTypes.INT()),
+                        -0.0d,
+                        0.0d,
+                        -1.0d,
+                        1.0d),
+                Arguments.of(
+                        new FloatType(),
+                        DataTypes.FLOAT(),
+                        literal(0.0f, DataTypes.FLOAT()),
+                        -0.0f,
+                        0.0f,
+                        -1.0f,
+                        1.0f),
+                Arguments.of(
+                        new FloatType(),
+                        DataTypes.FLOAT(),
+                        literal(-0.0f, DataTypes.FLOAT()),
+                        -0.0f,
+                        0.0f,
+                        -1.0f,
+                        1.0f),
+                Arguments.of(
+                        new FloatType(), DataTypes.FLOAT(), decimalZero, -0.0f, 0.0f, -1.0f, 1.0f));
+    }
+
+    private static void assertAccepts(Predicate predicate, List<Object> values, boolean expected) {
+        for (Object value : values) {
+            assertThat(predicate.test(GenericRow.of(value)))
+                    .as("%s on %s", predicate, value)
+                    .isEqualTo(expected);
+            SimpleColStats[] stats = {new SimpleColStats(value, value, 0L)};
+            assertThat(SimpleColStatsTestUtils.test(predicate, 1, stats))
+                    .as("%s on stats of %s", predicate, value)
+                    .isEqualTo(expected);
+        }
     }
 
     @Test

@@ -32,6 +32,8 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.sql.Date;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -128,14 +130,14 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitLessThan(FieldRef fieldRef, Object literal) {
-        return convertBinary(fieldRef, literal, OrcFilters.LessThan::new);
+        return convertBinary(fieldRef, signedZero(literal, true), OrcFilters.LessThan::new);
     }
 
     @Override
     public Optional<OrcFilters.Predicate> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
         return convertBinary(
                 fieldRef,
-                literal,
+                signedZero(literal, true),
                 (colName, litType, serializableLiteral) ->
                         new OrcFilters.Not(
                                 new OrcFilters.LessThan(colName, litType, serializableLiteral)));
@@ -143,6 +145,9 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitNotEqual(FieldRef fieldRef, Object literal) {
+        if (isZero(literal)) {
+            return visitEqual(fieldRef, literal).map(OrcFilters.Not::new);
+        }
         return convertBinary(
                 fieldRef,
                 literal,
@@ -153,11 +158,18 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return convertBinary(fieldRef, literal, OrcFilters.LessThanEquals::new);
+        return convertBinary(fieldRef, signedZero(literal, false), OrcFilters.LessThanEquals::new);
     }
 
     @Override
     public Optional<OrcFilters.Predicate> visitEqual(FieldRef fieldRef, Object literal) {
+        if (isZero(literal)) {
+            // matches both zeros, see signedZero
+            return visitAnd(
+                    Arrays.asList(
+                            visitGreaterOrEqual(fieldRef, literal),
+                            visitLessOrEqual(fieldRef, literal)));
+        }
         return convertBinary(fieldRef, literal, OrcFilters.Equals::new);
     }
 
@@ -165,7 +177,7 @@ public class OrcPredicateFunctionVisitor
     public Optional<OrcFilters.Predicate> visitGreaterThan(FieldRef fieldRef, Object literal) {
         return convertBinary(
                 fieldRef,
-                literal,
+                signedZero(literal, false),
                 (colName, litType, serializableLiteral) ->
                         new OrcFilters.Not(
                                 new OrcFilters.LessThanEquals(
@@ -186,10 +198,20 @@ public class OrcPredicateFunctionVisitor
             return Optional.empty();
         }
 
-        Object[] orcLiterals = new Object[literals.size()];
-        for (int i = 0; i < literals.size(); i++) {
-            Object orcLiteral = toOrcObject(colType, literals.get(i));
-            if (orcLiteral == null && literals.get(i) != null) {
+        List<Object> expanded = new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            if (isZero(literal)) {
+                // match both zeros, see signedZero
+                expanded.add(signedZero(literal, true));
+                expanded.add(signedZero(literal, false));
+            } else {
+                expanded.add(literal);
+            }
+        }
+        Object[] orcLiterals = new Object[expanded.size()];
+        for (int i = 0; i < expanded.size(); i++) {
+            Object orcLiteral = toOrcObject(colType, expanded.get(i));
+            if (orcLiteral == null && expanded.get(i) != null) {
                 // If conversion fails for non-null value, skip this predicate
                 return Optional.empty();
             }
@@ -247,6 +269,28 @@ public class OrcPredicateFunctionVisitor
         return orcObj instanceof Serializable
                 ? Optional.of(func.apply(fieldRef.name(), litType, (Serializable) orcObj))
                 : Optional.empty();
+    }
+
+    private static boolean isZero(Object literal) {
+        return (literal instanceof Double && (Double) literal == 0.0d)
+                || (literal instanceof Float && (Float) literal == 0.0f);
+    }
+
+    /**
+     * ORC evaluates a search argument against statistics with {@code compareTo}, which orders -0.0
+     * before 0.0, while engines treat the two as equal. A zero literal is therefore replaced by the
+     * zero that puts both zeros on the same side: the negative one for {@code <} and {@code >=},
+     * which are built on ORC's less-than, and the positive one for {@code <=} and {@code >}, built
+     * on less-than-or-equal. Equality and IN cover both zeros.
+     */
+    private static Object signedZero(Object literal, boolean negative) {
+        if (!isZero(literal)) {
+            return literal;
+        }
+        if (literal instanceof Float) {
+            return negative ? -0.0f : 0.0f;
+        }
+        return negative ? -0.0d : 0.0d;
     }
 
     @Nullable

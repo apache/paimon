@@ -22,6 +22,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.predicate.SimpleColStatsTestUtils.test;
@@ -341,6 +343,67 @@ public class PredicateTest {
         assertThat(predicate.test(GenericRow.of(Float.NaN))).isEqualTo(true);
         assertThat(predicate.test(GenericRow.of(1.5f))).isEqualTo(false);
         assertThat(predicate.test(GenericRow.of((Object) null))).isEqualTo(false);
+    }
+
+    @Test
+    public void testSignedZeroDouble() {
+        assertSignedZerosAreEqual(new DoubleType(), -0.0d, 0.0d, i -> (double) i);
+
+        // NaN keeps matching itself
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new DoubleType()));
+        assertThat(builder.equal(0, Double.NaN).test(GenericRow.of(Double.NaN))).isTrue();
+    }
+
+    @Test
+    public void testSignedZeroFloat() {
+        assertSignedZerosAreEqual(new FloatType(), -0.0f, 0.0f, i -> (float) i);
+
+        // NaN keeps matching itself
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new FloatType()));
+        assertThat(builder.equal(0, Float.NaN).test(GenericRow.of(Float.NaN))).isTrue();
+    }
+
+    /**
+     * Engines treat -0.0 and 0.0 as equal, so neither a row nor the statistics of a file holding
+     * only one of the zeros may be rejected by a predicate on the other one.
+     */
+    private static void assertSignedZerosAreEqual(
+            DataType type, Object negative, Object positive, Function<Integer, Object> number) {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(type));
+        for (Object[] zeros : new Object[][] {{negative, positive}, {positive, negative}}) {
+            Object stored = zeros[0];
+            Object literal = zeros[1];
+            // more than 20 literals keep IN as a single leaf instead of an OR of equals
+            List<Object> manyWithZero = new ArrayList<>();
+            for (int i = 1; i <= 21; i++) {
+                manyWithZero.add(number.apply(i));
+            }
+            manyWithZero.add(literal);
+            GenericRow row = GenericRow.of(stored);
+            SimpleColStats[] stats = {new SimpleColStats(stored, stored, 0L)};
+
+            for (Predicate p :
+                    Arrays.asList(
+                            builder.equal(0, literal),
+                            builder.in(0, Arrays.asList(literal, number.apply(5))),
+                            builder.in(0, manyWithZero),
+                            builder.greaterOrEqual(0, literal),
+                            builder.lessOrEqual(0, literal),
+                            builder.between(0, literal, literal))) {
+                assertThat(p.test(row)).as("row %s: %s", stored, p).isTrue();
+                assertThat(test(p, 1, stats)).as("stats %s: %s", stored, p).isTrue();
+            }
+            for (Predicate p :
+                    Arrays.asList(
+                            builder.notEqual(0, literal),
+                            builder.lessThan(0, literal),
+                            builder.greaterThan(0, literal),
+                            builder.notIn(0, manyWithZero),
+                            builder.between(0, literal, literal).negate().get())) {
+                assertThat(p.test(row)).as("row %s: %s", stored, p).isFalse();
+                assertThat(test(p, 1, stats)).as("stats %s: %s", stored, p).isFalse();
+            }
+        }
     }
 
     @Test

@@ -211,6 +211,72 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
      * always-true, for NOT IN) semantics are enforced by residual evaluation upstream, not by
      * ORC-level pruning.
      */
+    /**
+     * Engines treat -0.0 and 0.0 as equal, while ORC compares statistics with {@code compareTo}. A
+     * file holding only one of the zeros must not be skipped by a predicate on the other one.
+     */
+    @Test
+    public void testSignedZeroPredicatesKeepTheFile() throws IOException {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "d", DataTypes.DOUBLE()),
+                        DataTypes.FIELD(1, "f", DataTypes.FLOAT()));
+        org.apache.paimon.predicate.PredicateBuilder builder =
+                new org.apache.paimon.predicate.PredicateBuilder(rowType);
+        Object[][] cases = {{-0.0d, -0.0f, 0.0d, 0.0f}, {0.0d, 0.0f, -0.0d, -0.0f}};
+        for (Object[] c : cases) {
+            fileIO.deleteQuietly(file);
+            write(fileFormat().createWriterFactory(rowType), file, GenericRow.of(c[0], c[1]));
+            for (int i = 0; i < 2; i++) {
+                Object zero = c[2 + i];
+                Object one = i == 0 ? (Object) 1.0d : (Object) 1.0f;
+                // more than 20 literals keep IN as a single leaf instead of an OR of equals
+                List<Object> manyWithZero = new ArrayList<>();
+                for (int n = 1; n <= 21; n++) {
+                    manyWithZero.add(i == 0 ? (Object) (double) n : (Object) (float) n);
+                }
+                manyWithZero.add(zero);
+
+                for (org.apache.paimon.predicate.Predicate predicate :
+                        Arrays.asList(
+                                builder.equal(i, zero),
+                                builder.in(i, Arrays.asList(zero, one)),
+                                builder.in(i, manyWithZero),
+                                builder.greaterOrEqual(i, zero),
+                                builder.lessOrEqual(i, zero),
+                                builder.between(i, zero, zero))) {
+                    assertThat(countRows(rowType, predicate))
+                            .as("stored %s, %s", c[i], predicate)
+                            .isEqualTo(1);
+                }
+                // the filter is applied at all: a literal outside the file's range skips it
+                assertThat(countRows(rowType, builder.equal(i, one))).isEqualTo(0);
+            }
+        }
+    }
+
+    private int countRows(RowType rowType, org.apache.paimon.predicate.Predicate predicate)
+            throws IOException {
+        List<org.apache.paimon.predicate.Predicate> filters = new ArrayList<>();
+        filters.add(predicate);
+        try (RecordReader<InternalRow> reader =
+                fileFormat()
+                        .createReaderFactory(rowType, rowType, filters)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            int count = 0;
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                while (batch.next() != null) {
+                    count++;
+                }
+                batch.releaseBatch();
+            }
+            return count;
+        }
+    }
+
     @Test
     public void testEmptyInAndNotInPredicatesDoNotCrashTheReader() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "id", DataTypes.BIGINT()));
