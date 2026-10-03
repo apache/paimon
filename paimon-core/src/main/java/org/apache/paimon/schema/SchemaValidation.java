@@ -1466,25 +1466,25 @@ public class SchemaValidation {
         for (String column : options.primaryKeyBTreeIndexColumns()) {
             GlobalIndexer.create(
                     BTreeGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyBTreeIndexOptions(column));
         }
         for (String column : options.primaryKeyBitmapIndexColumns()) {
             GlobalIndexer.create(
                     BitmapGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyBitmapIndexOptions(column));
         }
         for (String column : options.primaryKeyMultiValueIndexColumns()) {
             GlobalIndexer.create(
                     MultiValueGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyMultiValueIndexOptions(column));
         }
         for (String column : options.primaryKeyFMIndexColumns()) {
             GlobalIndexer.create(
                     FMGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyFMIndexOptions(column));
         }
     }

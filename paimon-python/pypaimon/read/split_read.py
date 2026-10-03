@@ -287,7 +287,7 @@ class SplitRead(ABC):
             read_paimon_predicate = None
 
         # Use external_path if available, otherwise use file_path
-        file_path = file.external_path if file.external_path else file.file_path
+        file_path = file.physical_path()
         file_format = format_identifier(os.path.basename(file_path))
 
         batch_size = self.table.options.read_batch_size()
@@ -405,7 +405,8 @@ class SplitRead(ABC):
                                              batch_size=batch_size,
                                              row_indices=row_indices,
                                              blob_parallelism=blob_parallelism,
-                                             file_size=file.file_size)
+                                             file_size=file.file_size,
+                                             index_cache=self.table.catalog_environment.blob_index_cache())
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(
@@ -607,12 +608,7 @@ class SplitRead(ABC):
 
     @staticmethod
     def _aligned_extra_file_path(file: DataFileMeta, extra_file: str) -> str:
-        if "://" in extra_file or extra_file.startswith("/"):
-            return extra_file
-        file_path = file.external_path if file.external_path else file.file_path
-        if not file_path or "/" not in file_path:
-            return extra_file
-        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
+        return file.aligned_file_path(extra_file)
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))
@@ -647,7 +643,9 @@ class SplitRead(ABC):
             read_predicate = (trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
                               if schema_id == self.table.table_schema.id else None)
             read_arrow_predicate = (
-                read_predicate.to_arrow()
+                read_predicate.to_arrow(
+                    PyarrowFieldParser.from_paimon_schema(schema_fields)
+                )
                 if read_predicate and self._arrow_filter_pushdown_enabled
                 else None
             )
@@ -1751,7 +1749,7 @@ class DataEvolutionSplitRead(SplitRead):
             if not row_indices:
                 return None
 
-        file_path = file.external_path if file.external_path else file.file_path
+        file_path = file.physical_path()
         blob_parallelism = self._blob_parallelism
         return FormatBlobReader(
             self.table.file_io,
@@ -1764,6 +1762,7 @@ class DataEvolutionSplitRead(SplitRead):
             row_indices=row_indices,
             blob_parallelism=blob_parallelism,
             file_size=file.file_size,
+            index_cache=self.table.catalog_environment.blob_index_cache(),
         )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:

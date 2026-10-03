@@ -32,6 +32,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.apache.paimon.CoreOptions.FIELDS_DEFAULT_AGG_FUNC;
@@ -1152,6 +1153,174 @@ public class PartialUpdateMergeFunctionTest {
         add(func, RowKind.DELETE, 1, 2, 2, null);
         // after delete with removeRecordOnDelete, row is re-initialized via initRow
         validate(func, 1, 2, 2, null);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = RowKind.class,
+            names = {"DELETE", "UPDATE_BEFORE"})
+    public void testSequenceGroupDeleteSurvivesSubsequentRetractions(RowKind retractKind) {
+        MergeFunction<KeyValue> function = createSequenceGroupDeleteFunction();
+        function.reset();
+        add(function, 1, 1, 10, 1, 20);
+        add(function, RowKind.DELETE, 1, 2, 10, null, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+
+        add(function, retractKind, 1, null, null, 2, 20);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+        add(function, retractKind, 1, 1, 10, null, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+        add(function, retractKind, 1, null, null, null, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+        assertThat(function.getResult().value().getInt(1)).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = RowKind.class,
+            names = {"INSERT", "UPDATE_AFTER"})
+    public void testSequenceGroupDeleteOnlyRevivedByAcceptedGroupUpdate(RowKind updateKind) {
+        MergeFunction<KeyValue> function = createSequenceGroupDeleteFunction();
+        function.reset();
+        add(function, 1, 1, 10, 1, 20);
+        add(function, RowKind.DELETE, 1, 2, 10, null, null);
+
+        add(function, updateKind, 1, null, null, 3, 30);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+        add(function, updateKind, 1, 1, 99, null, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+        assertThat(function.getResult().value().getInt(1)).isEqualTo(2);
+
+        add(function, updateKind, 1, 3, 40, null, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
+        validate(function, 1, 3, 40, 3, 30);
+
+        add(function, RowKind.DELETE, 1, 2, 10, null, null);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
+    }
+
+    @Test
+    public void testSequenceGroupDeleteSurvivesMergeBoundaryAndReset() {
+        MergeFunction<KeyValue> function = createSequenceGroupDeleteFunction();
+        function.reset();
+        add(function, 1, 1, 10, 1, 20);
+        add(function, RowKind.DELETE, 1, 2, 10, null, null);
+        KeyValue result = function.getResult();
+        KeyValue deleted =
+                new KeyValue()
+                        .replace(
+                                result.key(),
+                                result.sequenceNumber(),
+                                result.valueKind(),
+                                result.value());
+
+        function.reset();
+        function.add(deleted);
+        add(function, 1, null, null, 3, 30);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+        assertThat(function.getResult().value().getInt(1)).isEqualTo(2);
+
+        function.reset();
+        function.add(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(2),
+                                sequence++,
+                                RowKind.INSERT,
+                                GenericRow.of(2, null, null, 1, 20)));
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
+        validate(function, 2, null, null, 1, 20);
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteIgnoresUpdateBeforeUntilInsert() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        MergeFunction<KeyValue> function =
+                PartialUpdateMergeFunction.factory(
+                                options,
+                                RowType.of(DataTypes.INT(), DataTypes.INT()),
+                                ImmutableList.of("f0"))
+                        .create();
+        function.reset();
+        add(function, 1, 10);
+        add(function, RowKind.DELETE, 1, 10);
+        add(function, RowKind.UPDATE_BEFORE, 1, 10);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.DELETE);
+
+        add(function, RowKind.INSERT, 1, 20);
+        assertThat(function.getResult().valueKind()).isEqualTo(RowKind.INSERT);
+        validate(function, 1, 20);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "otherValue,id"})
+    public void testSequenceGroupDeleteStateWithProjectedCompositeSequence(String selectedFields) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("sequence", DataTypes.INT())
+                        .field("subSequence", DataTypes.INT())
+                        .field("value", DataTypes.INT())
+                        .field("otherSequence", DataTypes.INT())
+                        .field("otherValue", DataTypes.INT())
+                        .build();
+        Options options = new Options();
+        options.set("fields.sequence,subSequence.sequence-group", "value");
+        options.set("fields.otherSequence.sequence-group", "otherValue");
+        options.set("partial-update.remove-record-on-sequence-group", "sequence");
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("id"));
+        RowType readType =
+                factory.adjustReadType(
+                        rowType.project(
+                                selectedFields.isEmpty()
+                                        ? new String[0]
+                                        : selectedFields.split(",")));
+        MergeFunction<KeyValue> function = factory.create(readType);
+        GenericRow[] records = {
+            GenericRow.of(1, 1, 1, 10, 1, 20),
+            GenericRow.of(1, 1, 2, 10, null, null),
+            GenericRow.of(1, null, null, null, 2, 20),
+            GenericRow.of(1, 1, 1, 99, null, null),
+            GenericRow.of(1, 1, 2, 30, null, null)
+        };
+        RowKind[] kinds = {
+            RowKind.INSERT, RowKind.DELETE, RowKind.DELETE, RowKind.INSERT, RowKind.UPDATE_AFTER
+        };
+        RowKind[] expected = {
+            RowKind.INSERT, RowKind.DELETE, RowKind.DELETE, RowKind.DELETE, RowKind.INSERT
+        };
+        function.reset();
+        for (int index = 0; index < records.length; index++) {
+            function.add(
+                    new KeyValue()
+                            .replace(
+                                    GenericRow.of(1),
+                                    sequence++,
+                                    kinds[index],
+                                    ProjectedRow.from(readType, rowType)
+                                            .replaceRow(records[index])));
+            assertThat(function.getResult().valueKind())
+                    .as("Projection %s, input %s", selectedFields, index)
+                    .isEqualTo(expected[index]);
+        }
+    }
+
+    private MergeFunction<KeyValue> createSequenceGroupDeleteFunction() {
+        Options options = new Options();
+        options.set("fields.f1.sequence-group", "f2");
+        options.set("fields.f3.sequence-group", "f4");
+        options.set("partial-update.remove-record-on-sequence-group", "f1");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT().notNull(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        return PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                .create();
     }
 
     private void assertProjectedDelete(

@@ -145,6 +145,47 @@ print(pa_table)
 
 </Tabs>
 
+## Composite BTree Indexes
+
+Spark and Flink can create a composite index by listing columns in key order:
+
+```sql
+CALL sys.create_global_index(
+    `table` => 'db.my_table',
+    index_column => 'category,item_number',
+    index_type => 'btree'
+);
+
+SELECT * FROM my_table
+WHERE category = 'category-a'
+  AND item_number = 107;
+```
+
+The index stores typed tuples and one row-ID posting list for each distinct tuple.
+Equality conditions on every key column use a composite point lookup, regardless
+of their order in the SQL predicate. This avoids expanding each column's posting
+list before intersecting them. Additional predicates remain row filters, and OR
+branches can each select a composite lookup. When several definitions match,
+selection prefers the one with more key columns.
+
+Eligible composite point queries honor `global-index.query-in-reader.enabled`.
+With reader evaluation enabled, supported index conditions narrow the candidate
+rows and remaining conditions are evaluated against the data.
+
+Composite indexes can coexist with single-column indexes on the same columns.
+Composite lookup currently requires equality on all key columns; conditions on
+only some key columns, ranges and IN predicates use available single-column
+indexes or ordinary scans. Vector and full-text search pre-filters use
+single-column indexes or their data fallback.
+
+In `full` and `detail` modes, rows outside the selected composite index's coverage
+remain eligible for data filtering. Calling the procedure again with the same
+ordered column list fills missing index ranges. Under the `IGNORE` column-update
+policy, updates to any key column invalidate the affected composite index ranges;
+calling the procedure again rebuilds those ranges.
+To drop the composite definition, pass the same ordered column list to
+`sys.drop_global_index`; independent single-column definitions remain in place.
+
 ## BTree Options
 
 | Option | Default | Description |

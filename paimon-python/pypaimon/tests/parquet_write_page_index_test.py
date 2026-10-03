@@ -116,6 +116,7 @@ def test_written_indexes_and_round_trip(tmp_path, mode, setting):
 
 
 @pytest.mark.parametrize('mode', MODES)
+@pytest.mark.python_write
 def test_unsupported_arrow_rejected_before_output(tmp_path, mode):
     table = _table(tmp_path, mode, 'true')
     with patch.object(pa, '__version__', '12.0.1'), \
@@ -132,6 +133,7 @@ def test_unsupported_arrow_rejected_before_output(tmp_path, mode):
 
 @pytest.mark.parametrize('setting', [None, 'false'])
 @pytest.mark.parametrize('arrow_version', ['6.0.1', '12.0.1'])
+@pytest.mark.python_write
 def test_legacy_arrow_omits_new_argument(tmp_path, setting, arrow_version):
     table = _table(tmp_path, 'buffered', setting)
     original = table.file_io.write_parquet
@@ -142,6 +144,7 @@ def test_legacy_arrow_omits_new_argument(tmp_path, setting, arrow_version):
     assert 'write_page_index' not in write.call_args[1]
 
 
+@pytest.mark.python_write
 def test_explicit_false_passed_to_supported_arrow(tmp_path):
     if not HAS_PAGE_INDEX:
         pytest.skip('Writing page indexes requires PyArrow >= 13')

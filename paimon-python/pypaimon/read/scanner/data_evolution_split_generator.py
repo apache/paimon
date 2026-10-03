@@ -134,14 +134,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             pack = packed_files[i] if i < len(packed_files) else []
             raw_convertible = all(len(sub_pack) == 1 for sub_pack in pack)
 
-            for data_file in file_group:
-                data_file.set_file_path(
-                    self.table.table_path,
-                    file_entries[0].partition,
-                    file_entries[0].bucket,
-                    self.default_part_value,
-                    self.table.options.data_file_path_directory()
-                )
+            self._set_data_file_paths(
+                file_group, file_entries[0].partition, file_entries[0].bucket)
 
             if file_group:
                 # Get deletion files for this split

@@ -39,7 +39,6 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitSerializer;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -171,8 +170,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load("btree")).thenReturn(factory);
@@ -224,7 +222,9 @@ class GlobalIndexQueryTest {
             GlobalIndexSingleColumnWriter writer =
                     (GlobalIndexSingleColumnWriter)
                             GlobalIndexer.create(
-                                            indexType, rowType.getFields().get(0), new Options())
+                                            indexType,
+                                            Collections.singletonList(rowType.getFields().get(0)),
+                                            new Options())
                                     .createWriter(io);
             if (nulls) {
                 writer.write(null, 0);
@@ -361,8 +361,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
         try (MockedStatic<GlobalIndexerFactoryUtils> factories =
                 mockStatic(GlobalIndexerFactoryUtils.class)) {
             factories.when(() -> GlobalIndexerFactoryUtils.load(indexType)).thenReturn(factory);
@@ -432,8 +431,7 @@ class GlobalIndexQueryTest {
         when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
                 .thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
 
         RowType rowType = RowType.of(DataTypes.INT());
         GlobalIndexQuery plan =
@@ -508,8 +506,7 @@ class GlobalIndexQueryTest {
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
-        when(factory.create(any(DataField.class), anyList(), any(Options.class)))
-                .thenReturn(indexer);
+        when(factory.create(anyList(), any(Options.class))).thenReturn(indexer);
         FileIO fileIO = mock(FileIO.class);
         List<Range> first = Collections.singletonList(new Range(110, 119));
         List<Range> second = Collections.singletonList(new Range(130, 139));
@@ -571,21 +568,14 @@ class GlobalIndexQueryTest {
     }
 
     @Test
-    void testGroupsRejectInconsistentIndexedFields() {
-        assertThatThrownBy(
-                        () ->
-                                DataEvolutionGlobalIndexScanner.groupIndexFiles(
-                                        Arrays.asList(
-                                                indexFile(
-                                                        "es-index",
-                                                        "first",
-                                                        0,
-                                                        99,
-                                                        10,
-                                                        new int[] {20}),
-                                                indexFile("es-index", "tail", 100, 199, 10, null))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("different columns");
+    void testGroupsAllowSingleAndCompositeIndexesWithTheSamePrimaryField() {
+        Map<Integer, List<IndexMetaFileGroup>> groups =
+                DataEvolutionGlobalIndexScanner.groupIndexFiles(
+                        Arrays.asList(
+                                indexFile("btree", "composite", 0, 99, 10, new int[] {20}),
+                                indexFile("btree", "single", 100, 199, 10, null)));
+        assertThat(groups.get(10)).hasSize(2);
+        assertThat(groups.get(20)).hasSize(1);
     }
 
     @Test
@@ -606,10 +596,10 @@ class GlobalIndexQueryTest {
                                 null,
                                 new SortedIndexFileMeta(key, key, false).serialize()),
                         null);
-        IndexFileMeta multiColumn = indexFile("custom-index", "multi", 0, 99, 1, new int[] {2});
+        IndexFileMeta otherType = indexFile("custom-index", "single", 0, 99, 1, null);
         IndexPathFactory paths = mock(IndexPathFactory.class);
         when(paths.toPath(any(IndexFileMeta.class))).thenReturn(new Path("index"));
-        List<IndexFileMeta> files = Arrays.asList(supported, multiColumn);
+        List<IndexFileMeta> files = Arrays.asList(supported, otherType);
 
         Predicate supportedLeaf = builder.equal(0, 1);
         Predicate unsupportedLeaf = builder.equal(1, 2);
@@ -639,6 +629,41 @@ class GlobalIndexQueryTest {
                                 Arrays.asList(supported, indexFile("fm", "fm", 0, 99, 0, null)),
                                 paths))
                 .isNotNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "custom-index"})
+    void testScalarPlansUseOnlySingleFieldDefinitions(String indexType) {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        IndexFileMeta multi = indexFile(indexType, "multi", 0, 99, 0, new int[] {1});
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
+        for (int field : new int[] {0, 1}) {
+            Predicate predicate = builder.equal(field, 7);
+            assertThat(
+                            GlobalIndexQuery.create(
+                                    rowType, predicate, Collections.singletonList(multi), paths))
+                    .isNull();
+            Range dedicatedRange = new Range(20 + field * 20, 39 + field * 20);
+            IndexFileMeta dedicated =
+                    indexFile(
+                            "btree",
+                            "single-" + field,
+                            dedicatedRange.from,
+                            dedicatedRange.to,
+                            field,
+                            null);
+            GlobalIndexQuery query =
+                    GlobalIndexQuery.create(
+                            rowType, predicate, Arrays.asList(multi, dedicated), paths);
+            assertThat(query).isNotNull();
+            assertThat(query.coveredRanges()).containsExactly(dedicatedRange);
+            assertThat(query.hasCompositeQuery()).isFalse();
+        }
     }
 
     private IndexFileMeta indexFile(
