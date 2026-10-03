@@ -872,3 +872,90 @@ class TestDateExtractTransforms(unittest.TestCase):
         self.assertEqual(
             parse_predicate_to_batch_filter(pred)(self._ts_batch()).to_pylist(),
             [False, True, False])
+
+
+class TestStringTransforms(unittest.TestCase):
+    """LENGTH / BIT_LENGTH / TRANSLATE / OVERLAY / PAD, mirroring the Java
+    transforms of the same name (see TransformJsonSerdeTest for the wire shape)."""
+
+    def _apply(self, transform, column):
+        batch = pa.RecordBatch.from_pydict({"s": column})
+        return _apply_predicate_transform(transform, batch).to_pylist()
+
+    def _field(self):
+        return {"index": 0, "name": "s", "type": "STRING"}
+
+    def test_length(self):
+        out = self._apply({"name": "LENGTH", "inputs": [self._field()]},
+                          ["hello", "hi", None])
+        self.assertEqual(out, [5, 2, None])
+
+    def test_bit_length(self):
+        # "é" is two UTF-8 bytes -> 16 bits.
+        out = self._apply({"name": "BIT_LENGTH", "inputs": [self._field()]},
+                          ["hello", "é", None])
+        self.assertEqual(out, [40, 16, None])
+
+    def test_translate_maps_and_deletes(self):
+        mapped = self._apply(
+            {"name": "TRANSLATE", "inputs": [self._field(), "el", "ip"]},
+            ["hello", None])
+        self.assertEqual(mapped, ["hippo", None])
+        # A shorter replacement deletes the unmatched matching characters.
+        deleted = self._apply(
+            {"name": "TRANSLATE", "inputs": [self._field(), "l", ""]},
+            ["hello"])
+        self.assertEqual(deleted, ["heo"])
+
+    def test_overlay_with_and_without_length(self):
+        four = self._apply(
+            {"name": "OVERLAY", "inputs": [self._field(), "XX", 2, 1]},
+            ["hello", None])
+        self.assertEqual(four, ["hXXllo", None])
+        three = self._apply(
+            {"name": "OVERLAY", "inputs": [self._field(), "XX", 2]},
+            ["hello"])
+        self.assertEqual(three, ["hXXlo"])
+
+    def test_overlay_position_arithmetic_overflows_like_java(self):
+        # pos + replaced overflows 32-bit int in Java's OverlayTransform:
+        # OVERLAY('hello', 'x', 1, 2147483647) is 'xhell' there (the wrapped
+        # end position lands inside the string), not 'x'. The auth rule must
+        # admit the same rows in PyPaimon.
+        out = self._apply(
+            {"name": "OVERLAY", "inputs": [self._field(), "x", 1, 2147483647]},
+            ["hello"])
+        self.assertEqual(out, ["xhell"])
+
+    def test_pad_left_right_and_truncate(self):
+        left = self._apply(
+            {"name": "PAD", "inputs": [self._field(), 5, "ab"], "direction": "LEFT"},
+            ["hi", None])
+        self.assertEqual(left, ["abahi", None])
+        right = self._apply(
+            {"name": "PAD", "inputs": [self._field(), 5, "ab"], "direction": "RIGHT"},
+            ["hi"])
+        self.assertEqual(right, ["hiaba"])
+        # A target shorter than the source truncates.
+        self.assertEqual(
+            self._apply(
+                {"name": "PAD", "inputs": [self._field(), 3, "x"], "direction": "LEFT"},
+                ["hello"]),
+            ["hel"])
+
+    def test_length_wired_through_a_leaf_filter(self):
+        pred = json.dumps({
+            "kind": "LEAF",
+            "transform": {"name": "LENGTH", "inputs": [self._field()]},
+            "function": "GREATER_THAN",
+            "literals": [3],
+        })
+        batch = pa.RecordBatch.from_pydict({"s": ["hello", "hi", "abcd"]})
+        self.assertEqual(
+            parse_predicate_to_batch_filter(pred)(batch).to_pylist(),
+            [True, False, True])
+
+    def test_unknown_transform_still_raises(self):
+        with self.assertRaises(ValueError):
+            self._apply({"name": "NO_SUCH_TRANSFORM", "inputs": [self._field()]},
+                        ["hello"])
