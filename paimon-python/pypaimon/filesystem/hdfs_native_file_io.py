@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 import pyarrow
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.file_io import FileIO, normalize_naive_datetimes
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import HdfsOptions, SecurityOptions
 from pypaimon.common.uri_reader import UriReaderFactory
@@ -595,9 +595,7 @@ class HdfsNativeFileIO(FileIO):
                 record = {}
                 for col in records_dict.keys():
                     value = records_dict[col][i]
-                    if isinstance(value, datetime) and value.tzinfo is None:
-                        value = value.replace(tzinfo=timezone.utc)
-                    record[col] = value
+                    record[col] = normalize_naive_datetimes(value)
                 yield record
 
         codec_map = {

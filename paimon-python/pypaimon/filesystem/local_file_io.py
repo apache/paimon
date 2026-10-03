@@ -19,7 +19,6 @@ import logging
 import os
 import shutil
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import unquote, urlparse
@@ -27,33 +26,12 @@ from urllib.parse import unquote, urlparse
 import pyarrow
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import FileIO, create_temp_path
+from pypaimon.common.file_io import FileIO, create_temp_path, normalize_naive_datetimes
 from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.write.blob_format_writer import BlobFormatWriter
-
-
-def _normalize_naive_datetimes(value):
-    """Recursively attach UTC to naive datetimes, including ones nested inside
-    ROW (dict) and ARRAY/MAP (list/tuple) values.
-
-    fastavro converts a naive datetime using the host timezone, which corrupts
-    the stored instant on a non-UTC host; Paimon timestamps are UTC-based.
-    ``write_avro`` previously normalized only top-level column values, so a
-    naive datetime inside a struct or list was written shifted by the host
-    offset. Normalizing recursively keeps nested timestamps correct.
-    """
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
-    if isinstance(value, dict):
-        return {key: _normalize_naive_datetimes(val) for key, val in value.items()}
-    if isinstance(value, (list, tuple)):
-        return type(value)(_normalize_naive_datetimes(val) for val in value)
-    return value
 
 
 def _file_uri_path(parsed, windows=None) -> str:
@@ -379,7 +357,7 @@ class LocalFileIO(FileIO):
                 record = {}
                 for col in records_dict.keys():
                     value = records_dict[col][i]
-                    record[col] = _normalize_naive_datetimes(value)
+                    record[col] = normalize_naive_datetimes(value)
                 yield record
         
         records = record_generator()

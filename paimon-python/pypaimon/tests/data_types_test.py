@@ -411,3 +411,53 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(rows[0]["ts"].replace(tzinfo=None), ts)
         self.assertEqual(rows[0]["r"]["ts"].replace(tzinfo=None), ts)
         self.assertEqual(rows[0]["arr"][0].replace(tzinfo=None), ts)
+
+    def test_pyarrow_file_io_avro_normalizes_nested_naive_timestamps(self):
+        # Same contract as the LocalFileIO case, but for the object-store base
+        # PyArrowFileIO (OSS/S3/GCS): it previously normalized only top-level
+        # column values, so a naive TIMESTAMP nested in a ROW/ARRAY written as
+        # Avro to object storage on a non-UTC host was shifted by the host
+        # offset. The output stream is mocked to a local file so the real
+        # write_avro record path runs without cloud credentials.
+        import datetime
+        import os
+        import tempfile
+        import time
+        from unittest import mock
+
+        import fastavro
+
+        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+
+        if not hasattr(time, "tzset"):
+            self.skipTest("time.tzset is unavailable on this platform")
+
+        ts = datetime.datetime(2024, 1, 2, 3, 4, 5)
+        table = pa.table({
+            "ts": pa.array([ts], pa.timestamp('s')),
+            "r": pa.array([{"ts": ts}], pa.struct([("ts", pa.timestamp('s'))])),
+            "arr": pa.array([[ts]], pa.list_(pa.timestamp('s'))),
+        })
+        file_io = PyArrowFileIO.__new__(PyArrowFileIO)
+        previous_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Shanghai"
+        time.tzset()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "data.avro")
+                with mock.patch.object(
+                        PyArrowFileIO, "new_output_stream",
+                        side_effect=lambda p: open(p, "wb")):
+                    file_io.write_avro(path, table)
+                with open(path, 'rb') as f:
+                    rows = list(fastavro.reader(f))
+        finally:
+            if previous_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = previous_tz
+            time.tzset()
+
+        self.assertEqual(rows[0]["ts"].replace(tzinfo=None), ts)
+        self.assertEqual(rows[0]["r"]["ts"].replace(tzinfo=None), ts)
+        self.assertEqual(rows[0]["arr"][0].replace(tzinfo=None), ts)
