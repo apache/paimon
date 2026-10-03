@@ -126,16 +126,20 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     negated,
                     op(builder::equal, builder::equal),
                     op(builder::equal, builder::equal),
-                    op(builder::notEqual, builder::notEqual),
-                    op(builder::notEqual, builder::notEqual));
+                    rejectSignedZero(op(builder::notEqual, builder::notEqual)),
+                    rejectSignedZero(op(builder::notEqual, builder::notEqual)));
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN) {
             return visitComparison(
                     children,
                     negated,
                     op(builder::lessOrEqual, builder::lessOrEqual),
                     op(builder::greaterOrEqual, builder::greaterOrEqual),
-                    op(builder::greaterThan, builder::greaterThan),
-                    op(builder::lessThan, builder::lessThan));
+                    keepSignedZeros(
+                            op(builder::greaterThan, builder::greaterThan),
+                            op(builder::greaterOrEqual, builder::greaterOrEqual)),
+                    keepSignedZeros(
+                            op(builder::lessThan, builder::lessThan),
+                            op(builder::lessOrEqual, builder::lessOrEqual)));
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL) {
             return visitComparison(
                     children,
@@ -150,8 +154,12 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     negated,
                     op(builder::greaterOrEqual, builder::greaterOrEqual),
                     op(builder::lessOrEqual, builder::lessOrEqual),
-                    op(builder::lessThan, builder::lessThan),
-                    op(builder::greaterThan, builder::greaterThan));
+                    keepSignedZeros(
+                            op(builder::lessThan, builder::lessThan),
+                            op(builder::lessOrEqual, builder::lessOrEqual)),
+                    keepSignedZeros(
+                            op(builder::greaterThan, builder::greaterThan),
+                            op(builder::greaterOrEqual, builder::greaterOrEqual)));
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
             return visitComparison(
                     children,
@@ -373,10 +381,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             LeafFunction negatedVisit2,
             LeafFunction visit1,
             LeafFunction visit2) {
-        // Flink FLOAT/DOUBLE comparisons use Java operators; Paimon uses
-        // Float/Double.compareTo. Negated equality, inequality, IN and BETWEEN
-        // are therefore not equivalent (NaN identity and signed zeros). Simple
-        // SQL such as NOT (d > 1.0) is often simplified to d <= 1.0 before
+        // Depending on the plan, Flink compares FLOAT/DOUBLE with Java operators,
+        // which do not order NaN, or orders -0.0 below 0.0 (see keepSignedZeros),
+        // while Paimon orders NaN last and treats the two zeros as equal. Negated
+        // equality, inequality, IN and BETWEEN are therefore not equivalent.
+        // Simple SQL such as NOT (d > 1.0) is often simplified to d <= 1.0 before
         // pushdown; keep this guard for unsimplified NOT that still reaches
         // applyFilters (for example De Morgan over AND/OR).
         if (negated && isFloatingPointComparison(children)) {
@@ -388,15 +397,48 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     }
 
     /**
-     * Flink compares FLOAT/DOUBLE with Java operators, so {@code -0.0 = 0.0} holds; Paimon's
-     * predicates use {@code compareTo}, which tells the two apart. Pruning a file on such a
-     * predicate could drop a row Flink would have kept, before Flink's own filter sees it, so
-     * comparisons, IN and BETWEEN on a nested floating-point field are left to Flink.
+     * Flink and Paimon do not always agree on how FLOAT/DOUBLE values compare (NaN, signed zeros).
+     * Pruning a file on such a predicate could drop a row Flink would have kept, before Flink's own
+     * filter sees it, so comparisons, IN and BETWEEN on a nested floating-point field are left to
+     * Flink.
      */
     private void rejectNestedFloatingPoint(ResolvedField field) {
         if (field.isNested() && isFloatingPointType(field.type())) {
             throw new UnsupportedExpression();
         }
+    }
+
+    /**
+     * Flink does not compare FLOAT/DOUBLE the same way in every plan: {@code d < 0.0} and {@code d
+     * >= 0.0} against a DECIMAL literal order -0.0 below 0.0, as do IN and several comparisons
+     * merged into one range, while {@code d = 0.0} and {@code d < 0} treat the two zeros as equal,
+     * as Paimon does. A strict comparison against a zero is therefore converted to the inclusive
+     * one, which keeps both zeros and leaves the choice to Flink's own filter.
+     */
+    private static LeafFunction keepSignedZeros(LeafFunction strict, LeafFunction inclusive) {
+        return (field, literal) ->
+                isSignedZero(literal)
+                        ? inclusive.apply(field, literal)
+                        : strict.apply(field, literal);
+    }
+
+    /**
+     * Whether Flink keeps -0.0 for {@code d <> 0.0} depends on the plan, see {@link
+     * #keepSignedZeros}, so the inequality is left to Flink.
+     */
+    private static LeafFunction rejectSignedZero(LeafFunction function) {
+        return (field, literal) -> {
+            if (isSignedZero(literal)) {
+                throw new UnsupportedExpression();
+            }
+            return function.apply(field, literal);
+        };
+    }
+
+    /** The literal is a FLOAT/DOUBLE zero of either sign; it has the field's type. */
+    private static boolean isSignedZero(@Nullable Object literal) {
+        return (literal instanceof Double && (Double) literal == 0.0d)
+                || (literal instanceof Float && (Float) literal == 0.0f);
     }
 
     private void rejectNegatedFloatingPoint(ResolvedField field) {

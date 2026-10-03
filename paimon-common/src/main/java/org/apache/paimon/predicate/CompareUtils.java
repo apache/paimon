@@ -27,10 +27,11 @@ public class CompareUtils {
     private CompareUtils() {}
 
     public static int compareLiteral(DataType type, Object v1, Object v2) {
-        // Engines compare FLOAT/DOUBLE values numerically, so -0.0 equals 0.0, but compareTo
-        // orders -0.0 first. Adding a positive zero turns -0.0 into 0.0 and leaves every other
-        // value, NaN included, unchanged; otherwise a file holding only -0.0 would be skipped
-        // by "= 0.0".
+        // SQL compares FLOAT/DOUBLE values numerically, so -0.0 equals 0.0, but compareTo orders
+        // -0.0 first. Adding a positive zero turns -0.0 into 0.0 and leaves every other value,
+        // NaN included, unchanged; otherwise a file holding only -0.0 would be skipped by
+        // "= 0.0". An engine that orders the zeros apart in some comparisons, as Flink does,
+        // has to convert those conservatively.
         if (v1 instanceof Double && v2 instanceof Double) {
             return Double.compare((Double) v1 + 0.0d, (Double) v2 + 0.0d);
         } else if (v1 instanceof Float && v2 instanceof Float) {

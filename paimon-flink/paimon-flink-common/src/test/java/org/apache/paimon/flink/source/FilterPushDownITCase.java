@@ -29,6 +29,8 @@ import org.apache.flink.types.RowKind;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -74,25 +76,78 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
                 Row.ofKind(RowKind.INSERT, 1, 1, "1"));
     }
 
-    /** Flink evaluates {@code -0.0 = 0.0} as true, so a pushed-down filter must keep the row. */
-    @Test
-    public void testNegativeZeroMatchesEqualityOnZero() {
+    /**
+     * Flink does not compare FLOAT/DOUBLE the same way in every plan: {@code d < 0.0} and {@code d
+     * >= 0.0} order -0.0 below 0.0, while {@code d = 0.0} and {@code d < 0} treat the two zeros as
+     * equal. Whatever Flink decides, a pushed-down filter must not drop a row Flink keeps, and one
+     * consumed on a partition field must not keep a row Flink drops. Flink's own evaluation of each
+     * condition, as a projected column of the whole table, is the oracle.
+     */
+    @ParameterizedTest(name = "{0}, partitioned: {1}")
+    @CsvSource({"parquet, false", "orc, false", "avro, false", "parquet, true"})
+    public void testSignedZeroFiltersAgreeWithFlink(String format, boolean partitioned) {
         // constants are folded through DECIMAL, which has no -0.0, so negate at runtime
         sql("CREATE TABLE ZERO_SRC (d DOUBLE, f FLOAT)");
         batchSql("INSERT INTO ZERO_SRC VALUES (CAST(0 AS DOUBLE), CAST(0 AS FLOAT))");
-        for (String format : Arrays.asList("parquet", "orc", "avro")) {
-            String table = "ZERO_" + format;
-            sql(
-                    "CREATE TABLE %s (id INT, d DOUBLE, f FLOAT) WITH ('file.format' = '%s')",
-                    table, format);
-            batchSql("INSERT INTO %s SELECT 1, -d, -f FROM ZERO_SRC", table);
-            assertThat(batchSql("SELECT CAST(d AS STRING), CAST(f AS STRING) FROM %s", table))
-                    .containsExactly(Row.of("-0.0", "-0.0"));
+        sql(
+                "CREATE TABLE Z (id INT, d DOUBLE, f FLOAT) %s WITH ('file.format' = '%s')",
+                partitioned ? "PARTITIONED BY (d, f)" : "", format);
+        // one file, or partition, per value
+        batchSql("INSERT INTO Z SELECT 1, -d, -f FROM ZERO_SRC");
+        batchSql("INSERT INTO Z SELECT 2, d, f FROM ZERO_SRC");
+        batchSql("INSERT INTO Z VALUES (3, -1.0, -1.0)");
+        batchSql("INSERT INTO Z VALUES (4, 1.0, 1.0)");
+        batchSql("INSERT INTO Z SELECT 5, d / d, f / f FROM ZERO_SRC");
+        assertThat(batchSql("SELECT id, CAST(d AS STRING), CAST(f AS STRING) FROM Z"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "-0.0", "-0.0"),
+                        Row.of(2, "0.0", "0.0"),
+                        Row.of(3, "-1.0", "-1.0"),
+                        Row.of(4, "1.0", "1.0"),
+                        Row.of(5, "NaN", "NaN"));
 
-            for (String condition : Arrays.asList("d = 0.0", "d = 0", "f = 0")) {
-                assertThat(batchSql("SELECT id FROM %s WHERE %s", table, condition))
-                        .as("%s: %s", format, condition)
-                        .containsExactly(Row.of(1));
+        // %1$s is the column, %2$s its type
+        List<String> templates =
+                Arrays.asList(
+                        "%1$s = 0.0",
+                        "%1$s <> 0.0",
+                        "%1$s < 0.0",
+                        "%1$s <= 0.0",
+                        "%1$s > 0.0",
+                        "%1$s >= 0.0",
+                        "%1$s < 0",
+                        "%1$s >= 0",
+                        "%1$s > CAST('-0.0' AS %2$s)",
+                        "%1$s <= CAST('-0.0' AS %2$s)",
+                        "0.0 > %1$s",
+                        "0.0 <= %1$s",
+                        "%1$s IN (0.0, 5.0)",
+                        "%1$s NOT IN (0.0, 5.0)",
+                        "%1$s BETWEEN 0.0 AND 0.5",
+                        "%1$s NOT BETWEEN 0.0 AND 0.5",
+                        "%1$s IS NOT DISTINCT FROM 0.0",
+                        "(%1$s <> 0.0 AND %1$s <> 5.0)",
+                        "(%1$s < 0.0 OR %1$s > 0.5)",
+                        "NOT (%1$s >= 0.0 AND id > 0)",
+                        "%1$s > 0.5",
+                        "%1$s <> 1.0");
+        for (String column : Arrays.asList("d", "f")) {
+            String type = column.equals("d") ? "DOUBLE" : "FLOAT";
+            List<String> conditions =
+                    templates.stream()
+                            .map(template -> String.format(template, column, type))
+                            .collect(Collectors.toList());
+            List<Row> evaluated = batchSql("SELECT id, %s FROM Z", String.join(", ", conditions));
+            for (int i = 0; i < conditions.size(); i++) {
+                int field = i + 1;
+                List<Row> expected =
+                        evaluated.stream()
+                                .filter(row -> Boolean.TRUE.equals(row.getField(field)))
+                                .map(row -> Row.of(row.getField(0)))
+                                .collect(Collectors.toList());
+                assertThat(batchSql("SELECT id FROM Z WHERE %s", conditions.get(i)))
+                        .as("%s", conditions.get(i))
+                        .containsExactlyInAnyOrderElementsOf(expected);
             }
         }
     }
