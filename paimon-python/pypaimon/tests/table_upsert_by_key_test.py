@@ -192,6 +192,40 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         self.assertEqual(file.value_stats_cols, [])
 
     @pytest.mark.python_write
+    @mock.patch.object(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 1)
+    def test_row_id_update_file_merges_signed_zero_bounds(self):
+        # A row-id update file is written incrementally over several row groups
+        # (here one row each). The cross-group min/max merge must keep Java's
+        # typed order for floats so a column with -0.0 in one group and +0.0 in
+        # another publishes min=-0.0 / max=+0.0, not whichever zero arrived
+        # first (Python min/max treat them equal). Single-group Arrow min/max
+        # already handles this, so two groups are needed to exercise the merge.
+        import math
+        schema = pa.schema([('id', pa.int32()), ('d', pa.float64())])
+
+        def write_rows(first, second):
+            table = self._create_table(pa_schema=schema, options={
+                **self.table_options, 'metadata.stats-mode': 'truncate(3)'})
+            rows = pa.Table.from_pylist(
+                [{'id': 1, 'd': first}, {'id': 2, 'd': second}], schema=schema)
+            writer = _RowIdUpdateFileWriter(table, (), ['id', 'd'])
+            try:
+                metas = writer.write_batches(rows.to_batches())
+            finally:
+                writer.close()
+            self.assertEqual(len(metas), 1)
+            vs = metas[0].value_stats
+            return vs.min_values.values[1], vs.max_values.values[1]
+
+        for first, second in ((-0.0, 0.0), (0.0, -0.0)):
+            with self.subTest(order=(first, second)):
+                mn, mx = write_rows(first, second)
+                # min keeps the negative zero, max the positive zero, regardless
+                # of which group each landed in.
+                self.assertEqual(math.copysign(1.0, mn), -1.0)
+                self.assertEqual(math.copysign(1.0, mx), 1.0)
+
+    @pytest.mark.python_write
     @mock.patch.object(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 2)
     def test_partial_upsert_streams_original_file_group(self):
         schema = pa.schema([
