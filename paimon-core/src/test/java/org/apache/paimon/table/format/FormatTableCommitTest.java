@@ -2185,7 +2185,7 @@ class FormatTableCommitTest {
             assertThat(thirdFinished.await(3, TimeUnit.SECONDS)).isTrue();
             assertThat(activePublishes).hasValue(1);
             verify(partitionManager, never())
-                    .createPartitions(anyList(), eq(true), any(), anyBoolean(), isNull());
+                    .createPartitions(anyList(), eq(true), any(), anyBoolean(), any());
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 verify(committer, never()).clean(fileIO);
             }
@@ -3144,6 +3144,8 @@ class FormatTableCommitTest {
                         .field("part", DataTypes.STRING())
                         .field("id", DataTypes.INT())
                         .build();
+        Map<String, String> tableOptions = new LinkedHashMap<>(options);
+        tableOptions.put(CoreOptions.FILE_FORMAT.key(), "csv");
         FormatTable table =
                 FormatTable.builder()
                         .fileIO(fileIO)
@@ -3152,7 +3154,7 @@ class FormatTableCommitTest {
                         .partitionKeys(Collections.singletonList("part"))
                         .location(tablePath.toString())
                         .format(FormatTable.Format.CSV)
-                        .options(options)
+                        .options(tableOptions)
                         .partitionManager(partitionManager)
                         .build();
         return table;
@@ -3163,6 +3165,8 @@ class FormatTableCommitTest {
             FileIO fileIO,
             FormatTablePartitionManager partitionManager,
             Map<String, String> options) {
+        Map<String, String> tableOptions = new LinkedHashMap<>(options);
+        tableOptions.put(CoreOptions.FILE_FORMAT.key(), "csv");
         FormatTable table =
                 FormatTable.builder()
                         .fileIO(fileIO)
@@ -3171,7 +3175,7 @@ class FormatTableCommitTest {
                         .partitionKeys(Collections.emptyList())
                         .location(tablePath.toString())
                         .format(FormatTable.Format.CSV)
-                        .options(options)
+                        .options(tableOptions)
                         .partitionManager(partitionManager)
                         .build();
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();

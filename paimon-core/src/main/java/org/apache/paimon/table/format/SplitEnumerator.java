@@ -63,14 +63,12 @@ abstract class SplitEnumerator {
     protected final CoreOptions coreOptions;
     protected final long targetSplitSize;
     protected final long openFileCost;
-    protected final FormatTable.Format format;
 
     SplitEnumerator(FormatTable table, CoreOptions coreOptions) {
         this.table = table;
         this.coreOptions = coreOptions;
         this.targetSplitSize = coreOptions.splitTargetSize();
         this.openFileCost = coreOptions.splitOpenFileCost();
-        this.format = table.format();
     }
 
     static SplitEnumerator create(
@@ -154,12 +152,28 @@ abstract class SplitEnumerator {
             @Nullable BinaryRow partition,
             boolean useCatalogContextFileIO)
             throws IOException {
+        return createSplits(
+                fileIO,
+                path,
+                partition,
+                useCatalogContextFileIO,
+                FormatTablePartitionOptions.fileFormat(table.options(), null));
+    }
+
+    List<Split> createSplits(
+            FileIO fileIO,
+            Path path,
+            @Nullable BinaryRow partition,
+            boolean useCatalogContextFileIO,
+            String fileFormat)
+            throws IOException {
+        FormatTable.Format partitionFormat = FormatTable.parseFormat(fileFormat);
         List<FormatDataSplit.FileMeta> segments = new ArrayList<>();
         // The listed directory is a single partition, or the table itself when unpartitioned.
         List<FileStatus> files = FormatTableScan.listDataFiles(fileIO, path);
         files.sort(Comparator.comparing(file -> file.getPath().toString()));
         for (FileStatus file : files) {
-            segments.addAll(toSegments(file));
+            segments.addAll(toSegments(file, partitionFormat));
         }
 
         List<Split> splits = new ArrayList<>();
@@ -168,13 +182,14 @@ abstract class SplitEnumerator {
                         segments,
                         file -> Math.max(file.readSize(), openFileCost),
                         targetSplitSize)) {
-            splits.add(new FormatDataSplit(bin, partition, useCatalogContextFileIO));
+            splits.add(new FormatDataSplit(bin, partition, useCatalogContextFileIO, fileFormat));
         }
         return splits;
     }
 
-    private List<FormatDataSplit.FileMeta> toSegments(FileStatus file) {
-        if (!preferToSplitFile(file)) {
+    private List<FormatDataSplit.FileMeta> toSegments(
+            FileStatus file, FormatTable.Format fileFormat) {
+        if (!preferToSplitFile(file, fileFormat)) {
             return Collections.singletonList(
                     new FormatDataSplit.FileMeta(file.getPath(), file.getLen()));
         }
@@ -193,13 +208,13 @@ abstract class SplitEnumerator {
         return segments;
     }
 
-    private boolean preferToSplitFile(FileStatus file) {
+    private boolean preferToSplitFile(FileStatus file, FormatTable.Format fileFormat) {
         if (file.getLen() <= targetSplitSize) {
             return false;
         }
 
         Options options = coreOptions.toConfiguration();
-        switch (format) {
+        switch (fileFormat) {
             case CSV:
                 return !isCompressed(file.getPath())
                         && isDefaultDelimiter(options.get(CsvOptions.LINE_DELIMITER));

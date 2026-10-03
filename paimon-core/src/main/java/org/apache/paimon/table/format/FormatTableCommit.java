@@ -102,6 +102,14 @@ public class FormatTableCommit implements BatchTableCommit {
     private final boolean dynamicPartitionOverwrite;
     private final int cleanupThreadNum;
     private final int publishThreadNum;
+    @Nullable private String fileFormat;
+
+    FormatTableCommit withFileFormat(String fileFormat) {
+        this.fileFormat =
+                FormatTablePartitionOptions.fileFormatOverride(
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), fileFormat));
+        return this;
+    }
 
     public FormatTableCommit(
             String location,
@@ -319,7 +327,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 message.getCommitter().clean(this.fileIO);
             }
             if (reportsStatistics && overwrite) {
-                reportPartitions(reportTargetSpecs, statisticsByPartition, commitTime, overwrite);
+                reportPartitions(
+                        reportTargetSpecs, statisticsByPartition, commitTime, true, fileFormat);
             } else if (partitionManager != null && !partitionSpecs.isEmpty()) {
                 // Register an append before reporting its additive statistics. Registration is
                 // idempotent, so a failed multi-batch call can roll back every file from this
@@ -351,7 +360,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 markPublishedTargetsToPreserveOnAbort(messages);
                 if (reportsStatistics && !statisticsByPartition.isEmpty()) {
                     try {
-                        reportPartitions(partitionSpecs, statisticsByPartition, commitTime, false);
+                        reportPartitions(
+                                partitionSpecs, statisticsByPartition, commitTime, false, null);
                     } catch (RuntimeException statisticsFailure) {
                         LOG.warn(
                                 "Committed data for format table {}, but failed to report append "
@@ -421,6 +431,20 @@ public class FormatTableCommit implements BatchTableCommit {
                 for (Partition partition : targetPartitions) {
                     if (FormatTablePartitionPathResolver.customLocation(partition) != null) {
                         throw unsupportedCustomLocation("Writing", partition);
+                    }
+                    String partitionFormat =
+                            FormatTablePartitionOptions.fileFormatOverride(partition.options());
+                    if (partitionFormat != null && !partitionFormat.equals(fileFormat)) {
+                        throw new UnsupportedOperationException(
+                                "Cannot append files in format "
+                                        + fileFormat
+                                        + " to partition "
+                                        + partition.spec()
+                                        + " of Format Table "
+                                        + tableIdentifier
+                                        + " registered with file.format="
+                                        + partitionFormat
+                                        + ".");
                     }
                 }
             }
@@ -585,7 +609,8 @@ public class FormatTableCommit implements BatchTableCommit {
             Set<Map<String, String>> targetPartitionSpecs,
             Map<Map<String, String>, PartitionStatistics> statisticsByPartition,
             long commitTime,
-            boolean replaceStatistics) {
+            boolean replaceStatistics,
+            @Nullable String writtenFileFormat) {
         // Statistics are matched by spec, not by position: the specs need only be a superset.
         Set<Map<String, String>> specs = new LinkedHashSet<>(targetPartitionSpecs);
         specs.addAll(statisticsByPartition.keySet());
@@ -608,8 +633,14 @@ public class FormatTableCommit implements BatchTableCommit {
                     // require a fully qualified URI. Keep escaped partition values intact.
                     partitionPath = new Path(new File(partitionPath.toString()).toURI());
                 }
-                partitionOptions.add(
-                        Collections.singletonMap(CoreOptions.PATH.key(), partitionPath.toString()));
+                Map<String, String> options = new LinkedHashMap<>();
+                options.put(CoreOptions.PATH.key(), partitionPath.toString());
+                if (writtenFileFormat != null) {
+                    // Report the format of the replacement even when the registry previously
+                    // matched it. That earlier value may have changed since the lookup.
+                    options.put(CoreOptions.FILE_FORMAT.key(), writtenFileFormat);
+                }
+                partitionOptions.add(options);
             }
         }
         partitionManager.createPartitions(
@@ -1314,7 +1345,11 @@ public class FormatTableCommit implements BatchTableCommit {
             // too, so the catalog stops describing files that are gone.
             try {
                 reportPartitions(
-                        emptied.keySet(), emptied, truncateTime, /* replaceStatistics */ true);
+                        emptied.keySet(),
+                        emptied,
+                        truncateTime,
+                        /* replaceStatistics */ true,
+                        null);
             } catch (RuntimeException e) {
                 if (failure == null) {
                     throw e;
