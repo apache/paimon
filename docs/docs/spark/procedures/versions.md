@@ -69,6 +69,26 @@ CALL sys.create_tag_from_timestamp(
 );
 ```
 
+## create_tag_from_watermark
+
+Create a tag based on given watermark timestamp.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier.
+- `tag` (`STRING`, required): name of the new tag.
+- `watermark` (`BIGINT`, required): Find the first snapshot (including tagged snapshots) whose watermark is at or after this value.
+- `time_retained` (`STRING`, optional): The maximum time retained for newly created tags.
+
+```sql
+CALL sys.create_tag_from_watermark(
+  `table` => 'default.T',
+  `tag` => 'my_tag',
+  `watermark` => 1724404318750,
+  time_retained => '1 d'
+);
+```
+
 ## replace_tag
 
 Replace an existing tag with new tag info.
