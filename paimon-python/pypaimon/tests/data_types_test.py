@@ -336,3 +336,78 @@ class DataTypesTest(unittest.TestCase):
 
         paimon_type = PyarrowFieldParser.to_paimon_type(pa.time32('ms'), nullable=True)
         self.assertEqual(paimon_type.type, "TIME(0)")
+
+    def test_avro_timestamp_seconds_maps_and_roundtrips(self):
+        import datetime
+        import os
+        import tempfile
+
+        import fastavro
+
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        # TIMESTAMP(0) -> pyarrow 's'; Avro's coarsest timestamp is millis, which
+        # holds seconds losslessly and matches Java AvroSchemaConverter (precision<=3).
+        self.assertEqual(
+            PyarrowFieldParser.to_avro_type(pa.timestamp('s'), 'ts', 'r'),
+            {"type": "long", "logicalType": "timestamp-millis"})
+        self.assertEqual(
+            PyarrowFieldParser.to_avro_type(pa.timestamp('s', tz='UTC'), 'ts', 'r'),
+            {"type": "long", "logicalType": "local-timestamp-millis"})
+        # nanos stays rejected: Avro has no nanos logical type (matches Java precision>6).
+        with self.assertRaises(ValueError):
+            PyarrowFieldParser.to_avro_type(pa.timestamp('ns'), 'ts', 'r')
+
+        # A second-granularity value round-trips unchanged (no seconds/millis mixup).
+        ts = datetime.datetime(2024, 1, 2, 3, 4, 5)
+        table = pa.table({"ts": pa.array([ts], pa.timestamp('s'))})
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "data.avro")
+            LocalFileIO().write_avro(path, table)
+            with open(path, 'rb') as f:
+                rows = list(fastavro.reader(f))
+        self.assertEqual(rows[0]["ts"].replace(tzinfo=None), ts)
+
+    def test_avro_nested_timestamp_roundtrips_on_non_utc_host(self):
+        # A naive TIMESTAMP(0) nested in a ROW or ARRAY must survive a write on
+        # a non-UTC host. fastavro converts a naive datetime using the host
+        # timezone, so without recursive UTC normalization the nested values
+        # were persisted shifted by the host offset (reproduced by the review
+        # under TZ=Asia/Shanghai). The top-level value was already normalized.
+        import datetime
+        import os
+        import tempfile
+        import time
+
+        import fastavro
+
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        if not hasattr(time, "tzset"):
+            self.skipTest("time.tzset is unavailable on this platform")
+
+        ts = datetime.datetime(2024, 1, 2, 3, 4, 5)
+        table = pa.table({
+            "ts": pa.array([ts], pa.timestamp('s')),
+            "r": pa.array([{"ts": ts}], pa.struct([("ts", pa.timestamp('s'))])),
+            "arr": pa.array([[ts]], pa.list_(pa.timestamp('s'))),
+        })
+        previous_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Shanghai"
+        time.tzset()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "data.avro")
+                LocalFileIO().write_avro(path, table)
+                with open(path, 'rb') as f:
+                    rows = list(fastavro.reader(f))
+        finally:
+            if previous_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = previous_tz
+            time.tzset()
+
+        self.assertEqual(rows[0]["ts"].replace(tzinfo=None), ts)
+        self.assertEqual(rows[0]["r"]["ts"].replace(tzinfo=None), ts)
+        self.assertEqual(rows[0]["arr"][0].replace(tzinfo=None), ts)
