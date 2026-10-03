@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafBinaryFunction;
@@ -25,6 +27,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -36,9 +39,122 @@ import java.util.List;
 
 /**
  * Helper for applying partition predicate pushdown in system tables (BucketsTable, FilesTable,
- * FileKeyRangesTable).
+ * FileKeyRangesTable, PartitionsTable).
  */
 public class PartitionPredicateHelper {
+
+    private static final String PARTITIONS_TABLE_PARTITION_FIELD = "partition";
+
+    /**
+     * Converts equality and IN filters on the {@code partition} column of PartitionsTable, such as
+     * {@code dt=20260410/region=1}, into a partition filter for manifest pruning.
+     *
+     * <p>Returns {@code null} unless every literal parses and renders back to itself, so pruning
+     * never drops a partition that the string predicate itself would match.
+     */
+    @Nullable
+    public static Predicate partitionsTableFilter(
+            @Nullable Predicate predicate,
+            List<String> partitionKeys,
+            RowType partitionType,
+            String defaultPartitionName) {
+        List<Object> literals = partitionsTableLiterals(predicate);
+        if (literals == null || literals.isEmpty()) {
+            return null;
+        }
+        PredicateBuilder builder = new PredicateBuilder(partitionType);
+        List<Predicate> orPredicates = new ArrayList<>();
+        for (Object literal : literals) {
+            Predicate partitionFilter =
+                    partitionsTableSpecFilter(
+                            literal, partitionKeys, partitionType, defaultPartitionName, builder);
+            if (partitionFilter == null) {
+                return null;
+            }
+            orPredicates.add(partitionFilter);
+        }
+        return PredicateBuilder.or(orPredicates);
+    }
+
+    /** Literals of the first conjunct that is an equality, IN or OR of equalities on partition. */
+    @Nullable
+    private static List<Object> partitionsTableLiterals(@Nullable Predicate predicate) {
+        for (Predicate conjunct : PredicateBuilder.splitAnd(predicate)) {
+            List<Object> literals = new ArrayList<>();
+            for (Predicate disjunct : PredicateBuilder.splitOr(conjunct)) {
+                if (!isPartitionsTableEqualOrIn(disjunct)) {
+                    literals = null;
+                    break;
+                }
+                literals.addAll(((LeafPredicate) disjunct).literals());
+            }
+            if (literals != null) {
+                return literals;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isPartitionsTableEqualOrIn(Predicate predicate) {
+        if (!(predicate instanceof LeafPredicate)) {
+            return false;
+        }
+        LeafPredicate leaf = (LeafPredicate) predicate;
+        return (leaf.function() instanceof Equal || leaf.function() instanceof In)
+                && leaf.fieldRefOptional()
+                        .map(ref -> PARTITIONS_TABLE_PARTITION_FIELD.equals(ref.name()))
+                        .orElse(false);
+    }
+
+    @Nullable
+    private static Predicate partitionsTableSpecFilter(
+            @Nullable Object literal,
+            List<String> partitionKeys,
+            RowType partitionType,
+            String defaultPartitionName,
+            PredicateBuilder builder) {
+        if (literal == null) {
+            return null;
+        }
+        String[] fields = literal.toString().split("/", -1);
+        if (fields.length != partitionKeys.size()) {
+            return null;
+        }
+        List<Predicate> predicates = new ArrayList<>();
+        for (int i = 0; i < fields.length; i++) {
+            String prefix = partitionKeys.get(i) + "=";
+            if (!fields[i].startsWith(prefix)) {
+                return null;
+            }
+            String value = fields[i].substring(prefix.length());
+            if (defaultPartitionName.equals(value)) {
+                predicates.add(builder.isNull(i));
+                continue;
+            }
+            Object parsed = renderableValue(value, partitionType.getTypeAt(i));
+            if (parsed == null) {
+                return null;
+            }
+            predicates.add(builder.equal(i, parsed));
+        }
+        return PredicateBuilder.and(predicates);
+    }
+
+    /** Parses a partition value only if PartitionsTable renders it back to the same string. */
+    @Nullable
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Object renderableValue(String value, DataType type) {
+        try {
+            Object parsed = TypeUtils.castFromString(value, type);
+            if (parsed == null) {
+                return null;
+            }
+            CastExecutor toString = CastExecutors.resolveToString(type);
+            return value.equals(toString.cast(parsed).toString()) ? parsed : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
 
     public static boolean applyPartitionFilter(
             SnapshotReader snapshotReader,

@@ -62,6 +62,7 @@ import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.PartitionPredicateHelper;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
@@ -428,10 +429,20 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         private List<Partition> listPartitionEntries() {
-            List<PartitionEntry> partitionEntries =
-                    fileStoreTable.newScan().withLevelFilter(level -> true).listPartitionEntries();
             RowType partitionType = fileStoreTable.schema().logicalPartitionType();
             String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
+            InnerTableScan scan = fileStoreTable.newScan().withLevelFilter(level -> true);
+            // prunes manifests only; the row filter in createReader keeps the exact semantics
+            Predicate partitionFilter =
+                    PartitionPredicateHelper.partitionsTableFilter(
+                            predicate,
+                            fileStoreTable.partitionKeys(),
+                            partitionType,
+                            defaultPartitionName);
+            if (partitionFilter != null) {
+                scan.withPartitionFilter(partitionFilter);
+            }
+            List<PartitionEntry> partitionEntries = scan.listPartitionEntries();
             String[] partitionColumns = fileStoreTable.partitionKeys().toArray(new String[0]);
             InternalRowPartitionComputer computer =
                     new InternalRowPartitionComputer(

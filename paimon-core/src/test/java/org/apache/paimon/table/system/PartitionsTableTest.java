@@ -277,6 +277,71 @@ public class PartitionsTableTest extends TableTestBase {
                 .containsExactlyInAnyOrder("pt=1-2", "pt=2-1", "pt=3-1");
     }
 
+    @Test
+    public void testPartitionFilterOnManifestScanKeepsStringSemantics() throws Exception {
+        String testTableName = "StringOrderTable";
+        Schema testSchema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .build();
+        Identifier testTableId = identifier(testTableName);
+        catalog.createTable(testTableId, testSchema, true);
+        FileStoreTable testTable = (FileStoreTable) catalog.getTable(testTableId);
+        write(
+                testTable,
+                GenericRow.of(1, 1),
+                GenericRow.of(2, 2),
+                GenericRow.of(10, 3),
+                GenericRow.of(null, 4));
+
+        // time travel lists partitions from the manifests, where the filter is pushed down
+        PartitionsTable testPartitionsTable =
+                (PartitionsTable)
+                        catalog.getTable(
+                                        identifier(
+                                                testTableName
+                                                        + SYSTEM_TABLE_SPLITTER
+                                                        + PartitionsTable.PARTITIONS))
+                                .copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.SCAN_VERSION.key(), "1"));
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+        int[] partitionOnly = new int[] {0};
+
+        assertThat(
+                        readProjectedPartitions(
+                                testPartitionsTable,
+                                builder.equal(0, BinaryString.fromString("pt=10")),
+                                partitionOnly))
+                .containsExactly("pt=10");
+        assertThat(
+                        readProjectedPartitions(
+                                testPartitionsTable,
+                                builder.in(
+                                        0,
+                                        Arrays.asList(
+                                                BinaryString.fromString("pt=1"),
+                                                BinaryString.fromString(
+                                                        "pt=__DEFAULT_PARTITION__"))),
+                                partitionOnly))
+                .containsExactlyInAnyOrder("pt=1", "pt=__DEFAULT_PARTITION__");
+        // "pt=10" < "pt=2" as strings although 10 > 2, so range filters are not pushed down
+        assertThat(
+                        readProjectedPartitions(
+                                testPartitionsTable,
+                                builder.lessThan(0, BinaryString.fromString("pt=2")),
+                                partitionOnly))
+                .containsExactlyInAnyOrder("pt=1", "pt=10");
+        assertThat(
+                        readProjectedPartitions(
+                                testPartitionsTable,
+                                builder.equal(0, BinaryString.fromString("pt=01")),
+                                partitionOnly))
+                .isEmpty();
+    }
+
     private List<String> readPartitionAndRecordCount(Predicate predicate) throws IOException {
         ReadBuilder readBuilder = partitionsTable.newReadBuilder().withFilter(predicate);
         List<String> rows = new ArrayList<>();
