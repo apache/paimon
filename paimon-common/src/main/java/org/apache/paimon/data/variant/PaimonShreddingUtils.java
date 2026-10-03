@@ -586,7 +586,17 @@ public class PaimonShreddingUtils {
 
     /** Assemble a variant (binary format) from a variant value. */
     public static Variant assembleVariant(InternalRow row, VariantSchema schema) {
-        return ShreddingUtils.rebuild(new PaimonShreddedRow(row), schema);
+        return assembleVariant(row, schema, VariantMetadata.empty());
+    }
+
+    /**
+     * Assemble a variant (binary format) from a variant value, reusing the decoded metadata
+     * dictionary in {@code metadataCache} across rows. Callers reading many rows (e.g. one batch)
+     * should share a single cache instance.
+     */
+    public static Variant assembleVariant(
+            InternalRow row, VariantSchema schema, VariantMetadata cachedMetadata) {
+        return ShreddingUtils.rebuild(new PaimonShreddedRow(row), schema, cachedMetadata);
     }
 
     /** Assemble a variant struct, in which each field is extracted from the variant value. */
@@ -781,11 +791,12 @@ public class PaimonShreddingUtils {
         output.reserve(numRows);
         WritableBytesVector valueChild = (WritableBytesVector) output.getChildren()[0];
         WritableBytesVector metadataChild = (WritableBytesVector) output.getChildren()[1];
+        VariantMetadata cachedMetadata = VariantMetadata.empty();
         for (int i = 0; i < numRows; ++i) {
             if (input.isNullAt(i)) {
                 output.setNullAt(i);
             } else {
-                Variant v = assembleVariant(input.getRow(i), variantSchema);
+                Variant v = assembleVariant(input.getRow(i), variantSchema, cachedMetadata);
                 valueChild.putByteBuffer(i, v.valueBuffer());
                 metadataChild.putByteBuffer(i, v.metadataBuffer());
             }

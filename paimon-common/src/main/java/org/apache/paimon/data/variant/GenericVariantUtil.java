@@ -684,16 +684,23 @@ public class GenericVariantUtil {
             checkIndex(stringStart + nextOffset - 1, metadata.remaining());
         }
         int length = nextOffset - offset;
+        return decodeMetadataKey(metadata, stringStart + offset, length);
+    }
+
+    /**
+     * Decodes the key string whose UTF-8 bytes begin at absolute buffer position {@code pos} with
+     * {@code length} bytes. Shared by {@link #getMetadataKey} and the precomputed-offset fast path
+     * in {@link VariantMetadata}.
+     */
+    static String decodeMetadataKey(ByteBuffer metadata, int pos, int length) {
         if (metadata.hasArray()) {
             return new String(
                     metadata.array(),
-                    metadata.arrayOffset() + metadata.position() + stringStart + offset,
+                    metadata.arrayOffset() + metadata.position() + pos,
                     length,
                     StandardCharsets.UTF_8);
         }
-        return StandardCharsets.UTF_8
-                .decode(slice(metadata, stringStart + offset, length))
-                .toString();
+        return StandardCharsets.UTF_8.decode(slice(metadata, pos, length)).toString();
     }
 
     static int compareMetadataKey(ByteBuffer metadata, int id, byte[] utf8Key) {

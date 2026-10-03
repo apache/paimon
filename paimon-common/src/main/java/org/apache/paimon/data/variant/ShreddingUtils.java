@@ -80,7 +80,8 @@ public class ShreddingUtils {
 
     // This `rebuild` function should only be called on the top-level schema, and that other private
     // implementation will be called on any recursively shredded sub-schema.
-    public static Variant rebuild(ShreddedRow row, VariantSchema schema) {
+    public static Variant rebuild(
+            ShreddedRow row, VariantSchema schema, VariantMetadata cachedMetadata) {
         if (schema.topLevelMetadataIdx < 0 || row.isNullAt(schema.topLevelMetadataIdx)) {
             throw malformedVariant();
         }
@@ -92,8 +93,9 @@ public class ShreddingUtils {
             }
             return new GenericVariant(row.getBinaryBuffer(schema.variantIdx), metadata);
         }
+        cachedMetadata.setCurrent(metadata);
         GenericVariantBuilder builder = new GenericVariantBuilder(false);
-        rebuild(row, metadata, schema, builder);
+        rebuild(row, cachedMetadata, schema, builder);
         return builder.result();
     }
 
@@ -101,13 +103,8 @@ public class ShreddingUtils {
     // https://github.com/apache/parquet-format/blob/master/VariantShredding.md.
     // Append the result to `builder`.
     public static void rebuild(
-            ShreddedRow row, byte[] metadata, VariantSchema schema, GenericVariantBuilder builder) {
-        rebuild(row, ByteBuffer.wrap(metadata).order(ByteOrder.LITTLE_ENDIAN), schema, builder);
-    }
-
-    public static void rebuild(
             ShreddedRow row,
-            ByteBuffer metadata,
+            VariantMetadata cachedMetadata,
             VariantSchema schema,
             GenericVariantBuilder builder) {
         int typedIdx = schema.typedIdx;
@@ -165,7 +162,7 @@ public class ShreddingUtils {
                     offsets.add(builder.getWritePos() - start);
                     rebuild(
                             array.getStruct(i, elementSchema.numFields),
-                            metadata,
+                            cachedMetadata,
                             elementSchema,
                             builder);
                 }
@@ -190,34 +187,37 @@ public class ShreddingUtils {
                         fields.add(
                                 new GenericVariantBuilder.FieldEntry(
                                         fieldName, id, builder.getWritePos() - start));
-                        rebuild(fieldValue, metadata, fieldSchema, builder);
+                        rebuild(fieldValue, cachedMetadata, fieldSchema, builder);
                     }
                 }
                 if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
                     // Add the leftover fields in the variant binary.
                     GenericVariant v =
-                            new GenericVariant(row.getBinaryBuffer(variantIdx), metadata);
+                            new GenericVariant(
+                                    row.getBinaryBuffer(variantIdx), cachedMetadata.buffer());
                     if (v.getType() != GenericVariantUtil.Type.OBJECT) {
                         throw malformedVariant();
                     }
+                    cachedMetadata.adopt();
                     for (int i = 0; i < v.objectSize(); ++i) {
-                        GenericVariant.ObjectField field = v.getFieldAtIndex(i);
+                        String key = cachedMetadata.get(v.getDictionaryIdAtIndex(i));
                         // `value` must not contain any shredded field.
-                        if (schema.objectSchemaMap.containsKey(field.key)) {
+                        if (schema.objectSchemaMap.containsKey(key)) {
                             throw malformedVariant();
                         }
-                        int id = builder.addKey(field.key);
+                        int id = builder.addKey(key);
                         fields.add(
                                 new GenericVariantBuilder.FieldEntry(
-                                        field.key, id, builder.getWritePos() - start));
-                        builder.appendVariant(field.value);
+                                        key, id, builder.getWritePos() - start));
+                        builder.appendVariant(v.getFieldValueAtIndex(i));
                     }
                 }
                 builder.finishWritingObject(start, fields);
             }
         } else if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
             // `typed_value` doesn't exist or is null. Read from `value`.
-            builder.appendVariant(new GenericVariant(row.getBinaryBuffer(variantIdx), metadata));
+            builder.appendVariant(
+                    new GenericVariant(row.getBinaryBuffer(variantIdx), cachedMetadata.buffer()));
         } else {
             // This means the variant is missing in a context where it must present, so the input
             // data is invalid.

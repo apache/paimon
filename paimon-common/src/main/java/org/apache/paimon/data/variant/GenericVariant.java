@@ -429,6 +429,22 @@ public final class GenericVariant implements Variant, Serializable {
                 });
     }
 
+    // Get the field value at the `index` slot without decoding the metadata key. Return null if
+    // `index` is out of the bound of `[0, objectSize())`.
+    // It is only legal to call it when `getType()` is `Type.OBJECT`.
+    GenericVariant getFieldValueAtIndex(int index) {
+        return handleObject(
+                value,
+                0,
+                (size, idSize, offsetSize, idStart, offsetStart, dataStart) -> {
+                    if (index < 0 || index >= size) {
+                        return null;
+                    }
+                    int offset = readUnsigned(value, offsetStart + offsetSize * index, offsetSize);
+                    return variantAt(dataStart + offset);
+                });
+    }
+
     // Get the number of array elements in the variant.
     // It is only legal to call it when `getType()` is `Type.ARRAY`.
     public int arraySize() {
