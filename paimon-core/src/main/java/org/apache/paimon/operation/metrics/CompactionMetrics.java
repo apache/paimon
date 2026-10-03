@@ -74,6 +74,7 @@ public class CompactionMetrics {
     private Counter compactionsCompletedCounter;
     private Counter compactionsTotalCounter;
     private Counter compactionsQueuedCounter;
+    private final Object sharedCounterLock = new Object();
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
@@ -112,6 +113,30 @@ public class CompactionMetrics {
                         }
                         return count - 1;
                     });
+        }
+    }
+
+    private void incrementCompactionsCompletedCount() {
+        synchronized (sharedCounterLock) {
+            compactionsCompletedCounter.inc();
+        }
+    }
+
+    private void incrementCompactionsTotalCount() {
+        synchronized (sharedCounterLock) {
+            compactionsTotalCounter.inc();
+        }
+    }
+
+    private void incrementCompactionsQueuedCount() {
+        synchronized (sharedCounterLock) {
+            compactionsQueuedCounter.inc();
+        }
+    }
+
+    private void decrementCompactionsQueuedCount() {
+        synchronized (sharedCounterLock) {
+            compactionsQueuedCounter.dec();
         }
     }
 
@@ -313,22 +338,22 @@ public class CompactionMetrics {
 
         @Override
         public void increaseCompactionsCompletedCount() {
-            compactionsCompletedCounter.inc();
+            CompactionMetrics.this.incrementCompactionsCompletedCount();
         }
 
         @Override
         public void increaseCompactionsTotalCount() {
-            compactionsTotalCounter.inc();
+            CompactionMetrics.this.incrementCompactionsTotalCount();
         }
 
         @Override
         public void increaseCompactionsQueuedCount() {
-            compactionsQueuedCounter.inc();
+            CompactionMetrics.this.incrementCompactionsQueuedCount();
         }
 
         @Override
         public void decreaseCompactionsQueuedCount() {
-            compactionsQueuedCounter.dec();
+            CompactionMetrics.this.decrementCompactionsQueuedCount();
         }
 
         @Override

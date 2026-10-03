@@ -28,7 +28,10 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.metrics.Gauge;
+import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
+import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.metrics.TestMetricRegistry;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.Options;
@@ -47,6 +50,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -324,6 +329,83 @@ public class CompactionMetricsTest {
     }
 
     @Test
+    public void testSharedCompactionCountersWithConcurrentNonAtomicBackend() throws Exception {
+        Map<String, Counter> counters = new HashMap<>();
+        MetricRegistry registry =
+                (groupName, variables) ->
+                        new MetricGroup() {
+                            @Override
+                            public Counter counter(String name) {
+                                return counters.computeIfAbsent(name, n -> new NonThreadSafeCounter());
+                            }
+
+                            @Override
+                            public <T> Gauge<T> gauge(String name, Gauge<T> gauge) {
+                                return gauge;
+                            }
+
+                            @Override
+                            public Histogram histogram(String name, int windowSize) {
+                                throw new UnsupportedOperationException();
+                            }
+
+                            @Override
+                            public Map<String, String> getAllVariables() {
+                                return variables;
+                            }
+
+                            @Override
+                            public String getGroupName() {
+                                return groupName;
+                            }
+
+                            @Override
+                            public Map<String, Metric> getMetrics() {
+                                return Collections.emptyMap();
+                            }
+
+                            @Override
+                            public void close() {}
+                        };
+
+        CompactionMetrics metrics = new CompactionMetrics(registry, "myTable");
+        CompactionMetrics.Reporter[] reporters = new CompactionMetrics.Reporter[4];
+        for (int i = 0; i < reporters.length; i++) {
+            reporters[i] = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
+        }
+
+        ExecutorService workers = Executors.newFixedThreadPool(4);
+        try {
+            Future<?>[] futures = new Future<?>[reporters.length];
+            for (int i = 0; i < reporters.length; i++) {
+                CompactionMetrics.Reporter reporter = reporters[i];
+                futures[i] =
+                        workers.submit(
+                                () -> {
+                                    for (int j = 0; j < 10_000; j++) {
+                                        reporter.increaseCompactionsCompletedCount();
+                                        reporter.increaseCompactionsTotalCount();
+                                        reporter.increaseCompactionsQueuedCount();
+                                        reporter.decreaseCompactionsQueuedCount();
+                                    }
+                                });
+            }
+            for (Future<?> future : futures) {
+                future.get(60, TimeUnit.SECONDS);
+            }
+        } finally {
+            workers.shutdownNow();
+        }
+
+        assertThat(counters.get(CompactionMetrics.COMPACTION_COMPLETED_COUNT).getCount())
+                .isEqualTo(40_000L);
+        assertThat(counters.get(CompactionMetrics.COMPACTION_TOTAL_COUNT).getCount())
+                .isEqualTo(40_000L);
+        assertThat(counters.get(CompactionMetrics.COMPACTION_QUEUED_COUNT).getCount())
+                .isEqualTo(0L);
+    }
+
+    @Test
     public void testCompactTimerKeptWhileSharedCompactionThreadInUse() throws Exception {
         CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
         ExecutorService sharedPool = Executors.newFixedThreadPool(1);
@@ -345,6 +427,39 @@ public class CompactionMetricsTest {
             assertThat(metrics.activeCompactTimerCount()).isZero();
         } finally {
             sharedPool.shutdownNow();
+        }
+    }
+
+    /**
+     * Mimics Flink's {@code org.apache.flink.metrics.SimpleCounter}, which is not safe under
+     * concurrent updates from multiple compaction worker threads.
+     */
+    private static class NonThreadSafeCounter implements Counter {
+        private long count;
+
+        @Override
+        public void inc() {
+            count++;
+        }
+
+        @Override
+        public void inc(long n) {
+            count += n;
+        }
+
+        @Override
+        public void dec() {
+            count--;
+        }
+
+        @Override
+        public void dec(long n) {
+            count -= n;
+        }
+
+        @Override
+        public long getCount() {
+            return count;
         }
     }
 
