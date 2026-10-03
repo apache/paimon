@@ -72,7 +72,8 @@ class ResourcePaths:
                 self.TABLES, RESTUtil.encode_string(table_name)))
 
     def table_details(self, database_name: str) -> str:
-        return "{}/{}/{}/{}".format(self.base_path, self.DATABASES, database_name, self.TABLE_DETAILS)
+        return "{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name), self.TABLE_DETAILS)
 
     def table_token(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/token".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
