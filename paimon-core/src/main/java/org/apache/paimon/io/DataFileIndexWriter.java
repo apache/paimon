@@ -37,11 +37,8 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -58,7 +55,8 @@ public final class DataFileIndexWriter implements Closeable {
     private final Path path;
 
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
-    private final long inManifestThreshold;
+    private final int inManifestThreshold;
+    private final int formatVersion;
 
     // index type, column name -> index maintainer
     private final Map<String, Map<String, IndexMaintainer>> indexMaintainers = new HashMap<>();
@@ -146,6 +144,7 @@ public final class DataFileIndexWriter implements Closeable {
             }
         }
         this.inManifestThreshold = fileIndexOptions.fileIndexInManifestThreshold();
+        this.formatVersion = fileIndexOptions.formatVersion();
     }
 
     public void write(InternalRow row) {
@@ -158,36 +157,57 @@ public final class DataFileIndexWriter implements Closeable {
 
     @Override
     public void close() throws IOException {
-        Map<String, Map<String, byte[]>> indexMaps = serializeMaintainers();
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(out)) {
-            writer.writeColumnIndexes(indexMaps);
-        }
-
-        if (out.size() > inManifestThreshold) {
-            try (OutputStream outputStream = fileIO.newOutputStream(path, true)) {
-                outputStream.write(out.toByteArray());
+        SpillableIndexOutputStream output =
+                new SpillableIndexOutputStream(fileIO, path, inManifestThreshold);
+        try {
+            try (FileIndexFormat.Writer writer =
+                    FileIndexFormat.createWriter(output, formatVersion)) {
+                forEachIndex(
+                        (column, type, indexWriter) ->
+                                writer.writeIndex(
+                                        column,
+                                        type,
+                                        indexWriter == null ? null : indexWriter::writeTo));
+                writer.finish();
             }
-            resultFileName = path.getName();
-        } else {
-            embeddedIndexBytes = out.toByteArray();
+            if (output.spilled()) {
+                resultFileName = path.getName();
+            } else {
+                embeddedIndexBytes = output.embeddedBytes();
+            }
+        } catch (IOException | RuntimeException e) {
+            try {
+                output.abort();
+            } catch (IOException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+            }
+            throw e;
         }
     }
 
-    public Map<String, Map<String, byte[]>> serializeMaintainers() {
-        Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
-        for (Map<String, IndexMaintainer> columnIndexMaintainers : indexMaintainers.values()) {
-            for (IndexMaintainer indexMaintainer : columnIndexMaintainers.values()) {
-                Map<String, byte[]> mapBytes = indexMaintainer.serializedBytes();
-                for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
-                    indexMaps
-                            .computeIfAbsent(entry.getKey(), k -> new HashMap<>())
-                            .put(indexMaintainer.getIndexType(), entry.getValue());
-                }
+    /** Visits the index writers without serializing their payloads. */
+    public void forEachIndex(IndexConsumer consumer) throws IOException {
+        Map<String, Map<String, FileIndexWriter>> entries = new HashMap<>();
+        for (Map<String, IndexMaintainer> columnMaintainers : indexMaintainers.values()) {
+            for (IndexMaintainer maintainer : columnMaintainers.values()) {
+                maintainer.forEachIndex(
+                        (column, type, writer) ->
+                                entries.computeIfAbsent(column, ignored -> new HashMap<>())
+                                        .put(type, writer));
             }
         }
-        return indexMaps;
+        for (Map.Entry<String, Map<String, FileIndexWriter>> column : entries.entrySet()) {
+            for (Map.Entry<String, FileIndexWriter> index : column.getValue().entrySet()) {
+                consumer.accept(column.getKey(), index.getKey(), index.getValue());
+            }
+        }
+    }
+
+    /** Consumes the writer for one column and index type. */
+    @FunctionalInterface
+    public interface IndexConsumer {
+        void accept(String columnName, String indexType, @Nullable FileIndexWriter writer)
+                throws IOException;
     }
 
     public FileIndexResult result() {
@@ -241,9 +261,7 @@ public final class DataFileIndexWriter implements Closeable {
 
         void write(InternalRow row);
 
-        String getIndexType();
-
-        Map<String, byte[]> serializedBytes();
+        void forEachIndex(IndexConsumer consumer) throws IOException;
     }
 
     /** One index maintainer for one column. */
@@ -269,12 +287,8 @@ public final class DataFileIndexWriter implements Closeable {
             fileIndexWriter.writeRecord(getter.getFieldOrNull(row));
         }
 
-        public String getIndexType() {
-            return indexType;
-        }
-
-        public Map<String, byte[]> serializedBytes() {
-            return Collections.singletonMap(columnName, fileIndexWriter.serializedBytes());
+        public void forEachIndex(IndexConsumer consumer) throws IOException {
+            consumer.accept(columnName, indexType, fileIndexWriter);
         }
     }
 
@@ -348,22 +362,14 @@ public final class DataFileIndexWriter implements Closeable {
                             .createWriter());
         }
 
-        public String getIndexType() {
-            return indexType;
-        }
-
-        public Map<String, byte[]> serializedBytes() {
-            Map<String, byte[]> result = new HashMap<>();
-            indexWritersMap.forEach(
-                    (k, v) -> {
-                        if (!v.empty()) {
-                            result.put(
-                                    FileIndexCommon.toMapKey(columnName, k), v.serializedBytes());
-                        } else {
-                            result.put(FileIndexCommon.toMapKey(columnName, k), null);
-                        }
-                    });
-            return result;
+        public void forEachIndex(IndexConsumer consumer) throws IOException {
+            for (Map.Entry<String, FileIndexWriter> entry : indexWritersMap.entrySet()) {
+                FileIndexWriter writer = entry.getValue();
+                consumer.accept(
+                        FileIndexCommon.toMapKey(columnName, entry.getKey()),
+                        indexType,
+                        writer.empty() ? null : writer);
+            }
         }
     }
 }

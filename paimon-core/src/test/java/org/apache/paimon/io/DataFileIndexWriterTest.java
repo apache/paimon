@@ -28,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fileindex.FileIndexFormat;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.FileIO;
@@ -54,7 +55,10 @@ import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +67,9 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /** Tests for {@link DataFileIndexWriter}. */
 public class DataFileIndexWriterTest {
@@ -76,7 +83,127 @@ public class DataFileIndexWriterTest {
     boolean bloomExists = false;
 
     @Test
-    public void testCreatingMultipleIndexesOnOneColumn() throws Exception {
+    public void testSpillableIndexOutputStream() throws Exception {
+        Path path = new Path(tempFile.resolve("index.idx").toUri());
+        SpillableIndexOutputStream embedded = new SpillableIndexOutputStream(fileIO, path, 4);
+        embedded.write(new byte[] {1, 2, 3, 4});
+        embedded.close();
+        assertThat(embedded.spilled()).isFalse();
+        assertThat(embedded.embeddedBytes()).containsExactly(1, 2, 3, 4);
+
+        SpillableIndexOutputStream external = new SpillableIndexOutputStream(fileIO, path, 4);
+        external.write(new byte[] {1, 2, 3, 4});
+        external.write(5);
+        external.close();
+        assertThat(external.spilled()).isTrue();
+        try (org.apache.paimon.fs.SeekableInputStream input = fileIO.newInputStream(path)) {
+            byte[] bytes = new byte[5];
+            input.read(bytes);
+            assertThat(bytes).containsExactly(1, 2, 3, 4, 5);
+        }
+        external.abort();
+        assertThat(fileIO.exists(path)).isFalse();
+    }
+
+    @Test
+    public void testV2TableWriterStreamsPayloadOverTwoGiB() throws Exception {
+        Options options = new Options();
+        options.setString("file-index.format.version", "2");
+        options.setString("file-index.in-manifest-threshold", "1B");
+        options.setString("file-index.stream-test.columns", "large,small");
+        options.setString("file-index.stream-test.large.large", "true");
+        Path path = new Path(tempFile.resolve("large.index").toUri());
+        FileIO sparseFileIO = new SparseFileIndexIO();
+        RowType rowType =
+                RowType.builder()
+                        .field("large", DataTypes.INT())
+                        .field("small", DataTypes.INT())
+                        .build();
+        DataFileIndexWriter writer =
+                new DataFileIndexWriter(
+                        sparseFileIO,
+                        path,
+                        rowType,
+                        new FileIndexOptions(new CoreOptions(options)),
+                        null);
+        writer.write(GenericRow.of(1, 2));
+        writer.close();
+        assertThat(writer.result().independentIndexFile()).isEqualTo(path.getName());
+
+        long length = sparseFileIO.getFileStatus(path).getLen();
+        assertThat(length).isGreaterThan(Integer.MAX_VALUE);
+        try (FileIndexFormat.Reader reader =
+                FileIndexFormat.createReader(sparseFileIO.newInputStream(path), rowType, length)) {
+            assertThat(reader.indexMetas())
+                    .filteredOn(meta -> meta.columnName().equals("large"))
+                    .extracting(FileIndexFormat.FileIndexMeta::sizeInBytesLong)
+                    .containsExactly(2049L * 1024 * 1024 + 1);
+            assertThat(reader.readColumnIndex("large")).hasSize(1);
+            assertThat(reader.readColumnIndex("small")).hasSize(1);
+        }
+    }
+
+    @Test
+    public void testV2FailedWriteDeletesPartialIndexFile() throws Exception {
+        Options options = new Options();
+        options.setString("file-index.format.version", "2");
+        options.setString("file-index.in-manifest-threshold", "1B");
+        options.setString("file-index.stream-test.columns", "a");
+        options.setString("file-index.stream-test.a.fail", "true");
+        Path path = new Path(tempFile.resolve("failed.index").toUri());
+        DataFileIndexWriter writer =
+                new DataFileIndexWriter(
+                        fileIO,
+                        path,
+                        RowType.builder().field("a", DataTypes.INT()).build(),
+                        new FileIndexOptions(new CoreOptions(options)),
+                        null);
+        writer.write(GenericRow.of(1));
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Test index write failure");
+        assertThat(fileIO.exists(path)).isFalse();
+        assertThat(writer.result().independentIndexFile()).isNull();
+    }
+
+    @Test
+    public void testV2FailedWriteReportsDeleteFailure() throws Exception {
+        Options options = new Options();
+        options.setString("file-index.format.version", "2");
+        options.setString("file-index.in-manifest-threshold", "1B");
+        options.setString("file-index.stream-test.columns", "a");
+        options.setString("file-index.stream-test.a.fail", "true");
+        Path path = new Path(tempFile.resolve("undeleted.index").toUri());
+        FileIO deleteFailingFileIO =
+                new LocalFileIO() {
+                    @Override
+                    public boolean delete(Path path, boolean recursive) {
+                        return false;
+                    }
+                };
+        DataFileIndexWriter writer =
+                new DataFileIndexWriter(
+                        deleteFailingFileIO,
+                        path,
+                        RowType.builder().field("a", DataTypes.INT()).build(),
+                        new FileIndexOptions(new CoreOptions(options)),
+                        null);
+        writer.write(GenericRow.of(1));
+
+        Throwable failure = catchThrowable(writer::close);
+        assertThat(failure)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Test index write failure");
+        assertThat(failure.getSuppressed()).hasSize(1);
+        assertThat(failure.getSuppressed()[0])
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Failed to delete partial file index file");
+        assertThat(deleteFailingFileIO.exists(path)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testCreatingMultipleIndexesOnOneColumn(int version) throws Exception {
 
         String tableName = "test";
         String col1 = "f0";
@@ -84,6 +211,7 @@ public class DataFileIndexWriterTest {
         Identifier identifier = Identifier.create(tableName, tableName);
 
         Map<String, String> optionsMap = new HashMap<>();
+        optionsMap.put("file-index.format.version", Integer.toString(version));
         optionsMap.put("file-index.bitmap.columns", col1);
         optionsMap.put("file-index.bsi.columns", col1);
         optionsMap.put("file-index.bloom-filter.columns", col2);
@@ -197,12 +325,12 @@ public class DataFileIndexWriterTest {
                                 .collect(Collectors.toList());
                 // assert index file exist and only one index file
                 assert indexFiles.size() == 1;
+                Path indexPath = dataFilePathFactory.toAlignedPath(indexFiles.get(0), dataFileMeta);
                 try (FileIndexFormat.Reader reader =
                         FileIndexFormat.createReader(
-                                fileIO.newInputStream(
-                                        dataFilePathFactory.toAlignedPath(
-                                                indexFiles.get(0), dataFileMeta)),
-                                tableSchema.logicalRowType())) {
+                                fileIO.newInputStream(indexPath),
+                                tableSchema.logicalRowType(),
+                                fileIO.getFileStatus(indexPath).getLen())) {
                     Set<FileIndexReader> fileIndexReaders = reader.readColumnIndex(columnName);
                     for (FileIndexReader fileIndexReader : fileIndexReaders) {
                         consumer.accept(fileIndexReader);

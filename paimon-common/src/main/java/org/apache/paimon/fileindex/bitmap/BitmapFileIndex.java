@@ -70,6 +70,12 @@ public class BitmapFileIndex implements FileIndexer {
     @Override
     public FileIndexReader createReader(
             SeekableInputStream seekableInputStream, int start, int length) {
+        return createReader(seekableInputStream, (long) start, (long) length);
+    }
+
+    @Override
+    public FileIndexReader createReader(
+            SeekableInputStream seekableInputStream, long start, long length) {
         try {
             Reader reader = new Reader(seekableInputStream, start, options);
             return valuesAreTruncated(dataType) ? new TruncatedValueReader(reader) : reader;
@@ -209,7 +215,7 @@ public class BitmapFileIndex implements FileIndexer {
     private static class Reader extends FileIndexReader {
 
         private final SeekableInputStream seekableInputStream;
-        private final int headStart;
+        private final long headStart;
         private final Map<Object, RoaringBitmap32> bitmaps = new LinkedHashMap<>();
 
         private BitmapFileIndexMeta bitmapFileIndexMeta;
@@ -217,7 +223,7 @@ public class BitmapFileIndex implements FileIndexer {
 
         private final Options options;
 
-        public Reader(SeekableInputStream seekableInputStream, int start, Options options) {
+        public Reader(SeekableInputStream seekableInputStream, long start, Options options) {
             this.seekableInputStream = seekableInputStream;
             this.headStart = start;
             this.options = options;

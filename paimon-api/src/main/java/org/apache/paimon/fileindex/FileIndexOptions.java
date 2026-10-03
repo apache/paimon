@@ -39,7 +39,8 @@ public class FileIndexOptions {
     public static final String COLUMNS = "columns";
 
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
-    private final long fileIndexInManifestThreshold;
+    private final int fileIndexInManifestThreshold;
+    private final int formatVersion;
 
     private final Map<Column, Map<String, Options>> indexTypeOptions;
     private final Map<Column, Map<String, Options>> topLevelMapColumnOptions;
@@ -52,6 +53,7 @@ public class FileIndexOptions {
         this.indexTypeOptions = new HashMap<>();
         this.topLevelMapColumnOptions = new HashMap<>();
         this.fileIndexInManifestThreshold = coreOptions.fileIndexInManifestThreshold();
+        this.formatVersion = coreOptions.fileIndexFormatVersion();
         setupOptions(coreOptions);
     }
 
@@ -186,7 +188,11 @@ public class FileIndexOptions {
         return indexTypeOptions.isEmpty();
     }
 
-    public long fileIndexInManifestThreshold() {
+    public int formatVersion() {
+        return formatVersion;
+    }
+
+    public int fileIndexInManifestThreshold() {
         return fileIndexInManifestThreshold;
     }
 

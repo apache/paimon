@@ -235,12 +235,12 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                                 .collect(Collectors.toList());
                 // assert index file exist and only one index file
                 assert indexFiles.size() == 1;
+                Path indexPath = dataFilePathFactory.toAlignedPath(indexFiles.get(0), dataFileMeta);
                 try (FileIndexFormat.Reader reader =
                         FileIndexFormat.createReader(
-                                fileIO.newInputStream(
-                                        dataFilePathFactory.toAlignedPath(
-                                                indexFiles.get(0), dataFileMeta)),
-                                tableSchema.logicalRowType())) {
+                                fileIO.newInputStream(indexPath),
+                                tableSchema.logicalRowType(),
+                                fileIO.getFileStatus(indexPath).getLen())) {
                     Optional<FileIndexReader> fileIndexReader =
                             reader.readColumnIndex("a").stream().findFirst();
                     // assert index reader exist
