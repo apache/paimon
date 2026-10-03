@@ -27,6 +27,7 @@ import org.apache.paimon.flink.source.PaimonDataStreamSource;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.flink.utils.OperatorUidAssigner;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -97,6 +98,9 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
     private static final long serialVersionUID = 1L;
 
     private static final Logger LOG = LoggerFactory.getLogger(MonitorSource.class);
+
+    private static final String MONITOR_NAME = "Monitor";
+    private static final String READER_NAME = "Reader";
 
     private final ReadBuilder readBuilder;
     private final long monitorInterval;
@@ -379,28 +383,33 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         if (table != null) {
             source = new PaimonDataStreamSource<>(monitorSource, table);
         }
+        OperatorUidAssigner uids = OperatorUidAssigner.forSource(table);
         SingleOutputStreamOperator<Split> operator =
-                env.fromSource(
-                                source,
-                                WatermarkStrategy.noWatermarks(),
-                                name + "-Monitor",
-                                new JavaTypeInfo<>(Split.class))
-                        .forceNonParallel();
+                uids.assign(
+                        env.fromSource(
+                                        source,
+                                        WatermarkStrategy.noWatermarks(),
+                                        name + "-Monitor",
+                                        new JavaTypeInfo<>(Split.class))
+                                .forceNonParallel(),
+                        MONITOR_NAME);
 
         DataStream<Split> sourceDataStream =
                 unordered
                         ? shuffleUnordered(operator)
                         : shuffleOrdered(operator, shuffleBucketWithPartition);
 
-        return sourceDataStream.transform(
-                name + "-Reader",
-                typeInfo,
-                new ReadOperator(
-                        readBuilder::newRead,
-                        nestedProjectedRowData,
-                        limit,
-                        readType,
-                        blobAsDescriptor));
+        return uids.assign(
+                sourceDataStream.transform(
+                        name + "-Reader",
+                        typeInfo,
+                        new ReadOperator(
+                                readBuilder::newRead,
+                                nestedProjectedRowData,
+                                limit,
+                                readType,
+                                blobAsDescriptor)),
+                READER_NAME);
     }
 
     private static DataStream<Split> shuffleUnordered(
