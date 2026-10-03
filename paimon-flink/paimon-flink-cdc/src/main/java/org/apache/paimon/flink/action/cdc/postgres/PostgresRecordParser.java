@@ -187,6 +187,13 @@ public class PostgresRecordParser
                 if (field.name() != null && field.name().endsWith(decimalLogicalName())) {
                     int precision = field.parameters().get("connect.decimal.precision").asInt();
                     int scale = field.parameters().get("scale").asInt();
+                    // Postgres numeric can exceed Paimon DECIMAL's range (precision up to 38 and
+                    // 0 <= scale <= precision). Fall back to STRING when out of range, mirroring
+                    // the JDBC schema path (PostgresTypeUtils#toDataType) so the two paths agree
+                    // instead of crashing the first record on the DecimalType constructor.
+                    if (PostgresTypeUtils.isDecimalOutOfRange(precision, scale)) {
+                        return DataTypes.STRING();
+                    }
                     return DataTypes.DECIMAL(precision, scale);
                 } else if (Bits.LOGICAL_NAME.equals(field.name())) {
                     String stringifyLength = field.parameters().get("length").asText();

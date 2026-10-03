@@ -190,7 +190,7 @@ public class PostgresTypeUtils {
         }
     }
 
-    private static boolean isDecimalOutOfRange(int precision, int scale) {
+    static boolean isDecimalOutOfRange(int precision, int scale) {
         // Paimon DECIMAL requires precision <= 38 and 0 <= scale <= precision; Postgres
         // numeric can exceed both (precision up to 1000, and negative or over-precision
         // scale since PG 15), which would otherwise throw from the DecimalType constructor.

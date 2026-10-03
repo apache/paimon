@@ -126,6 +126,42 @@ public class PostgresRecordParserTest {
                 .isEqualTo(DataTypes.INT().nullable());
     }
 
+    /**
+     * Verifies that a Postgres {@code numeric} whose precision exceeds Paimon's DECIMAL range falls
+     * back to STRING instead of crashing the sync job on the first record.
+     *
+     * <p>PostgreSQL {@code numeric} allows a precision up to 1000, while Paimon DECIMAL requires
+     * {@code precision <= 38} and {@code 0 <= scale <= precision}. The JDBC schema path ({@link
+     * PostgresTypeUtils#toDataType}) already degrades such columns to STRING, so without this fix
+     * the record path and the JDBC path disagree — and building {@code DECIMAL(50, 2)} throws from
+     * the {@code DecimalType} constructor on the very first record.
+     */
+    @Test
+    public void testOutOfRangeDecimalPrecisionMapsToString() throws Exception {
+        List<RichCdcMultiplexRecord> out = parse(decimalDebeziumJson(50, 2));
+
+        assertThat(out).isNotEmpty();
+        DataField field = findField(out.get(0), "amount");
+        assertThat(field.type())
+                .as("numeric(50,2) exceeds Paimon DECIMAL precision and must fall back to STRING")
+                .isEqualTo(DataTypes.STRING().nullable());
+    }
+
+    /**
+     * Verifies that an in-range Postgres {@code numeric} still maps to DECIMAL — i.e. the fallback
+     * does not over-degrade representable decimals.
+     */
+    @Test
+    public void testInRangeDecimalMapsToDecimal() throws Exception {
+        List<RichCdcMultiplexRecord> out = parse(decimalDebeziumJson(10, 2));
+
+        assertThat(out).isNotEmpty();
+        DataField field = findField(out.get(0), "amount");
+        assertThat(field.type())
+                .as("numeric(10,2) is within range and must remain DECIMAL(10, 2)")
+                .isEqualTo(DataTypes.DECIMAL(10, 2).nullable());
+    }
+
     // -------------------------------------------------------------------------
     // helpers
     // -------------------------------------------------------------------------
@@ -198,6 +234,48 @@ public class PostgresRecordParserTest {
                 + "\"payload\":{"
                 + "  \"op\":\"r\","
                 + "  \"after\":{\"id\":1,\"ts_col\":1700000000000},"
+                + "  \"source\":{\"db\":\"testdb\",\"table\":\"test_table\"}"
+                + "}"
+                + "}";
+    }
+
+    /**
+     * Builds a minimal Debezium PostgreSQL CDC JSON event containing one {@code numeric} column
+     * {@code amount} encoded as the {@code org.apache.kafka.connect.data.Decimal} logical type with
+     * the given {@code precision} and {@code scale}.
+     */
+    private static String decimalDebeziumJson(int precision, int scale) {
+        return "{"
+                + "\"schema\":{"
+                + "  \"type\":\"struct\","
+                + "  \"fields\":["
+                + "    {"
+                + "      \"type\":\"struct\","
+                + "      \"optional\":true,"
+                + "      \"field\":\"after\","
+                + "      \"fields\":["
+                + "        {\"type\":\"int32\",\"optional\":false,\"field\":\"id\"},"
+                + "        {\"type\":\"bytes\",\"optional\":true,"
+                + "         \"name\":\"org.apache.kafka.connect.data.Decimal\","
+                + "         \"parameters\":{\"connect.decimal.precision\":\""
+                + precision
+                + "\",\"scale\":\""
+                + scale
+                + "\"},"
+                + "         \"field\":\"amount\"}"
+                + "      ]"
+                + "    },"
+                + "    {"
+                + "      \"type\":\"struct\","
+                + "      \"optional\":false,"
+                + "      \"field\":\"source\","
+                + "      \"fields\":[]"
+                + "    }"
+                + "  ]"
+                + "},"
+                + "\"payload\":{"
+                + "  \"op\":\"r\","
+                + "  \"after\":{\"id\":1,\"amount\":\"123.45\"},"
                 + "  \"source\":{\"db\":\"testdb\",\"table\":\"test_table\"}"
                 + "}"
                 + "}";
