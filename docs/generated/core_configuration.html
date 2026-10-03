@@ -45,6 +45,12 @@ under the License.
             <td>If true, it disables altering column type from null to not null. Default is true. Users can disable this option to explicitly convert null column type to not null.</td>
         </tr>
         <tr>
+            <td><h5>append.compaction.row-group-copy.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable Parquet RowGroup copy fast path for append-only table compaction. When enabled and all whitelist conditions are met, compaction concatenates compressed RowGroups without decoding and re-encoding rows.</td>
+        </tr>
+        <tr>
             <td><h5>async-file-write</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

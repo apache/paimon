@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
+import org.apache.paimon.append.ParquetFastPathCompactRewriter;
 import org.apache.paimon.append.cluster.Sorter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
@@ -38,6 +39,7 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.BlobFetchMetrics;
+import org.apache.paimon.operation.metrics.CompactionFastPathMetrics;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
@@ -91,6 +93,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     private @Nullable BlobFileContext blobContext;
     private @Nullable BlobFetchMetrics blobFetchMetrics;
+    private @Nullable CompactionFastPathMetrics compactionFastPathMetrics;
     private RowType writeType;
     private @Nullable List<String> writeCols;
     private boolean omitAllNonDedicatedWriteCols;
@@ -148,6 +151,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (blobContext != null) {
             blobFetchMetrics = new BlobFetchMetrics(metricRegistry, tableName);
             blobContext = blobContext.withBlobFetchMetricReporter(blobFetchMetrics);
+        }
+        if (options.appendCompactionRowGroupCopyEnabled()) {
+            compactionFastPathMetrics = new CompactionFastPathMetrics(metricRegistry, tableName);
         }
         return this;
     }
@@ -262,6 +268,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         } else {
             IOUtils.closeAll(super::close, blobFetchMetrics::close);
         }
+        if (compactionFastPathMetrics != null) {
+            compactionFastPathMetrics.close();
+        }
     }
 
     protected abstract CompactManager getCompactManager(
@@ -279,6 +288,24 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             throws Exception {
         if (toCompact.isEmpty()) {
             return Collections.emptyList();
+        }
+        if (options.appendCompactionRowGroupCopyEnabled()) {
+            List<DataFileMeta> fastPath =
+                    ParquetFastPathCompactRewriter.tryRewrite(
+                            fileIO,
+                            fileFormat,
+                            writeType,
+                            options,
+                            partition,
+                            bucket,
+                            dvFactory,
+                            toCompact,
+                            pathFactory.createDataFilePathFactory(partition, bucket),
+                            schemaId,
+                            compactionFastPathMetrics);
+            if (fastPath != null) {
+                return fastPath;
+            }
         }
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
