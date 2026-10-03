@@ -437,23 +437,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 formatVersion);
     }
 
-    // Iceberg's identity transform (the only transform Paimon partition values use) rejects
-    // VARIANT outright, so a VARIANT partition key can never be represented in Iceberg metadata
-    static void checkNoVariantPartitionKeys(
-            List<String> partitionKeys, IcebergSchema icebergSchema) {
-        Set<String> variantPartitionKeys = new LinkedHashSet<>();
-        for (IcebergDataField field : icebergSchema.fields()) {
-            if (partitionKeys.contains(field.name()) && field.dataType() instanceof VariantType) {
-                variantPartitionKeys.add(field.name());
-            }
-        }
-        Preconditions.checkArgument(
-                variantPartitionKeys.isEmpty(),
-                "Partition keys %s have type VARIANT, which Iceberg does not support as a "
-                        + "partition key.",
-                variantPartitionKeys);
-    }
-
     /**
      * Collects the types the Iceberg mirror cannot emit, with the path of each offending field.
      * Leaf types not named here are representable, or rejected later by the type conversion itself
