@@ -31,6 +31,8 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
@@ -162,6 +164,22 @@ class CompositeBTreeRangeTest {
                     PredicateBuilder.and(
                             builder.equal(0, 1), builder.equal(1, 7), builder.equal(2, 0));
             assertThat(reader.visitComposite(point).join().get().results().isEmpty()).isFalse();
+            Predicate multiPoint =
+                    PredicateBuilder.and(
+                            builder.equal(0, 1),
+                            builder.in(1, Arrays.asList(7, 8)),
+                            builder.in(2, Arrays.asList(0, 1)));
+            assertThat(
+                            reader.visitComposite(multiPoint)
+                                    .join()
+                                    .get()
+                                    .results()
+                                    .getLongCardinality())
+                    .isEqualTo(5);
+            Predicate nullPoint =
+                    PredicateBuilder.and(builder.isNull(0), builder.isNull(1), builder.isNull(2));
+            assertThat(reader.visitComposite(nullPoint).join().get().results().getLongCardinality())
+                    .isEqualTo(1);
             assertThat(
                             reader.visitComposite(builder.greaterThan(0, Integer.MAX_VALUE))
                                     .join()
@@ -179,6 +197,70 @@ class CompositeBTreeRangeTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testInAndNullIntervalsAcrossBlocks(int version) throws Exception {
+        Options options = options(version);
+        List<GlobalIndexIOMeta> files = write(options);
+        List<Predicate> queries =
+                Arrays.asList(
+                        PredicateBuilder.and(
+                                builder.in(0, Arrays.asList(-1, 1, 1, null)),
+                                builder.between(1, -1, 7)),
+                        PredicateBuilder.and(
+                                builder.equal(0, 1),
+                                in(1, -1, 7, 8, null),
+                                builder.in(2, Arrays.asList(0, 1))),
+                        PredicateBuilder.and(in(0, -1, 1), in(1, -1, 7), in(2, 0, 1)),
+                        PredicateBuilder.and(builder.equal(0, 1), in(1, -1, 7, null), in(1, 7, 8)),
+                        PredicateBuilder.and(builder.equal(0, 1), in(1)),
+                        PredicateBuilder.and(builder.equal(0, 1), in(1, (Object) null)),
+                        PredicateBuilder.and(builder.isNull(0), builder.greaterThan(1, 0)),
+                        PredicateBuilder.and(
+                                builder.isNull(0), builder.isNull(1), builder.isNull(2)),
+                        PredicateBuilder.and(
+                                builder.equal(0, 1), builder.equal(1, 7), builder.isNull(2)),
+                        builder.isNull(0),
+                        builder.isNotNull(0),
+                        PredicateBuilder.and(builder.equal(0, 1), builder.isNotNull(1)),
+                        PredicateBuilder.and(builder.isNull(0), builder.isNotNull(0)),
+                        PredicateBuilder.and(builder.isNull(0), builder.equal(0, 1)),
+                        PredicateBuilder.and(builder.isNull(0), builder.lessThan(0, 7)));
+        ExecutorService executor = newDirectExecutorService();
+        try (GlobalIndexReader reader =
+                GlobalIndexer.create("btree", type.getFields(), options)
+                        .createReader(
+                                file -> io.newInputStream(file.filePath()),
+                                files,
+                                rows.size(),
+                                null,
+                                executor)) {
+            for (Predicate query : queries) {
+                RoaringNavigableMap64 expected = new RoaringNavigableMap64();
+                for (int i = 0; i < rows.size(); i++) {
+                    if (query.test(rows.get(i))) {
+                        expected.add(i);
+                    }
+                }
+                assertThat(reader.visitComposite(query).join()).as("%s", query).isPresent();
+                assertThat(reader.visitComposite(query).join().get().results().toRangeList())
+                        .as("%s", query)
+                        .containsExactlyElementsOf(expected.toRangeList());
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private Predicate in(int field, Object... values) {
+        return new LeafPredicate(
+                In.INSTANCE,
+                type.getTypeAt(field),
+                field,
+                type.getFieldNames().get(field),
+                Arrays.asList(values));
     }
 
     private Options options(int version) {
@@ -202,6 +284,7 @@ class CompositeBTreeRangeTest {
         }
         rows.add(GenericRow.of(1, 7, 0));
         rows.add(GenericRow.of(1, 7, null));
+        rows.add(GenericRow.of(null, null, null));
         CompositeKeySerializer serializer = new CompositeKeySerializer(type);
         rows.sort((left, right) -> serializer.createComparator().compare(left, right));
         Path directory = new Path(tempPath.toUri());

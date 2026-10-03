@@ -167,8 +167,8 @@ of their order in the SQL predicate. This avoids expanding each column's posting
 list before intersecting them. Additional predicates remain row filters, and OR
 branches can each select a composite lookup.
 
-Composite indexes also support an equality prefix followed by a range on the next
-key column. For an index on `(category, item_number)`, the following conditions can
+Composite indexes also support a prefix restricted by equality, `IN` or `IS NULL`,
+followed by a range on the next key column. For an index on `(category, item_number)`, the following conditions can
 use the index:
 
 | Condition | Index scan |
@@ -177,13 +177,18 @@ use the index:
 | `category = 'category-a' AND item_number > 7` | A range within the category prefix |
 | `category = 'category-a' AND item_number BETWEEN 7 AND 9` | A range with inclusive endpoints within the prefix |
 | `category > 'category-a' AND item_number = 7` | A category range; the item-number condition remains a data filter |
+| `category IN ('category-a', 'category-b') AND item_number = 7` | A point probe for each category |
+| `category IN ('category-a', 'category-b') AND item_number > 7` | A separate range within each category prefix |
+| `category IS NULL AND item_number > 7` | A range within the NULL category prefix |
+| `category = 'category-a' AND item_number IS NULL` | A point probe with a NULL second component |
+| `category IS NOT NULL AND item_number = 7` | A non-NULL category range; the item-number condition remains a data filter |
 
-The range may use `>`, `>=`, `<`, `<=` or `BETWEEN`. Conditions after the first
+The range may use `>`, `>=`, `<`, `<=`, `BETWEEN` or `IS NOT NULL`. Conditions after the first
 range column remain data filters. A condition only on `item_number` cannot use
 this composite index's left prefix.
 
 When several composite definitions match, selection prefers more bounded key
-columns, then more equality columns, then fewer total key columns. If only the
+columns, then more columns restricted by equality, `IN` or `IS NULL`, then fewer total key columns. If only the
 leading column is bounded, a dedicated single-column index is preferred when
 its coverage includes the composite definition's coverage.
 
@@ -192,12 +197,19 @@ With reader evaluation enabled, supported index conditions narrow the candidate
 rows and remaining conditions are evaluated against the data.
 
 Composite indexes can coexist with single-column indexes on the same columns.
-Full-key equalities use point probes. Prefix and range scans use
+Restrictions by equality, `IN` or `IS NULL` on every key column use point probes.
+Repeated `IN` values are deduplicated, and NULL entries in `IN` lists do not match
+NULL keys. `IS NULL` explicitly selects NULL keys; equality to NULL still matches
+no rows. The planner expands at most 256 tuple intervals after deduplication and
+intersection of conditions on each column. Queries exceeding this limit fall back
+to other eligible index paths or an ordinary scan.
+
+Prefix and range scans use
 `btree-index.fallback-scan-max-size`, applied to the selected files in each index
 group. If any group exceeds the budget, the whole composite definition is
 declined and planning uses other indexes or an ordinary scan. Point probes are
-unaffected by this budget. Dedicated composite `IN` and `IS NULL` optimization is
-not supported yet. Vector and full-text search pre-filters use single-column
+unaffected by this budget. A file shared by several intervals is counted only once.
+Vector and full-text search pre-filters use single-column
 indexes or their data fallback.
 
 In `full` and `detail` modes, rows outside the selected composite index's coverage
