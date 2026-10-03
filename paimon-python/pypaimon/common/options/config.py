@@ -31,6 +31,10 @@ class OssOptions:
     OSS_ENDPOINT = ConfigOptions.key("fs.oss.endpoint").string_type().no_default_value().with_description(
         "OSS endpoint")
     OSS_REGION = ConfigOptions.key("fs.oss.region").string_type().no_default_value().with_description("OSS region")
+    OSS_SECOND_LEVEL_DOMAIN_ENABLE = ConfigOptions.key(
+        "fs.oss.second.level.domain.enable").boolean_type().default_value(False).with_description(
+        "Path-style addressing (endpoint/bucket/key) instead of bucket.endpoint, "
+        "for IP or non-wildcard endpoints")
     OSS_SSE_METHOD = ConfigOptions.key(
         "fs.oss.server-side-encryption").string_type().no_default_value().with_description(
         "OSS atomic metadata encryption method: AES256, KMS or SM4")
@@ -124,6 +128,9 @@ class CatalogOptions:
         "DLF token file path")
     DLF_OSS_ENDPOINT = ConfigOptions.key("dlf.oss-endpoint").string_type().no_default_value().with_description(
         "DLF OSS endpoint")
+    IO_CACHE_ENABLED = ConfigOptions.key("io-cache.enabled").boolean_type().default_value(False).with_description(
+        "Route reads to the io-cache targets vended with the table token; "
+        "a value set in the catalog options overrides the token")
     DLF_TOKEN_LOADER = ConfigOptions.key("dlf.token-loader").string_type().no_default_value().with_description(
         "DLF token loader")
     DLF_TOKEN_ECS_ROLE_NAME = ConfigOptions.key(

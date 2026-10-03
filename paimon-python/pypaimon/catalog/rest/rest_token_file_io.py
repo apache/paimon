@@ -20,6 +20,7 @@ import threading
 import time
 from datetime import timedelta
 from typing import Optional, Union
+from urllib.parse import urlparse
 
 from cachetools import TTLCache
 
@@ -33,6 +34,8 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
+from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 
 
 class RESTTokenFileIO(FileIO):
@@ -111,19 +114,26 @@ class RESTTokenFileIO(FileIO):
             if file_io is not None:
                 return file_io, cache_key
 
-            merged_properties = RESTUtil.merge(
+            merged_properties = self._merge_token_with_catalog_options(RESTUtil.merge(
                 self.catalog_options.to_map() if self.catalog_options else {},
                 cache_key.token
-            )
-            if self.catalog_options:
-                dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
-                if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-                    merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
-            merged_options = Options(merged_properties)
+            ))
 
-            file_io = FileIO.get(self.path, merged_options)
+            file_io = self._create_file_io(merged_properties)
             cache[cache_key] = file_io
             return file_io, cache_key
+
+    def _create_file_io(self, properties: dict) -> FileIO:
+        routing = IoCacheRouting.create(properties)
+        if routing is None or urlparse(self.path).scheme != "oss":
+            return FileIO.get(self.path, Options(properties))
+        self.log.info(
+            "io-cache routing enabled for [%s], targets %s, origin endpoint %s",
+            self.identifier, routing.targets(), routing.origin_endpoint())
+        origin = FileIO.get(self.path, Options(routing.origin_options(properties)))
+        return IoCacheRoutingFileIO(
+            routing, origin,
+            lambda name: FileIO.get(self.path, Options(routing.target_options(properties, name))))
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
@@ -132,6 +142,10 @@ class RESTTokenFileIO(FileIO):
             dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if dlf_oss_endpoint and dlf_oss_endpoint.strip():
                 merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
+            # An explicit io-cache.enabled in the catalog options wins over the token, as in Java.
+            if self.catalog_options.contains(CatalogOptions.IO_CACHE_ENABLED):
+                merged_token[CatalogOptions.IO_CACHE_ENABLED.key()] = str(
+                    self.catalog_options.get(CatalogOptions.IO_CACHE_ENABLED)).lower()
         return merged_token
 
     def new_input_stream(self, path: str):
