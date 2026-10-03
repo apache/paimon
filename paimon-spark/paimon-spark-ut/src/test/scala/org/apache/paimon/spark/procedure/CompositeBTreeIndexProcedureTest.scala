@@ -18,13 +18,17 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.globalindex.{IndexedSplit, IndexQuerySplit}
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder
 import org.apache.paimon.types.DataField
+import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.sql.Row
 
+import java.io.FileNotFoundException
 import java.util.Collections
 
 import scala.collection.JavaConverters._
@@ -79,7 +83,6 @@ class CompositeBTreeIndexProcedureTest extends PaimonSparkTestBase {
       }
       insert(0, 40)
       sql("INSERT INTO T VALUES (100, NULL, 7), (101, 'category-a', NULL)")
-      build("category")
       build("item_number")
       build("category,item_number")
       val indexes = loadTable("T").store().newIndexFileHandler().scanEntries().asScala
@@ -90,44 +93,95 @@ class CompositeBTreeIndexProcedureTest extends PaimonSparkTestBase {
         composite.forall(
           _.indexFile().globalIndexMeta().getIndexedFieldIds().asScala.toSeq == Seq(1, 2)))
       assert(composite.map(_.indexFile().rowCount()).sum == 42L)
-      for (inReader <- Seq(false, true)) {
-        sql(
-          s"ALTER TABLE T SET TBLPROPERTIES ('global-index.query-in-reader.enabled' = '$inReader', 'scalar-index.search-mode' = 'fast')")
-        checkAnswer(
-          sql("SELECT id FROM T WHERE item_number = 7 AND category = 'category-a'"),
-          Seq(Row(7), Row(27)))
-        checkAnswer(
-          sql("SELECT id FROM T WHERE category = 'absent' AND item_number = 7"),
-          Seq.empty)
-        checkAnswer(
-          sql("SELECT id FROM T WHERE category = 'category-a'"),
-          ((0 until 10) ++ (20 until 30) :+ 101).map(Row(_)))
-        checkAnswer(
-          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number > 7"),
-          Seq(Row(8), Row(9), Row(28), Row(29)))
-        checkAnswer(
-          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number BETWEEN 6 AND 8"),
-          Seq(Row(6), Row(7), Row(8), Row(26), Row(27), Row(28)))
-        checkAnswer(
+      // Keep the trailing scalar definition, but make its postings unavailable.
+      val scalarFiles = SortedGlobalIndexTestUtils.deleteIndexFiles(loadTable("T"), 1)
+      try {
+        for (inReader <- Seq(false, true)) {
           sql(
-            "SELECT id FROM T WHERE category IN ('category-a', 'category-b') AND item_number IN (7, 8)"),
-          Seq(Row(7), Row(8), Row(17), Row(18), Row(27), Row(28), Row(37), Row(38))
-        )
-        checkAnswer(
-          sql(
-            "SELECT id FROM T WHERE category IN ('category-a', 'category-b') AND item_number > 7"),
-          Seq(Row(8), Row(9), Row(18), Row(19), Row(28), Row(29), Row(38), Row(39))
-        )
-        checkAnswer(
-          sql("SELECT id FROM T WHERE category IS NULL AND item_number = 7"),
-          Seq(Row(100)))
-        checkAnswer(
-          sql("SELECT id FROM T WHERE category = 'category-a' AND item_number IS NULL"),
-          Seq(Row(101)))
-        checkAnswer(
-          sql("SELECT id FROM T WHERE category IN ('category-a', NULL) AND item_number IN (7, 8)"),
-          Seq(Row(7), Row(8), Row(27), Row(28)))
+            s"ALTER TABLE T SET TBLPROPERTIES ('global-index.query-in-reader.enabled' = '$inReader', 'scalar-index.search-mode' = 'fast')")
+          def checkCompositeAnswer(query: String, expected: Seq[Row]): Unit = {
+            val splits =
+              try {
+                getPaimonScan(query).inputSplits
+              } catch {
+                case failure: Exception =>
+                  throw new AssertionError(s"Failed to plan $query, inReader=$inReader", failure)
+              }
+            if (expected.nonEmpty) {
+              assert(splits.nonEmpty)
+              assert(
+                splits.forall(
+                  split =>
+                    if (inReader) split.isInstanceOf[IndexQuerySplit]
+                    else split.isInstanceOf[IndexedSplit]))
+            } else if (!inReader) {
+              assert(splits.isEmpty)
+            }
+            try {
+              checkAnswer(sql(query), expected)
+            } catch {
+              case failure: Exception =>
+                throw new AssertionError(s"Failed to read $query, inReader=$inReader", failure)
+            }
+            if (expected.nonEmpty) {
+              val compositeFiles = loadTable("T")
+                .store()
+                .newIndexFileHandler()
+                .scanEntries()
+                .asScala
+                .map(_.indexFile())
+                .filter(_.globalIndexMeta().getIndexedFieldIds().size() == 2)
+                .map(_.fileName())
+              val removed = SortedGlobalIndexTestUtils.deleteIndexFiles(loadTable("T"), 2)
+              try {
+                val failure = intercept[Exception] {
+                  sql(query).collect()
+                }
+                val missing = ExceptionUtils.findThrowable(failure, classOf[FileNotFoundException])
+                assert(missing.isPresent)
+                assert(compositeFiles.exists(missing.get().getMessage.contains))
+              } finally {
+                removed.close()
+              }
+            }
+          }
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE item_number = 7 AND category = 'category-a'",
+            Seq(Row(7), Row(27)))
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category = 'absent' AND item_number = 7",
+            Seq.empty)
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category = 'category-a'",
+            ((0 until 10) ++ (20 until 30) :+ 101).map(Row(_)))
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category = 'category-a' AND item_number > 7",
+            Seq(Row(8), Row(9), Row(28), Row(29)))
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category = 'category-a' AND item_number BETWEEN 6 AND 8",
+            Seq(Row(6), Row(7), Row(8), Row(26), Row(27), Row(28)))
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category IN ('category-a', 'category-b') AND item_number IN (7, 8)",
+            Seq(Row(7), Row(8), Row(17), Row(18), Row(27), Row(28), Row(37), Row(38))
+          )
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category IN ('category-a', 'category-b') AND item_number > 7",
+            Seq(Row(8), Row(9), Row(18), Row(19), Row(28), Row(29), Row(38), Row(39))
+          )
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category IS NULL AND item_number = 7",
+            Seq(Row(100)))
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category = 'category-a' AND item_number IS NULL",
+            Seq(Row(101)))
+          checkCompositeAnswer(
+            "SELECT id FROM T WHERE category IN ('category-a', NULL) AND item_number IN (7, 8)",
+            Seq(Row(7), Row(8), Row(27), Row(28)))
+        }
+      } finally {
+        scalarFiles.close()
       }
+      build("category")
       insert(40, 60)
       build("category,item_number")
       checkAnswer(

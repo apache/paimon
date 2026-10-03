@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -40,6 +41,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.Range;
 
@@ -49,6 +51,8 @@ import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.io.Closeable;
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -61,6 +65,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for sorted global indexes. */
 public class SortedGlobalIndexITCase extends CatalogITCaseBase {
@@ -111,7 +116,6 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                 "INSERT INTO T_COMPOSITE VALUES "
                         + "(100, CAST(NULL AS STRING), 7), (101, 'category-a', CAST(NULL AS INT))");
         buildBTreeIndexForTable("T_COMPOSITE", "category");
-        buildBTreeIndexForTable("T_COMPOSITE", "item_number");
         // Reverse the schema order to verify the index preserves the requested key order.
         buildBTreeIndexForTable("T_COMPOSITE", "item_number, category");
         List<IndexManifestEntry> compositeEntries =
@@ -135,61 +139,58 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                         });
         assertThat(compositeEntries.stream().mapToLong(entry -> entry.indexFile().rowCount()).sum())
                 .isEqualTo(42);
-        for (boolean inReader : Arrays.asList(false, true)) {
-            sql(
-                    "ALTER TABLE T_COMPOSITE SET ('global-index.query-in-reader.enabled' = '"
-                            + inReader
-                            + "', 'scalar-index.search-mode' = 'fast')");
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category = 'category-a'"))
-                    .containsExactlyInAnyOrder(Row.of(7), Row.of(27));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 7"))
-                    .containsExactlyInAnyOrder(Row.of(7), Row.of(27));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE category = 'absent' AND item_number = 7"))
-                    .isEmpty();
-            assertThat(sql("SELECT id FROM T_COMPOSITE WHERE item_number = 7"))
-                    .containsExactlyInAnyOrder(
-                            Row.of(7), Row.of(17), Row.of(27), Row.of(37), Row.of(100));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category > 'category-a'"))
-                    .containsExactlyInAnyOrder(Row.of(17), Row.of(37));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category BETWEEN 'category-a' AND 'category-b'"))
-                    .containsExactlyInAnyOrder(Row.of(7), Row.of(17), Row.of(27), Row.of(37));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE item_number IN (7, 8) AND category IN ('category-a', 'category-b')"))
-                    .containsExactlyInAnyOrder(
-                            Row.of(7),
-                            Row.of(8),
-                            Row.of(17),
-                            Row.of(18),
-                            Row.of(27),
-                            Row.of(28),
-                            Row.of(37),
-                            Row.of(38));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE item_number IN (7, 8) AND category > 'category-a'"))
-                    .containsExactlyInAnyOrder(Row.of(17), Row.of(18), Row.of(37), Row.of(38));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE item_number IS NULL AND category = 'category-a'"))
-                    .containsExactly(Row.of(101));
-            assertThat(sql("SELECT id FROM T_COMPOSITE WHERE item_number = 7 AND category IS NULL"))
-                    .containsExactly(Row.of(100));
-            assertThat(
-                            sql(
-                                    "SELECT id FROM T_COMPOSITE WHERE item_number IS NOT NULL AND category IS NULL"))
-                    .containsExactly(Row.of(100));
+        // Keep the trailing scalar definition, but make its postings unavailable.
+        try (Closeable ignored =
+                SortedGlobalIndexTestUtils.deleteIndexFiles(paimonTable("T_COMPOSITE"), 1)) {
+            for (boolean inReader : Arrays.asList(false, true)) {
+                sql(
+                        "ALTER TABLE T_COMPOSITE SET ('global-index.query-in-reader.enabled' = '"
+                                + inReader
+                                + "', 'scalar-index.search-mode' = 'fast')");
+                assertCompositeBTreeQuery(
+                        "item_number = 7 AND category = 'category-a'", Row.of(7), Row.of(27));
+                assertCompositeBTreeQuery(
+                        "category = 'category-a' AND item_number = 7", Row.of(7), Row.of(27));
+                assertCompositeBTreeQuery("category = 'absent' AND item_number = 7");
+                assertCompositeBTreeQuery(
+                        "item_number = 7",
+                        Row.of(7),
+                        Row.of(17),
+                        Row.of(27),
+                        Row.of(37),
+                        Row.of(100));
+                assertCompositeBTreeQuery(
+                        "item_number = 7 AND category > 'category-a'", Row.of(17), Row.of(37));
+                assertCompositeBTreeQuery(
+                        "item_number = 7 AND category BETWEEN 'category-a' AND 'category-b'",
+                        Row.of(7),
+                        Row.of(17),
+                        Row.of(27),
+                        Row.of(37));
+                assertCompositeBTreeQuery(
+                        "item_number IN (7, 8) AND category IN ('category-a', 'category-b')",
+                        Row.of(7),
+                        Row.of(8),
+                        Row.of(17),
+                        Row.of(18),
+                        Row.of(27),
+                        Row.of(28),
+                        Row.of(37),
+                        Row.of(38));
+                assertCompositeBTreeQuery(
+                        "item_number IN (7, 8) AND category > 'category-a'",
+                        Row.of(17),
+                        Row.of(18),
+                        Row.of(37),
+                        Row.of(38));
+                assertCompositeBTreeQuery(
+                        "item_number IS NULL AND category = 'category-a'", Row.of(101));
+                assertCompositeBTreeQuery("item_number = 7 AND category IS NULL", Row.of(100));
+                assertCompositeBTreeQuery(
+                        "item_number IS NOT NULL AND category IS NULL", Row.of(100));
+            }
         }
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number");
         insertCompositeRows(40, 60);
         buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");
         assertThat(
@@ -232,6 +233,35 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                                 .distinct()
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(1, 2);
+    }
+
+    private void assertCompositeBTreeQuery(String predicate, Row... expected) throws Exception {
+        String query = "SELECT id FROM T_COMPOSITE WHERE " + predicate;
+        assertThat(sql(query)).containsExactlyInAnyOrder(expected);
+        if (expected.length == 0) {
+            return;
+        }
+        FileStoreTable table = paimonTable("T_COMPOSITE");
+        List<String> compositeFiles =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> file.globalIndexMeta().getIndexedFieldIds().size() == 2)
+                        .map(IndexFileMeta::fileName)
+                        .collect(Collectors.toList());
+        try (Closeable ignored = SortedGlobalIndexTestUtils.deleteIndexFiles(table, 2)) {
+            assertThatThrownBy(() -> sql(query))
+                    .satisfies(
+                            failure -> {
+                                FileNotFoundException missing =
+                                        ExceptionUtils.findThrowable(
+                                                        failure, FileNotFoundException.class)
+                                                .orElseThrow(() -> new AssertionError(failure));
+                                assertThat(
+                                                compositeFiles.stream()
+                                                        .anyMatch(missing.getMessage()::contains))
+                                        .isTrue();
+                            });
+        }
     }
 
     private void insertCompositeRows(int from, int to) {
