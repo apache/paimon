@@ -402,4 +402,15 @@ public class CoreOptionsTest {
                     .hasMessageContaining("64");
         }
     }
+
+    @Test
+    public void testPartitionExpireMaxNumRejectsNonPositive() {
+        for (int invalid : new int[] {0, -1}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.PARTITION_EXPIRATION_MAX_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).partitionExpireMaxNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("partition.expiration-max-num must be positive.");
+        }
+    }
 }

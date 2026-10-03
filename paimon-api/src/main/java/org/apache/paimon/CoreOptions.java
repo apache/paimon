@@ -4242,7 +4242,9 @@ public class CoreOptions implements Serializable {
     }
 
     public int partitionExpireMaxNum() {
-        return options.get(PARTITION_EXPIRATION_MAX_NUM);
+        int maxNum = options.get(PARTITION_EXPIRATION_MAX_NUM);
+        checkArgument(maxNum > 0, "%s must be positive.", PARTITION_EXPIRATION_MAX_NUM.key());
+        return maxNum;
     }
 
     public int partitionExpireBatchSize() {
