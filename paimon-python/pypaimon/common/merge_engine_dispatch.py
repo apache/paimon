@@ -27,6 +27,7 @@ module is the single source of truth so the two sides cannot drift.
 from typing import List, Optional
 
 from pypaimon.common.options.core_options import MergeEngine
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
 from pypaimon.read.reader.first_row_merge_function import \
@@ -39,9 +40,9 @@ from pypaimon.read.reader.partial_update_merge_function import \
 # behaviour the pypaimon PartialUpdateMergeFunction does not yet
 # implement. Setting any of these forces the dispatch to refuse the
 # write instead of running the simple last-non-null merge silently.
+# ``ignore-delete`` / ``partial-update.ignore-delete`` are NOT here: they
+# are supported (retract rows are skipped, see build_merge_function).
 _PARTIAL_UPDATE_UNSUPPORTED_BOOLEAN_OPTIONS = (
-    "ignore-delete",
-    "partial-update.ignore-delete",
     "first-row.ignore-delete",
     "deduplicate.ignore-delete",
     "partial-update.remove-record-on-delete",
@@ -52,10 +53,10 @@ _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
 _FIELD_AGGREGATE_FUNCTION_SUFFIX = ".aggregate-function"
 _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
 
-# Mirror ``CoreOptions.ignore_delete()``: any of these keys, if set to
-# ``"true"``, opts the engine into silently dropping
-# DELETE/UPDATE_BEFORE records. Kept as a raw-option lookup here so the
-# dispatch stays table-agnostic.
+# Mirror ``CoreOptions.ignore_delete()``: any of these keys, if set to a
+# canonical-true value (``true`` / ``1`` / ``yes`` / ``on``), opts the
+# engine into silently dropping DELETE/UPDATE_BEFORE records. Kept as a
+# raw-option lookup here so the dispatch stays table-agnostic.
 _IGNORE_DELETE_KEYS = (
     "ignore-delete",
     "first-row.ignore-delete",
@@ -96,9 +97,9 @@ def build_merge_function(
             raise NotImplementedError(
                 "merge-engine 'partial-update' is enabled together with "
                 "options that pypaimon does not yet implement: {}. The "
-                "supported subset is per-key last-non-null merge with "
-                "no sequence-group, no per-field aggregator override, "
-                "no ignore-delete and no partial-update.remove-record-on-* "
+                "supported subset is per-key last-non-null merge (with "
+                "ignore-delete) but no sequence-group, no per-field "
+                "aggregator override, and no partial-update.remove-record-on-* "
                 "flags. Open an issue to track Python support.".format(
                     ", ".join(sorted(unsupported))
                 )
@@ -110,6 +111,7 @@ def build_merge_function(
             value_field_names=(
                 list(value_field_names)
                 if value_field_names is not None else None),
+            ignore_delete=_ignore_delete_from_options(raw_options),
         )
     if engine == MergeEngine.FIRST_ROW:
         return FirstRowMergeFunction(
@@ -150,18 +152,17 @@ def partial_update_unsupported_options(raw_options: dict):
 
 
 def _option_is_truthy(raw):
-    """Strict ``"true"`` boolean parsing for table-option strings.
+    """Canonical boolean parsing for table-option strings.
 
-    A string is truthy iff it equals ``"true"`` (case-insensitive).
-    ``"yes"``, ``"on"``, ``"1"`` and similar Python-truthy strings are
-    treated as falsey, matching the table-option parser used elsewhere
-    in Paimon so an option string the rest of the toolchain treats as
-    ``false`` is not silently elevated to ``true`` here.
+    Delegates to ``OptionsUtils.convert_to_boolean`` -- the same parser
+    behind ``CoreOptions.ignore_delete()`` -- so ``true`` / ``1`` / ``yes``
+    / ``on`` are all true and ``false`` / ``0`` / ``no`` / ``off`` false
+    (case-insensitive). ``None`` (option unset) is false. Using the shared
+    parser instead of a second one keeps a value the rest of the toolchain
+    treats as ``true`` (e.g. ``ignore-delete=yes``) from being silently
+    downgraded here -- which previously built the merge function with
+    ``ignore_delete=False`` and made the first retract raise.
     """
     if raw is None:
         return False
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, str):
-        return raw.strip().lower() == "true"
-    return False
+    return OptionsUtils.convert_to_boolean(raw)

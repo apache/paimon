@@ -37,9 +37,9 @@ from pypaimon.common.options.core_options import MergeEngine
 
 # Boolean-valued options that, when truthy, opt the table into behaviour
 # the Python ``PartialUpdateMergeFunction`` does not implement.
+# ``ignore-delete`` / ``partial-update.ignore-delete`` are NOT here: they
+# are supported (retract rows are skipped by the merge function).
 _PARTIAL_UPDATE_UNSUPPORTED_BOOLEAN_OPTIONS = (
-    "ignore-delete",
-    "partial-update.ignore-delete",
     "first-row.ignore-delete",
     "deduplicate.ignore-delete",
     "partial-update.remove-record-on-delete",
@@ -204,9 +204,9 @@ def check_supported(table) -> None:
             raise NotImplementedError(
                 "merge-engine 'partial-update' is enabled together with "
                 "options that pypaimon does not yet implement: {}. The "
-                "supported subset is per-key last-non-null merge with "
-                "no sequence-group, no per-field aggregator override, "
-                "no ignore-delete and no partial-update.remove-record-"
+                "supported subset is per-key last-non-null merge (with "
+                "ignore-delete) but no sequence-group, no per-field "
+                "aggregator override, and no partial-update.remove-record-"
                 "on-* flags. These options are not yet supported; open "
                 "an issue to track support.".format(
                     ", ".join(sorted(unsupported))
