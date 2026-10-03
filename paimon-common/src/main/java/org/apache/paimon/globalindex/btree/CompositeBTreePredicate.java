@@ -26,12 +26,17 @@ import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.Between;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.IsNotNull;
+import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
@@ -43,103 +48,204 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.TreeSet;
 
-/** An equality prefix followed by an optional range in physical composite-key order. */
+/** Discrete equality/IN/NULL prefixes followed by an optional range in composite-key order. */
 public final class CompositeBTreePredicate {
+
+    public static final int MAX_INTERVALS = 256;
 
     private CompositeBTreePredicate() {}
 
     public static Optional<Plan> plan(List<DataField> fields, Predicate predicate) {
         List<Predicate> conjuncts = PredicateBuilder.splitAnd(predicate);
         List<Predicate> covered = new ArrayList<>();
-        List<Object> prefix = new ArrayList<>();
+        List<Object[]> prefixes = new ArrayList<>();
+        prefixes.add(new Object[0]);
         List<LeafPredicate> range = Collections.emptyList();
-        boolean empty = false;
+        int equalColumns = 0;
         for (DataField field : fields) {
             List<LeafPredicate> column = new ArrayList<>();
-            LeafPredicate equality = null;
+            List<Predicate> originals = new ArrayList<>();
             for (Predicate child : conjuncts) {
-                if (!(child instanceof LeafPredicate)) {
-                    continue;
-                }
-                LeafPredicate leaf = (LeafPredicate) child;
-                if (!leaf.fieldRefOptional().isPresent()
-                        || !field.name().equals(leaf.fieldRefOptional().get().name())
-                        || !field.type().equalsIgnoreNullable(leaf.type())
-                        || (!(leaf.function() instanceof Equal) && !isRange(leaf))) {
-                    continue;
-                }
-                column.add(leaf);
-                if (leaf.function() instanceof Equal) {
-                    equality = leaf;
+                LeafPredicate leaf = asLeaf(child);
+                if (leaf != null
+                        && leaf.fieldRefOptional().isPresent()
+                        && field.name().equals(leaf.fieldRefOptional().get().name())
+                        && field.type().equalsIgnoreNullable(leaf.type())
+                        && (isPoint(leaf) || isRange(leaf))) {
+                    column.add(leaf);
+                    originals.add(child);
                 }
             }
-            if (equality == null) {
+            Optional<List<Object>> domain = pointValues(field, column);
+            covered.addAll(originals);
+            if (!domain.isPresent()) {
                 range = column;
-                covered.addAll(range);
                 break;
             }
-            Object value = equality.literals().get(0);
-            for (LeafPredicate leaf : column) {
-                // Validate all bounds before using a full-key point lookup or a prefix.
-                empty |=
-                        value == null || !leaf.function().test(leaf.type(), value, leaf.literals());
+            equalColumns++;
+            if (domain.get().isEmpty()) {
+                return Optional.of(
+                        new Plan(
+                                fields,
+                                covered,
+                                Collections.emptyList(),
+                                equalColumns,
+                                equalColumns));
             }
-            prefix.add(value);
-            covered.addAll(column);
+            if ((long) prefixes.size() * domain.get().size() > MAX_INTERVALS) {
+                return Optional.empty();
+            }
+            List<Object[]> expanded = new ArrayList<>();
+            for (Object[] prefix : prefixes) {
+                for (Object value : domain.get()) {
+                    expanded.add(append(prefix, value));
+                }
+            }
+            prefixes = expanded;
         }
-        int equalColumns = prefix.size();
         int boundColumns = equalColumns + (range.isEmpty() ? 0 : 1);
         if (boundColumns == 0) {
             return Optional.empty();
         }
-        Object[] values = prefix.toArray();
-        Bound lower = new Bound(fields, values, false);
-        Bound upper = new Bound(fields, values, true);
-        if (!range.isEmpty()) {
-            // Comparisons cannot match a NULL component, even with an unbounded lower endpoint.
-            lower = new Bound(fields, append(values, null), true);
-            for (LeafPredicate leaf : range) {
-                if (leaf.literals().contains(null)) {
-                    empty = true;
-                    continue;
-                }
-                if (leaf.function() instanceof GreaterThan
-                        || leaf.function() instanceof GreaterOrEqual
-                        || leaf.function() instanceof Between) {
-                    Bound next =
-                            new Bound(
-                                    fields,
-                                    append(values, leaf.literals().get(0)),
-                                    leaf.function() instanceof GreaterThan);
-                    if (next.compareTo(lower) > 0) {
-                        lower = next;
+        List<Interval> intervals = new ArrayList<>();
+        for (Object[] prefix : prefixes) {
+            Bound lower = new Bound(fields, prefix, false);
+            Bound upper = new Bound(fields, prefix, true);
+            boolean empty = false;
+            if (!range.isEmpty()) {
+                // Comparisons and IS NOT NULL exclude the entire NULL-component suffix.
+                lower = new Bound(fields, append(prefix, null), true);
+                for (LeafPredicate leaf : range) {
+                    if (leaf.function() instanceof IsNotNull) {
+                        continue;
                     }
-                }
-                if (leaf.function() instanceof LessThan
-                        || leaf.function() instanceof LessOrEqual
-                        || leaf.function() instanceof Between) {
-                    Object value = leaf.literals().get(leaf.function() instanceof Between ? 1 : 0);
-                    Bound next =
-                            new Bound(
-                                    fields,
-                                    append(values, value),
-                                    !(leaf.function() instanceof LessThan));
-                    if (next.compareTo(upper) < 0) {
-                        upper = next;
+                    if (leaf.literals().contains(null)) {
+                        empty = true;
+                        break;
+                    }
+                    if (leaf.function() instanceof GreaterThan
+                            || leaf.function() instanceof GreaterOrEqual
+                            || leaf.function() instanceof Between) {
+                        Bound next =
+                                new Bound(
+                                        fields,
+                                        append(prefix, leaf.literals().get(0)),
+                                        leaf.function() instanceof GreaterThan);
+                        if (next.compareTo(lower) > 0) {
+                            lower = next;
+                        }
+                    }
+                    if (leaf.function() instanceof LessThan
+                            || leaf.function() instanceof LessOrEqual
+                            || leaf.function() instanceof Between) {
+                        Object value =
+                                leaf.literals().get(leaf.function() instanceof Between ? 1 : 0);
+                        Bound next =
+                                new Bound(
+                                        fields,
+                                        append(prefix, value),
+                                        !(leaf.function() instanceof LessThan));
+                        if (next.compareTo(upper) < 0) {
+                            upper = next;
+                        }
                     }
                 }
             }
+            if (!empty && lower.compareTo(upper) < 0) {
+                intervals.add(new Interval(lower, upper));
+            }
         }
-        return Optional.of(
-                new Plan(
-                        fields,
-                        covered,
-                        lower,
-                        upper,
-                        boundColumns,
-                        equalColumns,
-                        empty || lower.compareTo(upper) >= 0));
+        return Optional.of(new Plan(fields, covered, intervals, boundColumns, equalColumns));
+    }
+
+    private static Optional<List<Object>> pointValues(DataField field, List<LeafPredicate> column) {
+        LeafPredicate selected = null;
+        for (LeafPredicate leaf : column) {
+            if (isPoint(leaf)
+                    && (selected == null
+                            || !(leaf.function() instanceof In)
+                            || (selected.function() instanceof In
+                                    && leaf.literals().size() < selected.literals().size()))) {
+                selected = leaf;
+            }
+        }
+        if (selected == null) {
+            return Optional.empty();
+        }
+        List<Object> candidates =
+                selected.function() instanceof IsNull
+                        ? Collections.singletonList(null)
+                        : selected.literals();
+        Comparator<Object> comparator = KeySerializer.create(field.type()).createComparator();
+        TreeSet<Object> values =
+                new TreeSet<>(
+                        (left, right) ->
+                                left == null
+                                        ? (right == null ? 0 : -1)
+                                        : right == null ? 1 : comparator.compare(left, right));
+        for (Object value : candidates) {
+            if (value == null
+                    && (!(selected.function() instanceof IsNull) || !field.type().isNullable())) {
+                continue;
+            }
+            boolean matches = true;
+            for (LeafPredicate leaf : column) {
+                if (!leaf.function().test(leaf.type(), value, leaf.literals())) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                values.add(value);
+                if (values.size() > MAX_INTERVALS) {
+                    break;
+                }
+            }
+        }
+        return Optional.of(new ArrayList<>(values));
+    }
+
+    // PredicateBuilder represents small IN lists as ORs of equalities.
+    private static LeafPredicate asLeaf(Predicate predicate) {
+        if (predicate instanceof LeafPredicate) {
+            return (LeafPredicate) predicate;
+        }
+        if (!(predicate instanceof CompoundPredicate)
+                || !(((CompoundPredicate) predicate).function() instanceof Or)) {
+            return null;
+        }
+        LeafPredicate first = null;
+        List<Object> literals = new ArrayList<>();
+        for (Predicate child : PredicateBuilder.splitOr(predicate)) {
+            if (!(child instanceof LeafPredicate)) {
+                return null;
+            }
+            LeafPredicate leaf = (LeafPredicate) child;
+            if (!(leaf.function() instanceof Equal)
+                    || !leaf.fieldRefOptional().isPresent()
+                    || (first != null
+                            && !first.fieldRefOptional().equals(leaf.fieldRefOptional()))) {
+                return null;
+            }
+            first = leaf;
+            literals.add(leaf.literals().get(0));
+        }
+        return first == null
+                ? null
+                : new LeafPredicate(
+                        In.INSTANCE,
+                        first.type(),
+                        first.fieldRefOptional().get().index(),
+                        first.fieldRefOptional().get().name(),
+                        literals);
+    }
+
+    private static boolean isPoint(LeafPredicate leaf) {
+        return leaf.function() instanceof Equal
+                || leaf.function() instanceof In
+                || leaf.function() instanceof IsNull;
     }
 
     private static boolean isRange(LeafPredicate leaf) {
@@ -147,7 +253,8 @@ public final class CompositeBTreePredicate {
                 || leaf.function() instanceof GreaterOrEqual
                 || leaf.function() instanceof LessThan
                 || leaf.function() instanceof LessOrEqual
-                || leaf.function() instanceof Between;
+                || leaf.function() instanceof Between
+                || leaf.function() instanceof IsNotNull;
     }
 
     private static Object[] append(Object[] prefix, Object value) {
@@ -209,35 +316,14 @@ public final class CompositeBTreePredicate {
         }
     }
 
-    /** One tuple interval, with its covered query predicates and point-lookup classification. */
-    public static final class Plan {
-        private final List<DataField> fields;
-        private final List<Predicate> predicates;
+    /** One disjoint tuple interval, in physical key order. */
+    public static final class Interval {
         private final Bound lower;
         private final Bound upper;
-        private final int boundColumns;
-        private final int equalColumns;
-        private final boolean empty;
 
-        private Plan(
-                List<DataField> fields,
-                List<Predicate> predicates,
-                Bound lower,
-                Bound upper,
-                int boundColumns,
-                int equalColumns,
-                boolean empty) {
-            this.fields = fields;
-            this.predicates = predicates;
+        private Interval(Bound lower, Bound upper) {
             this.lower = lower;
             this.upper = upper;
-            this.boundColumns = boundColumns;
-            this.equalColumns = equalColumns;
-            this.empty = empty;
-        }
-
-        public List<Predicate> predicates() {
-            return predicates;
         }
 
         public Bound lower() {
@@ -246,6 +332,40 @@ public final class CompositeBTreePredicate {
 
         public Bound upper() {
             return upper;
+        }
+
+        public GenericRow pointKey() {
+            return GenericRow.of(lower.values);
+        }
+    }
+
+    /** Tuple intervals and their covered predicates, rebuilt from the original query. */
+    public static final class Plan {
+        private final List<DataField> fields;
+        private final List<Predicate> predicates;
+        private final List<Interval> intervals;
+        private final int boundColumns;
+        private final int equalColumns;
+
+        private Plan(
+                List<DataField> fields,
+                List<Predicate> predicates,
+                List<Interval> intervals,
+                int boundColumns,
+                int equalColumns) {
+            this.fields = fields;
+            this.predicates = predicates;
+            this.intervals = intervals;
+            this.boundColumns = boundColumns;
+            this.equalColumns = equalColumns;
+        }
+
+        public List<Predicate> predicates() {
+            return predicates;
+        }
+
+        public List<Interval> intervals() {
+            return intervals;
         }
 
         public int boundColumns() {
@@ -257,15 +377,11 @@ public final class CompositeBTreePredicate {
         }
 
         public boolean isEmpty() {
-            return empty;
+            return intervals.isEmpty();
         }
 
         public boolean isPointLookup() {
             return equalColumns == fields.size();
-        }
-
-        public GenericRow pointKey() {
-            return GenericRow.of(lower.values);
         }
 
         /**
@@ -288,7 +404,7 @@ public final class CompositeBTreePredicate {
         }
 
         public List<GlobalIndexIOMeta> selectFiles(List<GlobalIndexIOMeta> files) {
-            if (empty) {
+            if (isEmpty()) {
                 return Collections.emptyList();
             }
             // Preserve conservative pruning when metadata is unavailable.
@@ -299,18 +415,19 @@ public final class CompositeBTreePredicate {
             List<GlobalIndexIOMeta> result = new ArrayList<>();
             for (GlobalIndexIOMeta file : files) {
                 SortedIndexFileMeta meta = SortedIndexFileMeta.deserialize(file.metadata());
-                if (meta.firstKey() == null
-                        || meta.lastKey() == null
-                        || (lower.compareKey(
-                                                (InternalRow)
-                                                        serializer.deserialize(
-                                                                MemorySlice.wrap(meta.lastKey())))
-                                        > 0
-                                && upper.compareKey(
-                                                (InternalRow)
-                                                        serializer.deserialize(
-                                                                MemorySlice.wrap(meta.firstKey())))
-                                        < 0)) {
+                if (meta.firstKey() == null || meta.lastKey() == null) {
+                    result.add(file);
+                    continue;
+                }
+                InternalRow first =
+                        (InternalRow) serializer.deserialize(MemorySlice.wrap(meta.firstKey()));
+                InternalRow last =
+                        (InternalRow) serializer.deserialize(MemorySlice.wrap(meta.lastKey()));
+                if (intervals.stream()
+                        .anyMatch(
+                                interval ->
+                                        interval.lower.compareKey(last) > 0
+                                                && interval.upper.compareKey(first) < 0)) {
                     result.add(file);
                 }
             }

@@ -346,26 +346,32 @@ public class BTreeIndexReader implements Closeable {
                     if (plan.isEmpty()) {
                         return new RoaringNavigableMap64();
                     }
-                    if (plan.isPointLookup()) {
-                        return pointQuery(plan.pointKey());
-                    }
                     RoaringNavigableMap64 result = new RoaringNavigableMap64();
-                    SstFileReader.SstFileIterator iterator = reader.createIterator();
-                    iterator.seekTo(
-                            key ->
-                                    plan.lower()
-                                            .compareKey(
-                                                    (InternalRow) keySerializer.deserialize(key)));
-                    BlockIterator batch;
-                    while ((batch = iterator.readBatch()) != null) {
-                        while (batch.hasNext()) {
-                            Map.Entry<MemorySlice, MemorySlice> entry = batch.next();
-                            InternalRow key =
-                                    (InternalRow) keySerializer.deserialize(entry.getKey());
-                            if (plan.upper().compareKey(key) > 0) {
-                                return result;
+                    for (CompositeBTreePredicate.Interval interval : plan.intervals()) {
+                        if (plan.isPointLookup()) {
+                            result.or(pointQuery(interval.pointKey()));
+                            continue;
+                        }
+                        SstFileReader.SstFileIterator iterator = reader.createIterator();
+                        iterator.seekTo(
+                                key ->
+                                        interval.lower()
+                                                .compareKey(
+                                                        (InternalRow)
+                                                                keySerializer.deserialize(key)));
+                        BlockIterator batch;
+                        boolean finished = false;
+                        while (!finished && (batch = iterator.readBatch()) != null) {
+                            while (batch.hasNext()) {
+                                Map.Entry<MemorySlice, MemorySlice> entry = batch.next();
+                                InternalRow key =
+                                        (InternalRow) keySerializer.deserialize(entry.getKey());
+                                if (interval.upper().compareKey(key) > 0) {
+                                    finished = true;
+                                    break;
+                                }
+                                addRowIdsTo(entry.getValue(), result);
                             }
-                            addRowIdsTo(entry.getValue(), result);
                         }
                     }
                     return result;

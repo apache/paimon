@@ -147,6 +147,12 @@ class GlobalIndexQuery {
         }
         CompoundPredicate compound = (CompoundPredicate) predicate;
         boolean union = compound.function() instanceof Or;
+        if (union) {
+            CompositeCandidate composite = selectComposite(predicate, groups, options);
+            if (composite != null) {
+                return composite.query();
+            }
+        }
         List<GlobalIndexQuery> children = new ArrayList<>();
         List<Predicate> predicates = GlobalIndexEvaluator.normalizedChildren(compound);
         if (!union) {
@@ -159,17 +165,16 @@ class GlobalIndexQuery {
                 children.add(selected.query());
                 predicates.removeAll(selected.plan.predicates());
                 // Later key conditions remain data filters; do not expand scalar postings for them.
-                Set<String> keyColumns =
+                Set<Integer> keyFields =
                         selected.group.indexFields().stream()
-                                .map(DataField::name)
+                                .map(DataField::id)
                                 .collect(Collectors.toSet());
                 predicates.removeIf(
-                        child ->
-                                child instanceof LeafPredicate
-                                        && ((LeafPredicate) child)
-                                                .fieldRefOptional()
-                                                .filter(field -> keyColumns.contains(field.name()))
-                                                .isPresent());
+                        child -> {
+                            Set<Integer> residualFields = collectFieldIds(rowType, child);
+                            return !residualFields.isEmpty()
+                                    && keyFields.containsAll(residualFields);
+                        });
             }
         }
 
@@ -257,7 +262,7 @@ class GlobalIndexQuery {
                 if (plan.boundColumns() == 1) {
                     List<Range> scalarCoverage =
                             Range.sortAndMergeOverlap(
-                                    fieldGroups.stream()
+                                    groups.get(group.field.id()).stream()
                                             .filter(other -> other.extraFields.isEmpty())
                                             .map(other -> other.range)
                                             .collect(Collectors.toList()),

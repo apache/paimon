@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitSerializer;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -83,6 +84,39 @@ import static org.mockito.Mockito.when;
 
 /** Tests predicate type preservation and unsupported predicates in index queries. */
 class GlobalIndexQueryTest {
+
+    @Test
+    void testCompositeNonNullRangeLeavesSmallInAsDataFilter() {
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "number", DataTypes.INT()),
+                        new DataField(1, "category", DataTypes.STRING()));
+        PredicateBuilder b = new PredicateBuilder(rowType);
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        new IndexFileMeta(
+                                "btree",
+                                "scalar",
+                                1,
+                                100,
+                                new GlobalIndexMeta(0, 99, 0, null, null),
+                                null),
+                        new IndexFileMeta(
+                                "btree",
+                                "composite",
+                                1,
+                                100,
+                                new GlobalIndexMeta(0, 99, 1, new int[] {0}, null),
+                                null));
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class))).thenReturn(new Path("index"));
+        Predicate predicate = PredicateBuilder.and(b.isNotNull(1), b.in(0, Arrays.asList(7, 8)));
+        GlobalIndexQuery query =
+                GlobalIndexQuery.create(rowType, predicate, files, paths, new Options());
+        assertThat(query.hasCompositeQuery()).isTrue();
+        assertThat(query.hasScalarQuery()).isFalse();
+        assertThat(query.contributingFieldIds(rowType)).containsExactly(1);
+    }
 
     @TempDir java.nio.file.Path tempDir;
 

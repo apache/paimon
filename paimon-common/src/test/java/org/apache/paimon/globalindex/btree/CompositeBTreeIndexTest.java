@@ -195,15 +195,7 @@ class CompositeBTreeIndexTest {
             for (Predicate unsupported :
                     Arrays.asList(
                             builder.equal(1, 7),
-                            builder.isNull(0),
-                            PredicateBuilder.and(
-                                    builder.in(
-                                            0,
-                                            Arrays.asList(
-                                                    BinaryString.fromString("category-a"),
-                                                    BinaryString.fromString("category-b"))),
-                                    builder.equal(1, 7),
-                                    builder.equal(2, BinaryString.fromString("tag"))),
+                            builder.notEqual(0, BinaryString.fromString("category-a")),
                             PredicateBuilder.or(fullKey, builder.equal(1, 8)))) {
                 assertThat(reader.visitComposite(unsupported).join()).isEmpty();
             }

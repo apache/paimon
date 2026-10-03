@@ -20,9 +20,13 @@ package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -30,21 +34,50 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.calcRowRange;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Utilities for building sorted indexes in tests without exposing a test-only production API. */
 public final class SortedGlobalIndexTestUtils {
 
     private SortedGlobalIndexTestUtils() {}
+
+    /** Delete physical index files without changing manifests, and restore them on close. */
+    public static Closeable deleteIndexFiles(FileStoreTable table, int fieldCount)
+            throws IOException {
+        Map<Path, byte[]> files = new LinkedHashMap<>();
+        for (IndexManifestEntry entry : table.store().newIndexFileHandler().scanEntries()) {
+            IndexFileMeta file = entry.indexFile();
+            if (file.globalIndexMeta().getIndexedFieldIds().size() == fieldCount) {
+                Path path = table.store().pathFactory().globalIndexFileFactory().toPath(file);
+                files.put(path, IOUtils.readFully(table.fileIO().newInputStream(path), true));
+                assertThat(table.fileIO().delete(path, false)).isTrue();
+            }
+        }
+        assertThat(files).isNotEmpty();
+        return () -> {
+            for (Map.Entry<Path, byte[]> file : files.entrySet()) {
+                try (PositionOutputStream out =
+                        table.fileIO().newOutputStream(file.getKey(), false)) {
+                    out.write(file.getValue());
+                }
+            }
+        };
+    }
 
     public static List<CommitMessage> buildIndex(
             FileStoreTable table,

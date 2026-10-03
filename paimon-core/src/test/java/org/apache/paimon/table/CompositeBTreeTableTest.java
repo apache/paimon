@@ -68,6 +68,86 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CompositeBTreeTableTest extends DataEvolutionTestBase {
 
     @Test
+    void testInAndNullQueriesAvoidScalarPostingsAcrossReaderModes() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                table().copy(Collections.singletonMap("sorted-index.records-per-file", "13"));
+        append(table, 0, 60);
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            null,
+                            BinaryString.fromString("category-a"),
+                            BinaryString.fromString("null-number")));
+            write.write(GenericRow.of(7, null, BinaryString.fromString("null-category")));
+            write.write(GenericRow.of(null, null, BinaryString.fromString("null-both")));
+            commit.commit(write.prepareCommit());
+        }
+        build(table, "f0");
+        build(table, "f1", "f0");
+        deleteIndexFiles(table, 1);
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        List<Object> categories =
+                new ArrayList<>(
+                        Arrays.asList(
+                                BinaryString.fromString("category-a"),
+                                BinaryString.fromString("category-b"),
+                                null));
+        Predicate small = b.in(1, categories);
+        for (int i = 0; i < 21; i++) {
+            categories.add(BinaryString.fromString("absent-" + i));
+        }
+        Predicate numbers = b.in(0, Arrays.asList(7, 8, 7, null));
+        Predicate joint = PredicateBuilder.and(small, numbers);
+        List<Predicate> queries =
+                Arrays.asList(
+                        joint,
+                        PredicateBuilder.and(b.in(1, categories), numbers),
+                        PredicateBuilder.and(small, b.greaterThan(0, 7)),
+                        PredicateBuilder.and(joint, b.greaterThan(0, 7)),
+                        PredicateBuilder.and(b.isNull(1), b.greaterThan(0, 6)),
+                        PredicateBuilder.and(b.isNull(1), b.isNull(0)),
+                        PredicateBuilder.and(
+                                b.equal(1, BinaryString.fromString("category-a")), b.isNull(0)),
+                        PredicateBuilder.and(b.isNotNull(1), numbers),
+                        PredicateBuilder.and(b.isNull(1), b.isNotNull(1)),
+                        PredicateBuilder.and(b.equal(1, null), b.isNull(0)),
+                        PredicateBuilder.or(b.isNull(1), joint));
+        for (Predicate query : queries) {
+            List<String> expected = read(withoutIndex, query);
+            for (boolean inReader : Arrays.asList(false, true)) {
+                for (String mode : Arrays.asList("fast", "full", "detail")) {
+                    List<String> actual;
+                    try {
+                        actual = read(configured(table, mode, inReader), query);
+                    } catch (Exception e) {
+                        throw new AssertionError(
+                                query + ", reader=" + inReader + ", mode=" + mode, e);
+                    }
+                    assertThat(actual)
+                            .as("%s, reader=%s, mode=%s", query, inReader, mode)
+                            .containsExactlyInAnyOrderElementsOf(expected);
+                }
+            }
+        }
+        List<String> indexed = read(withoutIndex, joint);
+        append(table, 60, 80);
+        for (boolean inReader : Arrays.asList(false, true)) {
+            assertThat(read(configured(table, "fast", inReader), joint))
+                    .containsExactlyInAnyOrderElementsOf(indexed);
+            for (String mode : Arrays.asList("full", "detail")) {
+                assertThat(read(configured(table, mode, inReader), joint))
+                        .containsExactlyInAnyOrderElementsOf(read(withoutIndex, joint));
+            }
+        }
+    }
+
+    @Test
     void testPrefixAndRangeQueriesAcrossReaderModes() throws Exception {
         createTableDefault();
         FileStoreTable table =
@@ -209,7 +289,15 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                         PredicateBuilder.and(
                                 b.equal(1, BinaryString.fromString("category-b")),
                                 b.greaterThan(0, 8)));
-        for (Predicate query : Arrays.asList(range, conjunction, union)) {
+        Predicate multiRange =
+                PredicateBuilder.and(
+                        b.in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("category-a"),
+                                        BinaryString.fromString("category-b"))),
+                        b.between(0, 7, 8));
+        for (Predicate query : Arrays.asList(range, conjunction, union, multiRange)) {
             List<String> expected = read(withoutIndex, query);
             for (boolean inReader : Arrays.asList(false, true)) {
                 for (String mode : Arrays.asList("fast", "full", "detail")) {
