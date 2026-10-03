@@ -494,6 +494,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 "Ready to overwrite to table {}, number of commit messages: {}",
                 tableName,
                 committable.fileCommittables().size());
+        commitCallbacks.forEach(callback -> callback.beforeOverwrite(committable));
 
         long started = System.nanoTime();
         int generatedSnapshot = 0;

@@ -364,6 +364,61 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Sink: full compaction of a micro-batch is recognised by a compacted-full scan") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b INT)
+                       |TBLPROPERTIES (
+                       |  'primary-key'='a',
+                       |  'bucket'='1',
+                       |  'full-compaction.delta-commits'='3'
+                       |)
+                       |""".stripMargin)
+          val table = loadTable("T")
+          val location = table.location().toString
+
+          val inputData = MemoryStream[(Int, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .format("paimon")
+            .start(location)
+
+          try {
+            // The third micro-batch is scheduled for a full compaction, the fourth is not.
+            for (b <- 100 to 103) {
+              inputData.addData((1, b))
+              stream.processAllAvailable()
+            }
+          } finally {
+            stream.stop()
+          }
+          // Micro-batch n is committed under identifier n + 1, the way Flink numbers checkpoints;
+          // that is what a compacted-full scan recognises a scheduled full compaction by.
+          val snapshots = table.snapshotManager()
+          assert(
+            snapshots.latestSnapshot().commitKind == APPEND,
+            "the last micro-batch must not have compacted")
+          assert(snapshots.latestSnapshot().commitIdentifier() == 4)
+          val fullCompaction = snapshots.snapshot(snapshots.latestSnapshotId() - 1)
+          assert(fullCompaction.commitKind == COMPACT)
+          assert(fullCompaction.commitIdentifier() == 3)
+
+          // A compacted-full scan reads the latest full compaction, that is the state after the
+          // third micro-batch, and must recognise it by the commit identifier the sink published.
+          val compactedFull = spark.read
+            .format("paimon")
+            .option("scan.mode", "compacted-full")
+            .load(location)
+          checkAnswer(compactedFull, Row(1, 102) :: Nil)
+      }
+    }
+  }
+
   test("Paimon Sink: batch then stream should not overwrite batch data") {
     failAfter(streamingTimeout) {
       withTempDir {

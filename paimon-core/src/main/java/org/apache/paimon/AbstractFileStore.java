@@ -442,7 +442,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         }
 
         if (options.isChainTable()) {
-            callbacks.add(new ChainTableOverwriteCommitCallback(table));
+            callbacks.add(new ChainTableOverwriteCommitCallback(table, commitUser));
         }
 
         if (options.visibilityCallbackEnabled() && shouldWaitForVisibility(table)) {
