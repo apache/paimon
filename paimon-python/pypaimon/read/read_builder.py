@@ -38,6 +38,20 @@ from pypaimon.utils.projection import MapKey, Projection, is_row_type
 ProjectionPath = Sequence[Union[int, MapKey]]
 
 
+def _is_supported_variant_target_type(target_type: pyarrow.DataType) -> bool:
+    if target_type in (
+            pyarrow.bool_(), pyarrow.int8(), pyarrow.int16(),
+            pyarrow.int32(), pyarrow.int64(), pyarrow.float32(),
+            pyarrow.float64(), pyarrow.string(), pyarrow.binary(),
+            pyarrow.date32()):
+        return True
+    if pyarrow.types.is_decimal128(target_type):
+        return 0 <= target_type.scale <= target_type.precision
+    return (pyarrow.types.is_timestamp(target_type)
+            and target_type.unit == 'us'
+            and target_type.tz in (None, 'UTC'))
+
+
 class _ReadPredicateBuilder(PredicateBuilder):
 
     def __init__(self, fields, unsupported_fields):
@@ -251,6 +265,10 @@ class ReadBuilder:
                 raise TypeError(
                     "variant_fields[%r]['target_type'] must be a PyArrow "
                     "data type" % column)
+            if not _is_supported_variant_target_type(target_type):
+                raise ValueError(
+                    "variant_fields[%r]['target_type'] must be a supported "
+                    "scalar type returned unchanged" % column)
             fail_on_error = options.get('fail_on_error', False)
             if not isinstance(fail_on_error, bool):
                 raise TypeError(
