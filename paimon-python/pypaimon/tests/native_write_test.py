@@ -16,7 +16,7 @@
 
 """End-to-end coverage of the optional native data writer bridge."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -130,12 +130,19 @@ def test_batch_native_write_commits_through_both_committers(
 
 
 @requires_native
-def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog):
+@pytest.mark.parametrize('directory', [None, 'relative', 'absolute', 'uri'])
+def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, directory):
     catalog = native_rest_catalog
+    options = {'file.format': 'parquet', 'write.native.enabled': 'true',
+               'commit.native.enabled': 'true'}
+    if directory is not None:
+        options['data-file.path-directory'] = {
+            'relative': 'data/nested', 'absolute': str(tmp_path / 'relocated'),
+            'uri': (tmp_path / 'relocated').as_uri(),
+        }[directory]
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
         pa.schema([('id', pa.int64()), ('pt', pa.string())]),
-        options={'file.format': 'parquet', 'write.native.enabled': 'true',
-                 'commit.native.enabled': 'true'}, partition_keys=['pt']), False)
+        options=options, partition_keys=['pt']), False)
     table = catalog.get_table('default.t')
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
@@ -248,6 +255,53 @@ def test_native_overwrite_and_empty_overwrite(tmp_path):
     empty.new_commit().commit(empty_writer.prepare_commit())
     empty_writer.close()
     assert _rows(table) == [{'id': 2, 'pt': 'b'}]
+
+
+@requires_native
+@pytest.mark.parametrize('failure', [None, 'before-publication', 'after-publication'])
+def test_writer_abort_preserves_native_commit_files(native_rest_catalog, failure):
+    native_rest_catalog.create_table('default.abort_handoff', Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('pt', pa.string())]), options={
+            'write.native.enabled': 'true', 'commit.native.enabled': 'true',
+        }), False)
+    table = native_rest_catalog.get_table('default.abort_handoff')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        assert isinstance(writer, NativeTableWrite)
+        writer.write_arrow_batch(_batch([1, 2], ['a', 'b']))
+        messages = writer.prepare_commit()
+        prepared = commit._prepare_native_commit(messages)
+        assert prepared is not None
+        native, native_messages = prepared
+        proxy = Mock(wraps=native)
+
+        def publish(*args):
+            if failure != 'before-publication':
+                native.commit(*args)
+            if failure:
+                raise RuntimeError('Native commit outcome is unknown')
+
+        proxy.commit.side_effect = publish
+        with patch.object(commit, '_prepare_native_commit', return_value=(proxy, native_messages)), \
+                patch.object(commit.file_store_commit, 'commit',
+                             side_effect=AssertionError('Python commit fallback')):
+            if failure:
+                with pytest.raises(RuntimeError, match='Native commit outcome is unknown'):
+                    commit.commit(messages)
+            else:
+                commit.commit(messages)
+        proxy.commit.assert_called_once()
+        writer.abort()
+        assert all(table.file_io.exists(file.file_path)
+                   for message in messages for file in message.new_files)
+        if failure != 'before-publication':
+            assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
+        else:
+            assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+        commit.close()
 
 
 @requires_native

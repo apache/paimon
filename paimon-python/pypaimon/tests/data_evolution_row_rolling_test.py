@@ -208,6 +208,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                 NotImplementedError, 'row-count based file rolling'):
             tw.write_arrow(self._rows(4))
 
+    @pytest.mark.python_write
     def test_blob_writer_supports_target_file_row_num(self):
         table = self._create_with_schema(
             self.blob_schema,

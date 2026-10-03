@@ -142,7 +142,7 @@ class PkSortedIndexBuilderTest {
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
         try (GlobalIndexReader reader =
-                GlobalIndexer.create("multivalue", tags, options)
+                GlobalIndexer.create("multivalue", Collections.singletonList(tags), options)
                         .createReader(
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,
@@ -391,7 +391,7 @@ class PkSortedIndexBuilderTest {
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
         try (GlobalIndexReader reader =
-                GlobalIndexer.create(indexType, field(), options)
+                GlobalIndexer.create(indexType, Collections.singletonList(field()), options)
                         .createReader(
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,

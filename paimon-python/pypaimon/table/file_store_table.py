@@ -534,12 +534,15 @@ class FileStoreTable(Table):
         return table
 
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
+        directory_key = CoreOptions.DATA_FILE_PATH_DIRECTORY.key()
+        if directory_key in options and options[directory_key] != self.options.data_file_path_directory():
+            raise ValueError('Cannot change immutable option ' + directory_key)
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
             if v is None:
-                new_options.pop(k)
+                new_options.pop(k, None)
             else:
                 new_options[k] = v
 

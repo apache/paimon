@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 
@@ -35,6 +36,11 @@ import java.util.concurrent.CompletableFuture;
 /** Index reader for global index, return {@link GlobalIndexResult}. */
 public interface GlobalIndexReader
         extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
+
+    /** Evaluate a composite predicate. An empty Optional means the reader cannot use the index. */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitComposite(Predicate predicate) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
 
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {

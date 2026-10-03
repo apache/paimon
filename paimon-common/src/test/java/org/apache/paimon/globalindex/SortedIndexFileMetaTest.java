@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,8 +158,11 @@ class SortedIndexFileMetaTest {
                 };
         GlobalIndexSingleColumnWriter indexWriter =
                 new BTreeGlobalIndexer(
-                                new DataField(
-                                        1, "testField", new VarCharType(VarCharType.MAX_LENGTH)),
+                                Collections.singletonList(
+                                        new DataField(
+                                                1,
+                                                "testField",
+                                                new VarCharType(VarCharType.MAX_LENGTH))),
                                 new Options())
                         .createWriter(fileWriter);
         for (int index = 0; index < keys.length; index++) {

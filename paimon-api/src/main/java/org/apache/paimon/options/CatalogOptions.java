@@ -208,6 +208,31 @@ public class CatalogOptions {
                                     + "Paimon can read and write to external storage paths, such as OSS or S3. "
                                     + "In order to access these external paths correctly, you also need to configure the corresponding access key and secret key.");
 
+    public static final ConfigOption<String> USER_AGENT_MODULE =
+            ConfigOptions.key("user-agent.module")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The module of Paimon's unified User-Agent, module(transport;features) extended, "
+                                    + "sent on REST and object storage requests. Defaults to the Paimon client and its version. "
+                                    + "For OSS, fs.oss.user.agent.module takes precedence; for REST, header.User-Agent replaces the whole value.");
+
+    public static final ConfigOption<String> USER_AGENT_FEATURES =
+            ConfigOptions.key("user-agent.features")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Space-separated features of Paimon's unified User-Agent, sent on REST and object storage requests. "
+                                    + "For OSS, fs.oss.user.agent.features takes precedence; for REST, header.User-Agent replaces the whole value.");
+
+    public static final ConfigOption<String> USER_AGENT_EXTENDED =
+            ConfigOptions.key("user-agent.extended")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Free-form text appended to Paimon's unified User-Agent, sent on REST and object storage requests. "
+                                    + "For OSS, fs.oss.user.agent.extended takes precedence; for REST, header.User-Agent replaces the whole value.");
+
     public static final ConfigOption<Boolean> FILE_IO_ALLOW_CACHE =
             ConfigOptions.key("file-io.allow-cache")
                     .booleanType()

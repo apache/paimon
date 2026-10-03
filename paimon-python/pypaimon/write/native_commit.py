@@ -194,6 +194,6 @@ def from_native_commit_messages(table, messages):
         table.trimmed_primary_keys_fields) for message in messages]
     for message in decoded:
         for file in message.new_files + message.changelog_files:
-            file.file_path = file.external_path or canonical_data_file_path(
+            file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
                 table, message.partition, message.bucket, file.file_name)
     return decoded

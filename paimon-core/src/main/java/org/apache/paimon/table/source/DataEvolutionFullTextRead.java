@@ -51,6 +51,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -259,7 +260,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     private Optional<GlobalIndexEvaluator.Evaluation> evaluateWithIndexes(
             Set<IndexFileMeta> scalarIndexFiles, @Nullable Snapshot planSnapshot) {
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
@@ -386,12 +387,13 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         if (meta.extraFieldIds() != null) {
             return GlobalIndexerFactoryUtils.load(indexType)
                     .create(
-                            meta.getIndexField(table.rowType()),
-                            meta.getExtraFields(table.rowType()),
+                            meta.getIndexedFields(table.rowType()),
                             table.coreOptions().toConfiguration());
         }
         return GlobalIndexerFactoryUtils.load(indexType)
-                .create(textColumn, table.coreOptions().toConfiguration());
+                .create(
+                        Collections.singletonList(textColumn),
+                        table.coreOptions().toConfiguration());
     }
 
     private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
