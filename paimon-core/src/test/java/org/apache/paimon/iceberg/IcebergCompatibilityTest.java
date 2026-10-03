@@ -59,6 +59,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -113,6 +114,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for Iceberg compatibility. */
@@ -1716,6 +1718,130 @@ public class IcebergCompatibilityTest {
                 DataTypes.TIMESTAMP(2),
                 DataTypes.TIMESTAMP(9),
                 DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9));
+    }
+
+    @ParameterizedTest
+    @MethodSource("unpublishableTimestampTypes")
+    public void testExistingTableWithUnpublishableTimestampsStillLoads(DataType timestampType)
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), timestampType}, new String[] {"k", "ts"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options.toMap(),
+                        "");
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, warehouse)) {
+            paimonCatalog.createDatabase("mydb", false);
+            paimonCatalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) paimonCatalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, Timestamp.fromEpochMillis(0)));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            Path tablePath = new Path(warehouse, "mydb.db/t");
+            TableSchema latest = new FileSystemSchemaManager(fileIO, tablePath).latest().get();
+            Map<String, String> upgraded = new HashMap<>(latest.options());
+            upgraded.put(
+                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                    IcebergOptions.StorageType.TABLE_LOCATION.toString());
+            TableSchema legacy =
+                    new TableSchema(
+                            latest.id() + 1,
+                            latest.fields(),
+                            latest.highestFieldId(),
+                            latest.partitionKeys(),
+                            latest.primaryKeys(),
+                            upgraded,
+                            latest.comment());
+            fileIO.writeFile(
+                    new Path(tablePath, "schema/schema-" + legacy.id()), legacy.toString(), true);
+
+            FileStoreTable loaded = (FileStoreTable) paimonCatalog.getTable(identifier);
+            ReadBuilder readBuilder = loaded.newReadBuilder();
+            List<Integer> keys = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(row -> keys.add(row.getInt(0)));
+            assertThat(keys).containsExactly(1);
+            assertThatCode(() -> loaded.copy(loaded.options())).doesNotThrowAnyException();
+
+            paimonCatalog.alterTable(
+                    identifier,
+                    SchemaChange.setOption(
+                            IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                            IcebergOptions.StorageType.DISABLED.toString()),
+                    false);
+        }
+    }
+
+    @Test
+    public void testRetryRefusesToRepublishWhatTheMirrorCannotPublish() throws Exception {
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                        IcebergOptions.StorageType.HADOOP_CATALOG.toString()));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        RecordingIcebergMetadataCommitter.failNextCommit = true;
+        write.write(GenericRow.of(2, 20));
+        assertThatThrownBy(() -> commit.commit(2, write.prepareCommit(false, 2)))
+                .hasStackTraceContaining("injected catalog failure");
+        write.close();
+        try {
+            commit.close();
+        } catch (Exception ignored) {
+        }
+
+        TableSchema latest = table.schemaManager().latest().get();
+        List<DataField> fields = new ArrayList<>(latest.fields());
+        fields.add(new DataField(latest.highestFieldId() + 1, "ts", DataTypes.TIMESTAMP(9)));
+        TableSchema legacy =
+                new TableSchema(
+                        latest.id() + 1,
+                        fields,
+                        latest.highestFieldId() + 1,
+                        latest.partitionKeys(),
+                        latest.primaryKeys(),
+                        latest.options(),
+                        latest.comment());
+        table.fileIO()
+                .writeFile(
+                        new Path(table.location(), "schema/schema-" + legacy.id()),
+                        legacy.toString(),
+                        true);
+
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser);
+        assertThatThrownBy(() -> callback.retry(new ManifestCommittable(2)))
+                .hasMessageContaining("precision from 3 to 6");
+        callback.close();
+        assertThat(RecordingIcebergMetadataCommitter.COMMITS).isEmpty();
     }
 
     @ParameterizedTest
