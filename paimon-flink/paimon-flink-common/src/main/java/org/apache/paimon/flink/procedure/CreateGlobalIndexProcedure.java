@@ -135,7 +135,7 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 SortedIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
-                        indexColumns.get(0),
+                        indexColumns,
                         indexType,
                         partitionPredicate,
                         userOptions);
