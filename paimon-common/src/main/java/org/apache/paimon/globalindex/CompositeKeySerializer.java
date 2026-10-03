@@ -67,6 +67,11 @@ public class CompositeKeySerializer implements KeySerializer {
     }
 
     @Override
+    public Comparator<MemorySlice> createSliceComparator() {
+        return serializer.get().createSliceComparator();
+    }
+
+    @Override
     public Comparator<Object> createComparator() {
         return (left, right) -> {
             for (int i = 0; i < getters.length; i++) {

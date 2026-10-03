@@ -181,7 +181,7 @@ public class BTreeIndexReader implements Closeable {
                             input, filePath, cacheManager, footer.getBloomFilterHandle());
             this.reader =
                     new SstFileReader(
-                            createSliceComparator(keySerializer),
+                            keySerializer.createSliceComparator(),
                             blockCache,
                             footer.getIndexBlockHandle(),
                             bloomFilter);
@@ -238,12 +238,6 @@ public class BTreeIndexReader implements Closeable {
         }
 
         return nullBitmap;
-    }
-
-    private Comparator<MemorySlice> createSliceComparator(KeySerializer keySerializer) {
-        return (slice1, slice2) ->
-                comparator.compare(
-                        keySerializer.deserialize(slice1), keySerializer.deserialize(slice2));
     }
 
     @Override
