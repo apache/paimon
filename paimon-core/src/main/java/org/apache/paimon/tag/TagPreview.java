@@ -27,11 +27,8 @@ import org.apache.paimon.utils.TagManager;
 import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 
 import static java.util.Collections.singletonMap;
@@ -85,10 +82,10 @@ public class TagPreview {
             return singletonMap(SCAN_SNAPSHOT_ID.key(), String.valueOf(snapshot.id()));
         }
 
+        // filter by tag name first: a snapshot may carry only manually created tags
         Optional<String> findTag =
-                tagManager.tags().values().stream()
-                        .map(this::toOneAutoTag)
-                        .filter(Objects::nonNull)
+                tagManager.tags(periodHandler::isAutoTag).values().stream()
+                        .map(TagAutoCreation::checkAndGetOneAutoTag)
                         .filter(t -> t.compareTo(tag) <= 0)
                         .max(Comparator.naturalOrder());
         if (findTag.isPresent()) {
@@ -96,19 +93,5 @@ public class TagPreview {
         }
 
         throw new RuntimeException("Cannot find snapshot or tag for tag name: " + tag);
-    }
-
-    private String toOneAutoTag(List<String> tags) {
-        List<String> autoTags = new ArrayList<>();
-        for (String tag : tags) {
-            if (periodHandler.isAutoTag(tag)) {
-                autoTags.add(tag);
-            }
-        }
-        if (autoTags.isEmpty()) {
-            // a snapshot may carry only manually created tags: nothing to resolve here
-            return null;
-        }
-        return TagAutoCreation.checkAndGetOneAutoTag(autoTags);
     }
 }

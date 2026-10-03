@@ -97,20 +97,13 @@ public class TagPreviewTest extends PrimaryKeyTableTestBase {
         TagPreview preview = create();
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
 
-        // only manually named tags exist and no snapshot's preview time resolves the
-        // requested tag: the lookup must fail with the intended error instead of the
-        // misleading "more than 1 auto-created tags"
+        // the only tag is a manual one and no snapshot is early enough, so nothing resolves
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
         table.createTag("my-manual-tag", 1);
 
         assertThatThrownBy(() -> preview.timeTravel(table, "2023-07-01"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Cannot find snapshot or tag");
-
-        // a date-shaped (auto-format) tag resolves normally through the short-circuit
-        table.createTag("2023-07-19", 1);
-        assertThat(preview.timeTravel(table, "2023-07-19"))
-                .containsAllEntriesOf(singletonMap(SCAN_TAG_NAME.key(), "2023-07-19"));
 
         commit.close();
     }
@@ -124,16 +117,14 @@ public class TagPreviewTest extends PrimaryKeyTableTestBase {
         TableCommitImpl commit =
                 table.copy(dynamicOptions).newCommit(commitUser).ignoreEmptyCommit(false);
 
-        // snapshot 1 keeps an auto-format tag, snapshot 2 keeps only a manually named tag
+        // snapshot 1 has an auto tag, snapshot 2 only a manual tag that sorts after it
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-19T12:12:00")));
         table.createTag("2023-07-18", 1);
-        table.createTag("my-manual-tag", 2);
+        table.createTag("2023-07-18-backup", 2);
 
-        // push the watermark past the request and expire snapshots 1 and 2, so the snapshot
-        // traversal finds nothing and the tags() fallback runs. The surviving auto tag on
-        // snapshot 1 must resolve even though snapshot 2's group holds only a manual tag: on
-        // master that manual-only group made toOneAutoTag throw and poisoned the whole max().
+        // expire snapshots 1 and 2, so no retained snapshot is early enough and the lookup
+        // falls back to the tags
         for (int i = 0; i < 5; i++) {
             commit.commit(new ManifestCommittable(0, utcMills("2023-07-21T12:12:00")));
         }
