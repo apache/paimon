@@ -88,7 +88,9 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(uri, user_agent.rest_user_agent(options))
         auth_provider = AuthProviderFactory.create_auth_provider(options)
+        client_user_agent = self._configured_user_agent(options.to_map())
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
+        self._set_user_agent(base_headers, client_user_agent)
 
         if config_required:
             warehouse = options.get(CatalogOptions.WAREHOUSE)
@@ -110,10 +112,37 @@ class RESTApi:
             base_headers.update(
                 RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
             )
+            override_user_agent = self._configured_user_agent(config_response.overrides or {})
+            default_user_agent = self._configured_user_agent(config_response.defaults or {})
+            if override_user_agent is not None:
+                configured_user_agent = override_user_agent
+            elif client_user_agent is not None:
+                configured_user_agent = client_user_agent
+            else:
+                configured_user_agent = default_user_agent
+            self._set_user_agent(base_headers, configured_user_agent)
 
         self.rest_auth_function = RESTAuthFunction(base_headers, auth_provider)
         self.options = options
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
+
+    @classmethod
+    def _configured_user_agent(cls, options: Dict[str, str]) -> Optional[str]:
+        user_agent_value = None
+        for key, value in options.items():
+            if key.lower() == (cls.HEADER_PREFIX + "User-Agent").lower() and value is not None:
+                user_agent_value = str(value)
+        return user_agent_value
+
+    @staticmethod
+    def _set_user_agent(headers: Dict[str, str], user_agent_value: Optional[str]) -> None:
+        # HTTP header names are case-insensitive; retain one value after applying
+        # server defaults < client options < server overrides.
+        for key in list(headers):
+            if key.lower() == "user-agent":
+                del headers[key]
+        if user_agent_value is not None:
+            headers["User-Agent"] = user_agent_value
 
     def __build_paged_query_params(
             self,
