@@ -1142,6 +1142,40 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
+    public static final ConfigOption<String> CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS =
+            key("changelog-producer.event-metadata-fields")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "A comma-separated list of column names whose post-merge values should "
+                                    + "be stored as event metadata fields in lookup changelog records. "
+                                    + "In retraction records (-U, -D), regular value columns retain "
+                                    + "the correct before-image while the event metadata fields "
+                                    + "contain the event values. In forward records (+I, +U), the "
+                                    + "event metadata fields mirror the regular values. The "
+                                    + "post-merge values may differ from the raw input row when the "
+                                    + "merge engine aggregates values. The event metadata fields "
+                                    + "can be read as Flink metadata columns by sinks that need event "
+                                    + "timestamps for conflict resolution. "
+                                    + "Only valid when changelog-producer is lookup.");
+
+    @Immutable
+    public static final ConfigOption<String> CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX =
+            key("changelog-producer.metadata-field-prefix")
+                    .stringType()
+                    .defaultValue("__internal__")
+                    .withDescription(
+                            "The prefix used for naming the extra metadata columns created by "
+                                    + "'changelog-producer.event-metadata-fields'. For example, "
+                                    + "with the default prefix '__internal__' and a preserved column "
+                                    + "'event_ts', the metadata column is named '__internal__event_ts'. "
+                                    + "That name is also the Flink readable metadata key. The "
+                                    + "changelog storage column uses the same prefix with the "
+                                    + "source field ID, keeping its name stable after a rename. "
+                                    + "Change this if the default prefix conflicts with existing "
+                                    + "column names. The prefix cannot be changed or reset after "
+                                    + "the table has snapshots.");
+
     public static final ConfigOption<Boolean> TABLE_READ_SEQUENCE_NUMBER_ENABLED =
             key("table-read.sequence-number.enabled")
                     .booleanType()
@@ -4031,6 +4065,20 @@ public class CoreOptions implements Serializable {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
                 .map(s -> Arrays.asList(s.split(",")))
                 .orElse(Collections.emptyList());
+    }
+
+    public List<String> changelogEventMetadataFields() {
+        return options.getOptional(CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS)
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
+                .orElse(Collections.emptyList());
+    }
+
+    public String changelogMetadataFieldPrefix() {
+        return options.get(CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX);
     }
 
     public boolean tableReadSequenceNumberEnabled() {

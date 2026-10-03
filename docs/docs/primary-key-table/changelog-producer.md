@@ -103,11 +103,50 @@ Lookup uses memory and local disk caches:
 | `lookup.cache-max-disk-size` | Unlimited | Bound local disk usage |
 | `lookup.cache-max-memory-size` | `256 mb` | Bound in-memory cache usage |
 
-In Flink, `execution.checkpointing.max-concurrent-checkpoints` can also affect throughput when
-checkpoint completion waits for compaction. Tune it with checkpoint duration and resource usage.
-
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
+
+Set `'changelog-producer.event-metadata-fields'` to a comma-separated list of columns whose
+post-merge values should be stored as event metadata fields in lookup changelog records. Metadata
+fields are named by concatenating the configured prefix and column name (`__internal__<column>` by
+default). The same name is used as the Flink metadata key. For retractions (`-U`, `-D`), regular
+columns contain the before-image while metadata fields contain the event values; for forward records
+(`+I`, `+U`), they mirror the regular values. The post-merge values may differ from the raw incoming
+row when the merge engine aggregates values. External sinks that need event timestamps for conflict
+resolution can read these metadata fields.
+
+These fields are intended to be passed through to downstream sinks. Do not use them in filters or
+aggregations: those operations can remove or combine changelog records, including retractions, and
+leave downstream sinks with an incomplete changelog.
+
+Paimon readers such as Spark expose these generated fields as regular columns using the configured
+names. Flink SQL must declare the field as a metadata column on the Paimon source, for example
+`METADATA FROM '__internal__event_ts'` with the default prefix. The Flink column alias is not a
+physical Paimon column and is not automatically visible to Spark.
+
+This option is supported only by the `lookup` changelog producer. Set
+`'changelog-producer.metadata-field-prefix'` if the default prefix conflicts with an existing column
+name. Changelog files written before this option was enabled expose these metadata fields as `NULL`.
+
+```sql
+-- Source table with event metadata preservation
+CREATE TABLE my_table (
+    id INT PRIMARY KEY NOT ENFORCED,
+    data STRING,
+    event_ts BIGINT,
+    source_event_ts BIGINT METADATA FROM '__internal__event_ts' VIRTUAL
+) WITH (
+    'changelog-producer' = 'lookup',
+    'sequence.field' = 'event_ts',
+    'changelog-producer.event-metadata-fields' = 'event_ts'
+);
+
+-- external_sink is defined by its datastore connector and has a writable event_ts input.
+```
+
+The Paimon source key `__internal__event_ts` populates the source alias `source_event_ts`. Map that
+alias to the external datastore's writable `event_ts` input. Any writable metadata key on the sink
+is separate and must be advertised by that sink connector.
 
 ## Full Compaction
 
