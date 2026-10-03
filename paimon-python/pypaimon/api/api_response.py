@@ -23,6 +23,7 @@ from pypaimon.api.api_request import RESTRequest
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import T, json_field, optional_json_field
 from pypaimon.common.options import Options
+from pypaimon.management.permission_assignment import PermissionAssignment
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
@@ -628,3 +629,39 @@ class AuthTableQueryRequest(RESTRequest):
 class AuthTableQueryResponse(RESTResponse):
     filter: Optional[List[str]] = json_field("filter", default=None)
     column_masking: Optional[Dict[str, str]] = json_field("columnMasking", default=None)
+
+
+class ListPermissionsResponse(PagedResponse[PermissionAssignment]):
+
+    FIELD_PERMISSIONS = "permissions"
+
+    def __init__(self, permissions: Optional[List[PermissionAssignment]],
+                 next_page_token: Optional[str] = None):
+        self._permissions = permissions
+        self._next_page_token = next_page_token
+
+    def get_permissions(self) -> Optional[List[PermissionAssignment]]:
+        return self._permissions
+
+    def data(self) -> Optional[List[PermissionAssignment]]:
+        return self._permissions
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self._next_page_token
+
+    def to_dict(self) -> dict:
+        result = {self.FIELD_PERMISSIONS: None if self._permissions is None else [
+            None if permission is None else permission.to_dict()
+            for permission in self._permissions]}
+        if self._next_page_token is not None:
+            result[PagedResponse.FIELD_NEXT_PAGE_TOKEN] = self._next_page_token
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ListPermissionsResponse":
+        permissions = data.get(cls.FIELD_PERMISSIONS)
+        return cls(
+            None if permissions is None else [
+                None if permission is None else PermissionAssignment.from_dict(permission)
+                for permission in permissions],
+            data.get(PagedResponse.FIELD_NEXT_PAGE_TOKEN))
