@@ -24,8 +24,7 @@ from pypaimon.common.options import Options
 class RESTUtil:
     @staticmethod
     def encode_string(value: str) -> str:
-        # Java's URLEncoder, except '~' stays raw: requests un-escapes %7E before sending,
-        # and the signature must cover the path sent.
+        # Java's URLEncoder, but '~' stays raw because requests un-escapes %7E before sending.
         return quote_plus(value, safe="*~", errors="replace")
 
     @staticmethod
