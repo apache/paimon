@@ -61,6 +61,7 @@ import org.apache.paimon.utils.BranchMergeHandler;
 import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
+import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
@@ -618,8 +619,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
-        IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
+        try {
+            checkRollbackKeepsRowTracking(snapshotManager.tryGetSnapshot(snapshotId));
+        } catch (FileNotFoundException ignored) {
+            // the snapshot may be reachable through a tag only; the tag path checks again
+        }
+        IcebergCommitCallback.markRetirePendingForRollback(this);
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
         } catch (UnsupportedOperationException e) {
@@ -644,6 +650,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
+        checkRollbackKeepsRowTracking(tagManager().getOrThrow(tagName).trimToSnapshot());
         IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
@@ -653,6 +660,36 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             RollbackHelper rollbackHelper = rollbackHelper();
             rollbackHelper.cleanLargerThan(taggedSnapshot);
             rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
+        }
+    }
+
+    /**
+     * See {@link DataEvolutionUtils#checkRollbackKeepsRowTracking} and {@link
+     * DataEvolutionUtils#checkRollbackFilesKeepDataEvolution}. Only a converted table pays for
+     * reading the files of the target.
+     */
+    private void checkRollbackKeepsRowTracking(Snapshot target) {
+        SchemaManager schemaManager = schemaManager();
+        Optional<TableSchema> latestSchema = schemaManager.latest();
+        if (!latestSchema.isPresent()) {
+            return;
+        }
+        DataEvolutionUtils.checkRollbackKeepsRowTracking(
+                name(), schemaManager, latestSchema.get(), target);
+        if (!DataEvolutionUtils.convertedToDataEvolution(schemaManager, latestSchema.get())) {
+            return;
+        }
+        Snapshot latest = snapshotManager().latestSnapshot();
+        if (latest != null) {
+            // The target replaces the metadata of every file, also of files still live.
+            DataEvolutionUtils.checkRollbackFilesKeepDataEvolution(
+                    name(),
+                    target.id(),
+                    newSnapshotReader().withSnapshot(target).readFileIterator(),
+                    DataEvolutionUtils.filesNeedingDataEvolutionConversion(
+                            newSnapshotReader().withSnapshot(latest).readFileIterator(),
+                            schemaManager::schema),
+                    schemaManager::schema);
         }
     }
 

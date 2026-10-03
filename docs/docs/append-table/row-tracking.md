@@ -38,7 +38,9 @@ contains the row: many later snapshots can still contain an unchanged row with a
 :::note Experimental
 
 Row tracking is experimental. Enable it when creating an unaware-bucket append table (`bucket = -1`, with no primary
-key or bucket key). `row-tracking.enabled` is immutable and cannot be enabled later with `ALTER TABLE`.
+key or bucket key). `row-tracking.enabled` cannot be enabled later with `ALTER TABLE`; an existing append table is
+converted with the `enable_data_evolution` procedure, which also enables Data Evolution, see
+[Data Evolution](../multimodal-table/data-evolution#enable-on-an-existing-append-table).
 
 :::
 

@@ -474,6 +474,31 @@ For more information of 'reassign_row_id', see
     reassign_row_id --help
 ```
 
+## Enable Data Evolution
+
+Run the following command to enable data evolution on an existing append table. This action
+assigns a row ID range to every data file by rewriting metadata, then switches on
+`row-tracking.enabled` and `data-evolution.enabled`.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    enable_data_evolution \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--dry_run true] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+For more information of 'enable_data_evolution', see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    enable_data_evolution --help
+```
+
 ## Force Start Flink Job
 
 Some actions, like `create_tag`, are lightweight and by default will not be submitted as a job to Flink cluster. If you
