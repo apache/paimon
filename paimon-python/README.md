@@ -168,6 +168,15 @@ path select the Python writer before native data is written. If the runtime or t
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
 
+Primary-key dynamic buckets (`bucket=-1`, with partition fields included in the
+primary key) also support native writes. HASH indexes are restored across writer
+restarts; `dynamic-bucket.max-buckets` bounds bucket growth and reuses existing
+buckets after that limit. Dynamic buckets use the trimmed primary key, so
+`bucket-key` must not be configured. As in Java, each bucket must have one writer
+owner: a HASH ADD replaces the complete previous index and does not carry a
+concurrent-writer baseline. Partitions with existing data but missing HASH indexes
+must be rewritten before incremental writes.
+
 Native writes honor `data-file.path-directory` and the configured
 `data-file.external-paths` strategy. Existing files keep their recorded locations
 when the write destinations change. Python and native readers and committers

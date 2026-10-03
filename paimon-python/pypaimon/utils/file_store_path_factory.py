@@ -273,7 +273,7 @@ class FileStorePathFactory:
                 return external.get_next_external_data_path(file_name), True
             # Python data directories historically use str(value) without
             # escaping. Record the actual location when Java renders it
-            # differently, so its readers can find the DV beside those files.
+            # differently, so its readers can find the index beside those files.
             return (f"{self.bucket_path(partition, bucket)}/{file_name}",
                     self._partition_path_requires_explicit_location(partition))
         factory = self.global_index_path_factory()
@@ -286,16 +286,16 @@ class FileStorePathFactory:
                 or self.relative_bucket_path(partition, 0) != self.relative_bucket_path(partition, 0, True))
 
     def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
-        """Resolve an existing bucket index, including the legacy Python DV layout."""
+        """Resolve an existing bucket index, including legacy Python bucket-index layouts."""
         if index_file.external_path:
             return to_file_io_path(index_file.external_path)
         legacy_path = f"{self.index_path()}/{index_file.file_name}"
         if not self.index_file_in_data_file_dir:
             return legacy_path
         path = f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}"
-        # Older Python DV writers ignored the option. Prefer the Java location
-        # when present, and use the old directory only for an existing DV file.
-        if file_io is not None and index_file.index_type == 'DELETION_VECTORS' and not file_io.exists(path):
+        # Older Python DV and HASH writers ignored the option. Prefer the Java location
+        # when present, and use the old directory only for an existing index file.
+        if file_io is not None and index_file.index_type in ('DELETION_VECTORS', 'HASH') and not file_io.exists(path):
             python_path = f"{self.bucket_path(partition, bucket)}/{index_file.file_name}"
             alternate = self._find_floating_bucket_index(partition, bucket, index_file.file_name, file_io, python_path)
             if alternate is not None:
