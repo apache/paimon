@@ -72,7 +72,14 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             or (table.options.data_evolution_enabled()
                 and table.options.data_evolution_row_sidecar_enabled())
             or table.bucket_mode() not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC,
-                                           BucketMode.BUCKET_UNAWARE)
+                                           BucketMode.BUCKET_UNAWARE,
+                                           BucketMode.CROSS_PARTITION,
+                                           BucketMode.POSTPONE_MODE)
+            # Postpone bypasses the KV merger. Native retract validation for
+            # other engines and managed BLOB externalization are still missing.
+            or (table.bucket_mode() == BucketMode.POSTPONE_MODE
+                and (table.options.merge_engine() != MergeEngine.DEDUPLICATE
+                     or any(is_blob_file_field(field) for field in table.table_schema.fields)))
             or (table.options.deletion_vectors_enabled()
                 and table.options.merge_engine() in (MergeEngine.PARTIAL_UPDATE,
                                                      MergeEngine.AGGREGATE))

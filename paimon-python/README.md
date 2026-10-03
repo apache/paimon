@@ -177,6 +177,21 @@ owner: a HASH ADD replaces the complete previous index and does not carry a
 concurrent-writer baseline. Partitions with existing data but missing HASH indexes
 must be rewritten before incremental writes.
 
+Cross-partition primary keys (`bucket=-1`, with some partition columns outside
+of the primary key) also support native writes. Rust rebuilds the global index
+from live rows on writer startup and preserves the full primary key. Deduplicate
+moves a key by deleting its old location; first-row keeps its first partition;
+partial-update and aggregation apply changes in the existing partition, matching
+Java. Use one writer owner for the global key space. Index TTL is not supported,
+and `sequence.field` and `bucket-key` are invalid for this mode. The Python writer
+does not implement cross-partition routing, so this mode requires the native runtime.
+
+Ordinary postpone writes (`bucket=-2`) support native Parquet deduplicate writes
+without BLOB columns. Pending files retain input order, row kinds and duplicates, and
+roll at a batch boundary after reaching `target-file-row-num`. Normal scans expose
+only real buckets after deferred bucket assignment. Other postpone merge engines,
+BLOB writes, and the separate fixed-bucket postpone builder use the Python writer.
+
 Native writes honor `data-file.path-directory` and the configured
 `data-file.external-paths` strategy. Existing files keep their recorded locations
 when the write destinations change. Python and native readers and committers
