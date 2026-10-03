@@ -26,6 +26,9 @@ _UNSAFE_ARROW_FILTER_METHODS = frozenset([
     'endsWith',
     'contains',
     'like',
+    'arrayContains',
+    'arraysOverlap',
+    'arrayContainsAll',
 ])
 
 # Large boolean trees can overflow or crash native Dataset scanners even when
