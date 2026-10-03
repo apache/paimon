@@ -832,6 +832,25 @@ public class SnapshotManager implements Serializable {
         return -1;
     }
 
+    /**
+     * Reads the LATEST hint, telling an absent hint apart from one that cannot be read.
+     *
+     * @return the hinted snapshot id, or empty if there is no LATEST hint file
+     * @throws IOException if the hint file exists but cannot be read or parsed
+     */
+    public Optional<Long> readLatestHintStrictly() throws IOException {
+        Optional<String> content =
+                fileIO.readOverwrittenFileUtf8(new Path(snapshotDirectory(), HintFileUtils.LATEST));
+        if (!content.isPresent()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Long.parseLong(content.get().trim()));
+        } catch (NumberFormatException e) {
+            throw new IOException("Invalid LATEST hint: " + content.get(), e);
+        }
+    }
+
     public void deleteLatestHint() throws IOException {
         HintFileUtils.deleteLatestHint(fileIO, snapshotDirectory());
     }

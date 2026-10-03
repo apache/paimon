@@ -30,12 +30,18 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.ThrowingConsumer;
 
@@ -62,6 +68,7 @@ import org.apache.flink.util.Preconditions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -759,6 +766,101 @@ public class CommitterOperatorTest extends CommitterTestBase {
                 createTestHarness(operatorFactory, 10, 10, 3)) {
             assertThatCode(testHarness::open)
                     .hasMessage("Committer Operator parallelism in paimon MUST be one.");
+        }
+    }
+
+    /**
+     * A batch job restarted from the committer replays the committables at end of input. While the
+     * LATEST hint stays behind, the replay must still be recognized as already committed, otherwise
+     * the same files are published twice.
+     */
+    @Test
+    public void testReplayEndInputCommitWhileLatestHintIsBehind() throws Exception {
+        LatestHintSkippingFileIO fileIO = new LatestHintSkippingFileIO();
+        // an append table without fixed buckets, so a replayed append file is not caught by
+        // conflict detection
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.BIGINT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1")
+                        .option(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3")
+                        .build();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        fileIO, tablePath, tableSchema, CatalogEnvironment.empty());
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        // snapshots 1 to 6 are committed by another user, the LATEST hint stays at 1
+        StreamWriteBuilder otherBuilder = table.newStreamWriteBuilder().withCommitUser("other");
+        try (StreamTableWrite write = otherBuilder.newWrite();
+                StreamTableCommit commit = otherBuilder.newCommit()) {
+            for (int i = 1; i <= 6; i++) {
+                fileIO.skipLatestHint = i > 1;
+                write.write(GenericRow.of(i, i * 10L));
+                commit.commit(i, write.prepareCommit(false, i));
+            }
+        }
+
+        // snapshot 7 is committed by the batch committer at end of input
+        List<CommitMessage> messages;
+        try (StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite()) {
+            write.write(GenericRow.of(100, 1000L));
+            messages = write.prepareCommit(true, Long.MAX_VALUE);
+        }
+        commitAtEndOfInput(table, messages);
+        assertThat(snapshotManager.readLatestHintStrictly()).hasValue(1L);
+        assertThat(snapshotManager.latestSnapshot().commitUser()).isEqualTo(initialCommitUser);
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        // the batch job restarts from the committer and replays the same committables
+        commitAtEndOfInput(table, messages);
+
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestSnapshotId);
+        assertResults(table, "1, 10", "100, 1000", "2, 20", "3, 30", "4, 40", "5, 50", "6, 60");
+    }
+
+    private void commitAtEndOfInput(FileStoreTable table, List<CommitMessage> messages)
+            throws Exception {
+        OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
+                new CommitterOperatorFactory<>(
+                        false,
+                        true,
+                        initialCommitUser,
+                        context ->
+                                new StoreCommitter(
+                                        table,
+                                        table.newStreamWriteBuilder()
+                                                .withCommitUser(context.commitUser())
+                                                .newCommit(),
+                                        context),
+                        new NoopCommittableStateManager());
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createTestHarness(operatorFactory);
+        testHarness.open();
+        long timestamp = 1;
+        for (CommitMessage message : messages) {
+            testHarness.processElement(new Committable(Long.MAX_VALUE, message), timestamp++);
+        }
+        testHarness.endInput();
+        testHarness.close();
+    }
+
+    /** A {@link LocalFileIO} which can silently skip writing the LATEST hint. */
+    private static class LatestHintSkippingFileIO extends LocalFileIO {
+
+        private volatile boolean skipLatestHint = false;
+
+        @Override
+        public void overwriteHintFile(Path path, String content) throws IOException {
+            if (skipLatestHint && path.getName().equals("LATEST")) {
+                return;
+            }
+            super.overwriteHintFile(path, content);
         }
     }
 
