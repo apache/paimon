@@ -200,6 +200,10 @@ class TableRead:
         self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
+        if self.variant_fields:
+            raise RuntimeError(
+                "variant_fields is not supported by to_iterator(); "
+                "use to_arrow() or to_arrow_batch_reader()")
         self._check_python_merge_supported()
         self._begin_auth_read(splits)
         limit = self.limit
@@ -1386,6 +1390,10 @@ class TableRead:
         ):
             raise ValueError("batch_size must be a positive int or None")
         if batch_format == "row":
+            if self.variant_fields:
+                raise RuntimeError(
+                    "variant_fields is not supported by Torch row format; "
+                    "use streaming=True with batch_format='pyarrow' or 'torch'")
             if batch_size is not None:
                 raise ValueError(
                     "batch_size requires batch_format='pyarrow' or 'torch'"

@@ -253,7 +253,7 @@ read_builder = table.new_read_builder().with_projection(
 Requires `read.native.enabled=true` and a compatible `pypaimon-rust`; there is
 no Python fallback. The result is an Arrow struct with children `"0"`, `"1"`,
 ... in path order. Only `pa.float32()` is supported; `fail_on_error` defaults to
-`False`.
+`False`. Row iterators and Torch row format are not supported.
 
 ### Read and update typed paths
 

@@ -1194,6 +1194,49 @@ class TestVariantPaimonTable(unittest.TestCase):
             pa.field('payload', _variant_arrow_type()),
         ])
 
+    def test_native_variant_projection_rejects_row_readers(self):
+        for mode, options in (
+            ('append', {}),
+            ('lazy', {
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            }),
+        ):
+            with self.subTest(mode=mode):
+                identifier = 'default.variant_projection_row_' + mode
+                schema = Schema.from_pyarrow_schema(
+                    self._pa_schema(), options=options)
+                self.catalog.create_table(identifier, schema, False)
+                table = self.catalog.get_table(identifier)
+                data = pa.table({
+                    'id': [1],
+                    'payload': GenericVariant.to_arrow_array([
+                        GenericVariant.from_python({'ratio': 1.25})]),
+                }, schema=self._pa_schema())
+                write_builder = table.new_batch_write_builder()
+                writer = write_builder.new_write()
+                commit = write_builder.new_commit()
+                writer.write_arrow(data)
+                commit.commit(writer.prepare_commit())
+                writer.close()
+                commit.close()
+
+                builder = table.new_read_builder().with_projection(
+                    ['payload'], variant_fields={'payload': {
+                        'paths': ['$.ratio'],
+                        'target_type': pa.float32(),
+                    }})
+                splits = builder.new_scan().plan().splits()
+                self.assertTrue(splits)
+                read = builder.new_read()
+
+                with self.assertRaisesRegex(RuntimeError, 'to_iterator'):
+                    read.to_iterator(splits)
+                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
+                    read.to_torch(splits, streaming=True)
+                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
+                    read.to_torch(splits, streaming=False)
+
     def test_plain_variant_write_and_read(self):
         """Plain VARIANT: GenericVariant → write_arrow → to_arrow → GenericVariant."""
         schema = Schema.from_pyarrow_schema(self._pa_schema())
