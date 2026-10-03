@@ -29,7 +29,7 @@ from pypaimon.read.native_plan import native_method_available
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_write_builder'),
+    not native_method_available('Table', 'new_batch_write_builder'),
     reason='Rust main writer and planner required')]
 
 
@@ -84,7 +84,7 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         # The Rust writer maintains the dynamic/cross-partition hash index and
         # emits the old-partition DELETE when a key moves.
         table = PaimonCatalog({'warehouse': str(tmp_path)}).get_table('default.t')
-        builder = table.new_write_builder()
+        builder = table.new_batch_write_builder()
         writer = builder.new_write()
         writer.write_arrow(pa.RecordBatch.from_pylist(rows, schema=schema))
         builder.new_commit().commit(writer.prepare_commit())

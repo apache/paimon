@@ -108,7 +108,7 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
             try:
                 index_file = entry.index_file
                 file_name = index_file.file_name
-                if index_file.index_type == 'DELETION_VECTORS':
+                if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
                     path = table.path_factory().bucket_index_path(
                         tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
                 else:
