@@ -36,7 +36,8 @@ from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.common import user_agent
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptions
+from pypaimon.common.options.config import (CatalogOptions, OssOptions, PVFSOptions,
+                                            data_token_expiration_safe_time_millis)
 from pypaimon.common.identifier import Identifier
 from pypaimon.filesystem.jindo_file_system_handler import (
     JINDO_AVAILABLE,
@@ -123,15 +124,14 @@ class PVFSTableIdentifier(PVFSIdentifier):
 
 @dataclass
 class PaimonRealStorage:
-    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
-
     token: Dict[str, str]
     expires_at_millis: Optional[int]
     file_system: AbstractFileSystem
+    expiration_safe_time_millis: int = data_token_expiration_safe_time_millis()
 
     def need_refresh(self) -> bool:
         if self.expires_at_millis is not None:
-            return self.expires_at_millis - int(time.time() * 1000) < self.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+            return self.expires_at_millis - int(time.time() * 1000) < self.expiration_safe_time_millis
         return False
 
 
@@ -152,6 +152,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             options = Options(options)
         user_agent.with_feature(options, 'PythonPVFS')
         self.options = options
+        # read once, so an invalid window fails here and not on the first storage access
+        self._expiration_safe_time_millis = data_token_expiration_safe_time_millis(options)
         self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (
             PVFSOptions.DEFAULT_TABLE_CACHE_TTL
@@ -866,7 +868,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 paimon_real_storage = PaimonRealStorage(
                     token=load_token_response.token,
                     expires_at_millis=load_token_response.expires_at_millis,
-                    file_system=fs
+                    file_system=fs,
+                    expiration_safe_time_millis=self._expiration_safe_time_millis
                 )
                 self._fs_cache[pvfs_table_identifier] = paimon_real_storage
                 if cache_value is not None:

@@ -21,6 +21,8 @@ package org.apache.paimon.rest;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
+import java.time.Duration;
+
 /** Options for REST Catalog. */
 public class RESTCatalogOptions {
 
@@ -138,4 +140,13 @@ public class RESTCatalogOptions {
                                     + "`read`: cache is enabled when reading files; "
                                     + "`write`: data is also cached when writing files; "
                                     + "`none`: cache is all disabled.");
+
+    public static final ConfigOption<Duration> DATA_TOKEN_EXPIRATION_SAFE_TIME =
+            ConfigOptions.key("data-token.expiration-safe-time")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(5))
+                    .withDescription(
+                            "Refresh a data token when less than this remains of its lifetime."
+                                    + " Keep it below the lifetime of the tokens the server vends,"
+                                    + " otherwise every file access requests a new token.");
 }
