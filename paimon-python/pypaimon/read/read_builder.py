@@ -88,21 +88,13 @@ class ReadBuilder:
         *,
         variant_fields: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> 'ReadBuilder':
-        """Project to the given column names.
+        """Project columns, nested ROW fields, or literal MAP keys.
 
-        Names containing a dot (e.g. ``"struct.subfield"``) walk into ROW
-        children. A quoted bracket selector on a top-level
-        ``MAP<STRING, ...>`` selects one literal key (e.g.
-        ``"attrs['key.with.dots']"``). Unknown names are silently skipped to
-        preserve the pre-existing contract.
-
-        An exact top-level field match takes precedence over both forms.
-
-        ``variant_fields`` optionally replaces a projected VARIANT column with
-        a typed Arrow struct. Each entry contains ``paths``, ``target_type``
-        (currently only ``pyarrow.float32()``), and optional
-        ``fail_on_error``. Extraction is performed by the native reader before
-        the full VARIANT value crosses into Python.
+        Use ``struct.field`` for ROW or ``attrs['key']`` for string-key MAP.
+        Exact column names take precedence; unknown names are skipped.
+        ``variant_fields`` maps projected VARIANT columns to ``paths``,
+        ``target_type`` (float32 only), and optional ``fail_on_error``.
+        It requires native reading and returns a typed Arrow struct.
         """
         self._projection = projection
         if projection and any(
