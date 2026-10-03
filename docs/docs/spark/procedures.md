@@ -89,6 +89,7 @@ Choose a group, then use the page contents to jump to a procedure:
 [`fast_forward`](./procedures/versions#fast_forward),
 [`merge_branch`](./procedures/versions#merge_branch),
 [`rollback`](./procedures/versions#rollback),
+[`rollback_to_as_latest`](./procedures/versions#rollback_to_as_latest),
 [`rollback_to_timestamp`](./procedures/versions#rollback_to_timestamp),
 [`rollback_to_watermark`](./procedures/versions#rollback_to_watermark)
 

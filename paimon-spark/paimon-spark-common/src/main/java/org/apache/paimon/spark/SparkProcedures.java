@@ -67,6 +67,7 @@ import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RevokePermissionProcedure;
 import org.apache.paimon.spark.procedure.RewriteFileIndexProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
+import org.apache.paimon.spark.procedure.RollbackToAsLatestProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
 import org.apache.paimon.spark.procedure.TriggerTagAutomaticCreationProcedure;
@@ -98,6 +99,7 @@ public class SparkProcedures {
         ImmutableMap.Builder<String, Supplier<ProcedureBuilder>> procedureBuilders =
                 ImmutableMap.builder();
         procedureBuilders.put("rollback", RollbackProcedure::builder);
+        procedureBuilders.put("rollback_to_as_latest", RollbackToAsLatestProcedure::builder);
         procedureBuilders.put("rollback_to_timestamp", RollbackToTimestampProcedure::builder);
         procedureBuilders.put("rollback_to_watermark", RollbackToWatermarkProcedure::builder);
         procedureBuilders.put("purge_files", PurgeFilesProcedure::builder);
