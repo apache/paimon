@@ -47,7 +47,11 @@ class FormatVortexReader(RecordBatchReader):
         if store_kwargs:
             from vortex import store
             vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-            vortex_file = vortex_store.open()
+            # vortex 0.70.0 S3Store (and the other object stores) have no
+            # ``.open()``; the supported entry point is ``vortex.open(path,
+            # store=...)``. Passing the store carries the endpoint/credentials
+            # the OSS path needs while vortex resolves the object.
+            vortex_file = vortex.open(file_path_for_vortex, store=vortex_store)
         else:
             vortex_file = vortex.open(file_path_for_vortex)
 

@@ -55,8 +55,15 @@ def to_vortex_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[
         parsed = urlparse(file_path)
         bucket = parsed.netloc
 
+        # Strip any scheme the user put on the endpoint before composing the
+        # virtual-hosted URL, otherwise we build "https://<bucket>.https://<host>".
+        # Mirrors the OSS handling in lance_utils.
+        endpoint = properties.get(OssOptions.OSS_ENDPOINT)
+        if endpoint:
+            endpoint = endpoint.replace('http://', '').replace('https://', '')
+
         store_kwargs = {
-            'endpoint': f"https://{bucket}.{properties.get(OssOptions.OSS_ENDPOINT)}",
+            'endpoint': f"https://{bucket}.{endpoint}",
             'access_key_id': properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             'secret_access_key': properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
             'virtual_hosted_style_request': 'true',
