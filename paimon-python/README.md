@@ -190,7 +190,41 @@ Ordinary postpone writes (`bucket=-2`) support native Parquet deduplicate writes
 without BLOB columns. Pending files retain input order, row kinds and duplicates, and
 roll at a batch boundary after reaching `target-file-row-num`. Normal scans expose
 only real buckets after deferred bucket assignment. Other postpone merge engines,
-BLOB writes, and the separate fixed-bucket postpone builder use the Python writer.
+BLOB writes use the Python writer.
+
+The fixed-bucket postpone builder uses native Parquet writes for deduplicate,
+first-row, partial-update and aggregation when supplied with a shared bucket plan
+or `postpone.default-bucket-num`. The default count is used exactly, without
+rounding or applying the inference limit. Append reuses each existing partition's
+bucket count; overwrite uses the new count for overwritten partitions. Pending
+files may coexist with real buckets and remain available for later assignment.
+
+```python
+from pypaimon.write.postpone_bucket import PostponeBucketPlan
+
+# A driver can serialize this small plan and give it to every worker.
+plan = PostponeBucketPlan({("2026-10-01",): 3, ("2026-10-02",): 5})
+builder = table.new_postpone_fixed_bucket_write_builder().with_bucket_plan(plan)
+writer = builder.new_write()
+try:
+    writer.write_arrow(arrow_table)
+    messages = writer.prepare_commit()
+finally:
+    writer.close()
+builder.new_commit().commit(messages)
+```
+
+All rows for one partition/bucket must have one writer owner. Python and native
+committers reject overlapping owners or writes that became stale after their
+baseline snapshot. Different real buckets and pending files can be appended
+concurrently. Overwrite detects concurrent changes to any overwritten partition.
+A shared plan must cover every input partition; a configured default does not
+fill missing entries in an explicit plan. Ray workers use native routing and
+writing with the driver's shared plan.
+
+Local automatic size estimation still uses the Python planner. Fixed-bucket
+native writes currently exclude BLOB and deletion-vector tables. They do not
+perform staging, compaction or automatic rescaling of existing partitions.
 
 Native writes honor `data-file.path-directory` and the configured
 `data-file.external-paths` strategy. Existing files keep their recorded locations

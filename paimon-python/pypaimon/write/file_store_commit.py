@@ -222,6 +222,14 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
+    def _set_fixed_bucket_commit_check(self, messages):
+        from pypaimon.write.commit.fixed_bucket_commit_check import FixedBucketCommitCheck
+
+        self.conflict_detection.fixed_bucket_commit_check = (
+            FixedBucketCommitCheck(messages)
+            if any(message.total_buckets is not None for message in messages)
+            else None)
+
     def commit(
             self,
             commit_messages: List[CommitMessage],
@@ -233,6 +241,7 @@ class FileStoreCommit:
             return
 
         _reject_compact_increment(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
         check_from_snapshot = _row_id_check_from_messages(commit_messages)
         # A committer can be reused; an untagged commit clears the prior baseline.
         self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
@@ -317,6 +326,7 @@ class FileStoreCommit:
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
         _reject_compact_increment(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
         self.conflict_detection._row_id_check_from_snapshot = (
             _row_id_check_from_messages(commit_messages))
         logger.info(

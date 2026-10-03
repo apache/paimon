@@ -50,6 +50,14 @@ class PostponeFixedBucketWriteBuilder(BatchWriteBuilder):
         return self
 
     def new_write(self):
+        # Automatic size estimation still belongs to the Python coordinator.
+        # Native direct writes accept a resolved plan or Java's explicit default.
+        if (self._bucket_plan is not None
+                or self.table.options.postpone_default_bucket_num() is not None):
+            native = self._native_write(
+                self.static_partition, fixed_bucket=True, bucket_plan=self._bucket_plan)
+            if native is not None:
+                return native
         return PostponeFixedBucketBatchTableWrite(
             self.table,
             self.commit_user,
@@ -71,7 +79,8 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         self._planner = PostponeBucketPlanner(
             table,
             known_num_buckets=(
-                bucket_plan.as_dict() if bucket_plan is not None else None
+                bucket_plan.as_dict() if bucket_plan is not None
+                else {} if static_partition is not None else None
             ),
         )
         self._bucket_plan = (
