@@ -1141,7 +1141,8 @@ class CoreOptions:
         .default_value("meta,global-index")
         .with_description(
             "Comma-separated list of file types to cache. "
-            "Supported values: meta, global-index, bucket-index, data, file-index."
+            "Supported values: meta, global-index, bucket-index, data, file-index, "
+            "or * for all of them."
         )
     )
 
