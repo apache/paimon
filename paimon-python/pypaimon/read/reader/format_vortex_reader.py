@@ -45,9 +45,18 @@ class FormatVortexReader(RecordBatchReader):
         file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, file_path)
 
         if store_kwargs:
+            from urllib.parse import urlparse
+
             from vortex import store
             vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-            vortex_file = vortex_store.open()
+            # vortex 0.70.0 object stores (S3Store et al.) expose no ``.open()``;
+            # the entry point is ``vortex.open(path, store=...)``. The store is
+            # virtual-hosted (the bucket is in the endpoint host), so ``path`` must
+            # be the object key relative to that store, not the full
+            # ``s3://bucket/key`` URL -- otherwise the bucket is resolved twice and
+            # the read fails.
+            object_key = urlparse(file_path_for_vortex).path.lstrip("/")
+            vortex_file = vortex.open(object_key, store=vortex_store)
         else:
             vortex_file = vortex.open(file_path_for_vortex)
 
