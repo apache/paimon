@@ -548,6 +548,10 @@ public interface Expression extends Serializable {
                                 "Invalid width value for truncate function: %s, expected integer.",
                                 literal));
             }
+            checkArgument(
+                    width > 0,
+                    "Invalid width value for truncate function: %s, expected a positive integer.",
+                    width);
         }
 
         @Override

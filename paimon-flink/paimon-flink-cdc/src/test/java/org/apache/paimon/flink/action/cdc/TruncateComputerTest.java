@@ -137,4 +137,26 @@ public class TruncateComputerTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported field type for truncate function: BOOLEAN");
     }
+
+    @Test
+    public void testTruncateRejectsNonPositiveWidth() {
+        String field = "computedColumnField";
+        Object[][] nonPositiveWidths = {
+            {"0", new IntType(true)},
+            {"-1", new IntType(true)},
+            {"0", new BigIntType(true)},
+            {"-3", new DecimalType(9, 2)},
+            {"0", new VarCharType(true, 5)},
+        };
+        for (Object[] testCase : nonPositiveWidths) {
+            String width = (String) testCase[0];
+            DataType dataType = (DataType) testCase[1];
+            assertThatThrownBy(() -> new Expression.TruncateComputer(field, dataType, width))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Invalid width value for truncate function: "
+                                    + width
+                                    + ", expected a positive integer.");
+        }
+    }
 }
