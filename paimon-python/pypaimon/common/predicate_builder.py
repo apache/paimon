@@ -56,14 +56,24 @@ class PredicateBuilder:
 
         A FLOAT array stores float32 values, so a Python ``float`` literal
         (double) such as ``0.1`` must be rounded to float32 before comparison;
-        otherwise ``array_contains`` never matches the stored ``0.1``. Other
-        element types need no normalization (Python ``float`` is already a
-        double; int/str/bool compare exactly).
+        otherwise ``array_contains`` never matches the stored ``0.1``. A DOUBLE
+        array needs an integer literal (e.g. ``0``) widened to ``float`` so it
+        reaches the signed-zero-aware comparator rather than Python ``==``
+        (otherwise ``0`` and ``0.0`` select different rows). int/str/bool
+        element types compare exactly and need no normalization.
         """
         element = self._field_types[field].element
         if isinstance(element, AtomicType) and element.type == 'FLOAT':
             return [self._to_float32(literal) for literal in literals]
+        if isinstance(element, AtomicType) and element.type == 'DOUBLE':
+            return [self._to_double(literal) for literal in literals]
         return literals
+
+    @staticmethod
+    def _to_double(value: Any) -> Any:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return value
+        return float(value)
 
     @staticmethod
     def _to_float32(value: Any) -> Any:

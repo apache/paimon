@@ -201,6 +201,14 @@ class ArrayPredicateNumericTest(unittest.TestCase):
         self.assertEqual([4], self._ids(self._pb().array_contains('doubles', 0.0)))
         self.assertEqual([3], self._ids(self._pb().array_contains('doubles', -0.0)))
 
+    def test_integer_zero_literal_matches_double_zero_spelling(self):
+        # An integer 0 literal on a DOUBLE array must behave like 0.0 (widened
+        # to the double comparator), matching only +0.0 -- not -0.0 via Python
+        # ==. All three methods agree with the 0.0 spelling.
+        self.assertEqual([4], self._ids(self._pb().array_contains('doubles', 0)))
+        self.assertEqual([4], self._ids(self._pb().arrays_overlap('doubles', [0])))
+        self.assertEqual([4], self._ids(self._pb().array_contains_all('doubles', [0])))
+
 
 if __name__ == '__main__':
     unittest.main()
