@@ -965,6 +965,22 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to force a compaction before commit.");
 
+    public static final ConfigOption<Integer> COMPACTION_TASK_THREADS =
+            key("compaction.task-threads")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "Number of threads for async compaction in each write task (for example, "
+                                    + "each Flink sink subtask). "
+                                    + "1 (default): all buckets in the task share one compaction thread. "
+                                    + "-1: one dedicated compaction thread per active (partition, bucket) "
+                                    + "writer in the task so different buckets compact in parallel. "
+                                    + "N (>1): a fixed thread pool of N threads shared by all buckets in the task. "
+                                    + "Compaction within the same bucket is still serialized. "
+                                    + "Values 0 and other negative integers except -1 are not allowed. "
+                                    + "Higher thread counts increase TaskManager memory pressure; "
+                                    + "monitor level-0 file count and compaction metrics.");
+
     public static final ConfigOption<SequenceNumberInitMode> WRITE_SEQUENCE_NUMBER_INIT_MODE =
             key("write.sequence-number-init-mode")
                     .enumType(SequenceNumberInitMode.class)
@@ -3894,6 +3910,26 @@ public class CoreOptions implements Serializable {
 
     public boolean commitForceCompact() {
         return options.get(COMMIT_FORCE_COMPACT);
+    }
+
+    public CompactionTaskExecutorMode compactionTaskExecutorMode() {
+        int threads = compactionTaskThreads();
+        if (threads == -1) {
+            return CompactionTaskExecutorMode.PER_BUCKET;
+        }
+        if (threads == 1) {
+            return CompactionTaskExecutorMode.SINGLE;
+        }
+        return CompactionTaskExecutorMode.FIXED_POOL;
+    }
+
+    public int compactionTaskThreads() {
+        int threads = options.get(COMPACTION_TASK_THREADS);
+        checkArgument(
+                threads == -1 || threads > 0,
+                "The option %s must be -1, 1, or any integer greater than 1.",
+                COMPACTION_TASK_THREADS.key());
+        return threads;
     }
 
     public SequenceNumberInitMode writeSequenceNumberInitMode() {

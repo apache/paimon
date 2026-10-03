@@ -70,6 +70,29 @@ publishes it. MOW batch readers can opt into merging pending data with
 For `changelog-producer = lookup`, generated changelogs are also delayed. A compactor that cannot
 keep up with sustained input will keep falling behind; relaxing waits does not add capacity.
 
+## Multi-thread async compaction
+
+When many buckets are assigned to the same write task (for example, one Flink sink subtask), the
+default async compaction uses **one shared thread** for all buckets. Under high write throughput,
+compaction may fall behind and level-0 files accumulate. This is especially visible in
+[MOW / deletion vectors mode](./table-mode#merge-on-write), where level-0 data becomes readable
+only after compaction publishes it.
+
+You can increase cross-bucket compaction parallelism with `compaction.task-threads`:
+
+- `1` (default): unchanged — one compaction thread per write task.
+- `N` (`N > 1`): a fixed thread pool of `N` threads shared by all buckets in the task.
+- `-1`: one dedicated compaction thread per active `(partition, bucket)` writer (highest
+  parallelism and memory use).
+
+Compaction **within the same bucket is always serialized**. Values `0` and negative integers other
+than `-1` are rejected.
+
+**Trade-offs:** more compaction threads increase TaskManager memory and I/O concurrency. Size
+TaskManager memory accordingly and monitor [compaction metrics](../maintenance/metrics#compaction-metrics)
+such as `avgLevel0FileCount`, `avgCompactionTime`, and `compactionQueuedCount`. Start with
+`N = 2` or `3` before using `-1`.
+
 ## Dedicated compaction job
 
 Set `write-only = true` on ingest writers and run a
