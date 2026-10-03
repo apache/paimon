@@ -243,7 +243,8 @@ public class CsvParser {
             case DOUBLE:
                 return Pair.of(true, Double.parseDouble(field));
             case BOOLEAN:
-                return Pair.of(true, Boolean.parseBoolean(field));
+                Boolean boolVal = parseBoolean(field);
+                return Pair.of(boolVal != null, boolVal);
             case CHAR:
             case VARCHAR:
                 return Pair.of(true, BinaryString.fromString(field));
@@ -267,6 +268,16 @@ public class CsvParser {
             return cast.cast(BinaryString.fromString(field));
         }
         return BinaryString.fromString(field);
+    }
+
+    private static Boolean parseBoolean(String s) {
+        if ("true".equalsIgnoreCase(s)) {
+            return Boolean.TRUE;
+        }
+        if ("false".equalsIgnoreCase(s)) {
+            return Boolean.FALSE;
+        }
+        return null;
     }
 
     private static Integer parseInt(String s) {

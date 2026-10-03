@@ -194,6 +194,49 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testIgnoreParseErrorsNullsMalformedBoolean() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BOOLEAN());
+
+        Options options = new Options();
+        options.set(JsonOptions.JSON_IGNORE_PARSE_ERRORS, true);
+
+        FileFormat format =
+                new JsonFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        Path testFile = new Path(parent, "test_bool_" + UUID.randomUUID() + ".json");
+        try (PositionOutputStream out = fileIO.newOutputStream(testFile, false)) {
+            out.write("{\"f0\":1,\"f1\":true}\n".getBytes());
+            out.write("{\"f0\":2,\"f1\":\"FALSE\"}\n".getBytes());
+            out.write("{\"f0\":3,\"f1\":\"maybe\"}\n".getBytes());
+            out.write("{\"f0\":4,\"f1\":1}\n".getBytes());
+        }
+
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
+
+            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+
+            assertThat(result).hasSize(4);
+            // Recognized literals parse, case-insensitively.
+            assertThat(result.get(0).getBoolean(1)).isTrue();
+            assertThat(result.get(1).getBoolean(1)).isFalse();
+            // An unrecognized string or a non-boolean number is malformed, so it is
+            // nulled like any other bad value instead of silently becoming false.
+            assertThat(result.get(2).isNullAt(1)).isTrue();
+            assertThat(result.get(3).isNullAt(1)).isTrue();
+        }
+    }
+
+    @Test
     public void testIgnoreParseErrorsDisabled() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
 
