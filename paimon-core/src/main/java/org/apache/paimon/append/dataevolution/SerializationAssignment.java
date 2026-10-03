@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -44,6 +45,7 @@ import java.util.zip.CheckedOutputStream;
 
 import static org.apache.paimon.utils.IOUtils.readFully;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.readCount;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
@@ -96,6 +98,30 @@ public final class SerializationAssignment {
 
     public long nextRowId() {
         return nextRowId;
+    }
+
+    /** Maps a complete file range, preserving every row's offset within the file. */
+    public Range mapRowRange(BinaryRow partition, Range range) {
+        RowRangeMappingIndex mapping = rowIdMappings.get(partition);
+        if (mapping == null || !mapping.overlaps(range)) {
+            return range;
+        }
+        Range mapped =
+                mapping.map(range)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Cannot reuse compaction across reassignment: range "
+                                                        + range
+                                                        + " is only partially or non-contiguously mapped."));
+        checkState(
+                mapped.from >= firstAssignedRowId
+                        && mapped.to < nextRowId
+                        && mapped.count() == range.count(),
+                "Invalid reassignment of compaction range %s to %s.",
+                range,
+                mapped);
+        return mapped;
     }
 
     /** Returns a plan only for the snapshot that committed it, ignoring inherited properties. */
