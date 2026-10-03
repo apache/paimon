@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import urllib.parse
 from typing import Optional
 
 from pypaimon.api.rest_util import RESTUtil
@@ -34,8 +35,13 @@ class ResourcePaths:
     BRANCHES = "branches"
     RENAME = "rename"
     FORWARD = "forward"
+    PERMISSIONS = "permissions"
 
     def __init__(self, prefix: str):
+        # Java encodes the prefix once with URLEncoder, so it stays one path segment. '~' stays raw:
+        # requests un-escapes %7E before sending, and the signature must cover the path sent.
+        if prefix:
+            prefix = urllib.parse.quote_plus(prefix, safe="*~", errors="replace")
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
 
     @classmethod
@@ -139,3 +145,12 @@ class ResourcePaths:
             self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
             self.TABLES, RESTUtil.encode_string(table_name)
         )
+
+    def permissions(self) -> str:
+        return "{}/{}".format(self.base_path, self.PERMISSIONS)
+
+    def grant_permission(self) -> str:
+        return "{}/grant".format(self.permissions())
+
+    def revoke_permission(self) -> str:
+        return "{}/revoke".format(self.permissions())
