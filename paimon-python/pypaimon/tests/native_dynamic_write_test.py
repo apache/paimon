@@ -116,6 +116,7 @@ def test_dynamic_cross_backend_restart(tmp_path, bucket_local, first_native):
         assert {m.bucket for m in messages} == {0}
         indexes = _indexes(table)
         assert len(indexes) == 1
+        assert indexes[0].index_file.external_path is None
         path = table.path_factory().bucket_index_path(
             tuple(indexes[0].partition.values), 0, indexes[0].index_file, table.file_io)
         assert table.file_io.exists(path)
@@ -177,19 +178,18 @@ def test_dynamic_abort_index_ownership(tmp_path, bucket_local, commit_first):
 
 
 @pytest.mark.parametrize('native', [False, True])
-def test_legacy_python_hash_location(tmp_path, native):
-    # Old Python versions ignored index-file-in-data-file-dir and stored HASH
-    # under table/index with no external_path. Opening that table must still work.
+def test_hash_index_requires_configured_directory(tmp_path, native):
+    # A file in table/index cannot replace a missing bucket-local index.
     table = _table(tmp_path, {'index-file-in-data-file-dir': 'false'})
     _write(table, _batch([1]), False)
     old = _indexes(table)[0]
     assert old.index_file.external_path is None
     table = table.copy({'index-file-in-data-file-dir': 'true'})
-    _write(table, _batch([2]), native)
-    assert len(_indexes(table)) == 1
-    assert _indexes(table)[0].index_file.row_count == 2
-    for native_read in (False, True):
-        assert _rows(table, native_read) == _batch([1, 2]).to_pylist()
+    with pytest.raises((FileNotFoundError, ValueError)) as error:
+        _write(table, _batch([2]), native)
+    assert old.index_file.file_name in str(error.value)
+    assert table.snapshot_manager().get_latest_snapshot().id == 1
+    assert _indexes(table) == [old]
 
 
 @pytest.mark.parametrize('missing_all', [False, True])
