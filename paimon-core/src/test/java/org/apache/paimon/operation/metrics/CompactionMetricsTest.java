@@ -336,7 +336,8 @@ public class CompactionMetricsTest {
                         new MetricGroup() {
                             @Override
                             public Counter counter(String name) {
-                                return counters.computeIfAbsent(name, n -> new NonThreadSafeCounter());
+                                return counters.computeIfAbsent(
+                                        name, n -> new NonThreadSafeCounter());
                             }
 
                             @Override
@@ -365,7 +366,8 @@ public class CompactionMetricsTest {
                             }
 
                             @Override
-                            public void close() {}
+                            public void close() {
+                            }
                         };
 
         CompactionMetrics metrics = new CompactionMetrics(registry, "myTable");
