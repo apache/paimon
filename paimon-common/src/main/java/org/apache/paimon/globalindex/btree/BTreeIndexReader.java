@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -337,6 +338,38 @@ public class BTreeIndexReader implements Closeable {
 
     public Optional<GlobalIndexResult> visitEqual(Object literal) {
         return createResult(() -> pointQuery(literal));
+    }
+
+    public Optional<GlobalIndexResult> visitComposite(CompositeBTreePredicate.Plan plan) {
+        return createResult(
+                () -> {
+                    if (plan.isEmpty()) {
+                        return new RoaringNavigableMap64();
+                    }
+                    if (plan.isPointLookup()) {
+                        return pointQuery(plan.pointKey());
+                    }
+                    RoaringNavigableMap64 result = new RoaringNavigableMap64();
+                    SstFileReader.SstFileIterator iterator = reader.createIterator();
+                    iterator.seekTo(
+                            key ->
+                                    plan.lower()
+                                            .compareKey(
+                                                    (InternalRow) keySerializer.deserialize(key)));
+                    BlockIterator batch;
+                    while ((batch = iterator.readBatch()) != null) {
+                        while (batch.hasNext()) {
+                            Map.Entry<MemorySlice, MemorySlice> entry = batch.next();
+                            InternalRow key =
+                                    (InternalRow) keySerializer.deserialize(entry.getKey());
+                            if (plan.upper().compareKey(key) > 0) {
+                                return result;
+                            }
+                            addRowIdsTo(entry.getValue(), result);
+                        }
+                    }
+                    return result;
+                });
     }
 
     public Optional<GlobalIndexResult> visitGreaterThan(Object literal) {

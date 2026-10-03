@@ -194,11 +194,8 @@ class CompositeBTreeIndexTest {
                             BinaryString.fromString("tag"));
             for (Predicate unsupported :
                     Arrays.asList(
-                            builder.equal(0, BinaryString.fromString("category-a")),
-                            PredicateBuilder.and(
-                                    builder.equal(0, BinaryString.fromString("category-a")),
-                                    builder.greaterThan(1, 7),
-                                    builder.equal(2, BinaryString.fromString("tag"))),
+                            builder.equal(1, 7),
+                            builder.isNull(0),
                             PredicateBuilder.and(
                                     builder.in(
                                             0,

@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFileGroup;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator.Evaluation;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -30,7 +31,6 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -106,7 +106,8 @@ class GlobalIndexQuery {
             RowType rowType,
             Predicate predicate,
             List<IndexFileMeta> files,
-            IndexPathFactory pathFactory) {
+            IndexPathFactory pathFactory,
+            Options options) {
         Map<Integer, List<IndexMetaFileGroup>> groupsByField =
                 DataEvolutionGlobalIndexScanner.groupIndexFiles(
                         files.stream()
@@ -124,90 +125,54 @@ class GlobalIndexQuery {
                     }
                     groups.put(fieldId, indexGroups);
                 });
-        return createForPredicate(predicate, rowType, groups);
+        return createForPredicate(predicate, rowType, groups, options);
     }
 
     @Nullable
     private static GlobalIndexQuery createForPredicate(
-            Predicate predicate, RowType rowType, Map<Integer, List<IndexGroup>> groups) {
+            Predicate predicate,
+            RowType rowType,
+            Map<Integer, List<IndexGroup>> groups,
+            Options options) {
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;
             Optional<FieldRef> field = leaf.fieldRefOptional();
             if (!field.isPresent()) {
                 return null;
             }
-            return createForIndexedField(leaf, field.get(), rowType, groups);
+            CompositeCandidate composite = selectComposite(leaf, groups, options);
+            return composite == null
+                    ? createForIndexedField(leaf, field.get(), rowType, groups)
+                    : composite.query();
         }
         CompoundPredicate compound = (CompoundPredicate) predicate;
         boolean union = compound.function() instanceof Or;
         List<GlobalIndexQuery> children = new ArrayList<>();
         List<Predicate> predicates = GlobalIndexEvaluator.normalizedChildren(compound);
         if (!union) {
-            // Prefer the longest full composite key before any single-column posting is read.
             while (!predicates.isEmpty()) {
-                IndexGroup selected = null;
-                List<LeafPredicate> matched = null;
-                Predicate conjunction = PredicateBuilder.and(predicates);
-                for (List<IndexGroup> fieldGroups : groups.values()) {
-                    for (IndexGroup group : fieldGroups) {
-                        if (!group.isCompositeBTree()
-                                || (selected != null
-                                        && group.extraFields.size()
-                                                <= selected.extraFields.size())) {
-                            continue;
-                        }
-                        Optional<List<LeafPredicate>> match =
-                                CompositeBTreePredicate.match(group.indexFields(), conjunction);
-                        if (match.isPresent()) {
-                            selected = group;
-                            matched = match.get();
-                        }
-                    }
-                }
+                CompositeCandidate selected =
+                        selectComposite(PredicateBuilder.and(predicates), groups, options);
                 if (selected == null) {
                     break;
                 }
-                List<Predicate> covered = new ArrayList<>();
-                for (Predicate child : predicates) {
-                    if (child instanceof LeafPredicate) {
-                        LeafPredicate leaf = (LeafPredicate) child;
-                        if (leaf.function() instanceof Equal
-                                && matched.stream()
-                                        .anyMatch(
-                                                equality ->
-                                                        equality.fieldRefOptional()
-                                                                .equals(leaf.fieldRefOptional()))) {
-                            covered.add(child);
-                        }
-                    }
-                }
-                Predicate composite = PredicateBuilder.and(covered);
-                List<IndexGroup> selectedGroups = new ArrayList<>();
-                for (IndexGroup group : groups.get(selected.field.id())) {
-                    if (group.type.equals(selected.type)
-                            && group.indexFields().equals(selected.indexFields())) {
-                        selectedGroups.add(group.selectFiles(composite));
-                    }
-                }
-                children.add(
-                        new GlobalIndexQuery(
-                                composite, false, Collections.emptyList(), selectedGroups));
-                predicates.removeAll(covered);
-                // The tuple equality already narrows these columns to one value. Leave their
-                // remaining conditions as data filters instead of reading scalar postings.
-                List<LeafPredicate> keyEqualities = matched;
+                children.add(selected.query());
+                predicates.removeAll(selected.plan.predicates());
+                // Later key conditions remain data filters; do not expand scalar postings for them.
+                Set<String> keyColumns =
+                        selected.group.indexFields().stream()
+                                .map(DataField::name)
+                                .collect(Collectors.toSet());
                 predicates.removeIf(
-                        child -> {
-                            if (!(child instanceof LeafPredicate)) {
-                                return false;
-                            }
-                            Optional<FieldRef> field = ((LeafPredicate) child).fieldRefOptional();
-                            return keyEqualities.stream()
-                                    .anyMatch(
-                                            equality -> equality.fieldRefOptional().equals(field));
-                        });
+                        child ->
+                                child instanceof LeafPredicate
+                                        && ((LeafPredicate) child)
+                                                .fieldRefOptional()
+                                                .filter(field -> keyColumns.contains(field.name()))
+                                                .isPresent());
             }
         }
+
         for (int i = 0; i < predicates.size(); i++) {
             Predicate child = predicates.get(i);
             GlobalIndexQuery query = null;
@@ -238,7 +203,7 @@ class GlobalIndexQuery {
                 }
             }
             if (query == null) {
-                query = createForPredicate(child, rowType, groups);
+                query = createForPredicate(child, rowType, groups, options);
             }
             if (query == null) {
                 if (union) {
@@ -251,6 +216,101 @@ class GlobalIndexQuery {
         return children.isEmpty()
                 ? null
                 : new GlobalIndexQuery(null, union, children, Collections.emptyList());
+    }
+
+    @Nullable
+    private static CompositeCandidate selectComposite(
+            Predicate predicate, Map<Integer, List<IndexGroup>> groups, Options options) {
+        CompositeCandidate selected = null;
+        Set<List<DataField>> seen = new HashSet<>();
+        long budget = options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes();
+        for (List<IndexGroup> fieldGroups : groups.values()) {
+            for (IndexGroup group : fieldGroups) {
+                if (!group.isCompositeBTree() || !seen.add(group.indexFields())) {
+                    continue;
+                }
+                Optional<CompositeBTreePredicate.Plan> planned =
+                        CompositeBTreePredicate.plan(group.indexFields(), predicate);
+                if (!planned.isPresent()) {
+                    continue;
+                }
+                CompositeBTreePredicate.Plan plan = planned.get();
+                List<IndexGroup> definition =
+                        groups.get(group.field.id()).stream()
+                                .filter(
+                                        other ->
+                                                other.type.equals(group.type)
+                                                        && other.indexFields()
+                                                                .equals(group.indexFields()))
+                                .collect(Collectors.toList());
+                Predicate covered = PredicateBuilder.and(plan.predicates());
+                List<IndexGroup> selectedGroups =
+                        definition.stream()
+                                .map(part -> part.selectFiles(covered))
+                                .collect(Collectors.toList());
+                // Decline the entire definition when any shard exceeds the same reader budget.
+                // Selecting only some shards would change FAST coverage between eager and reader
+                // queries.
+                if (selectedGroups.stream().anyMatch(part -> !plan.canScan(part.files, budget))) {
+                    continue;
+                }
+                if (plan.boundColumns() == 1) {
+                    List<Range> scalarCoverage =
+                            Range.sortAndMergeOverlap(
+                                    fieldGroups.stream()
+                                            .filter(other -> other.extraFields.isEmpty())
+                                            .map(other -> other.range)
+                                            .collect(Collectors.toList()),
+                                    true);
+                    List<Range> compositeCoverage =
+                            Range.sortAndMergeOverlap(
+                                    definition.stream()
+                                            .map(other -> other.range)
+                                            .collect(Collectors.toList()),
+                                    true);
+                    // A dedicated leading-field lookup avoids expanding the tuple suffix.
+                    if (Range.and(compositeCoverage, scalarCoverage).equals(compositeCoverage)) {
+                        continue;
+                    }
+                }
+                CompositeCandidate candidate = new CompositeCandidate(group, plan, selectedGroups);
+                if (selected == null || candidate.preferredTo(selected)) {
+                    selected = candidate;
+                }
+            }
+        }
+        return selected;
+    }
+
+    private static class CompositeCandidate {
+        private final IndexGroup group;
+        private final CompositeBTreePredicate.Plan plan;
+        private final List<IndexGroup> groups;
+
+        private CompositeCandidate(
+                IndexGroup group, CompositeBTreePredicate.Plan plan, List<IndexGroup> groups) {
+            this.group = group;
+            this.plan = plan;
+            this.groups = groups;
+        }
+
+        private boolean preferredTo(CompositeCandidate other) {
+            if (plan.boundColumns() != other.plan.boundColumns()) {
+                return plan.boundColumns() > other.plan.boundColumns();
+            }
+            if (plan.equalColumns() != other.plan.equalColumns()) {
+                return plan.equalColumns() > other.plan.equalColumns();
+            }
+            return group.indexFields().size() < other.group.indexFields().size();
+        }
+
+        private GlobalIndexQuery query() {
+            return new GlobalIndexQuery(
+                    PredicateBuilder.and(plan.predicates()),
+                    false,
+                    Collections.emptyList(),
+                    groups);
+        }
     }
 
     @Nullable

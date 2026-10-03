@@ -68,6 +68,159 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CompositeBTreeTableTest extends DataEvolutionTestBase {
 
     @Test
+    void testPrefixAndRangeQueriesAcrossReaderModes() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                table().copy(Collections.singletonMap("sorted-index.records-per-file", "13"));
+        append(table, 0, 60);
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writes.newWrite();
+                BatchTableCommit commit = writes.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            null,
+                            BinaryString.fromString("category-a"),
+                            BinaryString.fromString("null-number")));
+            write.write(GenericRow.of(7, null, BinaryString.fromString("null-category")));
+            commit.commit(write.prepareCommit());
+        }
+        build(table, "f1", "f0", "f2");
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate prefix = b.equal(1, BinaryString.fromString("category-a"));
+        List<Predicate> queries =
+                Arrays.asList(
+                        prefix,
+                        PredicateBuilder.and(prefix, b.equal(0, 7)),
+                        PredicateBuilder.and(prefix, b.greaterThan(0, 7)),
+                        PredicateBuilder.and(prefix, b.greaterOrEqual(0, 7)),
+                        PredicateBuilder.and(prefix, b.lessThan(0, 7)),
+                        PredicateBuilder.and(prefix, b.lessOrEqual(0, 7)),
+                        PredicateBuilder.and(prefix, b.between(0, 6, 8)),
+                        PredicateBuilder.and(prefix, b.greaterThan(0, 6), b.lessThan(0, 8)),
+                        PredicateBuilder.and(prefix, b.greaterThan(0, 7), b.lessOrEqual(0, 7)),
+                        PredicateBuilder.and(
+                                prefix,
+                                b.greaterThan(0, 7),
+                                b.startsWith(2, BinaryString.fromString("p2"))),
+                        PredicateBuilder.and(
+                                b.greaterThan(1, BinaryString.fromString("category-a")),
+                                b.equal(0, 7)),
+                        b.equal(0, 7),
+                        PredicateBuilder.or(
+                                PredicateBuilder.and(prefix, b.greaterThan(0, 7)),
+                                PredicateBuilder.and(
+                                        b.equal(1, BinaryString.fromString("category-b")),
+                                        b.lessOrEqual(0, 1))));
+        for (Predicate query : queries) {
+            List<String> expected = read(withoutIndex, query);
+            for (boolean inReader : Arrays.asList(false, true)) {
+                for (String mode : Arrays.asList("fast", "full", "detail")) {
+                    assertThat(read(configured(table, mode, inReader), query))
+                            .as("%s, reader=%s, mode=%s", query, inReader, mode)
+                            .containsExactlyInAnyOrderElementsOf(expected);
+                }
+            }
+        }
+        append(table, 60, 80);
+        Predicate query = PredicateBuilder.and(prefix, b.greaterThan(0, 7));
+        for (boolean inReader : Arrays.asList(false, true)) {
+            assertThat(read(configured(table, "fast", inReader), query)).hasSize(6);
+            for (String mode : Arrays.asList("full", "detail")) {
+                assertThat(read(configured(table, mode, inReader), query))
+                        .containsExactlyInAnyOrderElementsOf(read(withoutIndex, query));
+            }
+        }
+    }
+
+    @Test
+    void testRangesAvoidSingleColumnPostingsAndKeepResidualConditions() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 100);
+        build(table, "f1");
+        build(table, "f0");
+        build(table, "f1", "f0");
+        deleteIndexFiles(table, 1);
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate range =
+                PredicateBuilder.and(
+                        b.equal(1, BinaryString.fromString("category-a")), b.between(0, 6, 8));
+        Predicate residual = PredicateBuilder.and(range, b.notEqual(0, 7));
+        Predicate union =
+                PredicateBuilder.or(
+                        residual,
+                        PredicateBuilder.and(
+                                b.equal(1, BinaryString.fromString("category-b")),
+                                b.greaterThan(0, 8)));
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        for (boolean inReader : Arrays.asList(false, true)) {
+            for (Predicate query : Arrays.asList(range, residual, union)) {
+                assertThat(read(configured(table, "fast", inReader), query))
+                        .containsExactlyInAnyOrderElementsOf(read(withoutIndex, query));
+            }
+        }
+    }
+
+    @Test
+    void testOneOverBudgetShardFallsBackForTheWholeDefinition() throws Exception {
+        createTableDefault();
+        FileStoreTable table = table();
+        append(table, 0, 20);
+        build(table, "f1", "f0", "f2");
+        append(table, 20, 2200);
+        build(table, "f1", "f0", "f2");
+        List<IndexFileMeta> files =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        long small =
+                files.stream()
+                        .filter(file -> file.globalIndexMeta().rowRange().to == 19)
+                        .mapToLong(IndexFileMeta::fileSize)
+                        .sum();
+        long large =
+                files.stream()
+                        .filter(file -> file.globalIndexMeta().rowRange().from == 20)
+                        .mapToLong(IndexFileMeta::fileSize)
+                        .sum();
+        assertThat(small).isPositive();
+        assertThat(large).isGreaterThan(small);
+        FileStoreTable budgeted =
+                table.copy(
+                        Collections.singletonMap(
+                                "btree-index.fallback-scan-max-size", small + " b"));
+        FileStoreTable withoutIndex =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.GLOBAL_INDEX_ENABLED.key(), "false"));
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate range =
+                PredicateBuilder.and(
+                        b.equal(1, BinaryString.fromString("category-a")), b.between(0, 7, 8));
+        Predicate conjunction =
+                PredicateBuilder.and(range, b.startsWith(2, BinaryString.fromString("p")));
+        Predicate union =
+                PredicateBuilder.or(
+                        range,
+                        PredicateBuilder.and(
+                                b.equal(1, BinaryString.fromString("category-b")),
+                                b.greaterThan(0, 8)));
+        for (Predicate query : Arrays.asList(range, conjunction, union)) {
+            List<String> expected = read(withoutIndex, query);
+            for (boolean inReader : Arrays.asList(false, true)) {
+                for (String mode : Arrays.asList("fast", "full", "detail")) {
+                    assertThat(read(configured(budgeted, mode, inReader), query))
+                            .containsExactlyInAnyOrderElementsOf(expected);
+                }
+            }
+        }
+    }
+
+    @Test
     void testCoexistsAndAvoidsSingleColumnPostings() throws Exception {
         createTableDefault();
         FileStoreTable table =
@@ -395,7 +548,7 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
                 DataEvolutionGlobalIndexScanner.create(table, files).get()) {
             for (Predicate predicate :
                     Arrays.asList(
-                            predicates.equal(0, 7),
+                            predicates.notEqual(0, 7),
                             predicates.equal(1, BinaryString.fromString("category-a")))) {
                 assertThat(scanner.scan(predicate)).isEmpty();
                 assertThat(scanner.unindexedRows(predicate).results().toRangeList())
@@ -619,17 +772,15 @@ class CompositeBTreeTableTest extends DataEvolutionTestBase {
         createTableDefault();
         FileStoreTable table = table();
         append(table, 0, 20);
-        build(table, "f1");
+        build(table, "f0");
         append(table, 20, 40);
         build(table, "f1", "f0");
-        Predicate scalar =
-                new PredicateBuilder(table.rowType())
-                        .equal(1, BinaryString.fromString("category-a"));
+        Predicate scalar = new PredicateBuilder(table.rowType()).equal(0, 7);
         for (boolean inReader : Arrays.asList(false, true)) {
-            assertThat(read(configured(table, "fast", inReader), scalar)).hasSize(10);
+            assertThat(read(configured(table, "fast", inReader), scalar)).hasSize(2);
             for (String mode : Arrays.asList("full", "detail")) {
                 assertThat(read(configured(table, mode, inReader), scalar))
-                        .hasSize(20)
+                        .hasSize(4)
                         .contains("p27");
             }
         }
