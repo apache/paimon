@@ -918,7 +918,11 @@ public class IndexQuerySplitTest extends DataEvolutionTestBase {
         indexOptions.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1);
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
-                        GlobalIndexer.create("fm", original.rowType().getField("f1"), indexOptions)
+                        GlobalIndexer.create(
+                                        "fm",
+                                        Collections.singletonList(
+                                                original.rowType().getField("f1")),
+                                        indexOptions)
                                 .createWriter(io);
         for (int i = 0; i < 6; i++) {
             writer.write(str("a" + (100 + i)), i);
