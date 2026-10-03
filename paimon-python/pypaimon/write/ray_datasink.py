@@ -331,7 +331,9 @@ def write_paimon_dataset(
         planner = (
             postpone_bucket_planner
             if postpone_bucket_planner is not None
-            else PostponeBucketPlanner(table)
+            else PostponeBucketPlanner(
+                table, known_num_buckets={}
+                if overwrite or static_partition is not None else None)
         )
         plan = planner.current_plan()
         if table.partition_keys or not plan.contains(()):
