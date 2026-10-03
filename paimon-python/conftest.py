@@ -198,7 +198,8 @@ def enable_native_backends(request, monkeypatch):
     python_read = request.node.get_closest_marker("python_read") is not None
     python_write = request.node.get_closest_marker("python_write") is not None
     python_commit = request.node.get_closest_marker("python_commit") is not None
-    native_plan_test = request.path.name in (
+    # request.path requires pytest 7; Python 3.6 uses pytest 6.
+    native_plan_test = os.path.basename(request.node.location[0]) in (
         "native_plan_test.py", "native_plan_integration_test.py",
         "native_plan_capabilities_test.py")
     force_plan = _native_plan_enabled() and not python_plan and not native_plan_test
