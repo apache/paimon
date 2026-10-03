@@ -86,7 +86,11 @@ public class CreateTagFromWatermarkProcedure extends BaseProcedure {
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
-                    Snapshot snapshot = snapshotManager.laterOrEqualWatermark(watermark);
+                    Snapshot snapshot =
+                            earliestSnapshotCoveringWatermark(
+                                    snapshotManager,
+                                    snapshotManager.laterOrEqualWatermark(watermark),
+                                    watermark);
 
                     Set<Snapshot> sortedTagsSnapshots = fileStoreTable.tagManager().tags().keySet();
 
@@ -129,6 +133,32 @@ public class CreateTagFromWatermarkProcedure extends BaseProcedure {
 
                     return new InternalRow[] {outputRow};
                 });
+    }
+
+    /**
+     * {@link SnapshotManager#laterOrEqualWatermark} binary-searches and stops on the first
+     * watermark match it lands on, so a run of snapshots sharing the target watermark can resolve
+     * to a later member of that run. This Spark API promises the first qualifying snapshot, so walk
+     * back to the earliest snapshot whose watermark still covers {@code watermark}, stopping at any
+     * gap or missing-watermark snapshot.
+     */
+    private static Snapshot earliestSnapshotCoveringWatermark(
+            SnapshotManager snapshotManager, Snapshot snapshot, long watermark) {
+        if (snapshot == null) {
+            return null;
+        }
+        Long earliest = snapshotManager.earliestSnapshotId();
+        while (earliest != null
+                && snapshot.id() > earliest
+                && snapshotManager.snapshotExists(snapshot.id() - 1)) {
+            Snapshot previous = snapshotManager.snapshot(snapshot.id() - 1);
+            Long previousWatermark = previous.watermark();
+            if (previousWatermark == null || previousWatermark < watermark) {
+                break;
+            }
+            snapshot = previous;
+        }
+        return snapshot;
     }
 
     public static ProcedureBuilder builder() {

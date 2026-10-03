@@ -96,6 +96,35 @@ class CreateTagFromWatermarkProcedureTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql("SELECT * FROM T VERSION AS OF 'boundary'"), Row(1, "row1") :: Nil)
   }
 
+  test("Paimon Procedure: create tag picks the earliest snapshot in a repeated-watermark run") {
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, b STRING)
+                 |TBLPROPERTIES ('primary-key'='a', 'bucket'='1', 'write-only'='true')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    // Three consecutive snapshots (2, 3, 4) share watermark 2000. laterOrEqualWatermark
+    // binary-searches and stops on the run member it lands on (snapshot 3), but the first
+    // snapshot covering watermark 2000 is snapshot 2, so the tag must point there.
+    writeWithWatermark(table, 1L, 1000L, GenericRow.of(1, BinaryString.fromString("row1")))
+    writeWithWatermark(table, 2L, 2000L, GenericRow.of(2, BinaryString.fromString("row2")))
+    writeWithWatermark(table, 3L, 2000L, GenericRow.of(3, BinaryString.fromString("row3")))
+    writeWithWatermark(table, 4L, 2000L, GenericRow.of(4, BinaryString.fromString("row4")))
+    writeWithWatermark(table, 5L, 3000L, GenericRow.of(5, BinaryString.fromString("row5")))
+
+    val commitTime2 = table.snapshotManager.snapshot(2).timeMillis
+
+    checkAnswer(
+      spark.sql(s"""CALL paimon.sys.create_tag_from_watermark(
+                   |table => 'test.T', tag => 'wm2000', watermark => 2000)""".stripMargin),
+      Row("wm2000", 2, commitTime2, "2000") :: Nil
+    )
+    checkAnswer(
+      spark.sql("SELECT * FROM T VERSION AS OF 'wm2000' ORDER BY a"),
+      Row(1, "row1") :: Row(2, "row2") :: Nil
+    )
+  }
+
   private def writeWithWatermark(
       table: FileStoreTable,
       commitId: Long,
