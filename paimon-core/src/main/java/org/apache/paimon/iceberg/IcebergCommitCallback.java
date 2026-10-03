@@ -1642,10 +1642,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
-        Options options = new Options(table.options());
-        if (options.get(IcebergOptions.METADATA_DELETE_AFTER_COMMIT)) {
-            long earliestMetadataId =
-                    snapshotId - options.get(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX);
+        IcebergOptions options = new IcebergOptions(table.options());
+        if (options.deleteAfterCommitEnabled()) {
+            long earliestMetadataId = snapshotId - options.previousVersionsMax();
             if (earliestMetadataId > 0) {
                 Iterator<Path> it =
                         pathFactory

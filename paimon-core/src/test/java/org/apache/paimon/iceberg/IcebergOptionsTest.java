@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link IcebergOptions#metastoreDatabases}. */
 public class IcebergOptionsTest {
@@ -78,5 +79,30 @@ public class IcebergOptionsTest {
         List<String> databases = IcebergOptions.metastoreDatabases(options, FALLBACK_DB);
 
         assertThat(databases).containsExactly("db1", "db2", "db3");
+    }
+
+    @Test
+    public void testPreviousVersionsMaxRejectsNegative() {
+        // A negative value makes IcebergCommitCallback compute earliestMetadataId = snapshotId -
+        // (negative) > snapshotId, which deletes the current metadata file and makes the table
+        // unreadable by external engines on every commit.
+        for (int negative : new int[] {-1, -100}) {
+            Options options = new Options();
+            options.set(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX, negative);
+            assertThatThrownBy(() -> new IcebergOptions(options).previousVersionsMax())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "metadata.iceberg.previous-versions-max must not be negative");
+        }
+    }
+
+    @Test
+    public void testPreviousVersionsMaxAcceptsZeroAndPositive() {
+        // 0 is valid: keep only the current metadata (zero previous versions).
+        for (int valid : new int[] {0, 1, 100}) {
+            Options options = new Options();
+            options.set(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX, valid);
+            assertThat(new IcebergOptions(options).previousVersionsMax()).isEqualTo(valid);
+        }
     }
 }

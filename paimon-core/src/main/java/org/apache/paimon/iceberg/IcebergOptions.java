@@ -227,7 +227,13 @@ public class IcebergOptions {
     }
 
     public int previousVersionsMax() {
-        return options.get(METADATA_PREVIOUS_VERSIONS_MAX);
+        int previousVersionsMax = options.get(METADATA_PREVIOUS_VERSIONS_MAX);
+        Preconditions.checkArgument(
+                previousVersionsMax >= 0,
+                "%s must not be negative, but is %s.",
+                METADATA_PREVIOUS_VERSIONS_MAX.key(),
+                previousVersionsMax);
+        return previousVersionsMax;
     }
 
     /** Where to store Iceberg metadata. */
