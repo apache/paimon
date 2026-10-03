@@ -63,7 +63,8 @@ object SQLFunctionConverter {
     val inputParams: JList[DataField] = inputParamText.filter(_.trim.nonEmpty) match {
       case Some(text) =>
         SparkTypeUtils
-          .toPaimonRowType(UserDefinedFunction.parseRoutineParam(text, parser))
+          // Spark 4.2 added a trailing `collation` parameter with no default.
+          .toPaimonRowType(UserDefinedFunction.parseRoutineParam(text, parser, None))
           .getFields
       case None => Collections.emptyList[DataField]()
     }
@@ -141,6 +142,7 @@ object SQLFunctionConverter {
       exprText = if (isQuery) None else Some(body),
       queryText = if (isQuery) Some(body) else None,
       comment = Option(function.comment()),
+      collation = None,
       deterministic = deterministic,
       containsSQL = Option(options.get(CONTAINS_SQL)).map(_.toBoolean),
       isTableFunc = false,
@@ -158,7 +160,7 @@ object SQLFunctionConverter {
       funcIdent: FunctionIdentifier,
       returnTypeText: String,
       parser: ParserInterface): SparkDataType =
-    SQLFunction.parseReturnTypeText(returnTypeText, isTableFunc = false, parser) match {
+    SQLFunction.parseReturnTypeText(returnTypeText, isTableFunc = false, parser, None) match {
       case Some(Left(dataType)) => dataType
       case _ =>
         throw new UnsupportedOperationException(

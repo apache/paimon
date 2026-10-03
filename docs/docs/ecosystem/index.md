@@ -52,7 +52,7 @@ release cycle, embedded Paimon version, and feature limits.
 | Integration | Version selection | Access to Paimon tables |
 | --- | --- | --- |
 | [Flink](../flink/installation) | 1.16–1.20 and 2.0–2.2 | Batch and streaming reads/writes; [DDL](../flink/sql-ddl) and [row changes](../flink/sql-write) have version-specific requirements. |
-| [Spark](../spark/quick-start) | 3.2–3.5, 4.0, and 4.1; match the Scala binary version | Batch reads/writes, [DDL](../spark/sql-ddl), and [row changes](../spark/sql-write); [streaming](../spark/structured-streaming) requires Spark 3.3+. |
+| [Spark](../spark/quick-start) | 3.2–3.5, 4.0, 4.1, and 4.2; match the Scala binary version | Batch reads/writes, [DDL](../spark/sql-ddl), and [row changes](../spark/sql-write); [streaming](../spark/structured-streaming) requires Spark 3.3+. |
 | [Hive](./hive#version) | 2.1, 2.2, 2.3, 3.1, and 2.1-cdh-6.3 | Batch reads, table creation, and `INSERT INTO`; writes require MapReduce. |
 | [Trino](./trino#version) | Match the independently released Paimon connector to Trino | Batch reads; supported connectors also provide DDL, inserts, and time travel. See the guide's table-layout limits. |
 | [Presto](https://github.com/apache/paimon-presto) | Follow the separate connector's version requirements | See the connector repository for installation and supported operations. |
