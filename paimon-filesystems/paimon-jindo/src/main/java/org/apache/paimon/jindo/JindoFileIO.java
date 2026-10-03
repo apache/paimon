@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.jindo.CacheEndpoints.CacheEndpoint;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.plugin.PluginLoader;
 import org.apache.paimon.utils.IOUtils;
@@ -39,6 +40,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -72,6 +75,13 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
+    private static final String OSS_ENDPOINT = "fs.oss.endpoint";
+    private static final String OSS_HTTPS_ENABLE = "fs.oss.https.enable";
+    private static final String OSS_SECOND_LEVEL_DOMAIN_ENABLE =
+            "fs.oss.second.level.domain.enable";
+    private static final String OSS_REGION = "fs.oss.region";
+    // JindoSDK options of a DLF cache cluster, which the OSS endpoint must not use
+    private static final String OSS_DLF_CACHE_PREFIX = "fs.oss.dlf-cache.";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -91,6 +101,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
 
     private Options hadoopOptions;
     private Options hadoopOptionsWithCache;
+    private Map<String, Options> cacheEndpointOptions;
     private boolean allowCache = true;
     private transient BlobPresigner blobPresigner;
 
@@ -163,6 +174,39 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         hadoopOptionsWithCache.set("fs.oss.read.profile.columnar.use-pread", "false");
         hadoopOptionsWithCache.set(
                 "fs.jindocache.read.profile.columnar.readahead.pread.enable", "false");
+
+        if (cacheEndpoints != null) {
+            cacheEndpointOptions = new HashMap<>();
+            for (CacheEndpoint endpoint : cacheEndpoints.endpoints()) {
+                Options options = withEndpoint(hadoopOptions, endpoint.url);
+                options.set(
+                        OSS_SECOND_LEVEL_DOMAIN_ENABLE, String.valueOf(endpoint.pathStyleAccess));
+                if (endpoint.region != null) {
+                    options.set(OSS_REGION, endpoint.region);
+                }
+                cacheEndpointOptions.put(endpoint.name, options);
+            }
+            // fs.oss.endpoint may name a cache for older clients, so set the OSS endpoint again
+            hadoopOptions = withEndpoint(hadoopOptions, cacheEndpoints.ossEndpoint());
+            hadoopOptions.keySet().removeIf(key -> key.startsWith(OSS_DLF_CACHE_PREFIX));
+        }
+    }
+
+    /** Copies the options with an endpoint: its host[:port], and https from its scheme if any. */
+    static Options withEndpoint(Options base, @Nullable String endpoint) {
+        Options options = new Options(base.toMap());
+        if (endpoint == null) {
+            return options;
+        }
+        int schemeEnd = endpoint.indexOf("://");
+        if (schemeEnd >= 0) {
+            String scheme = endpoint.substring(0, schemeEnd);
+            options.set(OSS_HTTPS_ENABLE, String.valueOf("https".equalsIgnoreCase(scheme)));
+            endpoint = endpoint.substring(schemeEnd + 3);
+        }
+        int pathStart = endpoint.indexOf('/');
+        options.set(OSS_ENDPOINT, pathStart >= 0 ? endpoint.substring(0, pathStart) : endpoint);
+        return options;
     }
 
     /**
@@ -182,10 +226,12 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         } else if (opType.equalsIgnoreCase("meta")) {
             shouldCache = metaCacheEnabled && shouldCache(path);
         }
-        if (shouldCache) {
-            return hadoopOptionsWithCache;
-        } else {
+        if (!shouldCache) {
             return hadoopOptions;
+        } else if (cacheEndpoints != null) {
+            return cacheEndpointOptions.get(cacheEndpoints.endpointOf(path).name);
+        } else {
+            return hadoopOptionsWithCache;
         }
     }
 
@@ -256,9 +302,19 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     @Override
     protected Pair<JindoHadoopSystem, String> createFileSystem(
             org.apache.hadoop.fs.Path path, boolean enableCache) {
+        return createFileSystem(path, enableCache ? hadoopOptionsWithCache : hadoopOptions);
+    }
+
+    @Override
+    Pair<JindoHadoopSystem, String> createFileSystem(
+            org.apache.hadoop.fs.Path path, CacheEndpoint endpoint) {
+        return createFileSystem(path, cacheEndpointOptions.get(endpoint.name));
+    }
+
+    private Pair<JindoHadoopSystem, String> createFileSystem(
+            org.apache.hadoop.fs.Path path, Options options) {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
-        Options options = enableCache ? hadoopOptionsWithCache : hadoopOptions;
         Supplier<Pair<JindoHadoopSystem, String>> supplier =
                 () -> {
                     Configuration hadoopConf = new Configuration(false);
@@ -316,6 +372,12 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         if (!allowCache) {
             fsMap.values().stream().map(Pair::getKey).forEach(IOUtils::closeQuietly);
             fsMap.clear();
+            if (cacheEndpointFsMap != null) {
+                cacheEndpointFsMap.values().stream()
+                        .map(Pair::getKey)
+                        .forEach(IOUtils::closeQuietly);
+                cacheEndpointFsMap.clear();
+            }
         }
     }
 

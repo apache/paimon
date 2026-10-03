@@ -26,6 +26,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.jindo.CacheEndpoints.CacheEndpoint;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -36,6 +37,8 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -71,11 +74,18 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> fsMap;
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> jindoCacheFsMap;
+    protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> cacheEndpointFsMap;
+
+    // Set when the options name cache endpoints instead of a JindoCache RPC address
+    @Nullable CacheEndpoints cacheEndpoints;
 
     // Only enable cache for path which is generated with uuid
     private List<String> cacheWhitelistPaths = new ArrayList<>();
 
     boolean shouldCache(Path path) {
+        if (cacheEndpoints != null) {
+            return cacheEndpoints.endpointOf(path) != null;
+        }
         if (cacheWhitelistPaths.isEmpty()) {
             return true;
         }
@@ -102,8 +112,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         }
         // Enable file io cache
         if (context.options().get("fs.jindocache.namespace.rpc.address") == null) {
-            LOG.info(
-                    "FileIO cache is enabled but JindoCache RPC address is not set, fallback to no-cache");
+            configureCacheEndpoints(context);
         } else {
             metaCacheEnabled =
                     context.options().get(IO_CACHE_POLICY).contains(META_CACHE_ENABLED_TAG);
@@ -122,6 +131,27 @@ public abstract class HadoopCompliantFileIO implements FileIO {
                     writeCacheEnabled,
                     whitelist);
         }
+    }
+
+    // Without a JindoCache RPC address, reads may use the cache endpoints the options name.
+    private void configureCacheEndpoints(CatalogContext context) {
+        String policy = context.options().get(IO_CACHE_POLICY);
+        boolean metaCache = policy.contains(META_CACHE_ENABLED_TAG);
+        boolean readCache = policy.contains(READ_CACHE_ENABLED_TAG);
+        cacheEndpoints = metaCache || readCache ? CacheEndpoints.create(context.options()) : null;
+        if (cacheEndpoints == null) {
+            LOG.info(
+                    "FileIO cache is enabled but neither JindoCache RPC address nor cache endpoints are set, fallback to no-cache");
+            return;
+        }
+        // Writes always go to the OSS endpoint, so writeCacheEnabled stays false.
+        metaCacheEnabled = metaCache;
+        readCacheEnabled = readCache;
+        LOG.info(
+                "Cache endpoints enabled: meta cache enabled {}, read cache enabled {}, {}",
+                metaCacheEnabled,
+                readCacheEnabled,
+                cacheEndpoints);
     }
 
     @Override
@@ -194,7 +224,8 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public boolean exists(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        boolean shouldCache = metaCacheEnabled && shouldCache(path);
+        // A cache endpoint may remember that a file was missing, so existence checks skip it.
+        boolean shouldCache = metaCacheEnabled && cacheEndpoints == null && shouldCache(path);
         LOG.debug("Exists should cache {} for path {}", shouldCache, path);
         return getFileSystem(hadoopPath, shouldCache).exists(hadoopPath);
     }
@@ -226,6 +257,22 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return getFileSystem(hadoopSrc, false).rename(hadoopSrc, hadoopDst);
     }
 
+    @Override
+    public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
+        if (cacheEndpoints == null) {
+            FileIO.super.copyFile(sourcePath, targetPath, overwrite);
+            return;
+        }
+        // copies read the source from the OSS endpoint, not from a cache endpoint
+        org.apache.hadoop.fs.Path hadoopSrc = path(sourcePath);
+        org.apache.hadoop.fs.Path hadoopDst = path(targetPath);
+        try (FSDataInputStream in = getFileSystem(hadoopSrc, false).open(hadoopSrc);
+                FSDataOutputStream out =
+                        getFileSystem(hadoopDst, false).create(hadoopDst, overwrite)) {
+            IOUtils.copyBytes(in, out, 4096);
+        }
+    }
+
     protected org.apache.hadoop.fs.Path path(Path path) {
         URI uri = path.toUri();
         if ("oss".equals(uri.getScheme()) && uri.getUserInfo() != null) {
@@ -241,6 +288,9 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     protected Pair<JindoHadoopSystem, String> getFileSystemPair(
             org.apache.hadoop.fs.Path path, boolean enableCache) throws IOException {
+        if (enableCache && cacheEndpoints != null) {
+            return getCacheEndpointFileSystemPair(path);
+        }
         Map<String, Pair<JindoHadoopSystem, String>> map;
         if (enableCache) {
             if (jindoCacheFsMap == null) {
@@ -281,8 +331,41 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         }
     }
 
+    private Pair<JindoHadoopSystem, String> getCacheEndpointFileSystemPair(
+            org.apache.hadoop.fs.Path path) throws IOException {
+        CacheEndpoint endpoint = cacheEndpoints.endpointOf(new Path(path.toUri()));
+        if (endpoint == null) {
+            return getFileSystemPair(path, false);
+        }
+        if (cacheEndpointFsMap == null) {
+            synchronized (this) {
+                if (cacheEndpointFsMap == null) {
+                    cacheEndpointFsMap = new ConcurrentHashMap<>();
+                }
+            }
+        }
+        String authority = path.toUri().getAuthority();
+        String key = endpoint.name + "/" + (authority == null ? "DEFAULT" : authority);
+        try {
+            return cacheEndpointFsMap.computeIfAbsent(
+                    key,
+                    k -> {
+                        try {
+                            return createFileSystem(path, endpoint);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    });
+        } catch (UncheckedIOException e) {
+            throw e.getCause();
+        }
+    }
+
     protected abstract Pair<JindoHadoopSystem, String> createFileSystem(
             org.apache.hadoop.fs.Path path, boolean enableCache) throws IOException;
+
+    abstract Pair<JindoHadoopSystem, String> createFileSystem(
+            org.apache.hadoop.fs.Path path, CacheEndpoint endpoint) throws IOException;
 
     private static class HadoopSeekableInputStream extends SeekableInputStream {
 
