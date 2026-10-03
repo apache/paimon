@@ -16,10 +16,43 @@
 # under the License.
 
 from contextlib import suppress
+import math
 
 import pyarrow.parquet as pq
 
 from pypaimon.common.options.core_options import CoreOptions
+
+
+def _java_less_than(a, b) -> bool:
+    """Whether ``a`` sorts strictly before ``b`` under Java's typed ordering.
+
+    For floats this distinguishes signed zero (``-0.0`` < ``+0.0``), unlike
+    Python ``<`` which treats them equal. NaN is not expected here: a float
+    column containing NaN is flagged unreliable and its bounds are dropped.
+    """
+    if a < b:
+        return True
+    if a > b:
+        return False
+    if isinstance(a, float) and isinstance(b, float):
+        return math.copysign(1.0, a) < math.copysign(1.0, b)
+    return False
+
+
+def _typed_min(values):
+    result = values[0]
+    for value in values[1:]:
+        if _java_less_than(value, result):
+            result = value
+    return result
+
+
+def _typed_max(values):
+    result = values[0]
+    for value in values[1:]:
+        if _java_less_than(result, value):
+            result = value
+    return result
 
 
 class SingleFileWriter:
@@ -66,8 +99,14 @@ class SingleFileWriter:
                 previous = self.column_stats.get(field.name)
                 if previous is not None:
                     current['null_counts'] += previous['null_counts']
+                    # A bound is unreliable if any batch's was (e.g. a NaN or a
+                    # nanosecond timestamp seen in an earlier batch).
+                    if 'min_max_unreliable' in current or 'min_max_unreliable' in previous:
+                        current['min_max_unreliable'] = (
+                            current.get('min_max_unreliable', False)
+                            or previous.get('min_max_unreliable', False))
                     for key, choose in (
-                            ('min_values', min), ('max_values', max)):
+                            ('min_values', _typed_min), ('max_values', _typed_max)):
                         values = [
                             value for value in (previous[key], current[key])
                             if value is not None

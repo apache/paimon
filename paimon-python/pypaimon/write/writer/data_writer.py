@@ -32,6 +32,7 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
 from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
+from pypaimon.write.writer import stats_mode
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
@@ -54,6 +55,15 @@ class DataWriter(ABC):
         self.trimmed_primary_keys = self.table.trimmed_primary_keys
 
         self.options = options
+        # Parse metadata.stats-mode once: value stats are recorded for every
+        # mode except ``none`` (``counts`` keeps null counts, ``truncate(N)``
+        # truncates min/max, ``full`` keeps them). Java collects them; without
+        # this pypaimon wrote nothing but ``full``, so a Paimon/Spark/Flink
+        # reader could not data-skip files pypaimon wrote.
+        self._stats_mode_kind, self._stats_mode_length = \
+            stats_mode.parse_stats_mode(self.options.metadata_stats_mode())
+        self._value_stats_on = stats_mode.value_stats_enabled(
+            self._stats_mode_kind)
         self.target_file_size = self.options.target_file_size(self.table.is_primary_key_table)
         # Roll a file when it reaches target_file_row_num rows or target_file_size,
         # whichever comes first. Defaults to the max long (disabled), so plain
@@ -316,8 +326,10 @@ class DataWriter(ABC):
             min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
             max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
-            # key stats & value stats
-            value_stats_enabled = self.options.metadata_stats_enabled()
+            # key stats & value stats. Keys are always collected in full (the
+            # LSM needs exact key bounds); value stats honor
+            # metadata.stats-mode.
+            value_stats_enabled = self._value_stats_on
             if value_stats_enabled:
                 stats_fields = self.table.fields if self.table.is_primary_key_table \
                     else PyarrowFieldParser.to_paimon_schema(logical_data.schema)
@@ -336,7 +348,8 @@ class DataWriter(ABC):
 
             value_fields = stats_fields if value_stats_enabled else []
             value_stats = self._collect_value_stats(
-                logical_data, value_fields, column_stats)
+                logical_data, value_fields,
+                self._converted_value_column_stats(value_fields, column_stats))
 
             # Read the range without advancing it: the advance belongs with the
             # append below, so a retried flush derives the same range.
@@ -407,7 +420,7 @@ class DataWriter(ABC):
             extra_files=extra_files if extra_files is not None else [],
             creation_time=creation_time if creation_time is not None else Timestamp.now(),
             delete_row_count=0, file_source=0,
-            value_stats_cols=None if self.options.metadata_stats_enabled() else [],
+            value_stats_cols=None if self._value_stats_on else [],
             external_path=file_path if self.external_path_provider is not None else None,
             first_row_id=None, write_cols=self.write_cols, file_path=file_path,
         )
@@ -531,6 +544,46 @@ class DataWriter(ABC):
 
         return best_split
 
+    def _converted_value_column_stats(
+            self, fields: List,
+            column_stats: Dict[str, Dict]) -> Dict[str, Dict]:
+        """Return a per-column stats view converted per metadata.stats-mode.
+
+        ``full`` passes ``column_stats`` through untouched. ``counts`` and
+        ``truncate(N)`` return a shallow copy in which each listed field's
+        ``(min, max, null_count)`` is converted (see
+        ``stats_mode.convert_col_stats``); the copy keeps other entries
+        (e.g. the key fields feeding key stats) at their full values.
+        """
+        if self._stats_mode_kind == stats_mode.FULL:
+            return column_stats
+        converted = dict(column_stats)
+        for field in fields:
+            raw = column_stats[field.name]
+            if raw.get('min_max_unreliable'):
+                # Arrow min/max cannot produce a sound bound for this column
+                # (a float column containing NaN, or a nanosecond timestamp
+                # whose sub-microsecond part is lost on serialization). Keep
+                # the null count but omit min/max rather than publish a bound
+                # that would wrongly prune files -- matching the baseline,
+                # which wrote no value bounds for this option. ``full`` keeps
+                # its existing behavior (handled by the early return above).
+                converted[field.name] = {
+                    'min_values': None,
+                    'max_values': None,
+                    'null_counts': raw['null_counts'],
+                }
+                continue
+            min_v, max_v, null_count = stats_mode.convert_col_stats(
+                self._stats_mode_kind, self._stats_mode_length,
+                raw['min_values'], raw['max_values'], raw['null_counts'])
+            converted[field.name] = {
+                'min_values': min_v,
+                'max_values': max_v,
+                'null_counts': null_count,
+            }
+        return converted
+
     def _collect_value_stats(self, data: pa.Table, fields: List,
                              column_stats: Optional[Dict[str, Dict]] = None) -> SimpleStats:
         if not fields:
@@ -560,20 +613,22 @@ class DataWriter(ABC):
                 "min_values": None,
                 "max_values": None,
                 "null_counts": column_array.null_count,
+                "min_max_unreliable": False,
             }
-        
+
         column_type = column_array.type
         supports_minmax = not (
             pa.types.is_nested(column_type) or pa.types.is_map(column_type) or pa.types.is_large_binary(column_type)
         )
-        
+
         if not supports_minmax:
             return {
                 "min_values": None,
                 "max_values": None,
                 "null_counts": column_array.null_count,
+                "min_max_unreliable": False,
             }
-        
+
         min_values = pc.min(column_array).as_py()
         max_values = pc.max(column_array).as_py()
         null_counts = column_array.null_count
@@ -581,7 +636,23 @@ class DataWriter(ABC):
             "min_values": min_values,
             "max_values": max_values,
             "null_counts": null_counts,
+            # min/max from these columns are not a sound bound: Arrow min/max
+            # skip NaN (a float file with a NaN keeps a finite min/max, and an
+            # all-NaN file yields none), and a Python datetime drops a
+            # nanosecond timestamp's sub-microsecond part. Only the value-stats
+            # path (never key stats) consumes this to omit the bound.
+            "min_max_unreliable": DataWriter._min_max_unreliable(column_array),
         }
+
+    @staticmethod
+    def _min_max_unreliable(column_array) -> bool:
+        column_type = column_array.type
+        if pa.types.is_floating(column_type):
+            has_nan = pc.any(pc.is_nan(column_array)).as_py()
+            return bool(has_nan)
+        if pa.types.is_timestamp(column_type) and column_type.unit == "ns":
+            return True
+        return False
 
 
 class SequenceGenerator:

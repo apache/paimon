@@ -142,6 +142,90 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             output_stream.assert_not_called()
 
     @pytest.mark.python_write
+    def test_row_id_update_file_honors_stats_mode(self):
+        # A row-id update file must honor metadata.stats-mode like the other
+        # writers. Under counts / truncate(N) the manifest declares value
+        # stats (value_stats_cols=None) so it must actually write them --
+        # previously this path only collected stats under full and left
+        # null_counts empty, contradicting the declared columns.
+        schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        rows = pa.Table.from_pylist(
+            [{'id': 10, 'name': 'apple'},
+             {'id': 20, 'name': 'banana'},
+             {'id': 30, 'name': None}], schema=schema)
+
+        def write_update_file(mode):
+            table = self._create_table(pa_schema=schema, options={
+                **self.table_options, 'metadata.stats-mode': mode})
+            writer = _RowIdUpdateFileWriter(table, (), ['id', 'name'])
+            try:
+                metas = writer.write_batches(rows.to_batches())
+            finally:
+                writer.close()
+            self.assertEqual(len(metas), 1)
+            return table, metas[0]
+
+        def min_max(table, file):
+            vs = file.value_stats
+            return (list(vs.min_values.values),
+                    list(vs.max_values.values),
+                    list(vs.null_counts))
+
+        for mode in ('counts', 'truncate(3)'):
+            with self.subTest(mode=mode):
+                table, file = write_update_file(mode)
+                # Declares all columns have value stats...
+                self.assertIsNone(file.value_stats_cols)
+                mn, mx, null_counts = min_max(table, file)
+                # ...so it must record the null counts (id none, name one).
+                self.assertEqual(null_counts, [0, 1])
+                if mode == 'counts':
+                    self.assertEqual((mn, mx), ([None, None], [None, None]))
+                else:
+                    # int is not truncated; string min/max are (max bumped to
+                    # stay a sound upper bound): "apple"->"app", "banana"->"bao".
+                    self.assertEqual(mn, [10, 'app'])
+                    self.assertEqual(mx, [30, 'bao'])
+
+        # none writes no value stats at all (value_stats_cols=[]).
+        table, file = write_update_file('none')
+        self.assertEqual(file.value_stats_cols, [])
+
+    @pytest.mark.python_write
+    @mock.patch.object(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 1)
+    def test_row_id_update_file_merges_signed_zero_bounds(self):
+        # A row-id update file is written incrementally over several row groups
+        # (here one row each). The cross-group min/max merge must keep Java's
+        # typed order for floats so a column with -0.0 in one group and +0.0 in
+        # another publishes min=-0.0 / max=+0.0, not whichever zero arrived
+        # first (Python min/max treat them equal). Single-group Arrow min/max
+        # already handles this, so two groups are needed to exercise the merge.
+        import math
+        schema = pa.schema([('id', pa.int32()), ('d', pa.float64())])
+
+        def write_rows(first, second):
+            table = self._create_table(pa_schema=schema, options={
+                **self.table_options, 'metadata.stats-mode': 'truncate(3)'})
+            rows = pa.Table.from_pylist(
+                [{'id': 1, 'd': first}, {'id': 2, 'd': second}], schema=schema)
+            writer = _RowIdUpdateFileWriter(table, (), ['id', 'd'])
+            try:
+                metas = writer.write_batches(rows.to_batches())
+            finally:
+                writer.close()
+            self.assertEqual(len(metas), 1)
+            vs = metas[0].value_stats
+            return vs.min_values.values[1], vs.max_values.values[1]
+
+        for first, second in ((-0.0, 0.0), (0.0, -0.0)):
+            with self.subTest(order=(first, second)):
+                mn, mx = write_rows(first, second)
+                # min keeps the negative zero, max the positive zero, regardless
+                # of which group each landed in.
+                self.assertEqual(math.copysign(1.0, mn), -1.0)
+                self.assertEqual(math.copysign(1.0, mx), 1.0)
+
+    @pytest.mark.python_write
     @mock.patch.object(_RowIdUpdateFileWriter, '_ROW_GROUP_MAX_ROWS', 2)
     def test_partial_upsert_streams_original_file_group(self):
         schema = pa.schema([
