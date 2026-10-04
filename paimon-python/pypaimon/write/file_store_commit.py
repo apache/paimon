@@ -241,8 +241,8 @@ class FileStoreCommit:
             return
 
         _reject_compact_increment(commit_messages)
-        self._set_fixed_bucket_commit_check(commit_messages)
         check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
         # A committer can be reused; an untagged commit clears the prior baseline.
         self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
 
@@ -326,9 +326,9 @@ class FileStoreCommit:
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
         _reject_compact_increment(commit_messages)
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
         self._set_fixed_bucket_commit_check(commit_messages)
-        self.conflict_detection._row_id_check_from_snapshot = (
-            _row_id_check_from_messages(commit_messages))
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
