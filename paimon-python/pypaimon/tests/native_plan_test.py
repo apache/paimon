@@ -39,6 +39,7 @@ from pypaimon.read.native_plan import (
     _predicate_to_native,
     _resolved_schema_json,
     _restore_python_partition_paths,
+    _variant_read_type_json,
     native_family_search_modes_available,
     native_plan,
     native_version_at_least,
@@ -94,6 +95,45 @@ def _scan(native_enabled, file_scanner):
 
 class NativePlanTest(unittest.TestCase):
 
+    def test_variant_read_type_matches_java_interop_fixture(self):
+        actual = _variant_read_type_json(
+            [DataField(7, 'payload', AtomicType('VARIANT'))],
+            {'payload': {
+                'paths': ['$.x'],
+                'target_type': pyarrow.float32(),
+                'fail_on_error': False,
+            }})
+        # Parsed by Java VariantMetadataUtilsTest.testReadTypeJsonInteropWithRustAndPython.
+        java_fixture = (
+            '{"type":"ROW","fields":[{"id":7,"name":"payload",'
+            '"type":{"type":"ROW","fields":[{"id":0,"name":"0",'
+            '"type":"FLOAT","description":'
+            '"__VARIANT_METADATA$.x;false;UTC"}],"nullable":true}}],'
+            '"nullable":true}'
+        )
+        self.assertEqual(json.loads(actual), json.loads(java_fixture))
+
+        strict = _variant_read_type_json(
+            [DataField(7, 'payload', AtomicType('VARIANT'))],
+            {'payload': {
+                'paths': ['$.x'],
+                'target_type': pyarrow.float32(),
+                'fail_on_error': True,
+            }})
+        self.assertEqual(
+            json.loads(strict)['fields'][0]['type']['fields'][0]['description'],
+            '__VARIANT_METADATA$.x;true;UTC')
+
+    def test_variant_read_type_rejects_semicolon_path(self):
+        with self.assertRaisesRegex(ValueError, "must not contain ';'"):
+            _variant_read_type_json(
+                [DataField(7, 'payload', AtomicType('VARIANT'))],
+                {'payload': {
+                    'paths': ["$['a;b']"],
+                    'target_type': pyarrow.float32(),
+                    'fail_on_error': False,
+                }})
+
     def test_native_builder_receives_variant_read_type(self):
         builder = Mock()
         builder.with_read_type.return_value = builder
@@ -123,9 +163,8 @@ class NativePlanTest(unittest.TestCase):
         self.assertEqual([field['name'] for field in fields], ['id', 'payload'])
         self.assertEqual(fields[1]['id'], 2)
         self.assertEqual(fields[1]['type']['fields'][0]['type'], 'FLOAT')
-        self.assertEqual(json.loads(fields[1]['type']['fields'][0]['description'][
-            len('__VARIANT_METADATA'):]), {
-                'path': '$.ratio', 'failOnError': False, 'timeZoneId': 'UTC'})
+        self.assertEqual(fields[1]['type']['fields'][0]['description'],
+                         '__VARIANT_METADATA$.ratio;false;UTC')
         builder.with_projection.assert_not_called()
 
     def setUp(self):

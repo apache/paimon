@@ -245,6 +245,11 @@ class ReadBuilder:
                 raise TypeError(
                     "variant_fields[%r]['paths'] must be a non-empty "
                     "sequence of strings" % column)
+            for path in paths:
+                if ';' in path:
+                    raise ValueError(
+                        "Variant extraction path must not contain ';': %s"
+                        % path)
             target_type = options.get('target_type')
             if not isinstance(target_type, pyarrow.DataType):
                 raise TypeError(

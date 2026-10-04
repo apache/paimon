@@ -365,15 +365,16 @@ def _variant_read_type_json(
             raise ValueError("variant_fields column %r must be VARIANT" % field.name)
         if options['target_type'] != pyarrow.float32():
             raise ValueError("variant_fields[%r]['target_type'] must be float32" % field.name)
+        for path in options['paths']:
+            if ';' in path:
+                raise ValueError(
+                    "Variant extraction path must not contain ';': %s" % path)
         projected.add(field.name)
         children = [
             DataField(
                 index, str(index), AtomicType('FLOAT'),
-                '__VARIANT_METADATA' + json.dumps({
-                    'path': path,
-                    'failOnError': options['fail_on_error'],
-                    'timeZoneId': 'UTC',
-                }, separators=(',', ':')))
+                '__VARIANT_METADATA%s;%s;UTC' % (
+                    path, str(options['fail_on_error']).lower()))
             for index, path in enumerate(options['paths'])
         ]
         fields.append(DataField(

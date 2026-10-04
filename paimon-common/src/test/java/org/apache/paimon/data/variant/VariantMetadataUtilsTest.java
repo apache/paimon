@@ -19,8 +19,10 @@
 package org.apache.paimon.data.variant;
 
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.Test;
 
@@ -44,6 +46,65 @@ public class VariantMetadataUtilsTest {
         assertThatThrownBy(() -> VariantMetadataUtils.buildVariantMetadata("$.a;b", true, "UTC"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must not contain ';'");
+    }
+
+    @Test
+    public void testReadTypeJsonInteropWithRustAndPython() {
+        // This is the read-type JSON emitted by Rust (which omits optional nullable fields).
+        String rustJson =
+                "{\"type\":\"ROW\",\"fields\":[{\"id\":7,\"name\":\"payload\","
+                        + "\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "{\"id\":0,\"name\":\"0\",\"type\":\"FLOAT\","
+                        + "\"description\":\"__VARIANT_METADATA$.x;false;Asia/Shanghai\"},"
+                        + "{\"id\":1,\"name\":\"1\",\"type\":\"FLOAT\","
+                        + "\"description\":\"__VARIANT_METADATA$.y;true;UTC\"}]}}]}";
+        RowType javaRow =
+                RowType.of(
+                        new DataField(
+                                7,
+                                "payload",
+                                RowType.of(
+                                        new DataField(
+                                                0,
+                                                "0",
+                                                DataTypes.FLOAT(),
+                                                VariantMetadataUtils.buildVariantMetadata(
+                                                        "$.x", false, "Asia/Shanghai")),
+                                        new DataField(
+                                                1,
+                                                "1",
+                                                DataTypes.FLOAT(),
+                                                VariantMetadataUtils.buildVariantMetadata(
+                                                        "$.y", true, "UTC")))));
+        assertThat(JsonSerdeUtil.toFlatJson(javaRow)).isEqualTo(rustJson);
+        RowType parsedRustRow = (RowType) JsonSerdeUtil.fromJson(rustJson, DataType.class);
+        RowType rustVariantRow = (RowType) parsedRustRow.getField(0).type();
+        assertThat(VariantMetadataUtils.path(rustVariantRow.getField(0).description()))
+                .isEqualTo("$.x");
+        assertThat(VariantMetadataUtils.failOnError(rustVariantRow.getField(0).description()))
+                .isFalse();
+        assertThat(VariantMetadataUtils.timeZoneId(rustVariantRow.getField(0).description()))
+                .isEqualTo(ZoneId.of("Asia/Shanghai"));
+        assertThat(VariantMetadataUtils.path(rustVariantRow.getField(1).description()))
+                .isEqualTo("$.y");
+        assertThat(VariantMetadataUtils.failOnError(rustVariantRow.getField(1).description()))
+                .isTrue();
+        assertThat(VariantMetadataUtils.timeZoneId(rustVariantRow.getField(1).description()))
+                .isEqualTo(ZoneId.of("UTC"));
+
+        // PyPaimon includes nullable in its RowType.to_dict representation.
+        String pythonJson =
+                "{\"type\":\"ROW\",\"fields\":[{\"id\":7,\"name\":\"payload\","
+                        + "\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "{\"id\":0,\"name\":\"0\",\"type\":\"FLOAT\","
+                        + "\"description\":\"__VARIANT_METADATA$.x;false;UTC\"}],"
+                        + "\"nullable\":true}}],\"nullable\":true}";
+        DataType parsed = JsonSerdeUtil.fromJson(pythonJson, DataType.class);
+        RowType extracted = (RowType) ((RowType) parsed).getField(0).type();
+        String description = extracted.getField(0).description();
+        assertThat(VariantMetadataUtils.path(description)).isEqualTo("$.x");
+        assertThat(VariantMetadataUtils.failOnError(description)).isFalse();
+        assertThat(VariantMetadataUtils.timeZoneId(description)).isEqualTo(ZoneId.of("UTC"));
     }
 
     @Test

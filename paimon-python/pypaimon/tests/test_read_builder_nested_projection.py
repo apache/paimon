@@ -115,6 +115,15 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
                         ['payload'], variant_fields={'payload': {
                             'paths': ['$.x'], 'target_type': target_type}})
 
+    def test_variant_path_rejects_java_metadata_delimiter(self):
+        table = Mock()
+        table.fields = [DataField(1, 'payload', AtomicType('VARIANT'))]
+
+        with self.assertRaisesRegex(ValueError, "must not contain ';'"):
+            ReadBuilder(table).with_projection(
+                ['payload'], variant_fields={'payload': {
+                    'paths': ["$['a;b']"], 'target_type': pa.float32()}})
+
     def test_variant_fields_require_projected_variant_column(self):
         table = Mock()
         table.fields = [
