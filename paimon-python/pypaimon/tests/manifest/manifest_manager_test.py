@@ -428,13 +428,13 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
 
     def test_rolling_manifest_bucket_stats_are_per_file(self):
         manager = self._make_manager()
-        entries = [self._create_manifest_entry(str(i), bucket=i) for i in range(4)]
+        entries = [self._create_manifest_entry(str(i), bucket=i // 1000) for i in range(2001)]
         for entry in entries:
             entry.total_buckets = 8
         metas = manager.rolling_write(entries, 1, 'rolling-bucket-stats')
-        self.assertEqual(len(metas), len(entries))
+        self.assertEqual([m.num_added_files for m in metas], [1000, 1000, 1])
         self.assertEqual([(m.min_bucket, m.max_bucket, m.total_buckets) for m in metas],
-                         [(i, i, 8) for i in range(4)])
+                         [(i, i, 8) for i in range(3)])
 
     def test_filter_applied_after_read(self):
         manager = self._make_manager()
@@ -498,7 +498,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         self.assertEqual(read_stats.max_values.get_field(0), 10)
         self.assertEqual(read_stats.null_counts, [2])
 
-    def test_commit_manifest_exceeds_target_size(self):
+    def test_commit_manifest_waits_for_java_rolling_cadence(self):
         target_size = 16 * 1024
         pa_schema = pa.schema([
             ('pt', pa.string()),
@@ -527,17 +527,9 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
 
         snap = table.snapshot_manager().get_latest_snapshot()
         metas = ManifestListManager(table).read_all(snap)
-        max_allowed = target_size * 2
-        oversized = [m for m in metas if m.file_size > max_allowed]
-        self.assertEqual(
-            len(oversized), 0,
-            f"{len(oversized)} manifest file(s) exceed 2x target ({max_allowed} bytes): "
-            f"{[(m.file_name, m.file_size) for m in oversized]}. "
-            f"Java uses RollingFileWriter to split; Python writes one file.")
-        self.assertGreater(
-            len(metas), 1,
-            f"Expected multiple manifest files but got {len(metas)} "
-            f"with total {sum(m.file_size for m in metas)} bytes")
+        # Like Java, targets are approximate: no size check before 1000 records.
+        self.assertEqual(len(metas), 1)
+        self.assertGreater(metas[0].file_size, target_size)
 
         mfm = ManifestFileManager(table)
         all_entries = []
@@ -569,12 +561,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         entries = [big if i % 5 == 0 else small for i in range(300)]
         metas = manager.rolling_write(entries, target_size, "manifest-skew")
 
-        max_allowed = target_size * 2
-        oversized = [m for m in metas if m.file_size > max_allowed]
-        self.assertEqual(
-            len(oversized), 0,
-            f"Skewed entries: {len(oversized)} file(s) exceed 2x target: "
-            f"{[(m.file_name, m.file_size) for m in oversized]}")
+        self.assertEqual(len(metas), 1)
         total_entries = sum(m.num_added_files + m.num_deleted_files for m in metas)
         self.assertEqual(total_entries, 300)
 

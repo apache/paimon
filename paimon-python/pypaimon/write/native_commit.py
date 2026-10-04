@@ -29,9 +29,6 @@ from pypaimon.write.commit_message_serializer import (
 )
 
 
-_DEFAULT_MANIFEST_TARGET_SIZE = 8 * 1024 * 1024
-
-
 def native_commit_available() -> bool:
     """Whether the optional Rust bindings are installed."""
     try:
@@ -41,15 +38,19 @@ def native_commit_available() -> bool:
     return True
 
 
-def _native_publication_supported(table) -> bool:
-    # Data evolution needs sidecar ranges and row-id recovery. Custom manifest
-    # targets need Java's forced size checks between manifest entry groups.
-    return (not table.options.data_evolution_enabled()
-            and table.options.manifest_target_size() == _DEFAULT_MANIFEST_TARGET_SIZE)
+def _requires_python_row_id_recovery(table, messages) -> bool:
+    # PyPaimon's optional rebase rewrites staged partial files when concurrent
+    # compaction changes their row-ID ranges. Keep that recovery in Python;
+    # appends and deletion-vector updates use Rust's Java-compatible checks.
+    return (table.options.data_evolution_enabled()
+            and not table.options.deletion_vectors_enabled(False)
+            and table.options.data_evolution_row_id_conflict_rewrite_max_size() > 0
+            and any(file.first_row_id is not None
+                    for message in messages for file in message.new_files))
 
 
 def native_messages_supported(table, messages) -> bool:
-    if not _native_publication_supported(table):
+    if _requires_python_row_id_recovery(table, messages):
         return False
     path_factory = table.path_factory()
     for message in messages:
@@ -77,9 +78,7 @@ def native_messages_supported(table, messages) -> bool:
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
-    if (not _native_publication_supported(table)
-            or not _rest_catalog_supported(table)
-            or not native_commit_available()):
+    if not _rest_catalog_supported(table) or not native_commit_available():
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -160,6 +159,8 @@ def create_native_write_table(table):
         table.options.dynamic_partition_overwrite())
     options['snapshot.ignore-empty-commit'] = _option_value_to_string(
         table.options.snapshot_ignore_empty_commit())
+    options['row-tracking.partition-group-on-commit'] = _option_value_to_string(
+        table.options.row_tracking_partition_group_on_commit())
     schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
     if environment.supports_version_management:
         if not _rest_catalog_supported(table):

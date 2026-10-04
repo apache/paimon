@@ -203,6 +203,25 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
             file=cls._data_file(name, row_count),
         )
 
+    def test_snapshot_assignment_matches_java_sequence_sentinels(self):
+        commit = self._create_file_store_commit()
+        for kind in (0, 1):
+            for before, after in [((0, 0), (9, 9)), ((0, 3), (9, 9)),
+                                  ((2, 0), (2, 9)), ((2, 3), (2, 3))]:
+                with self.subTest(kind=kind, before=before):
+                    entry = self._append_entry((), 'file.parquet', 4)
+                    entry.kind = kind
+                    entry.file = replace(entry.file, min_sequence_number=before[0],
+                                         max_sequence_number=before[1], first_row_id=12,
+                                         write_cols=['id'], write_cols_sequences=[3])
+                    assigned, = commit._assign_snapshot_id(9, [entry])
+                    self.assertEqual((assigned.file.min_sequence_number,
+                                      assigned.file.max_sequence_number), after)
+                    self.assertEqual(assigned.file.first_row_id, 12)
+                    self.assertEqual(assigned.file.write_cols_sequences, [3])
+                    self.assertEqual((entry.file.min_sequence_number,
+                                      entry.file.max_sequence_number), before)
+
     def test_groups_files_by_partition_before_assigning_row_ids(self):
         file_store_commit = self._create_file_store_commit()
         entries = [

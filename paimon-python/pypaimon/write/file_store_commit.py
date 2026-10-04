@@ -1165,11 +1165,14 @@ class FileStoreCommit:
         ]
 
     def _assign_snapshot_id(self, snapshot_id: int, commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
-        """Assign snapshot ID to delta entries whose minSequenceNumber is 0."""
+        """Replace pending sequence numbers as in Java RowTrackingCommitUtils."""
         result = []
         for entry in commit_entries:
             if entry.file.min_sequence_number == 0:
                 result.append(entry.assign_sequence_number(snapshot_id, snapshot_id))
+            elif entry.file.max_sequence_number == 0:
+                result.append(entry.assign_sequence_number(
+                    entry.file.min_sequence_number, snapshot_id))
             else:
                 result.append(entry)
         return result
