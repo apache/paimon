@@ -78,7 +78,7 @@ public class VariantMetadataUtilsTest {
                                                         "$.y", true, "UTC")))));
         assertThat(JsonSerdeUtil.toFlatJson(javaRow)).isEqualTo(rustJson);
         RowType parsedRustRow = (RowType) JsonSerdeUtil.fromJson(rustJson, DataType.class);
-        RowType rustVariantRow = (RowType) parsedRustRow.getField(0).type();
+        RowType rustVariantRow = (RowType) parsedRustRow.getFields().get(0).type();
         assertThat(VariantMetadataUtils.path(rustVariantRow.getField(0).description()))
                 .isEqualTo("$.x");
         assertThat(VariantMetadataUtils.failOnError(rustVariantRow.getField(0).description()))
@@ -100,7 +100,7 @@ public class VariantMetadataUtilsTest {
                         + "\"description\":\"__VARIANT_METADATA$.x;false;UTC\"}],"
                         + "\"nullable\":true}}],\"nullable\":true}";
         DataType parsed = JsonSerdeUtil.fromJson(pythonJson, DataType.class);
-        RowType extracted = (RowType) ((RowType) parsed).getField(0).type();
+        RowType extracted = (RowType) ((RowType) parsed).getFields().get(0).type();
         String description = extracted.getField(0).description();
         assertThat(VariantMetadataUtils.path(description)).isEqualTo("$.x");
         assertThat(VariantMetadataUtils.failOnError(description)).isFalse();
