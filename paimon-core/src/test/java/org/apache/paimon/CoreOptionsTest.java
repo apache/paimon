@@ -402,4 +402,18 @@ public class CoreOptionsTest {
                     .hasMessageContaining("64");
         }
     }
+
+    @Test
+    public void testVarTypeSizeRejectsNonPositive() {
+        // zorder.var-length-contribution sizes new byte[] buffers in ZIndexer / SparkZOrderUDF;
+        // a non-positive value crashes zorder clustering with NegativeArraySizeException (or, at
+        // 0, silently drops the var-length column from the z-order).
+        for (int invalid : new int[] {0, -1}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.ZORDER_VAR_LENGTH_CONTRIBUTION, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).varTypeSize())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("zorder.var-length-contribution must be positive.");
+        }
+    }
 }

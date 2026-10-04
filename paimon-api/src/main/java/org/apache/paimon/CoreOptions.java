@@ -4481,7 +4481,10 @@ public class CoreOptions implements Serializable {
     }
 
     public int varTypeSize() {
-        return options.get(ZORDER_VAR_LENGTH_CONTRIBUTION);
+        int varTypeSize = options.get(ZORDER_VAR_LENGTH_CONTRIBUTION);
+        checkArgument(
+                varTypeSize > 0, "%s must be positive.", ZORDER_VAR_LENGTH_CONTRIBUTION.key());
+        return varTypeSize;
     }
 
     public boolean deletionVectorsEnabled() {
