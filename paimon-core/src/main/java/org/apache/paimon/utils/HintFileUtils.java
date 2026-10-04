@@ -43,8 +43,8 @@ public class HintFileUtils {
 
     /**
      * Reads a hint like {@link #readHint}, but throws if the hint file cannot be read instead of
-     * returning null. Content that is not a positive number is ignored by {@link #findLatest} and
-     * {@link #findEarliest}, so it is returned as absent.
+     * returning null. Content that is not a positive number is ignored by {@link #findLatest}, so
+     * it is returned as absent.
      *
      * @return the hinted id, or empty if there is no usable hint
      * @throws IOException if the hint file cannot be read after retries

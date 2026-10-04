@@ -1038,8 +1038,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         && snapshot.commitIdentifier() == identifier
                         && snapshot.commitKind() == commitKind) {
                     LOG.warn(
-                            "Snapshot #{} of table {} was committed by a previous attempt that "
-                                    + "failed with an exception. The LATEST hint may not have been "
+                            "Snapshot #{} of table {} was already committed by a previous "
+                                    + "attempt of this commit. The LATEST hint may not have been "
                                     + "updated.",
                             snapshot.id(),
                             tableName);

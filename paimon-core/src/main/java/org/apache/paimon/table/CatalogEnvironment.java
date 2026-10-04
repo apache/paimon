@@ -122,14 +122,6 @@ public class CatalogEnvironment implements Serializable {
         return supportsVersionManagement;
     }
 
-    /**
-     * Whether the catalog manages the snapshots of this table, so they are committed and rolled
-     * back through the catalog instead of the file system.
-     */
-    public boolean catalogManagesSnapshots() {
-        return catalogLoader != null && supportsVersionManagement;
-    }
-
     @Nullable
     public SchemaModification schemaModification() {
         if (catalogLoader == null) {
@@ -142,7 +134,7 @@ public class CatalogEnvironment implements Serializable {
     @Nullable
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
         SnapshotCommit snapshotCommit;
-        if (catalogManagesSnapshots()) {
+        if (catalogLoader != null && supportsVersionManagement) {
             snapshotCommit = new CatalogSnapshotCommit(catalogLoader.load(), identifier, uuid);
         } else {
             Lock lock =
@@ -157,7 +149,7 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public TableRollback catalogTableRollback() {
-        if (catalogManagesSnapshots()) {
+        if (catalogLoader != null && supportsVersionManagement) {
             Catalog catalog = catalogLoader.load();
             return (instant, fromSnapshot) -> {
                 try {
@@ -172,7 +164,7 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public LongConsumer catalogSchemaRollback() {
-        if (catalogManagesSnapshots()) {
+        if (catalogLoader != null && supportsVersionManagement) {
             Catalog catalog = catalogLoader.load();
             return schemaId -> {
                 try {
