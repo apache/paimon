@@ -56,6 +56,20 @@ _ARROW_MAJOR = int(pa.__version__.split('.')[0])
 _DEFAULT_PARQUET_BLOCK_SIZE = 128 * 1024 * 1024
 
 
+def _supports_parquet_row_id_update(table):
+    """Shared format constraints for ordinary row-ID updates."""
+    options = table.options
+    return (not table.is_primary_key_table
+            and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
+            == CoreOptions.FILE_FORMAT_PARQUET
+            and not (options.variant_shredding_enabled()
+                     and options.variant_shredding_schema())
+            and not options.data_evolution_row_sidecar_enabled(False)
+            and not options.with_vector_format()
+            and options.changelog_producer() == ChangelogProducer.NONE
+            and not any(is_blob_file_field(f) for f in table.fields))
+
+
 class _RowIdUpdateFileWriter:
     """Write one plain-Parquet update file for a row-id file group."""
 
@@ -63,18 +77,9 @@ class _RowIdUpdateFileWriter:
 
     @staticmethod
     def supports_table(table):
-        options = table.options
-        return (not table.is_primary_key_table
-                and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
-                == CoreOptions.FILE_FORMAT_PARQUET
-                and not (options.variant_shredding_enabled()
-                         and options.variant_shredding_schema())
-                and not options.data_evolution_row_sidecar_enabled(False)
-                and not options.with_vector_format()
-                and options.changelog_producer() == ChangelogProducer.NONE
-                and not any(options.map_storage_layout(f.name) == 'shared-shredding'
-                            for f in table.fields)
-                and not any(is_blob_file_field(f) for f in table.fields))
+        return (_supports_parquet_row_id_update(table)
+                and not any(table.options.map_storage_layout(f.name) == 'shared-shredding'
+                            for f in table.fields))
 
     def __init__(self, table, partition, column_names):
         if not self.supports_table(table):
