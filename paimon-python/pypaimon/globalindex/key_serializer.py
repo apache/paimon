@@ -19,7 +19,7 @@
 
 from abc import ABC, abstractmethod
 import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Context, Decimal, ROUND_HALF_UP
 import math
 import re
 from typing import Callable, Tuple
@@ -198,7 +198,8 @@ class DecimalSerializer(KeySerializer):
             unscaled = struct.unpack('<q', data)[0]
         else:
             unscaled = int.from_bytes(data, byteorder='big', signed=True)
-        return Decimal(unscaled).scaleb(-self._scale)
+        sign, digits, _ = Decimal(unscaled).as_tuple()
+        return Decimal((sign, digits, -self._scale))
 
     def create_comparator(self) -> Callable[[object, object], int]:
         def compare(a: object, b: object) -> int:
@@ -317,9 +318,12 @@ def _parse_precision(type_name: str, default: int) -> int:
 
 def _decimal_unscaled(value: object, scale: int) -> int:
     decimal_value = value if isinstance(value, Decimal) else Decimal(str(value))
-    quant = Decimal(1).scaleb(-scale)
-    rounded = decimal_value.quantize(quant, rounding=ROUND_HALF_UP)
-    return int(rounded.scaleb(scale))
+    # Index bytes must not depend on the caller's decimal precision or traps.
+    # Reserve one extra digit for a carry when rounding to the declared scale.
+    context = Context(prec=max(1, decimal_value.adjusted() + scale + 2))
+    quant = Decimal((0, (1,), -scale))
+    rounded = decimal_value.quantize(quant, rounding=ROUND_HALF_UP, context=context)
+    return int(rounded.scaleb(scale, context=context))
 
 
 def _signed_big_endian_bytes(value: int) -> bytes:
