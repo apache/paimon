@@ -38,20 +38,7 @@ def native_commit_available() -> bool:
     return True
 
 
-def _requires_python_row_id_recovery(table, messages) -> bool:
-    # PyPaimon's optional rebase rewrites staged partial files when concurrent
-    # compaction changes their row-ID ranges. Keep that recovery in Python;
-    # appends and deletion-vector updates use Rust's Java-compatible checks.
-    return (table.options.data_evolution_enabled()
-            and not table.options.deletion_vectors_enabled(False)
-            and table.options.data_evolution_row_id_conflict_rewrite_max_size() > 0
-            and any(file.first_row_id is not None
-                    for message in messages for file in message.new_files))
-
-
 def native_messages_supported(table, messages) -> bool:
-    if _requires_python_row_id_recovery(table, messages):
-        return False
     path_factory = table.path_factory()
     for message in messages:
         if (message.compact_before or message.compact_after

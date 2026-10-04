@@ -39,8 +39,7 @@ _SCHEMA = pa.schema([('id', pa.int64()), ('v', pa.int64()), ('w', pa.int64()), (
 def _table(catalog, options=None):
     settings = {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
                 'commit.native.enabled': 'true', 'write.native.enabled': 'true',
-                'manifest.sidecar.enabled': 'true',
-                'data-evolution.row-id-conflict-rewrite.max-size': '0 B'}
+                'manifest.sidecar.enabled': 'true'}
     settings.update(options or {})
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
         _SCHEMA, partition_keys=['p'], options=settings), False)
@@ -102,9 +101,7 @@ def test_append_groups_partitions_assigns_versions_and_publishes_sidecars(
         native_rest_catalog, native_write, group):
     table = _table(native_rest_catalog, {
         'write.native.enabled': str(native_write).lower(),
-        'row-tracking.partition-group-on-commit': str(group).lower(),
-        # Append commits do not need Python's automatic update-file rewrite.
-        'data-evolution.row-id-conflict-rewrite.max-size': '256 MB'})
+        'row-tracking.partition-group-on-commit': str(group).lower()})
     builder = table.new_batch_write_builder()
     messages = (_prepare(builder, [10, 11], 'a') + _prepare(builder, [20], 'b')
                 + _prepare(builder, [12], 'a'))
@@ -189,9 +186,7 @@ def test_overwrite_keeps_deleted_versions_and_allocates_fresh_row_ids(native_res
 
 
 def test_deletion_vector_commit_preserves_row_id_high_watermark(native_rest_catalog):
-    table = _table(native_rest_catalog, {
-        'deletion-vectors.enabled': 'true',
-        'data-evolution.row-id-conflict-rewrite.max-size': '256 MB'})
+    table = _table(native_rest_catalog, {'deletion-vectors.enabled': 'true'})
     seed = table.new_batch_write_builder()
     _commit(seed, _prepare(seed, [1, 2, 3]))
     builder = table.new_batch_write_builder()
@@ -206,22 +201,23 @@ def test_deletion_vector_commit_preserves_row_id_high_watermark(native_rest_cata
         assert rows['_ROW_ID'] == [1]
 
 
-def test_updates_keep_python_rebase_recovery_when_enabled(native_rest_catalog):
-    table = _table(native_rest_catalog, {'data-evolution.row-id-conflict-rewrite.max-size': '256 MB'})
+@pytest.mark.parametrize('rewrite_size', [None, '0 B', '256 MB'])
+def test_preassigned_row_id_updates_use_native_java_validation(native_rest_catalog, rewrite_size):
+    options = {} if rewrite_size is None else {
+        'data-evolution.row-id-conflict-rewrite.max-size': rewrite_size}
+    table = _table(native_rest_catalog, options)
     seed = table.new_batch_write_builder()
     _commit(seed, _prepare(seed, [1, 2]))
     builder = table.new_batch_write_builder()
     messages = builder.new_update().new_update_by_row_id().update_columns(
         pa.table({'_ROW_ID': [0], 'v': [99]}), ['v'])
-    assert not native_messages_supported(table, messages)
-    commit = builder.new_commit()
-    try:
-        with patch('pypaimon.write.native_commit.create_native_commit',
-                   side_effect=AssertionError('Python row-ID recovery required')):
-            commit.commit(messages)
-    finally:
-        commit.close()
-    assert _read(table)['v'] == [99, 2]
+    assert native_messages_supported(table, messages)
+    _commit(builder, messages)
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    assert snapshot.id == 2
+    assert snapshot.next_row_id == 2
+    for native in (False, True):
+        assert _read(table, native)['v'] == [99, 2]
 
 
 @pytest.mark.parametrize('group_option', ['off', '0', ' true '])
@@ -314,7 +310,8 @@ def test_blob_files_align_with_normal_files_after_native_rest_commit(
             assert actual.to_pylist() == expected
 
 
-def test_native_blob_update_rejects_stale_range_before_publication(native_rest_catalog):
+@pytest.mark.parametrize('rewrite_size', [None, '256 MB'])
+def test_native_blob_update_rejects_stale_range_before_publication(native_rest_catalog, rewrite_size):
     from dataclasses import replace
 
     from pypaimon.schema.data_types import AtomicType, DataField
@@ -322,8 +319,9 @@ def test_native_blob_update_rejects_stale_range_before_publication(native_rest_c
 
     fields = [DataField(0, 'id', AtomicType('BIGINT')), DataField(1, 'payload', AtomicType('BLOB'))]
     options = {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
-               'write.native.enabled': 'true', 'commit.native.enabled': 'true',
-               'data-evolution.row-id-conflict-rewrite.max-size': '0 B'}
+               'write.native.enabled': 'true', 'commit.native.enabled': 'true'}
+    if rewrite_size is not None:
+        options['data-evolution.row-id-conflict-rewrite.max-size'] = rewrite_size
     native_rest_catalog.create_table('default.blobs', Schema(fields=fields, options=options), False)
     table = native_rest_catalog.get_table('default.blobs')
     schema = pa.schema([('id', pa.int64()), ('payload', pa.large_binary())])
