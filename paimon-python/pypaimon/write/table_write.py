@@ -197,6 +197,9 @@ class TableWrite:
         )
         require_columns(values_by_name, column_names, "write_row")
         require_columns(values_by_name, self.table.partition_keys, "write_row")
+        from pypaimon.write.row_kind import skip_write_row
+        if skip_write_row(self.table, values_by_name):
+            return
         partition, bucket = (
             self.row_key_extractor.extract_partition_bucket_row(values_by_name)
         )
@@ -344,7 +347,8 @@ class TableWrite:
 
     def _prepare_arrow_data(self, data):
         self._validate_pyarrow_schema(data.schema)
-        return normalize_arrow_strings(data)
+        from pypaimon.write.row_kind import filter_write_batch
+        return filter_write_batch(self.table, normalize_arrow_strings(data))
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):

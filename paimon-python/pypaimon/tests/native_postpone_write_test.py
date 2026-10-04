@@ -139,12 +139,54 @@ def test_postpone_native_overwrite_and_abort(tmp_path, native_rest_catalog, nati
         writer.close()
 
 
-@pytest.mark.parametrize('engine', ['first-row', 'partial-update', 'aggregation'])
-def test_postpone_engine_retract_validation_stays_on_python(tmp_path, engine):
-    table = _table(tmp_path, {'merge-engine': engine})
+@pytest.mark.parametrize('engine,extra,accepted', [
+    ('deduplicate', {}, True),
+    ('first-row', {}, False),
+    ('partial-update', {}, False),
+    ('partial-update', {'partial-update.remove-record-on-delete': 'true'}, True),
+    ('aggregation', {'fields.v.aggregate-function': 'sum'}, True),
+    ('aggregation', {'fields.v.aggregate-function': 'min'}, False),
+    ('aggregation', {'fields.v.aggregate-function': 'min', 'fields.v.ignore-retract': 'true'}, True),
+])
+@pytest.mark.parametrize('kind', ['-D', '-U'])
+def test_postpone_validates_retract_without_merging_events(tmp_path, engine, extra, accepted, kind):
+    table = _table(tmp_path, {'merge-engine': engine, **extra})
     writer = table.new_batch_write_builder().new_write()
+    assert isinstance(writer, NativeTableWrite)
     try:
-        assert not isinstance(writer, NativeTableWrite)
+        writer.write_arrow_batch(_batch([(3, 'a', 10, '+I'), (1, 'a', 20, '+I'), (3, 'a', 30, '+I')]))
+        retract = [(3, 'a', 5, kind)]
+        if accepted:
+            writer.write_arrow_batch(_batch(retract))
+            files = [f for m in writer.prepare_commit() for f in m.new_files]
+            assert _file_rows(table, files) == [
+                (3, 'a', 10, '+I'), (1, 'a', 20, '+I'), (3, 'a', 30, '+I'), *retract]
+        else:
+            with pytest.raises(Exception, match='(?i)retract|DELETE|UPDATE_BEFORE'):
+                writer.write_arrow_batch(_batch(retract))
+            with pytest.raises(Exception, match='(?i)fail'):
+                writer.prepare_commit()
+            assert not list(tmp_path.rglob('*.parquet'))
+    finally:
+        writer.close()
+
+
+def test_postpone_first_retract_state_survives_checkpoints_and_is_partition_local(tmp_path):
+    table = _table(tmp_path, {'merge-engine': 'aggregation', 'fields.v.aggregate-function': 'min',
+                              'aggregation.remove-record-on-delete': 'true'})
+    writer = table.new_stream_write_builder().new_write()
+    try:
+        writer.write_arrow_batch(_batch([(1, 'a', 1, '-D')]))
+        first = writer.prepare_commit(1)
+        # The valid first DELETE is remembered; Java does not validate another
+        # retract in this writer, even if the next kind is UPDATE_BEFORE.
+        writer.write_arrow_batch(_batch([(2, 'a', 2, '-U')]))
+        second = writer.prepare_commit(2)
+        assert _file_rows(table, [f for m in second for f in m.new_files]) == [(2, 'a', 2, '-U')]
+        assert writer.prepare_commit(3) == []
+        with pytest.raises(Exception, match='(?i)retract'):
+            writer.write_arrow_batch(_batch([(1, 'b', 1, '-U')]))
+        assert all(table.file_io.exists(f.file_path) for m in first + second for f in m.new_files)
     finally:
         writer.close()
 
