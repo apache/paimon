@@ -41,7 +41,6 @@ Sections
 """
 
 import io
-import inspect
 import json
 import os
 import shutil
@@ -108,8 +107,7 @@ def _native_variant_projection_available() -> bool:
         return False
     try:
         from pypaimon_rust.datafusion import ReadBuilder as NativeReadBuilder
-        return ('variant_fields' in inspect.signature(
-            NativeReadBuilder.with_projection).parameters)
+        return callable(getattr(NativeReadBuilder, 'with_read_type', None))
     except (ImportError, AttributeError, TypeError, ValueError):
         return False
 

@@ -21,6 +21,7 @@ import unittest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+import pyarrow
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
 from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
@@ -93,16 +94,20 @@ def _scan(native_enabled, file_scanner):
 
 class NativePlanTest(unittest.TestCase):
 
-    def test_native_builder_receives_variant_fields_with_projection(self):
+    def test_native_builder_receives_variant_read_type(self):
         builder = Mock()
-        builder.with_projection.return_value = builder
+        builder.with_read_type.return_value = builder
         variant_fields = {
             'payload': {
                 'paths': ['$.ratio'],
-                'target_type': object(),
+                'target_type': pyarrow.float32(),
                 'fail_on_error': False,
             }
         }
+        read_type = [
+            DataField(1, 'id', AtomicType('INT')),
+            DataField(2, 'payload', AtomicType('VARIANT')),
+        ]
 
         result = _configure_native_read_builder(
             builder,
@@ -110,11 +115,18 @@ class NativePlanTest(unittest.TestCase):
             limit=None,
             projection=['id', 'payload'],
             variant_fields=variant_fields,
+            read_type=read_type,
         )
 
         self.assertIs(result, builder)
-        builder.with_projection.assert_called_once_with(
-            ['id', 'payload'], variant_fields=variant_fields)
+        fields = json.loads(builder.with_read_type.call_args.args[0])['fields']
+        self.assertEqual([field['name'] for field in fields], ['id', 'payload'])
+        self.assertEqual(fields[1]['id'], 2)
+        self.assertEqual(fields[1]['type']['fields'][0]['type'], 'FLOAT')
+        self.assertEqual(json.loads(fields[1]['type']['fields'][0]['description'][
+            len('__VARIANT_METADATA'):]), {
+                'path': '$.ratio', 'failOnError': False, 'timeZoneId': 'UTC'})
+        builder.with_projection.assert_not_called()
 
     def setUp(self):
         # Make the real capability probe see a split-API-capable pypaimon-rust so

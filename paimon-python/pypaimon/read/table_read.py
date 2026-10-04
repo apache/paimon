@@ -588,6 +588,7 @@ class TableRead:
             kwargs['nested_projection'] = self.nested_name_paths
         if self.variant_fields:
             kwargs['variant_fields'] = self.variant_fields
+            kwargs['read_type'] = self.read_type
         if self.include_row_kind:
             kwargs['include_row_kind'] = True
         return kwargs

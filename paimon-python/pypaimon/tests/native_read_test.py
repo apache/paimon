@@ -109,6 +109,7 @@ def test_native_read_projects_variant_fields_before_python():
         {'0': 2.5, '1': None},
     ]
     assert native.call_args.kwargs['variant_fields'] == read.variant_fields
+    assert native.call_args.kwargs['read_type'] == read.read_type
 
 
 def test_variant_fields_never_silently_falls_back_to_python():
