@@ -653,6 +653,11 @@ class FileScanner:
 
         return _filter
 
+    def with_all_buckets(self) -> 'FileScanner':
+        """Include pending buckets for commit metadata scans, as in Java."""
+        self.only_read_real_buckets = False
+        return self
+
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
         validate_shard(idx_of_this_subtask, number_of_para_subtasks)
         if self.start_pos_of_this_subtask is not None:

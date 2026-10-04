@@ -75,6 +75,7 @@ class OverwriteChangesProvider:
         self.full_scan_count += 1
         return (FileScanner(self.table, lambda: ([], None),
                             partition_predicate=self.partition_filter)
+                .with_all_buckets()
                 .read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
 
     def _update_cache(self, latest_snapshot: Snapshot) -> bool:

@@ -379,6 +379,7 @@ class DynamicBucketTest(unittest.TestCase):
             ):
                 new_writer.write_arrow(pa.table({'id': [1], 'value': ['new']}))
 
+    @pytest.mark.python_write
     def test_cross_partition_write_requires_global_index(self):
         with tempfile.TemporaryDirectory() as root:
             catalog = CatalogFactory.create({'warehouse': root})

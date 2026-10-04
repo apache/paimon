@@ -862,16 +862,12 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1'],
         }, schema=self.pk_pa_schema)
 
-        self._commit_arrow(table, expected)
-
-        self.assertEqual(
-            1,
-            len(glob.glob(
-                self.warehouse
-                + "/default.db/test_postpone_default_builder/user_id=1/"
-                + "bucket-postpone/*.avro"
-            )),
-        )
+        messages = self._commit_arrow(table, expected)
+        self.assertEqual({-2}, {message.bucket for message in messages})
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual(1, len(files))
+        self.assertIn('/bucket-postpone/', files[0].file_path)
+        self.assertTrue(table.file_io.exists(files[0].file_path))
         splits = table.new_read_builder().new_scan().plan().splits()
         self.assertTrue(not table.new_read_builder().new_read().to_arrow(splits))
 
@@ -1752,7 +1748,8 @@ class TableWriteTest(unittest.TestCase):
 
         # Verify file name format: {table_prefix}-u-{commit_user}-s-{random_number}-w--{uuid}-0.{format}
         # Expected pattern: data--u-{user}-s-{random}-w--{uuid}-0.{format}
-        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.avro$'
+        # Native postpone writes use Parquet; the Python writer may select Avro.
+        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.(avro|parquet)$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,

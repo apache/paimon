@@ -58,7 +58,7 @@ class WriteBuilder(ABC):
         else:
             return str(uuid.uuid4())
 
-    def _native_write(self, static_partition=None, stream=False):
+    def _native_write(self, static_partition=None, stream=False, **kwargs):
         from pypaimon.read.merge_engine_support import check_sequence_field_supported
 
         # Keep invalid configurations outside the native fallback handler and
@@ -69,7 +69,7 @@ class WriteBuilder(ABC):
         try:
             from pypaimon.write.native_write import create_native_write
             return create_native_write(self.table, self.commit_user,
-                                       static_partition, stream)
+                                       static_partition, stream, **kwargs)
         except Exception as error:
             # Construction has not written any data; the normal writer is safe.
             logger.debug('Native writer preparation failed; using Python: %s', error)
