@@ -557,21 +557,38 @@ def test_missing_runtime_falls_back_without_reconstructing_table(
         resolve.assert_not_called()
 
 
-def test_partial_row_id_and_compact_messages_preserve_python_recovery(
+def test_preassigned_row_id_messages_use_native_validation(
         tmp_path, native_rest_catalog):
     table = _table(tmp_path, 'de', catalog=native_rest_catalog)
-    assert create_native_commit(table, 'job') is None
-    assert not native_messages_supported(table, [CommitMessage((), 0, [])])
-    assert not native_messages_supported(table, [CommitMessage((), 0, [], check_from_snapshot=7)])
-    assert not native_messages_supported(table, [CommitMessage((), 0, [Mock(first_row_id=1)])])
+    assert native_messages_supported(table, [CommitMessage((), 0, [])])
+    assert native_messages_supported(table, [CommitMessage((), 0, [], check_from_snapshot=7)])
+    messages = _prepare(table.new_batch_write_builder(), [{'id': 1, 'pt': 'a'}])
+    messages[0].new_files[0].first_row_id = 1
+    messages[0].check_from_snapshot = 7
+    assert native_messages_supported(table, messages)
     assert not native_messages_supported(table, [CommitMessage((), 0, [], compact_after=[Mock()])])
 
 
-def test_custom_manifest_target_uses_python_rolling(tmp_path, native_rest_catalog):
-    table = _table(tmp_path, catalog=native_rest_catalog).copy({
-        'manifest.target-file-size': '16 kb'})
-    assert create_native_commit(table, 'job') is None
-    assert not native_messages_supported(table, [CommitMessage((), 0, [])])
+@requires_native
+@pytest.mark.parametrize('mode', ['append', 'de'])
+def test_custom_manifest_target_uses_native_commit(tmp_path, native_rest_catalog, mode):
+    from pypaimon.manifest.manifest_list_manager import ManifestListManager
+
+    table = _table(tmp_path, mode, catalog=native_rest_catalog).copy({
+        'manifest.target-file-size': '1 B'})
+    builder = table.new_batch_write_builder()
+    commit = builder.new_commit()
+    try:
+        messages = _prepare(builder, [{'id': 4, 'pt': 'a'}, {'id': 5, 'pt': 'b'}])
+        with _must_not_fallback(commit):
+            commit.commit(messages)
+        assert _rows(table) == [{'id': 4, 'pt': 'a'}, {'id': 5, 'pt': 'b'}]
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        metas = ManifestListManager(table).read_delta(snapshot)
+        assert len(metas) == 1  # Java checks only at multiples of 1000 records.
+        assert metas[0].num_added_files == 2
+    finally:
+        commit.close()
 
 
 def test_close_releases_python_resources_even_if_native_close_fails(tmp_path):
