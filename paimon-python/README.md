@@ -168,6 +168,14 @@ path select the Python writer before native data is written. If the runtime or t
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
 
+MAP columns configured with `fields.<name>.map.storage-layout=shared-shredding`
+also use native Parquet writes and data-evolution updates, including predicate
+updates and upserts. Rust applies Java's `plain`, `sequential` and `lru` column
+placement policies (`lru` by default), and adapts the physical column count
+between completed files. Files remain readable by the Python reader, including
+literal MAP-key projections. Shared-shredding requires `none`, `lz4` or `zstd`
+compression.
+
 Primary-key dynamic buckets (`bucket=-1`, with partition fields included in the
 primary key) also support native writes. HASH indexes are restored across writer
 restarts; `dynamic-bucket.max-buckets` bounds bucket growth and reuses existing

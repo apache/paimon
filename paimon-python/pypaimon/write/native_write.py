@@ -48,18 +48,6 @@ def _native_partition_types_supported(schema, partition_keys):
         for data_type in (schema.field(name).type for name in partition_keys))
 
 
-def _native_map_layouts_supported(table, schema):
-    options = table.options.options.to_map()
-    for field in schema:
-        if table.options.map_storage_layout(field.name) != 'default':
-            return False
-        # Python rejects even an explicit default layout on a non-MAP field.
-        if (not pa.types.is_map(field.type)
-                and 'fields.{}.map.storage-layout'.format(field.name) in options):
-            return False
-    return True
-
-
 def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None):
     """Return a native writer if the table can use the filesystem write path."""
@@ -82,8 +70,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                                                      MergeEngine.AGGREGATE))
             or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
-            # The native writer does not implement MAP shared-shredding layouts.
-            or not _native_map_layouts_supported(table, schema)
             # Rust cannot encode these partition keys yet.
             or not _native_partition_types_supported(schema, table.partition_keys)
             # Append dedicated files currently support top-level scalar Blob fields.
