@@ -347,8 +347,9 @@ class TableWrite:
 
     def _prepare_arrow_data(self, data):
         self._validate_pyarrow_schema(data.schema)
+        data = normalize_arrow_strings(data)
         from pypaimon.write.row_kind import filter_write_batch
-        return filter_write_batch(self.table, normalize_arrow_strings(data))
+        return filter_write_batch(self.table, data)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
