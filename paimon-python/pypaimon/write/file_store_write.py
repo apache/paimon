@@ -41,6 +41,16 @@ class FileStoreWrite:
 
     def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.common.options.core_options import MergeEngine
+        from pypaimon.read.merge_engine_support import check_sequence_field_supported
+
+        # TableWrite constructs this before the row-key extractor, whose
+        # dynamic bucket index must not retain hashes for rejected writes.
+        check_sequence_field_supported(table)
+        if table.is_primary_key_table and table.options.merge_engine() == MergeEngine.AGGREGATE:
+            from pypaimon.read.merge_engine_support import check_supported
+
+            check_supported(table)
 
         self.table: FileStoreTable = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
@@ -214,14 +224,9 @@ class FileStoreWrite:
         partial-update with no out-of-scope options) cannot drift
         between sides.
 
-        For wholly unsupported engines (``aggregation``) the writer
-        falls back to ``DeduplicateMergeFunction`` so the flushed file
-        still maintains the LSM "PK unique within a file" invariant.
-        The read path's dispatch still raises ``NotImplementedError``,
-        so the user gets an explicit error before they observe
-        wrong-engine data; the fallback only narrows the damage to
-        "file is deduped, not aggregated" rather than the silent
-        multi-row-per-PK corruption that existed pre-PR.
+        Aggregation options are validated with the read-side guard at writer
+        construction. Unsupported configurations must not be committed using
+        fallback merge semantics that discard input values.
 
         Partial-update with out-of-scope options (sequence-group,
         per-field aggregator, ignore-delete, remove-record-on-*) does
@@ -360,8 +365,11 @@ class FileStoreWrite:
             self.max_seq_numbers[partition] = buckets
         return buckets
 
+    def _sequence_read_table(self):
+        return self.table
+
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
-        read_builder = self.table.new_read_builder()
+        read_builder = self._sequence_read_table().new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
         for key, value in zip(self.table.partition_keys, partition):
@@ -382,6 +390,25 @@ class FileStoreWrite:
 
 class PostponeFixedBucketFileStoreWrite(FileStoreWrite):
     """File store write with runtime bucket counts for postpone tables."""
+
+    def __init__(self, table, commit_user):
+        super().__init__(table, commit_user)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self._check_from_snapshot = snapshot.id if snapshot is not None else 0
+
+    def _sequence_read_table(self):
+        return self.table.copy({'scan.snapshot-id': str(self._check_from_snapshot)})
+
+    def _load_seq_number_stats(self, partition):
+        if self._check_from_snapshot == 0:
+            return {}
+        return super()._load_seq_number_stats(partition)
+
+    def prepare_commit(self, commit_identifier):
+        messages = super().prepare_commit(commit_identifier)
+        for message in messages:
+            message.check_from_snapshot = self._check_from_snapshot
+        return messages
 
     def _configure_data_file_prefix(self, commit_user):
         pass

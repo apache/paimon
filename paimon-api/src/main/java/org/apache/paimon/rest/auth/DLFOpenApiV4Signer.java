@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -252,7 +253,7 @@ public class DLFOpenApiV4Signer implements DLFRequestSigner {
         Map<String, String> valueMap = new HashMap<>();
 
         for (Map.Entry<String, String> entry : headers.entrySet()) {
-            String lowerKey = entry.getKey().toLowerCase();
+            String lowerKey = entry.getKey().toLowerCase(Locale.ROOT);
             if (lowerKey.startsWith("x-acs-")
                     || lowerKey.equals(HOST_HEADER)
                     || lowerKey.equals(CONTENT_TYPE_HEADER)) {

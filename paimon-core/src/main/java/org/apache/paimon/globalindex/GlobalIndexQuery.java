@@ -1,0 +1,812 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.globalindex;
+
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner.IndexMetaFileGroup;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator.Evaluation;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.globalindex.btree.CompositeBTreePredicate;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LessOrEqual;
+import org.apache.paimon.predicate.Or;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Range;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
+import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
+import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
+
+/**
+ * A scalar index query to evaluate for one data split, represented as leaf predicates combined with
+ * AND/OR.
+ *
+ * <p>Each data split receives the overlapping index groups; its reader executes the predicate to
+ * obtain row IDs.
+ */
+class GlobalIndexQuery {
+
+    /** A leaf, paired range or composite lookup; null for an AND/OR node. */
+    @Nullable private final Predicate predicate;
+
+    /** For compound nodes, true means OR and false means AND; ignored for leaves. */
+    private final boolean union;
+
+    /** Indexed child queries of a compound node; empty for leaves. */
+    private final List<GlobalIndexQuery> children;
+
+    /** A query's index groups; empty when none overlap this data split. */
+    private final List<IndexGroup> groups;
+
+    private GlobalIndexQuery(
+            @Nullable Predicate predicate,
+            boolean union,
+            List<GlobalIndexQuery> children,
+            List<IndexGroup> groups) {
+        this.predicate = predicate;
+        this.union = union;
+        this.children = children;
+        this.groups = groups;
+    }
+
+    @Nullable
+    static GlobalIndexQuery create(
+            RowType rowType,
+            Predicate predicate,
+            List<IndexFileMeta> files,
+            IndexPathFactory pathFactory,
+            Options options) {
+        Map<Integer, List<IndexMetaFileGroup>> groupsByField =
+                DataEvolutionGlobalIndexScanner.groupIndexFiles(
+                        files.stream()
+                                .filter(
+                                        file ->
+                                                DataEvolutionGlobalIndexScanner.isIndexInSchema(
+                                                        rowType, file))
+                                .collect(Collectors.toList()));
+        Map<Integer, List<IndexGroup>> groups = new LinkedHashMap<>();
+        groupsByField.forEach(
+                (fieldId, fieldGroups) -> {
+                    List<IndexGroup> indexGroups = new ArrayList<>();
+                    for (IndexMetaFileGroup group : fieldGroups) {
+                        indexGroups.addAll(IndexGroup.fromMetadata(group, rowType, pathFactory));
+                    }
+                    groups.put(fieldId, indexGroups);
+                });
+        return createForPredicate(predicate, rowType, groups, options);
+    }
+
+    @Nullable
+    private static GlobalIndexQuery createForPredicate(
+            Predicate predicate,
+            RowType rowType,
+            Map<Integer, List<IndexGroup>> groups,
+            Options options) {
+        if (predicate instanceof LeafPredicate) {
+            LeafPredicate leaf = (LeafPredicate) predicate;
+            Optional<FieldRef> field = leaf.fieldRefOptional();
+            if (!field.isPresent()) {
+                return null;
+            }
+            CompositeCandidate composite = selectComposite(leaf, groups, options);
+            return composite == null
+                    ? createForIndexedField(leaf, field.get(), rowType, groups)
+                    : composite.query();
+        }
+        CompoundPredicate compound = (CompoundPredicate) predicate;
+        boolean union = compound.function() instanceof Or;
+        if (union) {
+            CompositeCandidate composite = selectComposite(predicate, groups, options);
+            if (composite != null) {
+                return composite.query();
+            }
+        }
+        List<GlobalIndexQuery> children = new ArrayList<>();
+        List<Predicate> predicates = GlobalIndexEvaluator.normalizedChildren(compound);
+        if (!union) {
+            while (!predicates.isEmpty()) {
+                CompositeCandidate selected =
+                        selectComposite(PredicateBuilder.and(predicates), groups, options);
+                if (selected == null) {
+                    break;
+                }
+                children.add(selected.query());
+                predicates.removeAll(selected.plan.predicates());
+                // Later key conditions remain data filters; do not expand scalar postings for them.
+                Set<Integer> keyFields =
+                        selected.group.indexFields().stream()
+                                .map(DataField::id)
+                                .collect(Collectors.toSet());
+                predicates.removeIf(
+                        child -> {
+                            Set<Integer> residualFields = collectFieldIds(rowType, child);
+                            return !residualFields.isEmpty()
+                                    && keyFields.containsAll(residualFields);
+                        });
+            }
+        }
+
+        for (int i = 0; i < predicates.size(); i++) {
+            Predicate child = predicates.get(i);
+            GlobalIndexQuery query = null;
+            if (!union && GlobalIndexEvaluator.isRangeBound(child)) {
+                LeafPredicate first = (LeafPredicate) child;
+                for (int j = i + 1; j < predicates.size(); j++) {
+                    Predicate other = predicates.get(j);
+                    if (!GlobalIndexEvaluator.isRangeBound(other)) {
+                        continue;
+                    }
+                    LeafPredicate second = (LeafPredicate) other;
+                    if (GlobalIndexEvaluator.isLowerBound(first)
+                                    == GlobalIndexEvaluator.isLowerBound(second)
+                            || !first.fieldRefOptional().equals(second.fieldRefOptional())) {
+                        continue;
+                    }
+                    LeafPredicate lower = GlobalIndexEvaluator.isLowerBound(first) ? first : second;
+                    LeafPredicate upper = GlobalIndexEvaluator.isLowerBound(first) ? second : first;
+                    Predicate rangeQuery =
+                            new CompoundPredicate(And.INSTANCE, Arrays.asList(lower, upper));
+                    query =
+                            createForIndexedField(
+                                    rangeQuery, lower.fieldRefOptional().get(), rowType, groups);
+                    if (query != null) {
+                        predicates.remove(j);
+                        break;
+                    }
+                }
+            }
+            if (query == null) {
+                query = createForPredicate(child, rowType, groups, options);
+            }
+            if (query == null) {
+                if (union) {
+                    return null;
+                }
+            } else {
+                children.add(query);
+            }
+        }
+        return children.isEmpty()
+                ? null
+                : new GlobalIndexQuery(null, union, children, Collections.emptyList());
+    }
+
+    @Nullable
+    private static CompositeCandidate selectComposite(
+            Predicate predicate, Map<Integer, List<IndexGroup>> groups, Options options) {
+        CompositeCandidate selected = null;
+        Set<List<DataField>> seen = new HashSet<>();
+        long budget = options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes();
+        for (List<IndexGroup> fieldGroups : groups.values()) {
+            for (IndexGroup group : fieldGroups) {
+                if (!group.isCompositeBTree() || !seen.add(group.indexFields())) {
+                    continue;
+                }
+                Optional<CompositeBTreePredicate.Plan> planned =
+                        CompositeBTreePredicate.plan(group.indexFields(), predicate);
+                if (!planned.isPresent()) {
+                    continue;
+                }
+                CompositeBTreePredicate.Plan plan = planned.get();
+                List<IndexGroup> definition =
+                        groups.get(group.field.id()).stream()
+                                .filter(
+                                        other ->
+                                                other.type.equals(group.type)
+                                                        && other.indexFields()
+                                                                .equals(group.indexFields()))
+                                .collect(Collectors.toList());
+                Predicate covered = PredicateBuilder.and(plan.predicates());
+                List<IndexGroup> selectedGroups =
+                        definition.stream()
+                                .map(part -> part.selectFiles(covered))
+                                .collect(Collectors.toList());
+                // Decline the entire definition when any shard exceeds the same reader budget.
+                // Selecting only some shards would change FAST coverage between eager and reader
+                // queries.
+                if (selectedGroups.stream().anyMatch(part -> !plan.canScan(part.files, budget))) {
+                    continue;
+                }
+                if (plan.boundColumns() == 1) {
+                    List<Range> scalarCoverage =
+                            Range.sortAndMergeOverlap(
+                                    groups.get(group.field.id()).stream()
+                                            .filter(other -> other.extraFields.isEmpty())
+                                            .map(other -> other.range)
+                                            .collect(Collectors.toList()),
+                                    true);
+                    List<Range> compositeCoverage =
+                            Range.sortAndMergeOverlap(
+                                    definition.stream()
+                                            .map(other -> other.range)
+                                            .collect(Collectors.toList()),
+                                    true);
+                    // A dedicated leading-field lookup avoids expanding the tuple suffix.
+                    if (Range.and(compositeCoverage, scalarCoverage).equals(compositeCoverage)) {
+                        continue;
+                    }
+                }
+                CompositeCandidate candidate = new CompositeCandidate(group, plan, selectedGroups);
+                if (selected == null || candidate.preferredTo(selected)) {
+                    selected = candidate;
+                }
+            }
+        }
+        return selected;
+    }
+
+    private static class CompositeCandidate {
+        private final IndexGroup group;
+        private final CompositeBTreePredicate.Plan plan;
+        private final List<IndexGroup> groups;
+
+        private CompositeCandidate(
+                IndexGroup group, CompositeBTreePredicate.Plan plan, List<IndexGroup> groups) {
+            this.group = group;
+            this.plan = plan;
+            this.groups = groups;
+        }
+
+        private boolean preferredTo(CompositeCandidate other) {
+            if (plan.boundColumns() != other.plan.boundColumns()) {
+                return plan.boundColumns() > other.plan.boundColumns();
+            }
+            if (plan.equalColumns() != other.plan.equalColumns()) {
+                return plan.equalColumns() > other.plan.equalColumns();
+            }
+            return group.indexFields().size() < other.group.indexFields().size();
+        }
+
+        private GlobalIndexQuery query() {
+            return new GlobalIndexQuery(
+                    PredicateBuilder.and(plan.predicates()),
+                    false,
+                    Collections.emptyList(),
+                    groups);
+        }
+    }
+
+    @Nullable
+    private static GlobalIndexQuery createForIndexedField(
+            Predicate predicate,
+            FieldRef field,
+            RowType rowType,
+            Map<Integer, List<IndexGroup>> groups) {
+        List<IndexGroup> fieldGroups = groups.get(rowType.getField(field.name()).id());
+        if (fieldGroups == null) {
+            return null;
+        }
+        List<IndexGroup> selectedGroups = new ArrayList<>();
+        for (IndexGroup group : fieldGroups) {
+            // Scalar lookups use independent single-field index definitions.
+            if (group.extraFields.isEmpty()) {
+                selectedGroups.add(group.selectFiles(predicate));
+            }
+        }
+        if (selectedGroups.isEmpty()) {
+            return null;
+        }
+        return new GlobalIndexQuery(predicate, false, Collections.emptyList(), selectedGroups);
+    }
+
+    /** Only prune when metadata proves no match throughout the requested row ranges. */
+    boolean isEmpty(List<Range> ranges) {
+        if (predicate != null) {
+            return !groups.isEmpty()
+                    && groups.stream().allMatch(group -> group.files.isEmpty())
+                    && Range.and(coveredRanges(), ranges).equals(ranges);
+        }
+        return union
+                ? children.stream().allMatch(child -> child.isEmpty(ranges))
+                : children.stream().anyMatch(child -> child.isEmpty(ranges));
+    }
+
+    boolean hasCompositeQuery() {
+        return groups.stream().anyMatch(IndexGroup::isCompositeBTree)
+                || children.stream().anyMatch(GlobalIndexQuery::hasCompositeQuery);
+    }
+
+    boolean hasScalarQuery() {
+        return groups.stream().anyMatch(group -> !group.isCompositeBTree())
+                || children.stream().anyMatch(GlobalIndexQuery::hasScalarQuery);
+    }
+
+    /** Rows covered by any selected index path, independent of predicate support. */
+    List<Range> indexedRanges() {
+        return predicate != null
+                ? coveredRanges()
+                : Range.sortAndMergeOverlap(
+                        children.stream()
+                                .flatMap(child -> child.indexedRanges().stream())
+                                .collect(Collectors.toList()),
+                        true);
+    }
+
+    /** Coverage of the selected query paths, including files pruned safely by key metadata. */
+    List<Range> coveredRanges() {
+        if (predicate != null) {
+            return Range.sortAndMergeOverlap(
+                    groups.stream().map(group -> group.range).collect(Collectors.toList()), true);
+        }
+        List<Range> coverage = null;
+        for (GlobalIndexQuery child : children) {
+            coverage =
+                    coverage == null
+                            ? child.coveredRanges()
+                            : Range.and(coverage, child.coveredRanges());
+        }
+        return coverage == null ? Collections.emptyList() : coverage;
+    }
+
+    /** Residual predicates discarded during planning must not expand unindexed coverage. */
+    Set<Integer> contributingFieldIds(RowType rowType) {
+        Set<Integer> fields = new HashSet<>();
+        if (predicate != null) {
+            fields.addAll(collectFieldIds(rowType, predicate));
+        } else {
+            for (GlobalIndexQuery child : children) {
+                fields.addAll(child.contributingFieldIds(rowType));
+            }
+        }
+        return fields;
+    }
+
+    /** Keep original row-ID offsets while removing groups unrelated to this data split. */
+    GlobalIndexQuery forRanges(List<Range> ranges) {
+        List<IndexGroup> selected = new ArrayList<>();
+        for (IndexGroup group : groups) {
+            if (ranges.stream()
+                    .anyMatch(
+                            range ->
+                                    Range.intersect(
+                                            group.range.from,
+                                            group.range.to,
+                                            range.from,
+                                            range.to))) {
+                selected.add(group);
+            }
+        }
+        List<GlobalIndexQuery> selectedChildren = new ArrayList<>();
+        for (GlobalIndexQuery child : children) {
+            selectedChildren.add(child.forRanges(ranges));
+        }
+        // Keep children without local groups so readers can retain their uncertain candidates.
+        return new GlobalIndexQuery(predicate, union, selectedChildren, selected);
+    }
+
+    GlobalIndexResult evaluate(FileIO fileIO, Options options, List<Range> ranges)
+            throws IOException {
+        ExecutorService executor =
+                GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
+        return evaluateWithExecutor(fileIO, options, ranges, executor, false).get().result();
+    }
+
+    /** Retain candidates wherever a child predicate cannot be evaluated by an index. */
+    Optional<GlobalIndexResult> evaluateCandidates(
+            FileIO fileIO, Options options, List<Range> ranges) throws IOException {
+        if (ranges.isEmpty()) {
+            return Optional.of(GlobalIndexResult.createEmpty());
+        }
+        if (predicate == null) {
+            GlobalIndexResult result = null;
+            for (GlobalIndexQuery child : children) {
+                Optional<GlobalIndexResult> candidates =
+                        child.evaluateCandidates(fileIO, options, ranges);
+                if (!candidates.isPresent()) {
+                    if (union) {
+                        return Optional.empty();
+                    }
+                    continue;
+                }
+                result =
+                        result == null
+                                ? candidates.get()
+                                : union
+                                        ? result.or(candidates.get())
+                                        : result.and(candidates.get());
+            }
+            return Optional.ofNullable(result);
+        }
+        if (groups.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<Evaluation> evaluation = evaluateWithCoverage(fileIO, options, ranges);
+        return evaluation.map(
+                supported -> {
+                    List<Range> uncovered = new ArrayList<>();
+                    for (Range range : ranges) {
+                        uncovered.addAll(range.exclude(supported.coveredRanges()));
+                    }
+                    // Add gaps before AND/OR combination, so another index can still prune them.
+                    return supported.result().or(GlobalIndexResult.fromRanges(uncovered));
+                });
+    }
+
+    /** Preserve unsupported-reader fallback and coverage of the paths that actually contributed. */
+    Optional<Evaluation> evaluateWithCoverage(FileIO fileIO, Options options, List<Range> ranges)
+            throws IOException {
+        ExecutorService executor =
+                GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
+        return evaluateWithExecutor(fileIO, options, ranges, executor, true);
+    }
+
+    private Optional<Evaluation> evaluateWithExecutor(
+            FileIO fileIO,
+            Options options,
+            List<Range> ranges,
+            ExecutorService executor,
+            boolean allowUnsupported)
+            throws IOException {
+        if (predicate == null) {
+            GlobalIndexResult result = null;
+            Set<Integer> fields = new HashSet<>();
+            List<Range> coverage = null;
+            for (GlobalIndexQuery child : children) {
+                Optional<Evaluation> evaluation =
+                        child.evaluateWithExecutor(
+                                fileIO, options, ranges, executor, allowUnsupported);
+                if (!evaluation.isPresent()) {
+                    if (union) {
+                        return Optional.empty();
+                    }
+                    continue;
+                }
+                GlobalIndexResult matches = evaluation.get().result();
+                result =
+                        result == null ? matches : union ? result.or(matches) : result.and(matches);
+                fields.addAll(evaluation.get().contributingFieldIds());
+                List<Range> childCoverage = evaluation.get().coveredRanges();
+                coverage = coverage == null ? childCoverage : Range.and(coverage, childCoverage);
+            }
+            return result == null
+                    ? Optional.empty()
+                    : Optional.of(new Evaluation(result, fields, coverage));
+        }
+        GlobalIndexResult result = GlobalIndexResult.createEmpty();
+        Set<Integer> fields = new HashSet<>();
+        List<Range> coverage = new ArrayList<>();
+        boolean supported = groups.isEmpty();
+        for (IndexGroup group : groups) {
+            if (group.files.isEmpty()) {
+                supported = true;
+                fields.addAll(collectFieldIds(new RowType(group.indexFields()), predicate));
+                coverage.add(group.range);
+                continue;
+            }
+            Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> query =
+                    predicateQuery(group);
+            GlobalIndexResult splitRows = localSplitRows(ranges, group.range);
+            if (splitRows.results().isEmpty()) {
+                supported = true;
+                continue;
+            }
+            GlobalIndexer indexer =
+                    GlobalIndexerFactoryUtils.load(group.type).create(group.indexFields(), options);
+            try (GlobalIndexReader reader =
+                    indexer.createReader(
+                            meta -> fileIO.newInputStream(meta.filePath()),
+                            group.files,
+                            group.range.count(),
+                            splitRows.results().toRangeList(),
+                            executor)) {
+                Optional<GlobalIndexResult> matches = query.apply(reader).get();
+                if (!matches.isPresent()) {
+                    if (allowUnsupported) {
+                        continue;
+                    }
+                    throw new IOException("Index reader does not support predicate: " + predicate);
+                }
+                supported = true;
+                fields.addAll(collectFieldIds(new RowType(group.indexFields()), predicate));
+                coverage.add(group.range);
+                // Clip in index-local coordinates before offset() iterates the retained rows.
+                result = result.or(splitRows.and(matches.get()).offset(group.range.from));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while evaluating index query split", e);
+            } catch (ExecutionException e) {
+                throw new IOException("Failed to evaluate index query split", e.getCause());
+            }
+        }
+        return supported
+                ? Optional.of(
+                        new Evaluation(result, fields, Range.sortAndMergeOverlap(coverage, true)))
+                : Optional.empty();
+    }
+
+    private Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>>
+            predicateQuery(IndexGroup group) {
+        if (group.isCompositeBTree()) {
+            return reader -> reader.visitComposite(predicate);
+        }
+        if (predicate instanceof LeafPredicate) {
+            LeafPredicate leaf = (LeafPredicate) predicate;
+            return reader ->
+                    leaf.function().visit(reader, leaf.fieldRefOptional().get(), leaf.literals());
+        }
+        List<Predicate> bounds = ((CompoundPredicate) predicate).children();
+        LeafPredicate lower = (LeafPredicate) bounds.get(0);
+        LeafPredicate upper = (LeafPredicate) bounds.get(1);
+        FieldRef field = lower.fieldRefOptional().get();
+        return reader ->
+                reader.visitRange(
+                        field,
+                        lower.literals().get(0),
+                        upper.literals().get(0),
+                        lower.function() instanceof GreaterOrEqual,
+                        upper.function() instanceof LessOrEqual);
+    }
+
+    private static GlobalIndexResult localSplitRows(List<Range> ranges, Range groupRange) {
+        List<Range> localRanges = new ArrayList<>();
+        for (Range range : ranges) {
+            long from = Math.max(range.from, groupRange.from);
+            long to = Math.min(range.to, groupRange.to);
+            if (from <= to) {
+                localRanges.add(new Range(from - groupRange.from, to - groupRange.from));
+            }
+        }
+        return GlobalIndexResult.fromRanges(localRanges);
+    }
+
+    void serialize(DataOutputView out) throws IOException {
+        out.writeByte(predicate != null ? 0 : union ? 2 : 1);
+        if (predicate != null) {
+            serializeBytes(out, InstantiationUtil.serializeObject(predicate));
+            out.writeInt(groups.size());
+            for (IndexGroup group : groups) {
+                writeString(out, group.type);
+                writeString(out, JsonSerdeUtil.toJson(group.field));
+                out.writeInt(group.extraFields.size());
+                for (DataField field : group.extraFields) {
+                    writeString(out, JsonSerdeUtil.toJson(field));
+                }
+                out.writeLong(group.range.from);
+                out.writeLong(group.range.to);
+                out.writeInt(group.files.size());
+                for (GlobalIndexIOMeta file : group.files) {
+                    writeString(out, file.filePath().toString());
+                    out.writeLong(file.fileSize());
+                    out.writeLong(file.rowCount());
+                    out.writeBoolean(file.metadata() != null);
+                    if (file.metadata() != null) {
+                        serializeBytes(out, file.metadata());
+                    }
+                }
+            }
+        } else {
+            out.writeInt(children.size());
+            for (GlobalIndexQuery child : children) {
+                child.serialize(out);
+            }
+        }
+    }
+
+    static GlobalIndexQuery deserialize(DataInputView in) throws IOException {
+        int type = in.readByte();
+        if (type == 0) {
+            Predicate predicate;
+            try {
+                predicate =
+                        InstantiationUtil.deserializeObject(
+                                deserializedBytes(in), GlobalIndexQuery.class.getClassLoader());
+            } catch (ClassNotFoundException e) {
+                throw new IOException("Failed to deserialize index query predicate", e);
+            }
+            if (!(predicate instanceof LeafPredicate)
+                    && !(predicate instanceof CompoundPredicate)) {
+                throw new IOException("Expected an index predicate");
+            }
+            List<IndexGroup> groups = new ArrayList<>();
+            int size = in.readInt();
+            for (int i = 0; i < size; i++) {
+                String indexType = readString(in);
+                DataField field = JsonSerdeUtil.fromJson(readString(in), DataField.class);
+                List<DataField> extraFields = new ArrayList<>();
+                int extraFieldCount = in.readInt();
+                for (int j = 0; j < extraFieldCount; j++) {
+                    extraFields.add(JsonSerdeUtil.fromJson(readString(in), DataField.class));
+                }
+                Range range = new Range(in.readLong(), in.readLong());
+                List<GlobalIndexIOMeta> files = new ArrayList<>();
+                int fileCount = in.readInt();
+                for (int j = 0; j < fileCount; j++) {
+                    Path path = new Path(readString(in));
+                    long fileSize = in.readLong();
+                    long rowCount = in.readLong();
+                    byte[] metadata = in.readBoolean() ? deserializedBytes(in) : null;
+                    files.add(new GlobalIndexIOMeta(path, fileSize, rowCount, metadata));
+                }
+                groups.add(new IndexGroup(indexType, field, extraFields, range, files));
+            }
+            return new GlobalIndexQuery(predicate, false, Collections.emptyList(), groups);
+        }
+        if (type != 1 && type != 2) {
+            throw new IOException("Unknown index query node: " + type);
+        }
+        List<GlobalIndexQuery> children = new ArrayList<>();
+        int size = in.readInt();
+        for (int i = 0; i < size; i++) {
+            children.add(deserialize(in));
+        }
+        return new GlobalIndexQuery(null, type == 2, children, Collections.emptyList());
+    }
+
+    static void writeString(DataOutputView out, String value) throws IOException {
+        serializeBytes(out, value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String readString(DataInputView in) throws IOException {
+        return new String(deserializedBytes(in), StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof GlobalIndexQuery)) {
+            return false;
+        }
+        GlobalIndexQuery that = (GlobalIndexQuery) obj;
+        return union == that.union
+                && Objects.equals(predicate, that.predicate)
+                && children.equals(that.children)
+                && groups.equals(that.groups);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(predicate, union, children, groups);
+    }
+
+    /**
+     * Files read together by one index reader, grouped by ordered index columns, index type and row
+     * range. A group may overlap multiple data splits; primary and extra column predicates can
+     * share it.
+     */
+    private static class IndexGroup {
+        /** Factory identifier used to create the index reader on the worker. */
+        private final String type;
+
+        /** The index's primary column, which need not be the column queried by this leaf. */
+        private final DataField field;
+
+        /** Other columns in the same physical index, in their original index field order. */
+        private final List<DataField> extraFields;
+
+        /** Original global row-ID range; its start is the offset for index-relative row IDs. */
+        private final Range range;
+
+        /** File paths and metadata; contains no query results or open readers. */
+        private final List<GlobalIndexIOMeta> files;
+
+        private IndexGroup(
+                String type,
+                DataField field,
+                List<DataField> extraFields,
+                Range range,
+                List<GlobalIndexIOMeta> files) {
+            this.type = type;
+            this.field = field;
+            this.extraFields = new ArrayList<>(extraFields);
+            this.range = range;
+            this.files = new ArrayList<>(files);
+        }
+
+        private List<DataField> indexFields() {
+            List<DataField> fields = new ArrayList<>(1 + extraFields.size());
+            fields.add(field);
+            fields.addAll(extraFields);
+            return fields;
+        }
+
+        private static List<IndexGroup> fromMetadata(
+                IndexMetaFileGroup group, RowType rowType, IndexPathFactory pathFactory) {
+            DataField field = group.indexField(rowType);
+            List<DataField> extraFields = group.extraFields(rowType);
+            List<IndexGroup> result = new ArrayList<>();
+            group.metas()
+                    .forEach(
+                            (type, ranges) ->
+                                    ranges.forEach(
+                                            (range, metas) -> {
+                                                List<GlobalIndexIOMeta> files = new ArrayList<>();
+                                                for (IndexFileMeta meta : metas) {
+                                                    files.add(
+                                                            DataEvolutionGlobalIndexScanner
+                                                                    .toGlobalMeta(
+                                                                            meta, pathFactory));
+                                                }
+                                                result.add(
+                                                        new IndexGroup(
+                                                                type,
+                                                                field,
+                                                                extraFields,
+                                                                range,
+                                                                files));
+                                            }));
+            return result;
+        }
+
+        private boolean isCompositeBTree() {
+            return "btree".equals(type) && !extraFields.isEmpty();
+        }
+
+        private IndexGroup selectFiles(Predicate predicate) {
+            List<GlobalIndexIOMeta> selected =
+                    GlobalIndexerFactoryUtils.selectFiles(type, indexFields(), predicate, files);
+            // Retain the row range even when metadata proves there are no matching files.
+            return selected == files
+                    ? this
+                    : new IndexGroup(type, field, extraFields, range, selected);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (!(obj instanceof IndexGroup)) {
+                return false;
+            }
+            IndexGroup that = (IndexGroup) obj;
+            return type.equals(that.type)
+                    && field.equals(that.field)
+                    && extraFields.equals(that.extraFields)
+                    && range.equals(that.range)
+                    && files.equals(that.files);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(type, field, extraFields, range, files);
+        }
+    }
+}

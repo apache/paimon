@@ -136,9 +136,14 @@ public class FileIndexProcessor {
                         fileIndexOptions,
                         schemaInfo.colNameMapping);
         if (dataFileIndexWriter != null) {
+            // projectedIndexCols index into the file schema. withProjection would re-interpret
+            // them against the current table schema, so a schema change that shifts columns (drop
+            // a middle column, add another) would read the wrong column and rebuild the index over
+            // it. Read with the same file-schema projection the writer above uses.
+            RowType indexReadType = schemaInfo.fileSchema.project(schemaInfo.projectedIndexCols);
             try (RecordReader<InternalRow> reader =
                     table.newReadBuilder()
-                            .withProjection(schemaInfo.projectedIndexCols)
+                            .withReadType(indexReadType)
                             .newRead()
                             .createReader(
                                     DataSplit.builder()

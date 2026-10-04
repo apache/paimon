@@ -30,7 +30,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS;
 import static org.apache.paimon.CoreOptions.MAX_DYNAMIC_BUCKETS;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** When we need to overwrite the table, we should use this to avoid loading index. */
 public class SimpleHashBucketAssigner implements BucketAssigner {
@@ -45,6 +47,19 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
     public SimpleHashBucketAssigner(
             int numAssigners, int assignId, long targetBucketRowNumber, int maxBucketsNum) {
         PartitionIndex.validateMaxBuckets(maxBucketsNum);
+        // buckets are owned by 'bucket % numAssigners == assignId % numAssigners', so the
+        // smallest bucket this assigner owns is assignId % numAssigners. With a cap that does
+        // not admit it, this assigner owns no bucket and would silently default to bucket 0,
+        // which belongs to another assigner.
+        checkArgument(
+                maxBucketsNum == -1 || maxBucketsNum > assignId % numAssigners,
+                "Dynamic bucket max buckets number %s must be greater than the assigner id %s: "
+                        + "buckets are owned by 'bucket modulo assigners', so this assigner "
+                        + "would own no bucket and its records could not be placed. "
+                        + "Increase '%s' or reduce the assigner parallelism.",
+                maxBucketsNum,
+                assignId % numAssigners,
+                DYNAMIC_BUCKET_MAX_BUCKETS.key());
         this.numAssigners = numAssigners;
         this.assignId = assignId;
         this.targetBucketRowNumber = targetBucketRowNumber;

@@ -23,6 +23,7 @@ workers together cover the data exactly once.
 """
 
 import os
+import random
 import shutil
 import tempfile
 import unittest
@@ -163,6 +164,75 @@ def _bitmap_deletion_vector(*positions):
     for position in positions:
         deletion_vector.delete(position)
     return deletion_vector
+
+
+class ChunkShuffleOrderCompatibilityTest(unittest.TestCase):
+
+    def _check_order(self, factory, entries, ordered_signatures):
+        first_dv = DeletionFile('dv.index', 0, 20, cardinality=1)
+        second_dv = DeletionFile('dv.index', 20, 20, cardinality=None)
+        deletion_files = {((None,), 0): {'a.parquet': first_dv, 'b.parquet': second_dv}}
+        vectors = {
+            first_dv: _bitmap_deletion_vector(1),
+            second_dv: _bitmap_deletion_vector(0, 2),
+        }
+        for seed in (0, 7, 42):
+            expected = list(ordered_signatures)
+            random.Random(seed).shuffle(expected)
+            # Include unsharded reads and empty workers (four chunks, six workers).
+            for workers in (1, 3, 6):
+                combined = []
+                for worker in range(workers):
+                    with self.subTest(seed=seed, workers=workers, worker=worker):
+                        gen = factory(seed=seed, chunk_size=3, deletion_files_map=deletion_files)
+                        if workers > 1:
+                            gen.with_shard(worker, workers)
+                        with patch(
+                            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+                            side_effect=lambda _, dv: vectors[dv],
+                        ) as read:
+                            # Manifest input order must not affect the shuffle.
+                            splits = gen.create_splits(list(reversed(entries)))
+                        self.assertEqual(read.call_count, 2)
+                        signatures = [_split_signature(split) for split in splits]
+                        size, remainder = divmod(len(expected), workers)
+                        start = worker * size + min(worker, remainder)
+                        end = start + size + (worker < remainder)
+                        self.assertEqual(signatures, expected[start:end])
+                        combined.extend(signatures)
+                self.assertEqual(combined, expected)
+
+    def test_append_order_across_partitions_files_and_deletions(self):
+        entries = [
+            _mock_entry([None], 0, 'a.parquet', 5),
+            _mock_entry([None], 0, 'b.parquet', 4),
+            _mock_entry(['p'], 2, 'c.parquet', 5),
+        ]
+        # Non-null partitions sort first. The second null-partition chunk
+        # spans files: b's file-local offsets 1 and 3 follow a's five rows.
+        expected = [
+            (('p',), 2, ('c.parquet',), ((0, 2),)),
+            (('p',), 2, ('c.parquet',), ((3, 4),)),
+            ((None,), 0, ('a.parquet',), ((0, 0), (2, 3))),
+            ((None,), 0, ('a.parquet', 'b.parquet'), ((4, 4), (6, 6), (8, 8))),
+        ]
+        self._check_order(_make_generator, entries, expected)
+
+    def test_data_evolution_order_preserves_blob_siblings_and_row_id_gaps(self):
+        entries = [
+            _mock_de_entry([None], 0, 'a.parquet', 1000, 5),
+            _mock_de_entry([None], 0, 'a.blob', 1000, 5),
+            _mock_de_entry([None], 0, 'b.parquet', 2000, 4),
+            _mock_de_entry(['p'], 2, 'c.parquet', 3000, 5),
+        ]
+        expected = [
+            (('p',), 2, ('c.parquet',), ((3000, 3002),)),
+            (('p',), 2, ('c.parquet',), ((3003, 3004),)),
+            ((None,), 0, ('a.blob', 'a.parquet'), ((1000, 1000), (1002, 1003))),
+            ((None,), 0, ('a.blob', 'a.parquet', 'b.parquet'),
+             ((1004, 1004), (2001, 2001), (2003, 2003))),
+        ]
+        self._check_order(_make_de_generator, entries, expected)
 
 
 class LiveRowRangeSlicerTest(unittest.TestCase):

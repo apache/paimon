@@ -66,6 +66,9 @@ class TableCommit:
             commit_messages: List[CommitMessage],
             commit_identifier: int = BATCH_COMMIT_IDENTIFIER,
             snapshot_properties: Optional[Dict[str, str]] = None):
+        """Release native-writer cleanup ownership before publication can start."""
+        for message in commit_messages:
+            message._native_write_pending = False
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
         commit_kwargs = {
             "commit_messages": non_empty_messages,

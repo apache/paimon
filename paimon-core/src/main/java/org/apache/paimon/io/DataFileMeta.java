@@ -387,6 +387,8 @@ public interface DataFileMeta {
 
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
+    DataFileMeta assignFileSource(FileSource fileSource);
+
     DataFileMeta withWriteColsSequences(long[] writeColsSequences);
 
     DataFileMeta assignFirstRowId(long firstRowId);

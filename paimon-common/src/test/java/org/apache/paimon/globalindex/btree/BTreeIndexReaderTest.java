@@ -28,10 +28,13 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -57,7 +60,90 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                 fileReader,
                 Collections.singletonList(written),
                 dataNum,
+                null,
                 newDirectExecutorService());
+    }
+
+    @TestTemplate
+    public void testLocalRowRanges() throws Exception {
+        for (int index = dataNum - 100; index < dataNum; index++) {
+            data.get(index).setLeft(null);
+        }
+        GlobalIndexIOMeta written = writeData(data);
+        FieldRef field = new FieldRef(1, "testField", dataType);
+        Object literal = data.get(dataNum / 2).getKey();
+        List<Range> ranges = Arrays.asList(new Range(2, 8), new Range(30, 50));
+        RoaringNavigableMap64 allowed = GlobalIndexResult.fromRanges(ranges).results();
+        try (GlobalIndexReader full =
+                        globalIndexer.createReader(
+                                fileReader,
+                                Collections.singletonList(written),
+                                dataNum,
+                                null,
+                                newDirectExecutorService());
+                GlobalIndexReader local =
+                        globalIndexer.createReader(
+                                fileReader,
+                                Collections.singletonList(written),
+                                dataNum,
+                                ranges,
+                                newDirectExecutorService())) {
+            assertThat(local.visitIsNull(field).join().get().results())
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed, full.visitIsNull(field).join().get().results()));
+            assertThat(local.visitEqual(field, literal).join().get().results())
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitEqual(field, literal).join().get().results()));
+            assertThat(
+                            local.visitBetween(
+                                            field,
+                                            data.get(0).getKey(),
+                                            data.get(dataNum - 101).getKey())
+                                    .join()
+                                    .get()
+                                    .results())
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitBetween(
+                                                    field,
+                                                    data.get(0).getKey(),
+                                                    data.get(dataNum - 101).getKey())
+                                            .join()
+                                            .get()
+                                            .results()));
+            assertThat(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    local.visitNotEqual(field, literal).join().get().results()))
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitNotEqual(field, literal).join().get().results()));
+            assertThat(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    local.visitNotIn(field, Collections.singletonList(literal))
+                                            .join()
+                                            .get()
+                                            .results()))
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed,
+                                    full.visitNotIn(field, Collections.singletonList(literal))
+                                            .join()
+                                            .get()
+                                            .results()));
+            assertThat(
+                            RoaringNavigableMap64.and(
+                                    allowed, local.visitIsNotNull(field).join().get().results()))
+                    .containsExactlyElementsOf(
+                            RoaringNavigableMap64.and(
+                                    allowed, full.visitIsNotNull(field).join().get().results()));
+        }
     }
 
     @TestTemplate
@@ -173,6 +259,7 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                         fileReader,
                         Collections.singletonList(written),
                         dataNum,
+                        null,
                         newDirectExecutorService())) {
             assertResult(
                     reader.visitEqual(ref, literal).join().get(),

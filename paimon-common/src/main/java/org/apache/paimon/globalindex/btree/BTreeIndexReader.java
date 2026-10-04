@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -71,6 +72,7 @@ public class BTreeIndexReader implements Closeable {
     private final LazyField<RoaringNavigableMap64> nullBitmap;
     private final Object minKey;
     private final Object maxKey;
+    @Nullable private final RoaringNavigableMap64 rowIdFilter;
 
     /** A key and its local row ids stored in one btree entry. */
     public static class KeyRowIds {
@@ -141,10 +143,12 @@ public class BTreeIndexReader implements Closeable {
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
             GlobalIndexIOMeta globalIndexIOMeta,
-            CacheManager cacheManager)
+            CacheManager cacheManager,
+            @Nullable RoaringNavigableMap64 rowIdFilter)
             throws IOException {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
+        this.rowIdFilter = rowIdFilter;
         SortedIndexFileMeta indexMeta =
                 SortedIndexFileMeta.deserialize(globalIndexIOMeta.metadata());
         if (indexMeta.getFirstKey() != null) {
@@ -177,7 +181,7 @@ public class BTreeIndexReader implements Closeable {
                             input, filePath, cacheManager, footer.getBloomFilterHandle());
             this.reader =
                     new SstFileReader(
-                            createSliceComparator(keySerializer),
+                            keySerializer.createSliceComparator(),
                             blockCache,
                             footer.getIndexBlockHandle(),
                             bloomFilter);
@@ -236,12 +240,6 @@ public class BTreeIndexReader implements Closeable {
         return nullBitmap;
     }
 
-    private Comparator<MemorySlice> createSliceComparator(KeySerializer keySerializer) {
-        return (slice1, slice2) ->
-                comparator.compare(
-                        keySerializer.deserialize(slice1), keySerializer.deserialize(slice2));
-    }
-
     @Override
     public void close() throws IOException {
         // input is this reader's own handle, so it has to be released even when the reader
@@ -272,7 +270,11 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitIsNull() {
-        return createResult(nullBitmap::get);
+        return createResult(
+                () ->
+                        rowIdFilter == null
+                                ? nullBitmap.get()
+                                : RoaringNavigableMap64.and(nullBitmap.get(), rowIdFilter));
     }
 
     public Optional<GlobalIndexResult> visitStartsWith(Object literal) {
@@ -330,6 +332,44 @@ public class BTreeIndexReader implements Closeable {
 
     public Optional<GlobalIndexResult> visitEqual(Object literal) {
         return createResult(() -> pointQuery(literal));
+    }
+
+    public Optional<GlobalIndexResult> visitComposite(CompositeBTreePredicate.Plan plan) {
+        return createResult(
+                () -> {
+                    if (plan.isEmpty()) {
+                        return new RoaringNavigableMap64();
+                    }
+                    RoaringNavigableMap64 result = new RoaringNavigableMap64();
+                    for (CompositeBTreePredicate.Interval interval : plan.intervals()) {
+                        if (plan.isPointLookup()) {
+                            result.or(pointQuery(interval.pointKey()));
+                            continue;
+                        }
+                        SstFileReader.SstFileIterator iterator = reader.createIterator();
+                        iterator.seekTo(
+                                key ->
+                                        interval.lower()
+                                                .compareKey(
+                                                        (InternalRow)
+                                                                keySerializer.deserialize(key)));
+                        BlockIterator batch;
+                        boolean finished = false;
+                        while (!finished && (batch = iterator.readBatch()) != null) {
+                            while (batch.hasNext()) {
+                                Map.Entry<MemorySlice, MemorySlice> entry = batch.next();
+                                InternalRow key =
+                                        (InternalRow) keySerializer.deserialize(entry.getKey());
+                                if (interval.upper().compareKey(key) > 0) {
+                                    finished = true;
+                                    break;
+                                }
+                                addRowIdsTo(entry.getValue(), result);
+                            }
+                        }
+                    }
+                    return result;
+                });
     }
 
     public Optional<GlobalIndexResult> visitGreaterThan(Object literal) {
@@ -550,10 +590,13 @@ public class BTreeIndexReader implements Closeable {
             MemorySliceInput input = slice.toInput();
             int count = readVersion1Count(input);
             for (int i = 0; i < count; i++) {
-                target.add(input.readVarLenLong());
+                long rowId = input.readVarLenLong();
+                if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
+                    target.add(rowId);
+                }
             }
         } else {
-            BTreePostingList.addTo(slice, target);
+            BTreePostingList.addTo(slice, target, rowIdFilter);
         }
     }
 

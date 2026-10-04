@@ -90,7 +90,8 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     @Override
     protected GlobalIndexReader prepareDataAndCreateReader() throws Exception {
         List<GlobalIndexIOMeta> written = writeData();
-        return globalIndexer.createReader(fileReader, written, dataNum, newDirectExecutorService());
+        return globalIndexer.createReader(
+                fileReader, written, dataNum, null, newDirectExecutorService());
     }
 
     private List<GlobalIndexIOMeta> writeData() throws Exception {
@@ -123,6 +124,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                                         fileReader,
                                         written,
                                         dataNum + 1,
+                                        null,
                                         newDirectExecutorService()));
         BTreeIndexReader btreeReader = spy(indexReader.openReader(written.get(0)));
         doReturn(btreeReader).when(indexReader).openReader(written.get(0));
@@ -203,7 +205,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, written, dataNum, newDirectExecutorService())) {
+                        fileReader, written, dataNum, null, newDirectExecutorService())) {
             GlobalIndexResult result =
                     reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, limit)).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(limit);
@@ -230,7 +232,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     @TestTemplate
     public void testFallbackScanDisabledByBudget() throws Exception {
         options.set(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(1));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
 
         List<GlobalIndexIOMeta> written = writeData();
         FieldRef ref = new FieldRef(1, "testField", dataType);
@@ -240,7 +245,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, written, dataNum, newDirectExecutorService())) {
+                        fileReader, written, dataNum, null, newDirectExecutorService())) {
             assertResult(reader.visitBetween(ref, min, max).join().get(), filter(obj -> true));
 
             GlobalIndexResult result = reader.visitEqual(ref, literal).join().get();
@@ -262,7 +267,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         options.set(
                 BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE,
                 MemorySize.ofBytes(written.get(1).fileSize()));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
 
         FieldRef ref = new FieldRef(1, "testField", dataType);
         Object min = data.get(0).getKey();
@@ -271,7 +279,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, written, dataNum, newDirectExecutorService())) {
+                        fileReader, written, dataNum, null, newDirectExecutorService())) {
             assertResult(reader.visitBetween(ref, min, max).join().get(), filter(obj -> true));
 
             GlobalIndexResult result = reader.visitGreaterOrEqual(ref, secondFileMin).join().get();
@@ -291,7 +299,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         try (GlobalIndexReader reader =
                 new OffsetGlobalIndexReader(
                         globalIndexer.createReader(
-                                countingReader, written, 4, newDirectExecutorService()),
+                                countingReader, written, 4, null, newDirectExecutorService()),
                         1000L,
                         1003L)) {
             assertRows(reader.visitEqual(ref, literal).join().get(), 1000L, 1001L, 1002L, 1003L);
@@ -334,7 +342,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     @TestTemplate
     public void testAllMatchRangeDoesNotConsumeScanBudget() throws Exception {
         options.set(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(1));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
         List<GlobalIndexIOMeta> written = writeData();
         Object min = data.get(0).getKey();
         Object max = data.get(dataNum - 1).getKey();
@@ -342,7 +353,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        countingReader, written, dataNum, newDirectExecutorService())) {
+                        countingReader, written, dataNum, null, newDirectExecutorService())) {
             assertResult(reader.visitBetween(ref, min, max).join().get(), filter(obj -> true));
             assertResult(reader.visitGreaterOrEqual(ref, min).join().get(), filter(obj -> true));
             assertResult(reader.visitLessOrEqual(ref, max).join().get(), filter(obj -> true));
@@ -373,6 +384,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                             countingReader,
                             Collections.singletonList(meta),
                             4,
+                            null,
                             newDirectExecutorService())) {
                 assertRows(reader.visitEqual(ref, literal).join().get(), 1L, 3L);
                 assertThat(countingReader.openedFiles).containsExactly(meta.filePath());
@@ -393,7 +405,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         FieldRef ref = new FieldRef(1, "testField", dataType);
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        countingReader, written, 2, newDirectExecutorService())) {
+                        countingReader, written, 2, null, newDirectExecutorService())) {
             assertRows(reader.visitEqual(ref, min).join().get(), 0L);
             assertRows(reader.visitLessThan(ref, max).join().get(), 0L);
             assertThat(countingReader.openedFiles).containsExactly(written.get(0).filePath());
@@ -418,7 +430,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         try (GlobalIndexReader reader =
                 new OffsetGlobalIndexReader(
                         globalIndexer.createReader(
-                                countingReader, written, 4, newDirectExecutorService()),
+                                countingReader, written, 4, null, newDirectExecutorService()),
                         1000L,
                         1003L)) {
             GlobalIndexResult result = reader.visitNotEqual(ref, 100).join().get();
@@ -455,7 +467,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
         for (GlobalIndexIOMeta index : written) {
             try (BTreeIndexReader reader =
-                    new BTreeIndexReader(keySerializer, fileReader, index, CACHE_MANAGER)) {
+                    new BTreeIndexReader(keySerializer, fileReader, index, CACHE_MANAGER, null)) {
 
                 TreeSet<Long> nullRowIds = new TreeSet<>();
                 reader.scanNullRowIds(nullRowIds::add);
@@ -519,7 +531,9 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         stressOptions.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofKibiBytes(64));
         stressOptions.set(BTreeIndexOptions.BTREE_INDEX_HIGH_PRIORITY_POOL_RATIO, 0.1);
         BTreeGlobalIndexer stressIndexer =
-                new BTreeGlobalIndexer(new DataField(1, "testField", dataType), stressOptions);
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        stressOptions);
 
         // Inject null values at the tail to test isNull/isNotNull under concurrency
         for (int i = dataNum - 1; i >= dataNum * 0.9; i--) {
@@ -540,7 +554,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         // Real multi-threaded executor for the reader's internal file-level parallelism
         ExecutorService readerExecutor = Executors.newFixedThreadPool(8);
         try (GlobalIndexReader reader =
-                stressIndexer.createReader(fileReader, written, dataNum, readerExecutor)) {
+                stressIndexer.createReader(fileReader, written, dataNum, null, readerExecutor)) {
             FieldRef ref = new FieldRef(1, "testField", dataType);
 
             int concurrency = 16;
@@ -624,7 +638,8 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                 new SemaphoredDelegatingExecutor(baseExecutor, 2, false);
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, written, dataNum, semaphoredExecutor)) {
+                globalIndexer.createReader(
+                        fileReader, written, dataNum, null, semaphoredExecutor)) {
             FieldRef ref = new FieldRef(1, "testField", dataType);
 
             Random random = new Random(42);

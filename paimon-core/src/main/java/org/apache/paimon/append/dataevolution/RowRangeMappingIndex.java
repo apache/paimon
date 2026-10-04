@@ -18,8 +18,11 @@
 
 package org.apache.paimon.append.dataevolution;
 
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.utils.Range;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -27,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 
 /** Index for row-range mappings. */
 final class RowRangeMappingIndex {
@@ -164,6 +168,28 @@ final class RowRangeMappingIndex {
 
         int index = lowerBound(oldEnds, oldRange.from);
         return index < oldStarts.length && oldStarts[index] <= oldRange.to;
+    }
+
+    void serialize(DataOutputView out) throws IOException {
+        out.writeInt(oldStarts.length);
+        for (int i = 0; i < oldStarts.length; i++) {
+            out.writeLong(oldStarts[i]);
+            out.writeLong(oldEnds[i]);
+            out.writeLong(Math.addExact(newStarts[i], newStartOffset));
+        }
+    }
+
+    static RowRangeMappingIndex deserialize(DataInputView in) throws IOException {
+        int size = readCount(in, "row-id mappings");
+        long[] oldStarts = new long[size];
+        long[] oldEnds = new long[size];
+        long[] newStarts = new long[size];
+        for (int i = 0; i < size; i++) {
+            oldStarts[i] = in.readLong();
+            oldEnds[i] = in.readLong();
+            newStarts[i] = in.readLong();
+        }
+        return createFromOwnedArrays(oldStarts, oldEnds, newStarts);
     }
 
     private static int lowerBound(long[] sorted, long target) {

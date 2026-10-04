@@ -131,6 +131,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         Preconditions.checkArgument(
+                retainMin >= 1, String.format("retainMin (%s) must be at least 1.", retainMin));
+        Preconditions.checkArgument(
                 retainMax >= retainMin,
                 String.format(
                         "retainMax (%s) must not be less than retainMin (%s).",
@@ -178,7 +180,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     public int expireUntil(long earliestId, long endExclusiveId) {
         try {
             return innerExpireUntil(earliestId, endExclusiveId);
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }
     }

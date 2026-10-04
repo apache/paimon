@@ -16,7 +16,7 @@
 # under the License.
 
 import struct
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any, List, Optional, Tuple
 
 import pyarrow as pa
@@ -483,20 +483,29 @@ def _read_field(decoder: _RowDecoder, data_type) -> Any:
             precision, scale = _parse_decimal_params(type_name)
             if precision <= 18:
                 unscaled = decoder.read_long()
-                return Decimal(unscaled) / Decimal(10 ** scale)
             else:
                 raw = decoder.read_bytes()
                 unscaled = int.from_bytes(raw, byteorder='big', signed=True)
-                return Decimal(unscaled) / Decimal(10 ** scale)
+            # Rescale under a context wide enough for the column: the default 28-digit
+            # precision would round a DECIMAL(p) value with more than 28 significant
+            # digits, silently corrupting it. Mirrors pypaimon/data/decimal.py.
+            with localcontext() as ctx:
+                ctx.prec = max(precision + abs(scale), 38)
+                return Decimal(unscaled).scaleb(-scale)
         elif type_name.startswith('TIMESTAMP'):
             precision = _parse_timestamp_precision(type_name)
             millis = decoder.read_long()
+            # The value is placed into the Arrow time unit from_paimon_type maps the
+            # precision to (0 -> s, 1-3 -> ms, 4-6 -> us, 7-9 -> ns), so it must be
+            # returned in that unit. nano_of_milli is only on the wire for precision > 3.
+            if precision == 0:
+                return millis // 1000
             if precision <= 3:
                 return millis
-            else:
-                nano_of_milli = decoder.read_var_int()
-                micros = millis * 1000 + nano_of_milli // 1000
-                return micros
+            nano_of_milli = decoder.read_var_int()
+            if precision <= 6:
+                return millis * 1000 + nano_of_milli // 1000
+            return millis * 1_000_000 + nano_of_milli
         elif type_name == 'VARIANT':
             value_bytes = decoder.read_bytes()
             metadata_bytes = decoder.read_bytes()

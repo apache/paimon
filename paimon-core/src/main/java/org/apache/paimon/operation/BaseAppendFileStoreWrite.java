@@ -47,6 +47,7 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOExceptionSupplier;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.RecordWriter;
@@ -265,12 +266,16 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     @Override
     public void close() throws Exception {
-        super.close();
-        if (readForCompactByThread != null) {
-            readForCompactByThread.remove();
-        }
-        if (blobFetchMetrics != null) {
-            blobFetchMetrics.close();
+        try {
+            if (blobFetchMetrics == null) {
+                super.close();
+            } else {
+                IOUtils.closeAll(super::close, blobFetchMetrics::close);
+            }
+        } finally {
+            if (readForCompactByThread != null) {
+                readForCompactByThread.remove();
+            }
         }
     }
 

@@ -199,6 +199,36 @@ Expire snapshots.
 CALL sys.expire_snapshots(table => 'default.T', retain_max => 10, options => 'snapshot.expire.limit=1');
 ```
 
+## expire_changelogs
+
+Expire separated changelog files. Unspecified arguments fall back to table properties
+(`changelog.num-retained.max` / `changelog.num-retained.min` / `changelog.time-retained`, or the
+corresponding `snapshot.*` options when changelog options are not set, and `snapshot.expire.limit`
+for `max_deletes`). `retain_min` and `retain_max` are applied against the latest snapshot id, not
+the long-lived changelog count. The procedure returns `deleted_changelogs_count`, the number of
+changelogs successfully deleted. A missing changelog, one skipped after a file-skipper failure, or
+one whose changelog file is still present after a failed deletion, is not included.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier.
+- `retain_max` (`INT`, optional): the maximum number of completed changelogs to retain.
+- `retain_min` (`INT`, optional): the minimum number of completed changelogs to retain.
+- `older_than` (`STRING`, optional): timestamp before which changelogs will be removed.
+- `max_deletes` (`INT`, optional): the maximum number of changelogs that can be deleted at once.
+- `delete_all` (`BOOLEAN`, optional): when true, delete all separated changelogs. Cannot be combined with `retain_max`, `retain_min`, `older_than`, `max_deletes` or `options`.
+- `options` (`STRING`, optional): the additional dynamic options of the table. These override stored table properties and are overridden by explicit procedure arguments.
+
+```sql
+CALL sys.expire_changelogs(table => 'default.T', retain_max => 8);
+
+CALL sys.expire_changelogs(table => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 2);
+
+CALL sys.expire_changelogs(table => 'default.T', options => 'changelog.num-retained.max=8, changelog.num-retained.min=4');
+
+CALL sys.expire_changelogs(table => 'default.T', delete_all => true);
+```
+
 ## expire_partitions
 
 Expire partitions.
@@ -315,6 +345,22 @@ CALL sys.remove_unexisting_files(table => 'mydb.myt');
 
 -- only check what files will be removed, but not really remove them (dry run)
 CALL sys.remove_unexisting_files(table => 'mydb.myt', dry_run => true);
+```
+
+## remove_unexisting_manifests
+
+Remove missing manifest files from the latest snapshot's manifest list and commit a replacement snapshot.
+
+This procedure may cause data loss when used outside of the documented repair cases.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier. To repair a branch, backtick-quote the table name so `$` stays inside the identifier.
+
+```sql
+CALL sys.remove_unexisting_manifests(table => 'mydb.myt');
+
+CALL sys.remove_unexisting_manifests(table => 'mydb.`myt$branch_rt`');
 ```
 
 ## purge_files

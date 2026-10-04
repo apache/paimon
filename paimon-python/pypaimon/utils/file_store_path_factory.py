@@ -22,6 +22,7 @@ from typing import List, Optional, Tuple
 
 from pypaimon.casting.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.utils.path import resolve_path, to_file_io_path
 from pypaimon.schema.data_types import DataType
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import _is_ltz_type, _normalize_ltz, _parse_type_precision_scale
@@ -40,6 +41,22 @@ def _escape_partition_component(value: str) -> str:
     return ''.join('%{:02X}'.format(ord(char))
                    if ord(char) < 32 or ord(char) == 127 or char in escape_chars else char
                    for char in value)
+
+
+def canonical_data_file_path(table, partition, bucket, file_name):
+    """Locate a file in Java's escaped partition directory."""
+    bucket_path = table.path_factory().bucket_path(
+        tuple(partition), bucket, canonical_partition=True)
+    path = f"{bucket_path.rstrip('/')}/{file_name}"
+    root = resolve_path(table.path_factory().data_file_path(), '.').rstrip('/')
+    if (root.startswith('file:') and path.startswith(root + '/')
+            and '%' in path[len(root) + 1:]):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        # File I/O wrappers eventually decode %2F in file URIs. Rust stores
+        # the literal escaped component, so use its physical local path.
+        return str(LocalFileIO()._to_file(root) / path[len(root) + 1:])
+    return path
 
 
 def _floating_partition_string(value, single_precision: bool) -> str:
@@ -117,6 +134,8 @@ class FileStorePathFactory:
         self.changelog_file_prefix = changelog_file_prefix
         self.file_suffix_include_compression = file_suffix_include_compression
         self.file_compression = file_compression
+        if data_file_path_directory == '':
+            raise ValueError('data-file.path-directory must not be empty')
         self.data_file_path_directory = data_file_path_directory
         self.external_paths = external_paths or []
         self.external_path_strategy = external_path_strategy
@@ -143,9 +162,8 @@ class FileStorePathFactory:
         return f"{self._root}/{self.STATISTICS_PATH}"
 
     def data_file_path(self) -> str:
-        if self.data_file_path_directory:
-            return f"{self._root}/{self.data_file_path_directory}"
-        return self._root
+        path = resolve_path(self._root, self.data_file_path_directory)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def relative_bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         if canonical_partition and partition:
@@ -212,22 +230,27 @@ class FileStorePathFactory:
                 relative_parts = partition_parts + relative_parts
 
         # Add data file path directory if specified
+        relative = "/".join(relative_parts)
+        # Legacy Python timestamp partitions contain literal colons. Prefix a
+        # relative path so URI resolution cannot mistake the first field for a scheme.
+        if ':' in relative.split('/', 1)[0]:
+            relative = './' + relative
         if self.data_file_path_directory:
-            relative_parts = [self.data_file_path_directory] + relative_parts
-
-        return "/".join(relative_parts)
+            return resolve_path(self.data_file_path_directory, relative)
+        return relative
 
     def bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         relative_path = self.relative_bucket_path(partition, bucket, canonical_partition)
-        return f"{self._root}/{relative_path}"
+        path = resolve_path(self._root, relative_path)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def create_external_path_provider(
-        self, partition: Tuple, bucket: int
+        self, partition: Tuple, bucket: int, canonical_partition: bool = False
     ) -> Optional[ExternalPathProvider]:
         if not self.external_paths:
             return None
 
-        relative_bucket_path = self.relative_bucket_path(partition, bucket)
+        relative_bucket_path = self.relative_bucket_path(partition, bucket, canonical_partition)
         return ExternalPathProvider.create(
             self.external_path_strategy,
             self.external_paths,
@@ -245,42 +268,33 @@ class FileStorePathFactory:
     def new_bucket_index_path(self, partition: Tuple, bucket: int, file_name: str) -> Tuple[str, bool]:
         """Return a new bucket index's path and whether to persist its external location."""
         if self.index_file_in_data_file_dir:
-            external = self.create_external_path_provider(partition, bucket)
+            external = self.create_external_path_provider(partition, bucket, canonical_partition=True)
             if external is not None:
                 return external.get_next_external_data_path(file_name), True
-            # Python data directories historically use str(value) without
-            # escaping. Record the actual location when Java renders it
-            # differently, so its readers can find the DV beside those files.
-            return (f"{self.bucket_path(partition, bucket)}/{file_name}",
-                    self._partition_path_requires_explicit_location(partition))
+            path = f"{self.bucket_path(partition, bucket, canonical_partition=True)}/{file_name}"
+            # Java Float/Double.toString differs across JDK versions. Record
+            # the actual Java-style directory so every Java reader resolves
+            # the same file through IndexFileMeta.externalPath.
+            floating = any(value is not None and str(data_type).split()[0] in ('FLOAT', 'REAL', 'DOUBLE')
+                           for value, data_type in zip(partition, self.partition_types or []))
+            return to_file_io_path(path), floating
         factory = self.global_index_path_factory()
         return factory.to_path(file_name), factory.is_external_path()
 
-    def _partition_path_requires_explicit_location(self, partition: Tuple) -> bool:
-        # FLOAT/DOUBLE spellings also vary between JVM versions, so persist
-        # their actual Python location even if one Java spelling matches it.
-        return (any(isinstance(value, float) for value in partition)
-                or self.relative_bucket_path(partition, 0) != self.relative_bucket_path(partition, 0, True))
-
     def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
-        """Resolve an existing bucket index, including the legacy Python DV layout."""
+        """Resolve a bucket index using Java partition paths and explicit locations."""
         if index_file.external_path:
-            return index_file.external_path
-        legacy_path = f"{self.index_path()}/{index_file.file_name}"
+            return to_file_io_path(index_file.external_path)
         if not self.index_file_in_data_file_dir:
-            return legacy_path
-        path = f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}"
-        # Older Python DV writers ignored the option. Prefer the Java location
-        # when present, and use the old directory only for an existing DV file.
-        if file_io is not None and index_file.index_type == 'DELETION_VECTORS' and not file_io.exists(path):
-            python_path = f"{self.bucket_path(partition, bucket)}/{index_file.file_name}"
+            return f"{self.index_path()}/{index_file.file_name}"
+        path = to_file_io_path(f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}")
+        # Java Float/Double.toString can produce different digits across JDK
+        # versions. Only these floating partition spellings need a lookup.
+        if file_io is not None and index_file.index_type in ('DELETION_VECTORS', 'HASH') and not file_io.exists(path):
+            python_path = to_file_io_path(f"{self.bucket_path(partition, bucket)}/{index_file.file_name}")
             alternate = self._find_floating_bucket_index(partition, bucket, index_file.file_name, file_io, python_path)
             if alternate is not None:
                 return alternate
-            if python_path != path and file_io.exists(python_path):
-                return python_path
-            if file_io.exists(legacy_path):
-                return legacy_path
         return path
 
     def _find_floating_bucket_index(self, partition, bucket, file_name, file_io, python_path):
@@ -291,7 +305,7 @@ class FileStorePathFactory:
         # Float/Double.toString changed across JDK releases. Only if the usual
         # path is missing, inspect floating partition components and compare
         # their exact encoded values (including the sign of zero).
-        paths = [self.data_file_path()]
+        paths = [to_file_io_path(resolve_path(self.data_file_path(), '.'))]
         for i, text in enumerate(self._canonical_partition(partition)):
             prefix = _escape_partition_component(self.partition_keys[i]) + '='
             if not floating[i] or partition[i] is None:
@@ -335,7 +349,7 @@ class IndexPathFactory:
         self._file_count = 0
 
     def index_path(self) -> str:
-        """Return the table index path used as a read fallback."""
+        """Return the default table index directory."""
         return self._index_path
 
     def global_index_root_path(self) -> str:

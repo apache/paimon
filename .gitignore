@@ -35,6 +35,7 @@ metastore_db/
 
 ### Python ###
 *.pyc
+paimon-python/build/
 paimon-python/dist/
 paimon-python/*.egg-info/
 paimon-python/dev/log

@@ -26,6 +26,7 @@ from unittest.mock import Mock, patch
 
 from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
+import pytest
 from parameterized import parameterized
 
 from pypaimon.build_info import full_version as build_full_version
@@ -471,6 +472,7 @@ class TableWriteTest(unittest.TestCase):
         with patch.object(pa.TableGroupBy, 'aggregate', raise_missing_kernel):
             self.assertFalse(rk._probe_arrow_group_by())
 
+    @pytest.mark.python_commit
     def test_write_snapshot(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_write_snapshot', schema, False)
@@ -591,6 +593,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
 
+    @pytest.mark.python_write
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_parquet', schema, False)
@@ -715,6 +718,7 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_write
     def test_multi_prepare_commit_pk(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], primary_keys=['user_id', 'dt'],
                                             options={'bucket': '2'})
@@ -858,16 +862,12 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1'],
         }, schema=self.pk_pa_schema)
 
-        self._commit_arrow(table, expected)
-
-        self.assertEqual(
-            1,
-            len(glob.glob(
-                self.warehouse
-                + "/default.db/test_postpone_default_builder/user_id=1/"
-                + "bucket-postpone/*.avro"
-            )),
-        )
+        messages = self._commit_arrow(table, expected)
+        self.assertEqual({-2}, {message.bucket for message in messages})
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual(1, len(files))
+        self.assertIn('/bucket-postpone/', files[0].file_path)
+        self.assertTrue(table.file_io.exists(files[0].file_path))
         splits = table.new_read_builder().new_scan().plan().splits()
         self.assertTrue(not table.new_read_builder().new_read().to_arrow(splits))
 
@@ -1748,7 +1748,8 @@ class TableWriteTest(unittest.TestCase):
 
         # Verify file name format: {table_prefix}-u-{commit_user}-s-{random_number}-w--{uuid}-0.{format}
         # Expected pattern: data--u-{user}-s-{random}-w--{uuid}-0.{format}
-        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.avro$'
+        # Native postpone writes use Parquet; the Python writer may select Avro.
+        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.(avro|parquet)$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
@@ -1970,6 +1971,7 @@ class TableWriteTest(unittest.TestCase):
         actual = self._read_sorted(table, 'id')
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_write
     def test_validate_schema_allows_binary_family_for_write_cols(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),

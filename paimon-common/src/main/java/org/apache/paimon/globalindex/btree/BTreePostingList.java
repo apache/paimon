@@ -25,6 +25,8 @@ import org.apache.paimon.utils.LongArrayList;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -69,18 +71,29 @@ final class BTreePostingList {
                 : serializeDeltaList(rowIds, sizes.deltaList);
     }
 
-    static void addTo(MemorySlice slice, RoaringNavigableMap64 target) throws IOException {
+    static void addTo(
+            MemorySlice slice,
+            RoaringNavigableMap64 target,
+            @Nullable RoaringNavigableMap64 rowIdFilter)
+            throws IOException {
         MemorySliceInput input = slice.toInput();
         int type = input.readUnsignedByte();
         switch (type) {
             case SINGLE:
-                target.add(input.readVarLenLong());
+                long rowId = input.readVarLenLong();
+                if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
+                    target.add(rowId);
+                }
                 return;
             case DELTA_LIST:
-                addDeltaList(input, target);
+                addDeltaList(input, target, rowIdFilter);
                 return;
             case ROARING:
-                target.or(readRoaring(input));
+                RoaringNavigableMap64 bitmap = readRoaring(input);
+                if (rowIdFilter != null) {
+                    bitmap.and(rowIdFilter);
+                }
+                target.or(bitmap);
                 return;
             default:
                 throw new IllegalStateException("Unknown BTree posting list type: " + type);
@@ -210,13 +223,20 @@ final class BTreePostingList {
         }
     }
 
-    private static void addDeltaList(MemorySliceInput input, RoaringNavigableMap64 target) {
+    private static void addDeltaList(
+            MemorySliceInput input,
+            RoaringNavigableMap64 target,
+            @Nullable RoaringNavigableMap64 rowIdFilter) {
         int count = readDeltaCount(input);
         long rowId = input.readVarLenLong();
-        target.add(rowId);
+        if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
+            target.add(rowId);
+        }
         for (int i = 1; i < count; i++) {
             rowId += readPositiveDelta(input);
-            target.add(rowId);
+            if (rowIdFilter == null || rowIdFilter.contains(rowId)) {
+                target.add(rowId);
+            }
         }
     }
 

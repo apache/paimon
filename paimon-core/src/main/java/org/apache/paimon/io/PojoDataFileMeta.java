@@ -382,6 +382,32 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    public PojoDataFileMeta assignFileSource(FileSource fileSource) {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                writeColsSequences);
+    }
+
+    @Override
     public PojoDataFileMeta assignFirstRowId(long firstRowId) {
         return new PojoDataFileMeta(
                 fileName,

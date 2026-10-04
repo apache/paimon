@@ -264,6 +264,16 @@ class CoreOptions:
         )
     )
 
+    POSTPONE_DEFAULT_BUCKET_NUM: ConfigOption[int] = (
+        ConfigOptions.key("postpone.default-bucket-num")
+        .int_type()
+        .no_default_value()
+        .with_description(
+            "Exact bucket count for new postpone partitions and overwrite writes. "
+            "Takes precedence over automatic bucket estimation."
+        )
+    )
+
     POSTPONE_TARGET_ROW_NUM_PER_BUCKET: ConfigOption[int] = (
         ConfigOptions.key("postpone.target-row-num-per-bucket")
         .long_type()
@@ -520,6 +530,13 @@ class CoreOptions:
         .default_value("data-")
         .with_description("Specify the file name prefix of data files.")
     )
+
+    DATA_FILE_PATH_DIRECTORY: ConfigOption[str] = (
+        ConfigOptions.key("data-file.path-directory")
+        .string_type()
+        .no_default_value()
+        .with_description("Specify the path directory of data files.")
+    )
     # Scan options
     SCAN_MODE: ConfigOption[StartupMode] = (
         ConfigOptions.key("scan.mode")
@@ -683,6 +700,15 @@ class CoreOptions:
         .default_value(False)
         .with_description("Commit append and batch overwrite messages via pypaimon_rust. Unsupported "
                           "operations use Python before any native commit is attempted.")
+    )
+
+    WRITE_NATIVE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("write.native.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Write Arrow data via pypaimon_rust when the table and "
+                          "writer API are supported. Unsupported routes use Python "
+                          "before any native data is written.")
     )
 
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
@@ -1125,7 +1151,8 @@ class CoreOptions:
         .default_value("meta,global-index")
         .with_description(
             "Comma-separated list of file types to cache. "
-            "Supported values: meta, global-index, bucket-index, data, file-index."
+            "Supported values: meta, global-index, bucket-index, data, file-index, "
+            "or * for all of them."
         )
     )
 
@@ -1290,6 +1317,12 @@ class CoreOptions:
             CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM,
             default,
         )
+
+    def postpone_default_bucket_num(self):
+        value = self.options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)
+        if value is not None and not 0 < value <= 2147483647:
+            raise ValueError('postpone.default-bucket-num must be a positive 32-bit integer')
+        return value
 
     def postpone_target_row_num_per_bucket(self, default=None):
         return self.options.get(
@@ -1470,6 +1503,9 @@ class CoreOptions:
     def data_file_prefix(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_PREFIX, default)
 
+    def data_file_path_directory(self, default=None):
+        return self.options.get(CoreOptions.DATA_FILE_PATH_DIRECTORY, default)
+
     def scan_mode(self, default=None):
         return self.options.get(CoreOptions.SCAN_MODE, default)
 
@@ -1603,6 +1639,9 @@ class CoreOptions:
     def native_commit_enabled(self, default=None):
         return self.options.get(CoreOptions.COMMIT_NATIVE_ENABLED, default)
 
+    def native_write_enabled(self, default=None):
+        return self.options.get(CoreOptions.WRITE_NATIVE_ENABLED, default)
+
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
 
@@ -1670,13 +1709,13 @@ class CoreOptions:
         )
         if value is None:
             return None
-        parts = value.split(",")
+        parts = value.rstrip(",").split(",")
         weights = []
         for part in parts:
             parsed = int(part.strip())
-            if parsed <= 0:
+            if parsed <= 0 or parsed > 2147483647:
                 raise ValueError(
-                    f"Weight must be positive, got: {parsed}"
+                    f"Weight must be a positive 32-bit integer, got: {parsed}"
                 )
             weights.append(parsed)
         return weights

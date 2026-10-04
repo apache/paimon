@@ -167,6 +167,10 @@ public interface SnapshotReader {
         @Nullable
         Long snapshotId();
 
+        /** Snapshot used to plan the splits, if available. */
+        @Nullable
+        Snapshot snapshot();
+
         /** Result splits. */
         List<Split> splits();
 

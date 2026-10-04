@@ -443,6 +443,9 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 f"'DynamicBucketRowKeyExtractor', but found: {num_buckets}"
             )
 
+        if table_schema.options.get(CoreOptions.BUCKET_KEY.key()) is not None:
+            raise ValueError("Cannot define 'bucket-key' in dynamic bucket mode")
+
         opts = CoreOptions.from_dict(table_schema.options)
         self._table = table
         self.base_snapshot_id = 0

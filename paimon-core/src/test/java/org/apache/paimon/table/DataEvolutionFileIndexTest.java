@@ -71,6 +71,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
@@ -151,9 +152,44 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bloomOptions("f2", null));
         assertMergedGroup(table);
 
-        // a merged group is never row filtered, but the rows it returns must stay aligned
+        // A non-bitmap index cannot select rows, but the merged fields must stay aligned.
         List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)));
         assertThat(rows).hasSize(ROW_COUNT);
+        assertAligned(rows);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexSelectsMatchingRowsOnly() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)));
+        assertThat(rows).hasSize(1);
+        assertRow(rows.get(0), 50);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexIntersectsFieldSelections() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap_intersect", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        Predicate filter = PredicateBuilder.and(equalF1(f1(50)), equalF2(f2(50)));
+        List<InternalRow> rows = readWithFilter(table, filter);
+        assertThat(rows).hasSize(1);
+        assertRow(rows.get(0), 50);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexPreservesOrSelection() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap_or", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        Predicate filter = PredicateBuilder.or(equalF2(f2(50)), equalF2(f2(51)));
+        List<InternalRow> rows = readWithFilter(table, filter);
+        assertThat(rows).extracting(row -> row.getInt(0)).containsExactlyInAnyOrder(50, 51);
         assertAligned(rows);
     }
 
@@ -521,6 +557,28 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testSingleFileIndexSkipsBeforeReadingDeletionVector() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_bitmap_before_dv", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit split = (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        Path deletionVectorPath =
+                split.deletionFiles().get().stream()
+                        .filter(Objects::nonNull)
+                        .map(file -> new Path(file.path()))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(latest.fileIO().delete(deletionVectorPath, false)).isTrue();
+
+        // The bitmap index already rejects this value, so the missing DV file must not be read.
+        assertThat(readWithFilter(table, equalF1(MISSING_F1))).isEmpty();
+    }
+
+    @Test
     public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
         FileStoreTable table = createTable("overwritten", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
@@ -541,6 +599,78 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertThat(query(table, equalF1(f1(50)))).isEmpty();
     }
 
+    @Test
+    public void testMergedGroupFileIndexComposesWithDeletionVector() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_dv", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+
+        deleteRowsFrom(table, ROW_COUNT, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit targetSplit =
+                latest.newReadBuilder().newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .filter(
+                                split ->
+                                        split.dataFiles().stream()
+                                                .anyMatch(
+                                                        file ->
+                                                                file.nonNullFirstRowId()
+                                                                        == ROW_COUNT))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        DataFileMeta anchor =
+                retrieveAnchorFile(
+                        targetSplit.dataFiles().stream()
+                                .filter(file -> file.nonNullFirstRowId() == ROW_COUNT)
+                                .collect(Collectors.toList()),
+                        file -> file);
+        Path anchorPath =
+                latest.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(targetSplit.partition(), targetSplit.bucket())
+                        .toPath(anchor);
+        assertThat(latest.fileIO().delete(anchorPath, false)).isTrue();
+
+        // The deleted row is the only bitmap hit in the second merged group. The missing anchor
+        // file therefore proves that the group was skipped before any union reader opened it;
+        // the first group contributes its matching row through the shared bitmap selection.
+        RowType readType =
+                rowTypeWithRowId(rowType()).project(SpecialFields.ROW_ID.name(), "f1", "f2");
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
+        assertThat(rowIds(rows)).containsExactly(50L);
+
+        FileStoreTable neighbour = createTable("merged_bitmap_dv_neighbour", options);
+        writeSplitColumns(neighbour, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(neighbour, 51);
+        assertRow(assertSingleRow(query(neighbour, equalF1(f1(50)))), 50);
+    }
+
+    @Test
+    public void testMergedGroupFileIndexSkipsBeforeReadingDeletionVector() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_before_dv", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(table, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit split = (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        Path deletionVectorPath =
+                split.deletionFiles().get().stream()
+                        .filter(Objects::nonNull)
+                        .map(file -> new Path(file.path()))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(latest.fileIO().delete(deletionVectorPath, false)).isTrue();
+
+        // The bitmap index already rejects this value, so the missing DV file must not be read.
+        assertThat(readWithFilter(table, equalF1(MISSING_F1))).isEmpty();
+    }
+
     /** Commits a deletion vector for the anchor file of the only row id group of {@code table}. */
     private void deleteRows(FileStoreTable table, long... positions) throws Exception {
         FileStoreTable latest = getTable(identifier(table.name()));
@@ -552,17 +682,17 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     private void deleteRowsFrom(FileStoreTable table, long firstRowId, long... positions)
             throws Exception {
         FileStoreTable latest = getTable(identifier(table.name()));
-        DataFileMeta anchor =
+        List<DataFileMeta> group =
                 latest.newReadBuilder().newScan().plan().splits().stream()
                         .map(split -> (DataSplit) split)
                         .flatMap(split -> split.dataFiles().stream())
                         .filter(file -> file.nonNullFirstRowId() == firstRowId)
-                        .findFirst()
-                        .orElseThrow(
-                                () ->
-                                        new IllegalArgumentException(
-                                                "Cannot find data file with first row id "
-                                                        + firstRowId));
+                        .collect(Collectors.toList());
+        if (group.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Cannot find data file with first row id " + firstRowId);
+        }
+        DataFileMeta anchor = retrieveAnchorFile(group, file -> file);
         deleteRows(latest, anchor, positions);
     }
 

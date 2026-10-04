@@ -61,7 +61,7 @@ Use these mappings when defining a `pyarrow.Schema` for a Paimon table. See [Cat
 ## VARIANT Type
 
 `VARIANT` stores semi-structured, schema-flexible data (JSON objects, arrays, and primitives)
-in the [Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding).
+in the [Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding.md).
 
 pypaimon exposes VARIANT columns as Arrow `struct<value: binary NOT NULL, metadata: binary NOT NULL>` and
 provides `GenericVariant` for encoding and decoding.
@@ -217,6 +217,23 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `TINYINT`, `SM
 </Tabs>
 
 ## VARIANT Path Updates
+
+### Decode selected VARIANT fields to Python
+
+`variant_to_pylist` decodes only the requested top-level fields, returning
+one Python dict per row (or `None` for SQL NULL):
+
+```python
+from pypaimon.data import variant_to_pylist
+
+rows = variant_to_pylist(result.column('payload'), ['state.x', 'action.y'])
+```
+
+Field names are literal (`state.x` is not a nested path). Missing fields are
+omitted; VARIANT NULL is `None`. Values use natural Python types, even when
+types differ between rows. This does not reduce Parquet I/O.
+
+### Read and update typed paths
 
 Read existing paths as Arrow arrays, use Arrow compute, and replace them
 without decoding unrelated fields:

@@ -93,13 +93,10 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                      + list(message.compact_changelog_files)):
             path = None
             try:
-                path = file.external_path or file.file_path
-                if not path:
-                    bucket_path = table.path_factory().bucket_path(
-                        tuple(message.partition), message.bucket)
-                    path = '%s/%s' % (bucket_path.rstrip('/'), file.file_name)
-                if path:
-                    table.file_io.delete_quietly(str(path))
+                bucket_path = None if file.physical_path() else table.path_factory().bucket_path(
+                    tuple(message.partition), message.bucket)
+                for path in file.collect_files(bucket_path):
+                    table.file_io.delete_quietly(path)
             except Exception as error:
                 logger.warning(
                     "Failed to clean up file %s during abort: %s",
@@ -111,7 +108,7 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
             try:
                 index_file = entry.index_file
                 file_name = index_file.file_name
-                if index_file.index_type == 'DELETION_VECTORS':
+                if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
                     path = table.path_factory().bucket_index_path(
                         tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
                 else:
@@ -225,6 +222,14 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
+    def _set_fixed_bucket_commit_check(self, messages):
+        from pypaimon.write.commit.fixed_bucket_commit_check import FixedBucketCommitCheck
+
+        self.conflict_detection.fixed_bucket_commit_check = (
+            FixedBucketCommitCheck(messages)
+            if any(message.total_buckets is not None for message in messages)
+            else None)
+
     def commit(
             self,
             commit_messages: List[CommitMessage],
@@ -237,6 +242,7 @@ class FileStoreCommit:
 
         _reject_compact_increment(commit_messages)
         check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
         # A committer can be reused; an untagged commit clears the prior baseline.
         self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
 
@@ -320,8 +326,9 @@ class FileStoreCommit:
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
         _reject_compact_increment(commit_messages)
-        self.conflict_detection._row_id_check_from_snapshot = (
-            _row_id_check_from_messages(commit_messages))
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
@@ -897,7 +904,7 @@ class FileStoreCommit:
                         path_factory = self.table.path_factory()
                         for entry in entries:
                             file = entry.file
-                            file.file_path = file.external_path or "%s/%s" % (
+                            file.file_path = file.physical_path() if file.external_path else "%s/%s" % (
                                 path_factory.bucket_path(
                                     tuple(entry.partition.values),
                                     entry.bucket,

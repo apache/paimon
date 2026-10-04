@@ -152,7 +152,7 @@ function license_check() {
 
 # Flake8 check
 function flake8_check() {
-    local PRUNE_PATHS="\( -path ./dev -o -path ./.tox -o -path ./.venv"
+    local PRUNE_PATHS="\( -path ./dev -o -path ./.tox -o -path ./.venv -o -path ./build -o -path ./dist"
     if python -c "import sys; sys.exit(0 if sys.version_info < (3, 10) else 1)" 2>/dev/null; then
         PRUNE_PATHS="$PRUNE_PATHS -o -path ./pypaimon/daft -o -path ./pypaimon/tests/daft"
     fi
@@ -363,10 +363,6 @@ done
 
 # collect checks according to the options
 collect_checks
-
-if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"; then
-    python -m pip install 'paimon-ftindex==0.1.0' || exit 1
-fi
 
 # run checks
 check_stage

@@ -23,6 +23,10 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import json_field
 from pypaimon.function.function_change import FunctionChange
 from pypaimon.function.function_definition import FunctionDefinition
+from pypaimon.management.permission_access import PermissionAccess
+from pypaimon.management.permission_assignment import PermissionAssignment
+from pypaimon.management.permission_columns import PermissionColumns
+from pypaimon.management.permission_resource import PermissionResource
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
@@ -212,3 +216,75 @@ class RenameBranchRequest(RESTRequest):
 class ForwardBranchRequest(RESTRequest):
     """Empty body request; serializes to ``{}`` per Java ForwardBranchRequest."""
     pass
+
+
+class GrantPermissionRequest(RESTRequest):
+
+    def __init__(self, assignment: PermissionAssignment):
+        self._assignment = assignment
+
+    def assignment(self) -> PermissionAssignment:
+        return self._assignment
+
+    def get_resource(self) -> PermissionResource:
+        return self._assignment.get_resource()
+
+    def get_access(self) -> str:
+        return self._assignment.get_access()
+
+    def get_principal(self) -> str:
+        return self._assignment.get_principal()
+
+    def get_columns(self) -> Optional[PermissionColumns]:
+        return self._assignment.get_columns()
+
+    def get_expire_time(self) -> Optional[str]:
+        return self._assignment.get_expire_time()
+
+    def to_dict(self) -> dict:
+        return self._assignment.to_dict()
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GrantPermissionRequest":
+        resource = data.get(PermissionAssignment.FIELD_RESOURCE)
+        columns = data.get(PermissionAssignment.FIELD_COLUMNS)
+        return cls(PermissionAssignment(
+            None if resource is None else PermissionResource.from_dict(resource),
+            data.get(PermissionAssignment.FIELD_ACCESS),
+            data.get(PermissionAssignment.FIELD_PRINCIPAL),
+            None if columns is None else PermissionColumns.from_dict(columns),
+            data.get(PermissionAssignment.FIELD_EXPIRE_TIME)))
+
+
+class RevokePermissionRequest(RESTRequest):
+
+    FIELD_RESOURCE = "resource"
+    FIELD_ACCESS = "access"
+    FIELD_PRINCIPAL = "principal"
+
+    def __init__(self, resource: PermissionResource, access: str, principal: str):
+        self._resource = resource
+        self._access = PermissionAccess.canonicalize_for(resource, access)
+        self._principal = PermissionAssignment.validate_principal(principal)
+
+    def get_resource(self) -> PermissionResource:
+        return self._resource
+
+    def get_access(self) -> str:
+        return self._access
+
+    def get_principal(self) -> str:
+        return self._principal
+
+    def to_dict(self) -> dict:
+        return {
+            self.FIELD_RESOURCE: self._resource.to_dict(),
+            self.FIELD_ACCESS: self._access,
+            self.FIELD_PRINCIPAL: self._principal,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RevokePermissionRequest":
+        resource = data.get(cls.FIELD_RESOURCE)
+        return cls(None if resource is None else PermissionResource.from_dict(resource),
+                   data.get(cls.FIELD_ACCESS), data.get(cls.FIELD_PRINCIPAL))

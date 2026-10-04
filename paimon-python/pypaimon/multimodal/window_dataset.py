@@ -36,7 +36,9 @@ from pypaimon.read.datasource.torch_dataset import (
     select_indexed_splits,
 )
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
+from pypaimon.schema.data_types import (
+    is_array_blob_type, is_blob_file_type, is_map_blob_type,
+)
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
@@ -440,11 +442,15 @@ class _PinnedRowIdPlan:
         self._blob_columns = [
             field.name for field in table.fields
             if field.name in columns
-            and (is_blob_type(field.type) or is_map_blob_type(field.type))
+            and is_blob_file_type(field.type)
         ]
         self._map_blob_columns = {
             field.name for field in table.fields
             if field.name in self._blob_columns and is_map_blob_type(field.type)
+        }
+        self._array_blob_columns = {
+            field.name for field in table.fields
+            if field.name in self._blob_columns and is_array_blob_type(field.type)
         }
         blob_column_set = set(self._blob_columns)
         self._projection = (
@@ -497,7 +503,8 @@ class _PinnedRowIdPlan:
             arrow.select(self._blob_columns).to_pydict(),
             self._blob_columns,
             self._blob_parallelism,
-            self._map_blob_columns)
+            self._map_blob_columns,
+            self._array_blob_columns)
         blob_column_set = set(self._blob_columns)
         rows = arrow.select([
             name for name in arrow.column_names if name not in blob_column_set

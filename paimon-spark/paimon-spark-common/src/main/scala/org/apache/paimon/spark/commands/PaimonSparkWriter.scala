@@ -32,6 +32,7 @@ import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
 import org.apache.paimon.spark.{SparkPostponeStagedCommitter, SparkRow}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
+import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
@@ -85,6 +86,8 @@ case class PaimonSparkWriter(
       table.rowType()
     }
   }
+
+  @transient private lazy val metricRegistry = SparkMetricRegistry()
 
   val postponeBatchWriteFixedBucket: Boolean =
     table.bucketMode() == POSTPONE_MODE && coreOptions.postponeBatchWriteFixedBucket()
@@ -471,6 +474,7 @@ case class PaimonSparkWriter(
     val activeWriteBuilder =
       Option(directPostponeWriteBuilder).getOrElse(writeBuilder)
     val tableCommit = activeWriteBuilder.newCommit()
+    tableCommit.withMetricRegistry(metricRegistry)
     if (operation != null) {
       tableCommit.withOperation(operation)
     }

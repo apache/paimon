@@ -28,6 +28,17 @@ _MAX_STOP = 2 ** 31 - 1
 
 _INT_MIN, _INT_MAX = -2 ** 31, 2 ** 31 - 1
 
+
+def _wrap_int32(value: int) -> int:
+    """Wrap ``value`` into signed 32-bit, mirroring Java ``int`` overflow.
+
+    OVERLAY's position arithmetic (``pos - 1`` and ``pos + replaced``) is
+    evaluated by ``OverlayTransform.transform`` as 32-bit ``int``, so a large
+    position wraps rather than growing unboundedly. Query-auth rules must admit
+    exactly the rows Java admits, so compute these the same way.
+    """
+    return ((value + 2 ** 31) % 2 ** 32) - 2 ** 31
+
 # Integer.parseInt syntax: an optional sign and Unicode decimal digits, which
 # Character.digit accepts, but no whitespace or underscore, which int() would.
 # Java reads UTF-16 chars, so a supplementary-plane digit fails there.
@@ -41,6 +52,29 @@ _TRIM_OPS = {
     "BOTH": (pc.utf8_trim, str.strip),
     "LEADING": (pc.utf8_ltrim, str.lstrip),
     "TRAILING": (pc.utf8_rtrim, str.rstrip),
+}
+
+# Calendar-field extractions on a DATE / TIMESTAMP field, mirroring Java's
+# DateExtractTransform subclasses (name -> the Arrow kernel over a timestamp).
+# QUARTER matches (month - 1) / 3 + 1; the day-of-week variants match Java's
+# java.time numbering: WEEKDAY is Monday=0..Sunday=6, ISO_DAY_OF_WEEK is
+# Monday=1..Sunday=7, DAY_OF_WEEK is Sunday=1..Saturday=7. WEEK / YEAR_OF_WEEK
+# are the ISO week-of-week-based-year and the ISO week-based year. The rest map
+# one to one.
+_DATE_EXTRACT = {
+    "YEAR": pc.year,
+    "MONTH": pc.month,
+    "DAY": pc.day,
+    "HOUR": pc.hour,
+    "MINUTE": pc.minute,
+    "SECOND": pc.second,
+    "QUARTER": pc.quarter,
+    "DAY_OF_YEAR": pc.day_of_year,
+    "WEEKDAY": lambda c: pc.day_of_week(c, count_from_zero=True, week_start=1),
+    "ISO_DAY_OF_WEEK": lambda c: pc.day_of_week(c, count_from_zero=False, week_start=1),
+    "DAY_OF_WEEK": lambda c: pc.day_of_week(c, count_from_zero=False, week_start=7),
+    "WEEK": pc.iso_week,
+    "YEAR_OF_WEEK": pc.iso_year,
 }
 
 
@@ -135,7 +169,46 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     elif name == "NULL":
         return pa.nulls(len(batch), type=null_type)
 
+    elif name in _DATE_EXTRACT:
+        return _date_extract(name, transform["fieldRef"], batch)
+    elif name == "LENGTH":
+        _check_string_input("LENGTH input", transform["inputs"][0], batch)
+        source = _resolve_transform_input(transform["inputs"][0], batch)
+        return pa.array(
+            [None if v is None else len(v) for v in source.to_pylist()],
+            type=pa.int32())
+
+    elif name == "BIT_LENGTH":
+        _check_string_input("BIT_LENGTH input", transform["inputs"][0], batch)
+        source = _resolve_transform_input(transform["inputs"][0], batch)
+        return pa.array(
+            [None if v is None else len(v.encode("utf-8")) * 8
+             for v in source.to_pylist()],
+            type=pa.int32())
+
+    elif name == "TRANSLATE":
+        return _translate(transform["inputs"], batch)
+
+    elif name == "OVERLAY":
+        return _overlay(transform["inputs"], batch)
+
+    elif name == "PAD":
+        return _pad(transform["inputs"], transform.get("direction"), batch)
+
     raise ValueError(f"Unknown transform type: {name}")
+
+
+def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array:
+    """Extract a calendar field from a DATE / TIMESTAMP column, as INT.
+
+    A DATE is read at the start of its day (Java's LocalDate.atStartOfDay),
+    so it is cast to a timestamp first and HOUR/MINUTE/SECOND come out as 0.
+    Nulls propagate. Mirrors Java DateExtractTransform.
+    """
+    column = _field_column(field_ref, batch)
+    if pa.types.is_date(column.type):
+        column = pc.cast(column, pa.timestamp("us"))
+    return pc.cast(_DATE_EXTRACT[name](column), pa.int32())
 
 
 def _substring(inputs, batch: pa.RecordBatch) -> pa.Array:
@@ -352,6 +425,111 @@ def _resolve_transform_input(inp, batch: pa.RecordBatch) -> pa.Array:
     elif inp is None:
         return pa.nulls(len(batch), type=pa.string())
     return pa.array([str(inp)] * len(batch), type=pa.string())
+
+
+def _pad(inputs, direction, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list) or len(inputs) != 3:
+        raise ValueError(f"PAD takes 3 inputs, got {inputs!r}")
+    if direction not in ("LEFT", "RIGHT"):
+        raise ValueError(f"PAD direction must be LEFT or RIGHT: {direction!r}")
+    _check_string_input("PAD input", inputs[0], batch)
+    _check_string_input("PAD string", inputs[2], batch)
+    source = _resolve_transform_input(inputs[0], batch)
+    pad = _resolve_transform_input(inputs[2], batch)
+    lengths = _Positions(inputs[1], batch)
+    src_list = source.to_pylist()
+    pad_list = pad.to_pylist()
+    result = []
+    for i in range(len(source)):
+        value = src_list[i]
+        pad_str = pad_list[i]
+        raw_len = lengths.value(i)
+        if value is None or raw_len is None or pad_str is None:
+            result.append(None)
+            continue
+        result.append(_pad_one(value, _int_position(raw_len), pad_str, direction))
+    return pa.array(result, type=pa.string())
+
+
+def _pad_one(source, length, pad, direction):
+    needed = length - len(source)
+    if needed <= 0 or pad == "":
+        # Truncate to the first `length` characters (empty for a non-positive length).
+        return source[:length] if length > 0 else ""
+    pad_chars = len(pad)
+    padding = pad * (needed // pad_chars) + pad[:needed % pad_chars]
+    return padding + source if direction == "LEFT" else source + padding
+
+
+def _translate(inputs, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list) or len(inputs) != 3:
+        raise ValueError(f"TRANSLATE takes 3 inputs, got {inputs!r}")
+    _check_string_input("TRANSLATE source", inputs[0], batch)
+    _check_string_input("TRANSLATE matching", inputs[1], batch)
+    _check_string_input("TRANSLATE replacement", inputs[2], batch)
+    source = _resolve_transform_input(inputs[0], batch)
+    matching = _resolve_transform_input(inputs[1], batch)
+    replacement = _resolve_transform_input(inputs[2], batch)
+    result = []
+    for src, mat, rep in zip(source.to_pylist(), matching.to_pylist(),
+                             replacement.to_pylist()):
+        result.append(_translate_one(src, mat, rep))
+    return pa.array(result, type=pa.string())
+
+
+def _translate_one(source, matching, replacement):
+    if source is None or matching is None or replacement is None:
+        return None
+    # First mapping wins per source character; a replacement code point of 0
+    # (or a missing one) deletes the character, mirroring Java's TranslateTransform.
+    dictionary = {}
+    for i, ch in enumerate(matching):
+        if ch not in dictionary:
+            mapped = replacement[i] if i < len(replacement) else None
+            dictionary[ch] = mapped if (mapped is not None and ord(mapped) != 0) else None
+    out = []
+    for ch in source:
+        if ch not in dictionary:
+            out.append(ch)
+        elif dictionary[ch] is not None:
+            out.append(dictionary[ch])
+    return "".join(out)
+
+
+def _overlay(inputs, batch: pa.RecordBatch) -> pa.Array:
+    if not isinstance(inputs, list) or len(inputs) not in (3, 4):
+        raise ValueError(f"OVERLAY takes 3 or 4 inputs, got {inputs!r}")
+    _check_string_input("OVERLAY input", inputs[0], batch)
+    _check_string_input("OVERLAY replacement", inputs[1], batch)
+    source = _resolve_transform_input(inputs[0], batch)
+    replacement = _resolve_transform_input(inputs[1], batch)
+    positions = _Positions(inputs[2], batch)
+    has_length = len(inputs) == 4
+    lengths = _Positions(inputs[3], batch) if has_length else None
+    src_list = source.to_pylist()
+    repl_list = replacement.to_pylist()
+    result = []
+    for i in range(len(source)):
+        value = src_list[i]
+        repl = repl_list[i]
+        raw_pos = positions.value(i)
+        # SQL null propagation: any null argument yields a null result
+        if value is None or repl is None or raw_pos is None:
+            result.append(None)
+            continue
+        if has_length and lengths.value(i) is None:
+            result.append(None)
+            continue
+        pos = _int_position(raw_pos)
+        length = _int_position(lengths.value(i)) if has_length else None
+        replaced = len(repl) if (length is None or length < 0) else length
+        # pos - 1 and pos + replaced are 32-bit int expressions in Java's
+        # OverlayTransform; wrap them so a boundary position overflows exactly
+        # as Java's does (otherwise an auth rule admits different rows here).
+        head = _substring_sql(value, 1, _wrap_int32(pos - 1))
+        tail = _substring_sql(value, _wrap_int32(pos + replaced), _INT_MAX)
+        result.append(head + repl + tail)
+    return pa.array(result, type=pa.string())
 
 
 def _concat_ws(sep: pa.Array, value_arrays: list) -> pa.Array:
