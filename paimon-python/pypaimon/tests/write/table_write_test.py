@@ -227,6 +227,7 @@ class TableWriteTest(unittest.TestCase):
     @staticmethod
     def _mock_table_write(partitions, buckets):
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
         table_write.file_store_write = Mock()
@@ -301,6 +302,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -325,6 +327,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
