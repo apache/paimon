@@ -19,8 +19,11 @@
 
 import io
 import os
+import struct
 import tempfile
 import unittest
+
+from parameterized import parameterized
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
@@ -127,6 +130,47 @@ class BTreeBloomFilterTest(unittest.TestCase):
             self.assertEqual([4, 10], result.results().to_list())
         finally:
             reader.close()
+
+    @parameterized.expand([
+        ('float_nan', 'FLOAT', '<f', '<I', 0x7fc00001, 0xffc00002),
+        ('float_nan_reverse', 'FLOAT', '<f', '<I', 0xffc00002, 0x7fc00001),
+        ('double_nan', 'DOUBLE', '<d', '<Q', 0x7ff8000000000001, 0xfff8000000000002),
+        ('double_nan_reverse', 'DOUBLE', '<d', '<Q', 0xfff8000000000002, 0x7ff8000000000001),
+        ('float_zero', 'FLOAT', '<f', '<I', 0x80000000, 0),
+        ('float_zero_reverse', 'FLOAT', '<f', '<I', 0, 0x80000000),
+        ('double_zero', 'DOUBLE', '<d', '<Q', 0x8000000000000000, 0),
+        ('double_zero_reverse', 'DOUBLE', '<d', '<Q', 0, 0x8000000000000000),
+    ])
+    def test_float_point_lookups_with_equivalent_encodings(
+        self, name, type_name, float_format, int_format, stored_bits, queried_bits,
+    ):
+        stored = struct.unpack(float_format, struct.pack(int_format, stored_bits))[0]
+        queried = struct.unpack(float_format, struct.pack(int_format, queried_bits))[0]
+        self.serializer = create_serializer(AtomicType(type_name))
+        self.assertNotEqual(self.serializer.serialize(stored), self.serializer.serialize(queried))
+        for enabled in (False, True):
+            with self.subTest(bloom=enabled):
+                with tempfile.TemporaryDirectory() as directory:
+                    writer = BTreeIndexWriter(
+                        LocalFileIO(), directory, self.serializer,
+                        block_size=128, bloom_filter_enabled=enabled)
+                    # Enough finite keys to exercise block seeking before
+                    # the equivalent encodings at the end of the index.
+                    for row_id in range(32):
+                        writer.write(row_id - 32.0, row_id)
+                    writer.write(stored, 32)
+                    writer.write(stored, 33)
+                    entry = writer.finish()[0]
+                    with open(os.path.join(directory, entry.file_name), 'rb') as stream:
+                        data = stream.read()
+                reader = self._reader(_MemoryFileIO(data), data, entry)
+                try:
+                    self.assertEqual([32, 33], reader.visit_equal(queried).results().to_list())
+                    self.assertEqual([32, 33], reader.visit_in([None, queried]).results().to_list())
+                    self.assertEqual([0], reader.visit_equal(-32.0).results().to_list())
+                    self.assertEqual([], reader.visit_equal(0.5).results().to_list())
+                finally:
+                    reader.close()
 
     def _write_index(self, enabled, entry_count, duplicate_key=None):
         with tempfile.TemporaryDirectory() as directory:

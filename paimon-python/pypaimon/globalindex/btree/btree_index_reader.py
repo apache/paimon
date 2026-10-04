@@ -21,6 +21,7 @@ Synchronous index reader for a single BTree index file. Parallelism across
 multiple files is handled by LazyFilteredBTreeReader.
 """
 
+import math
 import struct
 import threading
 import zlib
@@ -30,7 +31,7 @@ from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.key_serializer import KeySerializer
+from pypaimon.globalindex.key_serializer import DoubleSerializer, FloatSerializer, KeySerializer
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.sst_file_reader import SstFileReader
@@ -261,6 +262,13 @@ class BTreeIndexReader:
         return self._range_query(literal, self.max_key, False, True)
 
     def _point_query(self, key: object) -> RoaringBitmap64:
+        if isinstance(self.key_serializer, (FloatSerializer, DoubleSerializer)):
+            value = float(key)
+            if math.isnan(value) or value == 0.0:
+                # NaN payloads and signed zeros can compare equal with different
+                # bytes. Existing Bloom filters hash those bytes, so use the
+                # comparator-based lookup without changing the on-disk encoding.
+                return self._range_query(key, key, True, True)
         result = RoaringBitmap64()
         row_ids = self.reader.lookup(self.key_serializer.serialize(key))
         if row_ids is not None:
