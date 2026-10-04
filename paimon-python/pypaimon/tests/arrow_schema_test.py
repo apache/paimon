@@ -122,6 +122,22 @@ class ArrowSchemaTest(unittest.TestCase):
             self.assertEqual(sorted(zip(actual['id'], actual['text'])), [(1, '中文'), (2, None)])
 
     @parameterized.expand([('table',), ('batch',)])
+    def test_schema_only_writer_normalizes_input(self, entry):
+        writer = object.__new__(TableWrite)
+        writer.file_store_write = Mock(write_cols=None)
+        writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
+        source = pa.Table.from_pydict({'text': ['中文', None]}, schema=pa.schema([('text', pa.large_string())]))
+        if entry == 'batch':
+            source = source.to_batches()[0]
+
+        result = writer._prepare_arrow_data(source)
+
+        self.assertIsInstance(result, type(source))
+        self.assertEqual(result.schema, writer.table_pyarrow_schema)
+        self.assertEqual(result.to_pydict(), source.to_pydict())
+        writer.file_store_write.write.assert_not_called()
+
+    @parameterized.expand([('table',), ('batch',)])
     def test_normalization_failure_fails_before_routing(self, entry):
         writer = object.__new__(TableWrite)
         writer.file_store_write = Mock(write_cols=None)

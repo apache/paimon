@@ -348,8 +348,12 @@ class TableWrite:
     def _prepare_arrow_data(self, data):
         self._validate_pyarrow_schema(data.schema)
         data = normalize_arrow_strings(data)
+        # Schema-only writers can normalize input without table options.
+        table = getattr(self, 'table', None)
+        if table is None:
+            return data
         from pypaimon.write.row_kind import filter_write_batch
-        return filter_write_batch(self.table, data)
+        return filter_write_batch(table, data)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
