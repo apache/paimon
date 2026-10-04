@@ -50,6 +50,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -65,6 +66,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -173,6 +175,27 @@ class FormatTablePartitionFormatTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"00000_0", "part-x.parquet.gz"})
+    void testPartitionFormatTakesPrecedenceOverFileName(String fileName) throws Exception {
+        Path location = new Path(tempDir.toUri());
+        writeFile(location, "p", "orc", "first", "second");
+        FormatTable table =
+                table(
+                        location,
+                        "parquet",
+                        Collections.singletonList(partition("p", options("orc"))));
+        assertThat(
+                        table.fileIO()
+                                .rename(
+                                        new Path(location, "pt=p/data.orc"),
+                                        new Path(location, "pt=p/" + fileName)))
+                .isTrue();
+        ReadBuilder read = table.newReadBuilder();
+        assertThat(readRows(read, read.newScan().plan().splits()))
+                .containsExactly("first", "second");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"csv", "json"})
     void testSplittingUsesPartitionFormat(String format) throws Exception {
         Path tablePath = new Path(tempDir.toUri());
@@ -275,6 +298,78 @@ class FormatTablePartitionFormatTest {
                                 reloaded.newReadBuilder(),
                                 reloaded.newReadBuilder().newScan().plan().splits()))
                 .containsExactly("replacement");
+    }
+
+    @Test
+    void testCrossFormatOverwriteCatalogFailureAndMetadataRepair() throws Exception {
+        Path location = new Path(tempDir.toUri());
+        writeFile(location, "p", "orc", "old");
+        List<Partition> registered =
+                new ArrayList<>(Collections.singletonList(partition("p", options("orc"))));
+        FormatTable table = table(location, "parquet", registered);
+        doThrow(new RuntimeException("catalog update failed"))
+                .doAnswer(
+                        invocation -> {
+                            List<PartitionStatistics> statistics = invocation.getArgument(2);
+                            List<Map<String, String>> options = invocation.getArgument(4);
+                            PartitionStatistics stats = statistics.get(0);
+                            registered.set(
+                                    0,
+                                    new Partition(
+                                            stats.spec(),
+                                            stats.recordCount(),
+                                            stats.fileSizeInBytes(),
+                                            stats.fileCount(),
+                                            stats.lastFileCreationTime(),
+                                            stats.totalBuckets(),
+                                            false,
+                                            null,
+                                            null,
+                                            null,
+                                            null,
+                                            options.get(0)));
+                            return null;
+                        })
+                .when(table.partitionManager())
+                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), any());
+
+        BatchWriteBuilder overwrite =
+                table.newBatchWriteBuilder().withOverwrite(Collections.singletonMap("pt", "p"));
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = overwrite.newWrite()) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("replacement"), BinaryString.fromString("p")));
+            messages = write.prepareCommit();
+        }
+        assertThatThrownBy(() -> overwrite.newCommit().commit(messages))
+                .hasRootCauseMessage("catalog update failed");
+        Path replacement = ((TwoPhaseCommitMessage) messages.get(0)).getCommitter().targetPath();
+        assertThat(table.fileIO().exists(replacement)).isTrue();
+        assertThat(table.fileIO().exists(new Path(location, "pt=p/data.orc"))).isFalse();
+        assertThat(registered.get(0).options()).containsEntry("file.format", "orc");
+        ReadBuilder stale = table.newReadBuilder();
+        assertThatThrownBy(() -> readRows(stale, stale.newScan().plan().splits()))
+                .isInstanceOf(IOException.class);
+
+        // With the complete replacement verified and other writes stopped, repair only metadata.
+        Partition repair = partition("p", options("parquet"));
+        List<PartitionStatistics> statistics =
+                new FormatTablePartitionStatsCollector(table, true, 1)
+                        .collectPartitions(Collections.singletonList(repair));
+        table.partitionManager()
+                .createPartitions(
+                        Collections.singletonList(repair.spec()),
+                        true,
+                        statistics,
+                        true,
+                        Collections.singletonList(repair.options()));
+        assertThat(registered.get(0).recordCount()).isOne();
+        assertThat(registered.get(0).fileCount()).isOne();
+        assertThat(registered.get(0).fileSizeInBytes())
+                .isEqualTo(table.fileIO().getFileStatus(replacement).getLen());
+        ReadBuilder read = table.newReadBuilder();
+        assertThat(readRows(read, read.newScan().plan().splits())).containsExactly("replacement");
     }
 
     @ParameterizedTest

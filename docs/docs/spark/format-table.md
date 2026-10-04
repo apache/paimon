@@ -139,10 +139,17 @@ Changing only the table's default does not convert existing data: register the a
 partitions that would otherwise inherit the new default before changing it. All readers and writers
 of a mixed table, and its catalog provider, must support partition file formats.
 
-Overwrites of the same partition must be externally serialized with other writes and format
-metadata changes. The append check does not prevent a concurrent overwrite from changing the
-partition format. Queries running during an overwrite have no snapshot isolation and may observe
-files and metadata from different stages of the overwrite.
+Overwrites of the same partition must be externally serialized with other writes. Changes to a
+partition's format metadata must also be serialized with both appends and overwrites: the append
+check does not prevent the format from changing before files are published. Queries running during
+an overwrite have no snapshot isolation and may observe files and metadata from different stages
+of the overwrite.
+
+If new files are published but the catalog update fails, an overwrite can leave the previous
+format and statistics describing the replacement files. The new files are preserved; the old
+files are not restored. With other writes stopped, verify that the replacement is complete and
+uses one format, then repair the partition's `file.format` and replace its statistics through the
+Catalog API. An incomplete replacement needs a fresh overwrite from the source data.
 
 `ANALYZE TABLE` chooses the statistics reader per partition. Formats without footer row counts
 leave the row count unknown. The existing restriction on analyzing custom locations still applies.
