@@ -192,6 +192,7 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
+        self.fixed_bucket_commit_check = None
         self.commit_scanner = commit_scanner
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
@@ -247,6 +248,13 @@ class ConflictDetection:
         conflict = self.check_bucket_num_conflicts(merged_entries)
         if conflict is not None:
             return conflict
+
+        if self.fixed_bucket_commit_check is not None:
+            conflict = self.fixed_bucket_commit_check.check(
+                latest_snapshot, delta_entries, commit_kind,
+                self.snapshot_manager, self.commit_scanner)
+            if conflict is not None:
+                return conflict
 
         conflict = self.check_overwrite_from_snapshot(
             latest_snapshot, delta_entries, commit_kind)

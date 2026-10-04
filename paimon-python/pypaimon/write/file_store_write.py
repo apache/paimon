@@ -365,8 +365,11 @@ class FileStoreWrite:
             self.max_seq_numbers[partition] = buckets
         return buckets
 
+    def _sequence_read_table(self):
+        return self.table
+
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
-        read_builder = self.table.new_read_builder()
+        read_builder = self._sequence_read_table().new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
         for key, value in zip(self.table.partition_keys, partition):
@@ -387,6 +390,25 @@ class FileStoreWrite:
 
 class PostponeFixedBucketFileStoreWrite(FileStoreWrite):
     """File store write with runtime bucket counts for postpone tables."""
+
+    def __init__(self, table, commit_user):
+        super().__init__(table, commit_user)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self._check_from_snapshot = snapshot.id if snapshot is not None else 0
+
+    def _sequence_read_table(self):
+        return self.table.copy({'scan.snapshot-id': str(self._check_from_snapshot)})
+
+    def _load_seq_number_stats(self, partition):
+        if self._check_from_snapshot == 0:
+            return {}
+        return super()._load_seq_number_stats(partition)
+
+    def prepare_commit(self, commit_identifier):
+        messages = super().prepare_commit(commit_identifier)
+        for message in messages:
+            message.check_from_snapshot = self._check_from_snapshot
+        return messages
 
     def _configure_data_file_prefix(self, commit_user):
         pass
