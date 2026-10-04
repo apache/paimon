@@ -106,18 +106,14 @@ public class ParallelAppendCompactionReaderIsolationTest {
             for (int i = 0; i < 24; i++) {
                 int bucket = i % 2;
                 int marker = bucket == 0 ? 100 : 200;
-                write.write(
-                        partition,
-                        bucket,
-                        GenericRow.of(0, bucket, marker, GenericRow.of(i)));
+                write.write(partition, bucket, GenericRow.of(0, bucket, marker, GenericRow.of(i)));
                 commit.commit(i, write.prepareCommit(false, i));
             }
             write.close();
         }
 
         Path tablePath = new Path(warehouse, "default.db/append_parallel_compact");
-        SchemaManager schemaManager =
-                new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.commitChanges(
                 SchemaChange.updateColumnType(
                         new String[] {"payload", "val"}, DataTypes.BIGINT(), false));
@@ -143,10 +139,8 @@ public class ParallelAppendCompactionReaderIsolationTest {
                     pool.submit(() -> write.compactRewrite(partition, 0, null, bucket0Files));
             Future<List<DataFileMeta>> bucket1Future =
                     pool.submit(() -> write.compactRewrite(partition, 1, null, bucket1Files));
-            assertRowsHaveMarker(
-                    table, partition, 0, bucket0Future.get(), 100);
-            assertRowsHaveMarker(
-                    table, partition, 1, bucket1Future.get(), 200);
+            assertRowsHaveMarker(table, partition, 0, bucket0Future.get(), 100);
+            assertRowsHaveMarker(table, partition, 1, bucket1Future.get(), 200);
         } finally {
             pool.shutdownNow();
             write.close();
@@ -174,8 +168,7 @@ public class ParallelAppendCompactionReaderIsolationTest {
             throws Exception {
         assertThat(files).isNotEmpty();
         RawFileSplitRead read = ((AppendOnlyFileStore) table.store()).newRead();
-        @Nullable
-        Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = null;
+        @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = null;
         try (RecordReaderIterator<InternalRow> iterator =
                 new RecordReaderIterator<>(
                         read.createReader(partition, bucket, files, dvFactories))) {
