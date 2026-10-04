@@ -547,8 +547,8 @@ def write_paimon(
     writer. For primary-key tables, ``map_groups`` writes each complete
     ``(partition_keys..., bucket)`` group in one Ray task. Postpone-bucket
     writes follow ``postpone.batch-write-fixed-bucket`` by default. Their
-    bucket plan is resolved once on the driver and workers write sorted
-    blocks to real buckets.
+    bucket plan is resolved once on the driver, then each complete
+    partition/bucket group is written by one task to a real bucket.
     HASH_DYNAMIC and CROSS_PARTITION primary-key Ray writes are rejected
     because Ray write tasks create independent Paimon writers.
 

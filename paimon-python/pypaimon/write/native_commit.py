@@ -29,9 +29,6 @@ from pypaimon.write.commit_message_serializer import (
 )
 
 
-_DEFAULT_MANIFEST_TARGET_SIZE = 8 * 1024 * 1024
-
-
 def native_commit_available() -> bool:
     """Whether the optional Rust bindings are installed."""
     try:
@@ -41,16 +38,7 @@ def native_commit_available() -> bool:
     return True
 
 
-def _native_publication_supported(table) -> bool:
-    # Data evolution needs sidecar ranges and row-id recovery. Custom manifest
-    # targets need Java's forced size checks between manifest entry groups.
-    return (not table.options.data_evolution_enabled()
-            and table.options.manifest_target_size() == _DEFAULT_MANIFEST_TARGET_SIZE)
-
-
 def native_messages_supported(table, messages) -> bool:
-    if not _native_publication_supported(table):
-        return False
     path_factory = table.path_factory()
     for message in messages:
         if (message.compact_before or message.compact_after
@@ -77,9 +65,7 @@ def native_messages_supported(table, messages) -> bool:
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
-    if (not _native_publication_supported(table)
-            or not _rest_catalog_supported(table)
-            or not native_commit_available()):
+    if not _rest_catalog_supported(table) or not native_commit_available():
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -140,15 +126,13 @@ def create_native_write_table(table):
     from pypaimon.filesystem.local_file_io import LocalFileIO
     from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
     from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-    from pypaimon.table.bucket_mode import BucketMode
     from pypaimon.table.file_store_table import FileStoreTable
 
-    # Native branch and postpone writes are not supported.
+    # Native writes currently require the main branch.
     environment = table.catalog_environment
     if (type(table) is not FileStoreTable
             or type(environment) is not CatalogEnvironment
             or table.current_branch() != 'main'
-            or table.bucket_mode() == BucketMode.POSTPONE_MODE
             or table.options.query_auth_enabled):
         return None
 
@@ -162,6 +146,8 @@ def create_native_write_table(table):
         table.options.dynamic_partition_overwrite())
     options['snapshot.ignore-empty-commit'] = _option_value_to_string(
         table.options.snapshot_ignore_empty_commit())
+    options['row-tracking.partition-group-on-commit'] = _option_value_to_string(
+        table.options.row_tracking_partition_group_on_commit())
     schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
     if environment.supports_version_management:
         if not _rest_catalog_supported(table):

@@ -264,6 +264,16 @@ class CoreOptions:
         )
     )
 
+    POSTPONE_DEFAULT_BUCKET_NUM: ConfigOption[int] = (
+        ConfigOptions.key("postpone.default-bucket-num")
+        .int_type()
+        .no_default_value()
+        .with_description(
+            "Exact bucket count for new postpone partitions and overwrite writes. "
+            "Takes precedence over automatic bucket estimation."
+        )
+    )
+
     POSTPONE_TARGET_ROW_NUM_PER_BUCKET: ConfigOption[int] = (
         ConfigOptions.key("postpone.target-row-num-per-bucket")
         .long_type()
@@ -1141,7 +1151,8 @@ class CoreOptions:
         .default_value("meta,global-index")
         .with_description(
             "Comma-separated list of file types to cache. "
-            "Supported values: meta, global-index, bucket-index, data, file-index."
+            "Supported values: meta, global-index, bucket-index, data, file-index, "
+            "or * for all of them."
         )
     )
 
@@ -1306,6 +1317,12 @@ class CoreOptions:
             CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM,
             default,
         )
+
+    def postpone_default_bucket_num(self):
+        value = self.options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)
+        if value is not None and not 0 < value <= 2147483647:
+            raise ValueError('postpone.default-bucket-num must be a positive 32-bit integer')
+        return value
 
     def postpone_target_row_num_per_bucket(self, default=None):
         return self.options.get(

@@ -240,6 +240,29 @@ CALL sys.rollback(table => 'default.T', tag => 'tag1');
 CALL sys.rollback(table => 'default.T', snapshot => 2);
 ```
 
+## rollback_to_as_latest
+
+Roll back to a retained snapshot or tag and materialize it as the latest snapshot, without deleting
+later snapshots or tags. Specify exactly one of `snapshot_id` or `tag`. Batch and time-travel reads
+are correct; for deletion-vector tables, a rollback whose only difference is a deletion-vector
+change is not guaranteed to be observed by streaming overwrite readers.
+
+When rolling back to a snapshot, the procedure creates a tag named
+`rollback-to-as-latest-<snapshot_id>-<uuid>` that protects the restored data files from snapshot
+expiration.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier.
+- `tag` (`STRING`, optional): tag that will roll back to.
+- `snapshot_id` (`BIGINT`, optional): snapshot that will roll back to.
+
+```sql
+CALL sys.rollback_to_as_latest(table => 'default.T', snapshot_id => 10);
+
+CALL sys.rollback_to_as_latest(table => 'default.T', tag => 'tag1');
+```
+
 ## rollback_to_timestamp
 
 Rollback to the snapshot which earlier or equal than timestamp.

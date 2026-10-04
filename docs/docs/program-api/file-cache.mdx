@@ -52,8 +52,10 @@ The cache classifies files by path. Set `local-cache.whitelist` to select the fi
 | DATA | data | Data files (ORC, Parquet, etc.) | No |
 | FILE_INDEX | file-index | Data-file level bloom filter, bitmap | No |
 
-The default whitelist is `meta,global-index`. The mutable `LATEST` and `EARLIEST` hint files bypass
-the cache even though they are classified as metadata.
+The default whitelist is `meta,global-index`, and `*` selects every file type. Files rewritten in
+place under a stable path always bypass the cache, whatever their type: the `LATEST` and `EARLIEST`
+hint files, tags, consumer and service files, `_SUCCESS` files, Iceberg-compatible metadata
+(`v{N}.metadata.json`, `version-hint.text`, `retire-pending`), and temporary files.
 
 ## Enable Cache
 
@@ -126,7 +128,7 @@ The Java snippet is a method-body fragment; declare or handle the catalog except
 | `local-cache.dir` | String | (none) | Directory for storing cached blocks on disk. If not configured, memory cache is used. |
 | `local-cache.max-size` | MemorySize | See below | Maximum cached block bytes per cache manager. Least recently used blocks are evicted when the limit is exceeded. |
 | `local-cache.block-size` | MemorySize | 1 mb | Block size for caching. Files are logically divided into fixed-size blocks and cached independently. |
-| `local-cache.whitelist` | String | meta,global-index | Comma-separated list of file types to cache. Supported values: `meta`, `global-index`, `bucket-index`, `data`, `file-index`. |
+| `local-cache.whitelist` | String | meta,global-index | Comma-separated list of file types to cache. Supported values: `meta`, `global-index`, `bucket-index`, `data`, `file-index`, or `*` for all of them. |
 
 When `local-cache.max-size` is omitted, Java has no configured size limit. PyPaimon uses a 256 MiB
 memory limit or a 10 GiB disk limit. Set the option explicitly when you want the same limit across

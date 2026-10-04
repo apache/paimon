@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
+import java.util.Optional;
 
 /** The {@link GlobalIndexerFactory} for btree index. */
 public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -43,8 +44,9 @@ public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
     public List<GlobalIndexIOMeta> selectFiles(
             List<DataField> indexFields, Predicate predicate, List<GlobalIndexIOMeta> files) {
         if (indexFields.size() > 1) {
-            // Scalar predicates cannot safely prune tuple metadata.
-            return files;
+            Optional<CompositeBTreePredicate.Plan> plan =
+                    CompositeBTreePredicate.plan(indexFields, predicate);
+            return plan.map(value -> value.selectFiles(files)).orElse(files);
         }
         return SortedFileMetaSelector.selectFiles(
                 predicate, files, KeySerializer.create(indexFields.get(0).type()));

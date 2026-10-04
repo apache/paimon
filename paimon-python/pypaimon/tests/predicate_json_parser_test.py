@@ -806,7 +806,8 @@ class TestConcatWsAllNull(unittest.TestCase):
 
 
 class TestDateExtractTransforms(unittest.TestCase):
-    """YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER / DAY_OF_YEAR,
+    """YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER / DAY_OF_YEAR /
+    WEEKDAY / ISO_DAY_OF_WEEK / DAY_OF_WEEK / WEEK / YEAR_OF_WEEK,
     mirroring Java's DateExtractTransform subclasses."""
 
     def _ts_batch(self):
@@ -832,6 +833,26 @@ class TestDateExtractTransforms(unittest.TestCase):
         self.assertEqual(self._apply("QUARTER", batch), [1, 3, None])
         self.assertEqual(self._apply("DAY_OF_YEAR", batch), [1, 183, None])
 
+    def test_week_family_parts(self):
+        # 2024-01-01 Monday, 2023-01-01 Sunday, 2021-01-01 Friday (ISO week 53
+        # of the 2020 week-based year), plus null. Numbering matches java.time.
+        batch = pa.RecordBatch.from_pydict({
+            "d": pa.array(
+                [datetime.date(2024, 1, 1), datetime.date(2023, 1, 1),
+                 datetime.date(2021, 1, 1), None],
+                type=pa.date32()),
+        })
+        # WEEKDAY Monday=0..Sunday=6
+        self.assertEqual(self._apply("WEEKDAY", batch, "d", "DATE"), [0, 6, 4, None])
+        # ISO_DAY_OF_WEEK Monday=1..Sunday=7
+        self.assertEqual(self._apply("ISO_DAY_OF_WEEK", batch, "d", "DATE"), [1, 7, 5, None])
+        # DAY_OF_WEEK Sunday=1..Saturday=7
+        self.assertEqual(self._apply("DAY_OF_WEEK", batch, "d", "DATE"), [2, 1, 6, None])
+        # WEEK: ISO week of the week-based year
+        self.assertEqual(self._apply("WEEK", batch, "d", "DATE"), [1, 52, 53, None])
+        # YEAR_OF_WEEK: ISO week-based year
+        self.assertEqual(self._apply("YEAR_OF_WEEK", batch, "d", "DATE"), [2024, 2022, 2020, None])
+
     def test_date_field_starts_at_midnight(self):
         # epoch day 19723 == 2024-01-01; a DATE has no time, so HOUR is 0.
         batch = pa.RecordBatch.from_pydict(
@@ -851,3 +872,90 @@ class TestDateExtractTransforms(unittest.TestCase):
         self.assertEqual(
             parse_predicate_to_batch_filter(pred)(self._ts_batch()).to_pylist(),
             [False, True, False])
+
+
+class TestStringTransforms(unittest.TestCase):
+    """LENGTH / BIT_LENGTH / TRANSLATE / OVERLAY / PAD, mirroring the Java
+    transforms of the same name (see TransformJsonSerdeTest for the wire shape)."""
+
+    def _apply(self, transform, column):
+        batch = pa.RecordBatch.from_pydict({"s": column})
+        return _apply_predicate_transform(transform, batch).to_pylist()
+
+    def _field(self):
+        return {"index": 0, "name": "s", "type": "STRING"}
+
+    def test_length(self):
+        out = self._apply({"name": "LENGTH", "inputs": [self._field()]},
+                          ["hello", "hi", None])
+        self.assertEqual(out, [5, 2, None])
+
+    def test_bit_length(self):
+        # "é" is two UTF-8 bytes -> 16 bits.
+        out = self._apply({"name": "BIT_LENGTH", "inputs": [self._field()]},
+                          ["hello", "é", None])
+        self.assertEqual(out, [40, 16, None])
+
+    def test_translate_maps_and_deletes(self):
+        mapped = self._apply(
+            {"name": "TRANSLATE", "inputs": [self._field(), "el", "ip"]},
+            ["hello", None])
+        self.assertEqual(mapped, ["hippo", None])
+        # A shorter replacement deletes the unmatched matching characters.
+        deleted = self._apply(
+            {"name": "TRANSLATE", "inputs": [self._field(), "l", ""]},
+            ["hello"])
+        self.assertEqual(deleted, ["heo"])
+
+    def test_overlay_with_and_without_length(self):
+        four = self._apply(
+            {"name": "OVERLAY", "inputs": [self._field(), "XX", 2, 1]},
+            ["hello", None])
+        self.assertEqual(four, ["hXXllo", None])
+        three = self._apply(
+            {"name": "OVERLAY", "inputs": [self._field(), "XX", 2]},
+            ["hello"])
+        self.assertEqual(three, ["hXXlo"])
+
+    def test_overlay_position_arithmetic_overflows_like_java(self):
+        # pos + replaced overflows 32-bit int in Java's OverlayTransform:
+        # OVERLAY('hello', 'x', 1, 2147483647) is 'xhell' there (the wrapped
+        # end position lands inside the string), not 'x'. The auth rule must
+        # admit the same rows in PyPaimon.
+        out = self._apply(
+            {"name": "OVERLAY", "inputs": [self._field(), "x", 1, 2147483647]},
+            ["hello"])
+        self.assertEqual(out, ["xhell"])
+
+    def test_pad_left_right_and_truncate(self):
+        left = self._apply(
+            {"name": "PAD", "inputs": [self._field(), 5, "ab"], "direction": "LEFT"},
+            ["hi", None])
+        self.assertEqual(left, ["abahi", None])
+        right = self._apply(
+            {"name": "PAD", "inputs": [self._field(), 5, "ab"], "direction": "RIGHT"},
+            ["hi"])
+        self.assertEqual(right, ["hiaba"])
+        # A target shorter than the source truncates.
+        self.assertEqual(
+            self._apply(
+                {"name": "PAD", "inputs": [self._field(), 3, "x"], "direction": "LEFT"},
+                ["hello"]),
+            ["hel"])
+
+    def test_length_wired_through_a_leaf_filter(self):
+        pred = json.dumps({
+            "kind": "LEAF",
+            "transform": {"name": "LENGTH", "inputs": [self._field()]},
+            "function": "GREATER_THAN",
+            "literals": [3],
+        })
+        batch = pa.RecordBatch.from_pydict({"s": ["hello", "hi", "abcd"]})
+        self.assertEqual(
+            parse_predicate_to_batch_filter(pred)(batch).to_pylist(),
+            [True, False, True])
+
+    def test_unknown_transform_still_raises(self):
+        with self.assertRaises(ValueError):
+            self._apply({"name": "NO_SUCH_TRANSFORM", "inputs": [self._field()]},
+                        ["hello"])

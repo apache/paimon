@@ -48,19 +48,8 @@ def _native_partition_types_supported(schema, partition_keys):
         for data_type in (schema.field(name).type for name in partition_keys))
 
 
-def _native_map_layouts_supported(table, schema):
-    options = table.options.options.to_map()
-    for field in schema:
-        if table.options.map_storage_layout(field.name) != 'default':
-            return False
-        # Python rejects even an explicit default layout on a non-MAP field.
-        if (not pa.types.is_map(field.type)
-                and 'fields.{}.map.storage-layout'.format(field.name) in options):
-            return False
-    return True
-
-
-def create_native_write(table, commit_user, static_partition=None, stream=False):
+def create_native_write(table, commit_user, static_partition=None, stream=False,
+                        *, fixed_bucket=False, bucket_plan=None):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     sequence_fields = table.options.sequence_field()
@@ -71,25 +60,35 @@ def create_native_write(table, commit_user, static_partition=None, stream=False)
             # Rust does not produce the optional random-access .row sidecars.
             or (table.options.data_evolution_enabled()
                 and table.options.data_evolution_row_sidecar_enabled())
-            or table.bucket_mode() not in (BucketMode.HASH_FIXED,
-                                           BucketMode.BUCKET_UNAWARE)
+            or table.bucket_mode() not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC,
+                                           BucketMode.BUCKET_UNAWARE,
+                                           BucketMode.CROSS_PARTITION,
+                                           BucketMode.POSTPONE_MODE)
+            or (fixed_bucket and table.options.deletion_vectors_enabled())
             or (table.options.deletion_vectors_enabled()
                 and table.options.merge_engine() in (MergeEngine.PARTIAL_UPDATE,
                                                      MergeEngine.AGGREGATE))
             or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
-            # The native writer does not implement MAP shared-shredding layouts.
-            or not _native_map_layouts_supported(table, schema)
             # Rust cannot encode these partition keys yet.
             or not _native_partition_types_supported(schema, table.partition_keys)
-            # Native dedicated files currently support top-level scalar Blob fields.
+            # Append dedicated files currently support top-level scalar Blob fields.
             or table.options.video_frame_fields()
-            or any(is_blob_file_field(field) and not is_blob_type(field.type)
-                   for field in table.table_schema.fields)):
+            or (not table.is_primary_key_table
+                and any(is_blob_file_field(field) and not is_blob_type(field.type)
+                        for field in table.table_schema.fields))):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
         return None
+    if fixed_bucket:
+        builder = native_table.new_postpone_fixed_bucket_write_builder()._with_commit_user(commit_user)
+        if bucket_plan is not None:
+            builder = builder.with_bucket_plan(bucket_plan.to_arrow(table))
+        if static_partition is not None:
+            builder = builder.with_overwrite(static_partition)
+        return NativePostponeFixedBucketTableWrite(
+            table, commit_user, static_partition, bucket_plan, builder.new_write())
     if stream:
         builder = native_table.new_stream_write_builder().with_commit_user(commit_user)
     else:
@@ -127,13 +126,14 @@ class NativeTableWrite:
                 'Cannot switch to the Python writer after native data was written')
         self._native_writer.close()
         self._native_writer = None
+        self._python_writer = self._new_python_writer()
+        return self._python_writer
+
+    def _new_python_writer(self):
         from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
         if self.stream:
-            self._python_writer = StreamTableWrite(self.table, self.commit_user)
-        else:
-            self._python_writer = BatchTableWrite(
-                self.table, self.commit_user, self.static_partition)
-        return self._python_writer
+            return StreamTableWrite(self.table, self.commit_user)
+        return BatchTableWrite(self.table, self.commit_user, self.static_partition)
 
     def __getattr__(self, name):
         if name.startswith('_'):
@@ -222,3 +222,20 @@ class NativeTableWrite:
                 self.close()
             finally:
                 _abort_commit_messages(self.table, messages)
+
+
+class NativePostponeFixedBucketTableWrite(NativeTableWrite):
+    """Fixed-bucket batches retain the standard native ownership contract.
+
+    A distributed coordinator can use Python planning before receiving data;
+    workers use the same shared plan through the Rust fixed-bucket writer.
+    """
+
+    def __init__(self, table, commit_user, static_partition, bucket_plan, native_writer):
+        super().__init__(table, commit_user, static_partition, False, native_writer)
+        self._bucket_plan = bucket_plan
+
+    def _new_python_writer(self):
+        from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
+        return PostponeFixedBucketBatchTableWrite(
+            self.table, self.commit_user, self.static_partition, self._bucket_plan)

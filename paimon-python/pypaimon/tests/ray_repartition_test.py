@@ -84,6 +84,10 @@ class RayShuffleTest(unittest.TestCase):
     def _make_table(self, table_name, pa_schema, *, primary_keys=None,
                     partition_keys=None, options=None):
         identifier = 'default.{}'.format(table_name)
+        options = dict(options or {})
+        # Pytest's patched defaults do not propagate to Ray worker processes.
+        options.setdefault('write.native.enabled', str(
+            os.environ.get('PYPAIMON_TEST_NATIVE_WRITE') == '1').lower())
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=primary_keys,
@@ -384,7 +388,7 @@ class RayShuffleTest(unittest.TestCase):
         )
         self.assertEqual(len(self._read_table(identifier)), 100)
 
-    def test_postpone_large_bucket_spans_writer_blocks(self):
+    def test_postpone_large_bucket_keeps_one_writer_across_input_blocks(self):
         from ray.data import DataContext
 
         from pypaimon.ray import write_paimon
@@ -411,8 +415,10 @@ class RayShuffleTest(unittest.TestCase):
         previous_target = context.target_max_block_size
         context.target_max_block_size = 64 * 1024
         try:
+            dataset = ray.data.from_arrow(rows).repartition(8).materialize()
+            self.assertGreater(dataset.num_blocks(), 1)
             write_paimon(
-                ray.data.from_arrow(rows).repartition(8),
+                dataset,
                 identifier,
                 self.catalog_options,
                 concurrency=4,
@@ -421,12 +427,14 @@ class RayShuffleTest(unittest.TestCase):
             context.target_max_block_size = previous_target
 
         files = self._count_data_files(table_name)
-        self.assertGreater(len(files), 1)
+        self.assertTrue(files)
         self.assertEqual(
             {'bucket-0'},
             {os.path.basename(os.path.dirname(path)) for path in files},
         )
-        self.assertEqual(400, len(self._read_table(identifier)))
+        result = self._read_table(identifier)
+        self.assertEqual(list(range(400)), sorted(result['id'].tolist()))
+        self.assertEqual({'x' * 4096}, set(result['value']))
 
     def test_explicit_postpone_writer_uses_real_buckets(self):
         pa_schema = pa.schema([
@@ -598,15 +606,25 @@ class RayShuffleTest(unittest.TestCase):
             for data_file in split.files
         ]
         self.assertEqual(len(data_files), 1)
-        self.assertEqual(
-            (data_files[0].min_sequence_number,
-             data_files[0].max_sequence_number),
-            (1, 801),
-        )
+        self.assertEqual(data_files[0].row_count, 1)
 
         result = self._read_table(identifier)
         self.assertEqual(len(result), 1)
         self.assertTrue(result.iloc[0]['value'].startswith('0799-'))
+
+        # A subsequent writer must continue after the persisted sequence,
+        # including when native buffering removed the earlier duplicate rows.
+        write_paimon(
+            ray.data.from_arrow(pa.Table.from_pydict(
+                {'id': [1], 'value': ['updated']}, schema=pa_schema)),
+            identifier,
+            self.catalog_options,
+            hash_fixed_precluster='map_groups',
+        )
+        self.assertEqual(
+            self._read_table(identifier).to_dict('records'),
+            [{'id': 1, 'value': 'updated'}],
+        )
 
     def test_primary_key_group_writer_overwrite(self):
         from pypaimon.ray import write_paimon

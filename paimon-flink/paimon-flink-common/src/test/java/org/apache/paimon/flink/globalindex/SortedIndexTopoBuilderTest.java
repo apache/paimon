@@ -117,7 +117,8 @@ public class SortedIndexTopoBuilderTest {
     @Test
     public void testBuildIndexReturnsFalseWhenNoBuildTask() throws Exception {
         SortedGlobalIndexScanner indexScanner = mock(SortedGlobalIndexScanner.class);
-        when(indexScanner.withIndexField("id")).thenReturn(indexScanner);
+        when(indexScanner.withIndexFields(Collections.singletonList("id")))
+                .thenReturn(indexScanner);
         when(indexScanner.incrementalScan()).thenReturn(Optional.empty());
         StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
 
@@ -138,7 +139,8 @@ public class SortedIndexTopoBuilderTest {
     @Test
     public void testBuildIndexStreamReturnsEmptyWhenNoBuildTask() throws Exception {
         SortedGlobalIndexScanner indexScanner = mock(SortedGlobalIndexScanner.class);
-        when(indexScanner.withIndexField("id")).thenReturn(indexScanner);
+        when(indexScanner.withIndexFields(Collections.singletonList("id")))
+                .thenReturn(indexScanner);
         when(indexScanner.incrementalScan()).thenReturn(Optional.empty());
         StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
 

@@ -27,7 +27,7 @@ from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
 from pypaimon.write.native_write import native_write_available, _native_partition_types_supported
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId, _RowIdUpdateFileWriter
+from pypaimon.write.table_update_by_row_id import TableUpdateByRowId, _supports_parquet_row_id_update
 from pypaimon.write.row_utils import value_for_arrow
 
 
@@ -37,7 +37,7 @@ def _native_row_id_table(table):
             or not table.options.native_write_enabled()
             or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()
-            or not _RowIdUpdateFileWriter.supports_table(table)
+            or not _supports_parquet_row_id_update(table)
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_write_available()):
         return None
