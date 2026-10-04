@@ -76,14 +76,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                                            BucketMode.BUCKET_UNAWARE,
                                            BucketMode.CROSS_PARTITION,
                                            BucketMode.POSTPONE_MODE)
-            # Postpone bypasses the KV merger. Native retract validation for
-            # other engines and managed BLOB externalization are still missing.
-            or (table.bucket_mode() == BucketMode.POSTPONE_MODE and not fixed_bucket
-                and (table.options.merge_engine() != MergeEngine.DEDUPLICATE
-                     or any(is_blob_file_field(field) for field in table.table_schema.fields)))
-            or (fixed_bucket and (table.options.deletion_vectors_enabled()
-                                  or any(is_blob_file_field(field)
-                                         for field in table.table_schema.fields)))
+            or (fixed_bucket and table.options.deletion_vectors_enabled())
             or (table.options.deletion_vectors_enabled()
                 and table.options.merge_engine() in (MergeEngine.PARTIAL_UPDATE,
                                                      MergeEngine.AGGREGATE))
@@ -93,10 +86,11 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
             or not _native_map_layouts_supported(table, schema)
             # Rust cannot encode these partition keys yet.
             or not _native_partition_types_supported(schema, table.partition_keys)
-            # Native dedicated files currently support top-level scalar Blob fields.
+            # Append dedicated files currently support top-level scalar Blob fields.
             or table.options.video_frame_fields()
-            or any(is_blob_file_field(field) and not is_blob_type(field.type)
-                   for field in table.table_schema.fields)):
+            or (not table.is_primary_key_table
+                and any(is_blob_file_field(field) and not is_blob_type(field.type)
+                        for field in table.table_schema.fields))):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
