@@ -238,24 +238,46 @@ public class StaleLatestHintTest {
         FileStoreTable writeOnly = createWriteOnlyTable(failingIO, "read-failure", 10);
         ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) writeOnly.newExpireSnapshots();
 
-        failingIO.failLatestRead = true;
+        failingIO.resetCounters();
+        failingIO.latestReadFailures.set(Integer.MAX_VALUE);
         assertThat(expire.expireUntil(1, 8)).isEqualTo(0);
-        failingIO.failLatestRead = false;
+        failingIO.latestReadFailures.set(0);
 
+        // the hint is read as many times as readHint retries before giving up
+        assertThat(failingIO.latestReads.get()).isEqualTo(3);
         assertThat(writeOnly.snapshotManager().snapshotExists(1)).isTrue();
         assertEarliestHintMatchesSnapshots(writeOnly);
     }
 
     @Test
-    public void testInvalidHintSkipsExpiration() throws Exception {
-        HintFileIO io = new HintFileIO();
-        FileStoreTable writeOnly = createWriteOnlyTable(io, "invalid", 10);
-        SnapshotManager sm = writeOnly.snapshotManager();
-        io.overwriteHintFile(new Path(sm.snapshotDirectory(), HintFileUtils.LATEST), "invalid");
+    public void testTransientHintReadFailureIsRetried() throws Exception {
+        HintFileIO failingIO = new HintFileIO();
+        FileStoreTable writeOnly = createWriteOnlyTable(failingIO, "read-retry", 10);
         ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) writeOnly.newExpireSnapshots();
 
-        assertThat(expire.expireUntil(1, 8)).isEqualTo(0);
-        assertThat(sm.snapshotExists(1)).isTrue();
+        failingIO.latestReadFailures.set(2);
+        assertThat(expire.expireUntil(1, 8)).isEqualTo(7);
+
+        assertThat(writeOnly.snapshotManager().earliestSnapshotId()).isEqualTo(8L);
+        assertEarliestHintMatchesSnapshots(writeOnly);
+    }
+
+    /**
+     * Readers ignore a hint which is not a positive number and list the snapshot files instead, so
+     * expiration ignores it as well.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"invalid", "0", "-1"})
+    public void testUnusableHintIsIgnored(String content) throws Exception {
+        HintFileIO io = new HintFileIO();
+        FileStoreTable writeOnly = createWriteOnlyTable(io, "unusable", 10);
+        SnapshotManager sm = writeOnly.snapshotManager();
+        io.overwriteHintFile(new Path(sm.snapshotDirectory(), HintFileUtils.LATEST), content);
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) writeOnly.newExpireSnapshots();
+
+        assertThat(expire.expireUntil(1, 8)).isEqualTo(7);
+        assertThat(sm.earliestSnapshotId()).isEqualTo(8L);
+        assertThat(sm.latestSnapshotId()).isEqualTo(10L);
         assertEarliestHintMatchesSnapshots(writeOnly);
     }
 
@@ -313,23 +335,22 @@ public class StaleLatestHintTest {
     }
 
     /**
-     * A hint on a missing snapshot in the middle keeps every snapshot, without deleting the data
-     * files the older snapshots still use.
+     * A hint on a missing snapshot still works for readers while the next snapshot exists, so that
+     * one and all later ones are kept.
      */
     @Test
-    public void testHintOnMissingSnapshot() throws Exception {
+    public void testHintOnMissingSnapshotKeepsTheNextOne() throws Exception {
         FileStoreTable writeOnly = createWriteOnlyTable(new HintFileIO(), "gap", 10);
         SnapshotManager sm = writeOnly.snapshotManager();
         ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) writeOnly.newExpireSnapshots();
         sm.deleteSnapshot(4);
         sm.commitLatestHint(4);
 
-        assertThat(expire.expireUntil(1, 8)).isEqualTo(0);
-        assertThat(sm.snapshotExists(1)).isTrue();
-        Map<String, String> timeTravel = new HashMap<>();
-        timeTravel.put("scan.snapshot-id", "3");
-        assertThat(countRows(writeOnly.copy(timeTravel))).isEqualTo(3L);
+        expire.expireUntil(1, 8);
+        assertThat(sm.earliestSnapshotId()).isEqualTo(5L);
+        assertThat(countRows(timeTravel(writeOnly, 5))).isEqualTo(5L);
         assertThat(sm.latestSnapshotId()).isEqualTo(10L);
+        assertEarliestHintMatchesSnapshots(writeOnly);
 
         // once a commit writes the hint again, expiration goes on
         commit(writeOnly, COMMIT_USER, 11);
@@ -340,13 +361,54 @@ public class StaleLatestHintTest {
     }
 
     /**
-     * On a primary key table, compactions delete data files that older snapshots still use. A hint
-     * on a missing snapshot must not let expiration delete any of them.
+     * On a primary key table, compactions delete data files that older snapshots still use. If
+     * neither the hinted snapshot nor the next one exists, expiration must not delete any of them.
      */
     @Test
-    public void testHintOnMissingSnapshotKeepsDataFilesOfOlderSnapshots() throws Exception {
+    public void testHintOnMissingSnapshotsKeepsDataFilesOfOlderSnapshots() throws Exception {
+        FileStoreTable pkTable = createCompactedPkTable("pk-gap");
+        SnapshotManager sm = pkTable.snapshotManager();
+        List<Long> ids = sm.snapshotIdStream().sorted().collect(Collectors.toList());
+        long gap = ids.get(ids.size() / 2);
+        long beforeGap = gap - 1;
+        long rowsBeforeGap = countRows(timeTravel(pkTable, beforeGap));
+
+        sm.deleteSnapshot(gap);
+        sm.deleteSnapshot(gap + 1);
+        sm.commitLatestHint(gap);
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) pkTable.newExpireSnapshots();
+        assertThat(expire.expireUntil(ids.get(0), ids.get(ids.size() - 1))).isEqualTo(0);
+
+        assertThat(countRows(timeTravel(pkTable, beforeGap))).isEqualTo(rowsBeforeGap);
+        assertThat(countRows(timeTravel(pkTable, ids.get(0)))).isGreaterThan(0L);
+    }
+
+    /** Keeping the snapshot after a missing hinted one keeps the data files it uses. */
+    @Test
+    public void testHintOnMissingSnapshotKeepsDataFilesOfTheNextOne() throws Exception {
+        FileStoreTable pkTable = createCompactedPkTable("pk-next");
+        SnapshotManager sm = pkTable.snapshotManager();
+        List<Long> ids = sm.snapshotIdStream().sorted().collect(Collectors.toList());
+        long gap = ids.get(ids.size() / 2);
+        long latest = ids.get(ids.size() - 1);
+        long rowsAfterGap = countRows(timeTravel(pkTable, gap + 1));
+        long rowsAtLatest = countRows(pkTable);
+
+        sm.deleteSnapshot(gap);
+        sm.commitLatestHint(gap);
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) pkTable.newExpireSnapshots();
+        expire.expireUntil(ids.get(0), latest);
+
+        assertThat(sm.earliestSnapshotId()).isEqualTo(gap + 1);
+        assertThat(countRows(timeTravel(pkTable, gap + 1))).isEqualTo(rowsAfterGap);
+        assertThat(countRows(pkTable)).isEqualTo(rowsAtLatest);
+        assertEarliestHintMatchesSnapshots(pkTable);
+    }
+
+    /** Creates a primary key table with 10 commits, some of which are compactions. */
+    private FileStoreTable createCompactedPkTable(String name) throws Exception {
         LocalFileIO localFileIO = LocalFileIO.create();
-        Path tablePath = new Path(tempDir.toString(), "pk-gap");
+        Path tablePath = new Path(tempDir.toString(), name);
         Schema schema =
                 Schema.newBuilder()
                         .column("k", DataTypes.INT())
@@ -375,16 +437,7 @@ public class StaleLatestHintTest {
         // a compaction before the gap has deleted data files that older snapshots use
         assertThat(ids.stream().filter(id -> id < gap).map(sm::snapshot))
                 .anyMatch(snapshot -> snapshot.commitKind() == Snapshot.CommitKind.COMPACT);
-        long beforeGap = gap - 1;
-        long rowsBeforeGap = countRows(timeTravel(pkTable, beforeGap));
-
-        sm.deleteSnapshot(gap);
-        sm.commitLatestHint(gap);
-        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) pkTable.newExpireSnapshots();
-        assertThat(expire.expireUntil(ids.get(0), ids.get(ids.size() - 1))).isEqualTo(0);
-
-        assertThat(countRows(timeTravel(pkTable, beforeGap))).isEqualTo(rowsBeforeGap);
-        assertThat(countRows(timeTravel(pkTable, ids.get(0)))).isGreaterThan(0L);
+        return pkTable;
     }
 
     private static FileStoreTable timeTravel(FileStoreTable table, long snapshotId) {
@@ -563,6 +616,38 @@ public class StaleLatestHintTest {
     }
 
     @Test
+    public void testReadFailureWarnsOnceUntilTheHintCanBeRead() throws Exception {
+        HintFileIO failingIO = new HintFileIO();
+        FileStoreTable writeOnly = createWriteOnlyTable(failingIO, "warn-read", 10);
+        SnapshotManager sm = writeOnly.snapshotManager();
+        sm.commitLatestHint(5);
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) writeOnly.newExpireSnapshots();
+
+        String logs =
+                captureLogs(
+                        ExpireSnapshotsImpl.class,
+                        () -> {
+                            failingIO.latestReadFailures.set(Integer.MAX_VALUE);
+                            expire.expireUntil(1, 8);
+                            expire.expireUntil(1, 8);
+                            // read again while the hint is behind
+                            failingIO.latestReadFailures.set(0);
+                            expire.expireUntil(1, 8);
+                            failingIO.latestReadFailures.set(Integer.MAX_VALUE);
+                            expire.expireUntil(5, 8);
+                            // read again while the hint is up to date
+                            failingIO.latestReadFailures.set(0);
+                            sm.commitLatestHint(10);
+                            expire.expireUntil(5, 6);
+                            failingIO.latestReadFailures.set(Integer.MAX_VALUE);
+                            expire.expireUntil(6, 8);
+                            failingIO.latestReadFailures.set(0);
+                        });
+
+        assertThat(logs.split("Cannot check the LATEST hint", -1)).hasSize(4);
+    }
+
+    @Test
     public void testRetryWarningOnlyWhenTheCommitIsFoundCommitted() throws Exception {
         HintFileIO failingIO = new HintFileIO();
         FileStoreTable writeOnly = createTable(failingIO, "retry-warning", true);
@@ -683,7 +768,7 @@ public class StaleLatestHintTest {
         private final AtomicInteger snapshotExistsChecks = new AtomicInteger();
         private volatile boolean skipLatestWrite = false;
         private volatile boolean failLatestWrite = false;
-        private volatile boolean failLatestRead = false;
+        private final AtomicInteger latestReadFailures = new AtomicInteger();
         private volatile ThrowingRunnable afterLatestRead;
 
         private void resetCounters() {
@@ -708,7 +793,7 @@ public class StaleLatestHintTest {
         public Optional<String> readOverwrittenFileUtf8(Path path) throws IOException {
             if (path.getName().equals(HintFileUtils.LATEST)) {
                 latestReads.incrementAndGet();
-                if (failLatestRead) {
+                if (latestReadFailures.getAndUpdate(n -> Math.max(n - 1, 0)) > 0) {
                     throw new IOException("Failed to read the LATEST hint");
                 }
                 Optional<String> content = super.readOverwrittenFileUtf8(path);

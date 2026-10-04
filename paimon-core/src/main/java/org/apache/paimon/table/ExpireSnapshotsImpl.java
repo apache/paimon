@@ -76,10 +76,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final boolean protectLatestHint;
 
     @Nullable private Long lastWarnedLatestHint;
+    private boolean latestHintUncheckable;
 
     private ExpireConfig expireConfig;
     private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
 
+    @VisibleForTesting
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
@@ -200,7 +202,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     /**
      * Keeps the snapshot the LATEST hint points to and all later ones. {@code findLatest} trusts
      * the hint as long as the snapshot after it does not exist, so expiring the hinted snapshot and
-     * the one after it would make it return a missing snapshot.
+     * the one after it would make it return a missing snapshot. If the hinted snapshot is already
+     * missing, {@code findLatest} only works while the snapshot after it exists, so that one and
+     * all later ones are kept.
      *
      * @return the exclusive end to expire until, or null if nothing should be expired because the
      *     boundary cannot be established
@@ -208,44 +212,57 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     @Nullable
     private Long keepHintedSnapshots(long endExclusiveId) {
         Optional<Long> latestHint;
-        boolean hintedSnapshotExists;
+        Long kept;
         try {
             latestHint = snapshotManager.readLatestHintStrictly();
             if (!latestHint.isPresent() || latestHint.get() >= endExclusiveId) {
+                latestHintUncheckable = false;
                 return endExclusiveId;
             }
-            hintedSnapshotExists = snapshotManager.snapshotExists(latestHint.get());
+            long hint = latestHint.get();
+            if (snapshotManager.snapshotExists(hint)) {
+                kept = hint;
+            } else if (snapshotManager.snapshotExists(hint + 1)) {
+                kept = hint + 1;
+            } else {
+                kept = null;
+            }
         } catch (Exception e) {
-            LOG.warn(
-                    "Cannot check the LATEST hint in {}, skip expiring snapshots this time.",
-                    snapshotManager.snapshotDirectory(),
-                    e);
+            if (!latestHintUncheckable) {
+                latestHintUncheckable = true;
+                LOG.warn(
+                        "Cannot check the LATEST hint in {}, skip expiring snapshots "
+                                + "until it can be checked.",
+                        snapshotManager.snapshotDirectory(),
+                        e);
+            }
             return null;
         }
+        latestHintUncheckable = false;
 
         Long hint = latestHint.get();
         if (!hint.equals(lastWarnedLatestHint)) {
             lastWarnedLatestHint = hint;
-            if (hintedSnapshotExists) {
+            if (kept != null) {
                 LOG.warn(
                         "The LATEST hint {} in {} is behind the latest snapshot {}. "
                                 + "Keeping snapshot {} and later ones instead of expiring up to {}.",
                         hint,
                         snapshotManager.snapshotDirectory(),
                         listLatestSnapshotId(),
-                        hint,
+                        kept,
                         endExclusiveId);
             } else {
                 LOG.warn(
                         "The LATEST hint {} in {} points to a snapshot that does not exist, "
-                                + "while the latest snapshot is {}. Skip expiring snapshots "
-                                + "until the hint is updated.",
+                                + "neither does the next one, while the latest snapshot is {}. "
+                                + "Skip expiring snapshots until the hint is updated.",
                         hint,
                         snapshotManager.snapshotDirectory(),
                         listLatestSnapshotId());
             }
         }
-        return hintedSnapshotExists ? hint : null;
+        return kept;
     }
 
     private String listLatestSnapshotId() {

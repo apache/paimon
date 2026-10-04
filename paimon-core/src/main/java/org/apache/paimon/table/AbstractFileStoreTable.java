@@ -503,11 +503,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public ExpireSnapshots newExpireSnapshots() {
         // The LATEST hint is only written when snapshots are committed by renaming files, that is
-        // unless the catalog manages the snapshots of this table (see
-        // CatalogEnvironment#snapshotCommit).
-        boolean protectLatestHint =
-                !(catalogEnvironment.catalogLoader() != null
-                        && catalogEnvironment.supportsVersionManagement());
+        // unless the catalog manages the snapshots of this table.
+        boolean protectLatestHint = !catalogEnvironment.catalogManagesSnapshots();
         return new ExpireSnapshotsImpl(
                 snapshotManager(),
                 changelogManager(),
