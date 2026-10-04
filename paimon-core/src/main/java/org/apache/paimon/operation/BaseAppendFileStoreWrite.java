@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.CompactionTaskExecutorMode;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.cluster.Sorter;
@@ -82,6 +83,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     private final FileIO fileIO;
     private final RawFileSplitRead readForCompact;
+    @Nullable private final ThreadLocal<RawFileSplitRead> readForCompactByThread;
     private final long schemaId;
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
@@ -119,6 +121,13 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 tableName);
         this.fileIO = fileIO;
         this.readForCompact = readForCompact;
+        if (options.compactionTaskExecutorMode() == CompactionTaskExecutorMode.SINGLE) {
+            this.readForCompactByThread = null;
+        } else {
+            this.readForCompactByThread =
+                    ThreadLocal.withInitial(
+                            () -> readForCompact.copyWithFreshReaderMappings(options));
+        }
         this.schemaId = schemaId;
         this.rowType = rowType;
         this.writeType = rowType;
@@ -257,9 +266,19 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     public void close() throws Exception {
         super.close();
+        if (readForCompactByThread != null) {
+            readForCompactByThread.remove();
+        }
         if (blobFetchMetrics != null) {
             blobFetchMetrics.close();
         }
+    }
+
+    private RawFileSplitRead readForCompactReader() {
+        if (readForCompactByThread != null) {
+            return readForCompactByThread.get();
+        }
+        return readForCompact;
     }
 
     protected abstract CompactManager getCompactManager(
@@ -385,7 +404,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
             throws IOException {
         return new RecordReaderIterator<>(
-                readForCompact.createReader(partition, bucket, files, dvFactories));
+                readForCompactReader().createReader(partition, bucket, files, dvFactories));
     }
 
     @Override

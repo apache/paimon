@@ -68,21 +68,28 @@ public class CompactionMetrics {
     private final MetricGroup metricGroup;
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
-    private final Map<Long, Integer> compactTimerRefCounts;
     private final Map<Long, Object> compactTimerLocks;
     private final Queue<Long> compactionTimes;
+    private final boolean retireCompactTimersOnReporterUnregister;
     private Counter compactionsCompletedCounter;
     private Counter compactionsTotalCounter;
     private Counter compactionsQueuedCounter;
     private final Object sharedCounterLock = new Object();
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
+        this(registry, tableName, false);
+    }
+
+    public CompactionMetrics(
+            MetricRegistry registry,
+            String tableName,
+            boolean retireCompactTimersOnReporterUnregister) {
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.reporters = new HashMap<>();
         this.compactTimers = new ConcurrentHashMap<>();
-        this.compactTimerRefCounts = new ConcurrentHashMap<>();
         this.compactTimerLocks = new ConcurrentHashMap<>();
         this.compactionTimes = new ConcurrentLinkedQueue<>();
+        this.retireCompactTimersOnReporterUnregister = retireCompactTimersOnReporterUnregister;
 
         registerGenericCompactionMetrics();
     }
@@ -103,16 +110,8 @@ public class CompactionMetrics {
 
     private void releaseCompactTimer(long threadId) {
         synchronized (compactTimerLock(threadId)) {
-            compactTimerRefCounts.compute(
-                    threadId,
-                    (id, count) -> {
-                        if (count == null || count <= 1) {
-                            compactTimers.remove(id);
-                            compactTimerLocks.remove(id);
-                            return null;
-                        }
-                        return count - 1;
-                    });
+            compactTimers.remove(threadId);
+            compactTimerLocks.remove(threadId);
         }
     }
 
@@ -284,13 +283,9 @@ public class CompactionMetrics {
         public CompactTimer getCompactTimer() {
             long threadId = Thread.currentThread().getId();
             synchronized (compactTimerLock(threadId)) {
-                CompactTimer timer =
-                        compactTimers.computeIfAbsent(
-                                threadId, ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
-                if (compactThreadIds.add(threadId)) {
-                    compactTimerRefCounts.merge(threadId, 1, Integer::sum);
-                }
-                return timer;
+                compactThreadIds.add(threadId);
+                return compactTimers.computeIfAbsent(
+                        threadId, ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
             }
         }
 
@@ -358,8 +353,10 @@ public class CompactionMetrics {
 
         @Override
         public void unregister() {
-            for (Long threadId : compactThreadIds) {
-                releaseCompactTimer(threadId);
+            if (retireCompactTimersOnReporterUnregister) {
+                for (Long threadId : compactThreadIds) {
+                    releaseCompactTimer(threadId);
+                }
             }
             compactThreadIds.clear();
             reporters.remove(key);

@@ -652,7 +652,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
-        this.compactionMetrics = new CompactionMetrics(metricRegistry, tableName);
+        this.compactionMetrics =
+                new CompactionMetrics(
+                        metricRegistry,
+                        tableName,
+                        options.compactionTaskExecutorMode()
+                                == CompactionTaskExecutorMode.PER_BUCKET);
         return this;
     }
 

@@ -270,7 +270,8 @@ public class CompactionMetricsTest {
 
     @Test
     public void testCompactTimersRetiredAfterPerBucketWorkerChurn() throws Exception {
-        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+        CompactionMetrics metrics =
+                new CompactionMetrics(new TestMetricRegistry(), "myTable", true);
         for (int i = 0; i < 32; i++) {
             ExecutorService worker = Executors.newSingleThreadExecutor();
             CompactionMetrics.Reporter reporter = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
@@ -324,7 +325,7 @@ public class CompactionMetricsTest {
 
             assertThat(workerError.get()).isNull();
             starting.unregister();
-            assertThat(metrics.activeCompactTimerCount()).isZero();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
         }
     }
 
@@ -425,7 +426,7 @@ public class CompactionMetricsTest {
             first.unregister();
             assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
             second.unregister();
-            assertThat(metrics.activeCompactTimerCount()).isZero();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
         } finally {
             sharedPool.shutdownNow();
         }
