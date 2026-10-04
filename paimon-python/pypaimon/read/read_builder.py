@@ -95,6 +95,7 @@ class ReadBuilder:
         ``variant_fields`` maps projected VARIANT columns to ``paths``,
         ``target_type`` (float32 only), and optional ``fail_on_error``.
         It requires native reading and returns a typed Arrow struct.
+        Paths containing ``;`` are not supported.
         """
         self._projection = projection
         if projection and any(

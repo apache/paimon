@@ -254,6 +254,7 @@ Requires `read.native.enabled=true` and a compatible `pypaimon-rust`; there is
 no Python fallback. The result is an Arrow struct with children `"0"`, `"1"`,
 ... in path order. Only `pa.float32()` is supported; `fail_on_error` defaults to
 `False`. Row iterators and Torch row format are not supported.
+Paths containing `;` are not supported; read the full VARIANT column instead.
 
 ### Read and update typed paths
 
