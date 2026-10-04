@@ -271,7 +271,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
     def test_streams_physical_batches(self):
         from pypaimon.write.map_shared_shredding_writer import _MapFieldConverter
 
-        table = self._create_table('parquet', 256)
+        table = self._create_table('parquet', 256, {'write.native.enabled': 'false'})
         data = pa.Table.from_pydict({
             'id': list(range(5000)), 'metrics': [[('a', 1)]] * 4999 + [[('late', 2)]],
         }, schema=self.arrow_schema)
@@ -332,7 +332,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
         for count in (1000, 2500):
             layouts = []
             for by_row in (False, True):
-                table = self._create_table('parquet', 256)
+                table = self._create_table('parquet', 256, {'write.native.enabled': 'false'})
                 builder = table.new_batch_write_builder()
                 writer = builder.new_write()
                 if by_row:
@@ -372,6 +372,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
                 "data-evolution.enabled": "true",
                 "row-tracking.enabled": "true",
                 "target-file-row-num": "2",
+                "write.native.enabled": "false",
             },
         )
         data = pa.Table.from_pydict({
