@@ -30,7 +30,7 @@ from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
 
 class _Split:
     def __init__(self, file_name='data.parquet', file_size=1):
-        self.files = [Mock(file_name=file_name, file_size=file_size)]
+        self.files = [Mock(file_name=file_name, file_size=file_size, extra_files=[], write_cols=None)]
 
 
 def _table_read(limit=None):
@@ -76,6 +76,36 @@ def _blob_table_read(limit=None):
 def _id_batch(values):
     return pa.record_batch(
         [pa.array(values, type=pa.int32())], names=['id'])
+
+
+def test_native_read_falls_back_before_opening_primary_file_with_row_sidecar():
+    read = _table_read()
+    split = _Split()
+    split.files[0].extra_files = ['point-read.row']
+    with patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches([split], pa.schema([('id', pa.int32())])) is None
+    native.assert_not_called()
+
+
+@pytest.mark.parametrize('project_sequence', [False, True])
+def test_native_partial_data_evolution_read_requires_a_sequence_provider(project_sequence):
+    from pypaimon.table.special_fields import SpecialFields
+
+    read = _table_read()
+    read.table.options.data_evolution_enabled.return_value = True
+    if project_sequence:
+        read._scan_read_type += [SpecialFields.SEQUENCE_NUMBER]
+    split = _Split()
+    split._native_split = object()
+    split.files[0].write_cols = ['id']
+    with patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch([1])]) as native:
+        batches = read._try_native_batches([split], pa.schema([('id', pa.int32())]))
+        if project_sequence:
+            assert batches is None
+            native.assert_not_called()
+        else:
+            assert [batch.to_pydict() for batch in batches] == [{'id': [1]}]
+            native.assert_called_once()
 
 
 def test_native_read_returns_named_variant_expression_columns():

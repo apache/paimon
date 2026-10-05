@@ -86,8 +86,9 @@ def reader_adapter(read_type, table_fields):
     no source paths are stored by builders or transported to Native or Ray.
     """
     paths = []
-    source_fields = []
+    source_fields = list(table_fields)
     table_by_id = {field.id: field for field in table_fields}
+    positions_by_id = {field.id: i for i, field in enumerate(table_fields)}
 
     def visit(target, source, path):
         if is_map_selected_keys_field(target):
@@ -104,9 +105,14 @@ def reader_adapter(read_type, table_fields):
 
     for field in read_type:
         source = table_by_id.get(field.id, field)
-        source_fields.append(_adapter_source(source, field))
+        adapted = _adapter_source(source, field)
+        if field.id in positions_by_id:
+            source_fields[positions_by_id[field.id]] = adapted
+        else:
+            source_fields.append(adapted)
         visit(field, source, [field.name])
-    # Reuse the established collision/nullability rules for format adapters.
+    # Resolve aliases against the complete table, including unprojected
+    # physical columns which can be referenced by a predicate.
     indexes = []
     for path in paths:
         fields = source_fields

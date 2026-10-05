@@ -41,6 +41,20 @@ class _BatchReader(RecordBatchReader):
 
 class ConcatBatchReaderTest(unittest.TestCase):
 
+    def test_merge_all_zero_column_batches_keep_row_counts(self):
+        batches = [pa.record_batch([pa.array(range(size))], names=['id']).select([])
+                   for size in (1, 2, 2)]
+        reader = MergeAllBatchReader(
+            [lambda batch=batch: _BatchReader([batch]) for batch in batches], batch_size=2)
+        actual = []
+        while True:
+            batch = reader.read_arrow_batch()
+            if batch is None:
+                break
+            self.assertEqual(batch.num_columns, 0)
+            actual.append(batch.num_rows)
+        self.assertEqual(actual, [2, 2, 1])
+
     def test_merge_all_coalesces_small_batches(self):
         batches = [
             pa.record_batch([pa.array(["a", "b"])], names=["value"]),

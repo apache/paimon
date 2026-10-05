@@ -45,6 +45,7 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
 from pypaimon.schema.data_types import (
     DataField, MapType, PyarrowFieldParser, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.utils.arrow_utils import zero_column_batch
 
 ROW_KIND_COLUMN = "_row_kind"
 logger = logging.getLogger(__name__)
@@ -506,6 +507,10 @@ class TableRead:
         if any(isinstance(split, QueryAuthSplit) for split in splits):
             return self._native_fallback(
                 "query authorization requires the Python reader")
+        if not self._native_data_evolution_sequence_supported(splits):
+            return self._native_fallback(
+                "sequence-number projection over partial data-evolution files "
+                "requires the Python reader")
         try:
             from pypaimon.read.native_plan import (
                 _prepare_native_read, native_read, native_split_from_python)
@@ -786,12 +791,28 @@ class TableRead:
     @staticmethod
     def _native_split_files_supported(split):
         for data_file in split.files:
+            # Rust does not select ROW sidecars for point reads. The primary
+            # file need not be available when the sidecar covers this read.
+            if any(name.lower().endswith('.row') for name in data_file.extra_files or []):
+                return False
             file_name = data_file.file_name.lower()
             if ('.vector.' not in file_name
                     and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
                     and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIX)):
                 return False
         return True
+
+    def _native_data_evolution_sequence_supported(self, splits):
+        from pypaimon.table.special_fields import SpecialFields
+
+        if (not self.table.options.data_evolution_enabled()
+                or not any(field.id == SpecialFields.SEQUENCE_NUMBER.id for field in self._scan_read_type)):
+            return True
+        # Current Rust provider selection cannot synthesize the sequence
+        # column from metadata when partial files omit that physical column.
+        return all(data_file.write_cols is None
+                   or SpecialFields.SEQUENCE_NUMBER.name in data_file.write_cols
+                   for split in splits for data_file in split.files)
 
     def _convert_native_batches(self, batches, schema):
         remaining = self.limit
@@ -1188,6 +1209,9 @@ class TableRead:
         single ``RecordBatch`` cannot hold. When that happens we split the rows in
         half and recurse so every emitted batch keeps each column under the limit.
         """
+        if not schema:
+            yield zero_column_batch(row_count, schema.metadata)
+            return
         arrays = []
         for field in schema:
             arr = pyarrow.array(pydict[field.name], type=field.type)

@@ -139,7 +139,9 @@ class ReadBuilder:
             if projection is None:
                 return self.with_read_type(self.table.fields)
             name_paths = Projection.of(indexes).to_name_paths(fields)
-            flat_fields = Projection.of(indexes).project(fields)
+            output_indexes = (indexes if any(len(path) > 1 for path in indexes)
+                              else [path[0] for path in indexes])
+            flat_fields = Projection.of(output_indexes).project(fields)
             output = OutputProjection([(field.name, path) for field, path in zip(flat_fields, name_paths)])
             variants = None
         read_type = project_read_type(self._table_read_fields(), name_paths)
