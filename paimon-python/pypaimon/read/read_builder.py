@@ -16,7 +16,7 @@
 # under the License.
 
 import ast
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import pyarrow
 
@@ -28,7 +28,7 @@ from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
-from pypaimon.read.table_read import TableRead
+from pypaimon.read.table_read import ROW_KIND_COLUMN, TableRead
 from pypaimon.read.table_scan import TableScan
 from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
@@ -36,10 +36,6 @@ from pypaimon.utils.projection import MapKey, Projection, is_row_type
 
 
 ProjectionPath = Sequence[Union[int, MapKey]]
-
-
-def _is_supported_variant_target_type(target_type: pyarrow.DataType) -> bool:
-    return target_type == pyarrow.float32()
 
 
 class _ReadPredicateBuilder(PredicateBuilder):
@@ -64,13 +60,13 @@ class ReadBuilder:
 
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
-        # ``_projection`` stores the user-facing name list from
-        # :meth:`with_projection`. When nested selectors are present,
-        # ``_nested_paths`` is also populated and takes precedence
-        # in ``read_type()`` and downstream consumers.
+        # ``_projection`` stores physical source columns. Expression aliases
+        # are kept separately for the Arrow output schema.
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[ProjectionPath]] = None
         self._variant_fields: Optional[Dict[str, Dict[str, Any]]] = None
+        self._expression_projection: Optional[
+            List[Tuple[str, str, Optional[int]]]] = None
         self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
@@ -84,19 +80,20 @@ class ReadBuilder:
 
     def with_projection(
         self,
-        projection: List[str],
-        *,
-        variant_fields: Optional[Dict[str, Dict[str, Any]]] = None,
+        projection: Union[List[str], Dict[str, str]],
     ) -> 'ReadBuilder':
-        """Project columns, nested ROW fields, or literal MAP keys.
+        """Project columns or named float32 VARIANT expressions.
 
-        Use ``struct.field`` for ROW or ``attrs['key']`` for string-key MAP.
-        Exact column names take precedence; unknown names are skipped.
-        ``variant_fields`` maps projected VARIANT columns to ``paths``,
-        ``target_type`` (float32 only), and optional ``fail_on_error``.
-        It requires native reading and returns a typed Arrow struct.
-        Paths containing ``;`` are not supported.
+        Lists retain column, nested ROW and MAP-key projection semantics.
+        A mapping assigns output names to source columns or float32
+        ``variant_get`` / ``try_variant_get`` expressions. Variant
+        expressions require native reading.
         """
+        if isinstance(projection, dict):
+            projection, variants, outputs = self._parse_expression_projection(
+                projection)
+        else:
+            variants, outputs = None, None
         self._projection = projection
         if projection and any(
                 '.' in name or '[' in name for name in projection):
@@ -105,8 +102,8 @@ class ReadBuilder:
                                   else None)
         else:
             self._nested_paths = None
-        self._variant_fields = self._validate_variant_fields(
-            projection, variant_fields)
+        self._variant_fields = variants
+        self._expression_projection = outputs
         return self
 
     def with_limit(self, limit: int) -> 'ReadBuilder':
@@ -132,6 +129,7 @@ class ReadBuilder:
             read_type=self.read_type(),
             nested_name_paths=self._nested_name_paths(),
             variant_fields=self._variant_fields,
+            expression_projection=self._expression_projection,
             limit=self._limit,
         )
 
@@ -202,75 +200,79 @@ class ReadBuilder:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _validate_variant_fields(
-        self,
-        projection: List[str],
-        variant_fields: Optional[Dict[str, Dict[str, Any]]],
-    ) -> Optional[Dict[str, Dict[str, Any]]]:
-        if variant_fields is None:
-            return None
-        if not isinstance(variant_fields, dict):
-            raise TypeError("variant_fields must be a dict")
-        if self._nested_paths:
-            raise ValueError(
-                "variant_fields cannot be combined with nested column projection")
-
-        field_map = {field.name: field for field in self.table.fields}
-        normalized = {}
-        for column, options in variant_fields.items():
-            if not isinstance(column, str):
-                raise TypeError(
-                    "variant_fields keys must be VARIANT column names")
-            if column not in projection:
-                raise ValueError(
-                    "variant_fields column %r is not in the projection" % column)
-            field = field_map.get(column)
-            if (field is None
-                    or not isinstance(field.type, AtomicType)
-                    or field.type.type.upper() != 'VARIANT'):
-                raise ValueError(
-                    "variant_fields column %r must be a VARIANT column" % column)
-            if not isinstance(options, dict):
-                raise TypeError(
-                    "variant_fields[%r] must be a dict" % column)
-            unknown = set(options) - {
-                'paths', 'target_type', 'fail_on_error'}
-            if unknown:
-                raise ValueError(
-                    "unknown variant_fields[%r] option %r"
-                    % (column, sorted(unknown)[0]))
-            paths = options.get('paths')
-            if (not isinstance(paths, (list, tuple))
-                    or not paths
-                    or any(not isinstance(path, str) for path in paths)):
-                raise TypeError(
-                    "variant_fields[%r]['paths'] must be a non-empty "
-                    "sequence of strings" % column)
-            for path in paths:
+    def _parse_expression_projection(self, expressions: Dict[str, str]):
+        if not expressions:
+            raise ValueError("Projection expression mapping must not be empty")
+        table_fields = self.table.fields
+        if self.table.options.row_tracking_enabled():
+            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
+        field_map = {field.name: field for field in table_fields}
+        projection = []
+        variants = {}
+        outputs = []
+        direct_columns = set()
+        for alias, expression in expressions.items():
+            if not isinstance(alias, str) or not alias:
+                raise TypeError("Projection output names must be non-empty strings")
+            if alias == ROW_KIND_COLUMN:
+                raise ValueError("Projection output name %r is reserved" % alias)
+            if not isinstance(expression, str) or not expression:
+                raise TypeError("Projection expressions must be non-empty strings")
+            if expression in field_map:
+                source, child = expression, None
+                direct_columns.add(source)
+            else:
+                try:
+                    call = ast.parse(expression, mode='eval').body
+                except SyntaxError as error:
+                    raise ValueError(
+                        "Unsupported projection expression %r" % expression
+                    ) from error
+                if (not isinstance(call, ast.Call)
+                        or not isinstance(call.func, ast.Name)
+                        or call.func.id.lower() not in ('variant_get', 'try_variant_get')
+                        or len(call.args) != 3 or call.keywords
+                        or not (isinstance(call.args[0], ast.Name)
+                                or (isinstance(call.args[0], ast.Constant)
+                                    and isinstance(call.args[0].value, str)))
+                        or not all(isinstance(arg, ast.Constant)
+                                   and isinstance(arg.value, str)
+                                   for arg in call.args[1:])):
+                    raise ValueError(
+                        "Unsupported projection expression %r" % expression)
+                source = (call.args[0].id
+                          if isinstance(call.args[0], ast.Name)
+                          else call.args[0].value)
+                field = field_map.get(source)
+                if (field is None
+                        or not isinstance(field.type, AtomicType)
+                        or field.type.type.upper() != 'VARIANT'):
+                    raise ValueError(
+                        "Variant extraction requires a VARIANT column: %r"
+                        % source)
+                path, target_type = (arg.value for arg in call.args[1:])
                 if ';' in path:
                     raise ValueError(
                         "Variant extraction path must not contain ';': %s"
                         % path)
-            target_type = options.get('target_type')
-            if not isinstance(target_type, pyarrow.DataType):
-                raise TypeError(
-                    "variant_fields[%r]['target_type'] must be a PyArrow "
-                    "data type" % column)
-            if not _is_supported_variant_target_type(target_type):
-                raise ValueError(
-                    "variant_fields[%r]['target_type'] must be float32"
-                    % column)
-            fail_on_error = options.get('fail_on_error', False)
-            if not isinstance(fail_on_error, bool):
-                raise TypeError(
-                    "variant_fields[%r]['fail_on_error'] must be a boolean"
-                    % column)
-            normalized[column] = {
-                'paths': list(paths),
-                'target_type': target_type,
-                'fail_on_error': fail_on_error,
-            }
-        return normalized
+                if target_type.lower() != 'float':
+                    raise ValueError(
+                        "Only float32 Variant extractions are supported")
+                options = variants.setdefault(source, {
+                    'paths': [], 'target_type': pyarrow.float32(),
+                    'fail_on_error': [],
+                })
+                child = len(options['paths'])
+                options['paths'].append(path)
+                options['fail_on_error'].append(
+                    call.func.id.lower() == 'variant_get')
+            if source not in projection:
+                projection.append(source)
+            outputs.append((alias, source, child))
+        if direct_columns & variants.keys():
+            raise ValueError(
+                "A VARIANT column cannot be read both whole and extracted")
+        return projection, variants or None, outputs
 
     def _resolve_projection_paths(self, names: List[str]) -> List[ProjectionPath]:
         """Translate ROW paths and MAP-key selectors into internal paths."""

@@ -124,6 +124,19 @@ class NativePlanTest(unittest.TestCase):
             json.loads(strict)['fields'][0]['type']['fields'][0]['description'],
             '__VARIANT_METADATA$.x;true;UTC')
 
+        mixed = _variant_read_type_json(
+            [DataField(7, 'payload', AtomicType('VARIANT'))],
+            {'payload': {
+                'paths': ['$.x', '$.y'],
+                'target_type': pyarrow.float32(),
+                'fail_on_error': [False, True],
+            }})
+        children = json.loads(mixed)['fields'][0]['type']['fields']
+        self.assertEqual(
+            [child['description'] for child in children],
+            ['__VARIANT_METADATA$.x;false;UTC',
+             '__VARIANT_METADATA$.y;true;UTC'])
+
     def test_variant_read_type_rejects_semicolon_path(self):
         with self.assertRaisesRegex(ValueError, "must not contain ';'"):
             _variant_read_type_json(

@@ -176,6 +176,33 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(set(df.columns), {'id', 'name'})
         self.assertEqual(len(df), 2)
 
+    def test_read_paimon_with_named_projection(self):
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = self._create_and_populate_table(
+            'test_read_named_proj', pa_schema,
+            {'id': [1, 2], 'name': ['a', 'b']},
+        )
+        projection = {'identifier': 'id', 'label': 'name'}
+        ds = read_paimon(identifier, self.catalog_options,
+                         projection=projection)
+        self.assertEqual(ds.schema().names, list(projection))
+        rows = sorted(ds.take_all(), key=lambda row: row['identifier'])
+        self.assertEqual(rows, [
+            {'identifier': 1, 'label': 'a'},
+            {'identifier': 2, 'label': 'b'},
+        ])
+
+        empty_schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog = CatalogFactory.create(self.catalog_options)
+        catalog.create_table('default.test_empty_named_proj',
+                             empty_schema, False)
+        empty = read_paimon('default.test_empty_named_proj',
+                            self.catalog_options, projection=projection)
+        self.assertEqual(empty.schema().names, list(projection))
+        self.assertEqual(empty.count(), 0)
+
     def test_read_paimon_count_with_query_auth(self):
         from pypaimon.ray import read_paimon
 

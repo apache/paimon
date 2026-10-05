@@ -369,13 +369,19 @@ def _variant_read_type_json(
             if ';' in path:
                 raise ValueError(
                     "Variant extraction path must not contain ';': %s" % path)
+        error_policy = options['fail_on_error']
+        if isinstance(error_policy, bool):
+            error_policy = [error_policy] * len(options['paths'])
+        if len(error_policy) != len(options['paths']):
+            raise ValueError("Variant paths and error policies must match")
         projected.add(field.name)
         children = [
             DataField(
                 index, str(index), AtomicType('FLOAT'),
                 '__VARIANT_METADATA%s;%s;UTC' % (
-                    path, str(options['fail_on_error']).lower()))
-            for index, path in enumerate(options['paths'])
+                    path, str(fail_on_error).lower()))
+            for index, (path, fail_on_error) in enumerate(
+                zip(options['paths'], error_policy))
         ]
         fields.append(DataField(
             field.id, field.name, RowType(field.type.nullable, children),

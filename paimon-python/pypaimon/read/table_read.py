@@ -20,7 +20,7 @@ import os
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import pandas
 import pyarrow
@@ -148,6 +148,8 @@ class TableRead:
         include_row_kind: bool = False,
         nested_name_paths: Optional[List[List[str]]] = None,
         variant_fields: Optional[Dict[str, Dict[str, Any]]] = None,
+        expression_projection: Optional[
+            List[Tuple[str, str, Optional[int]]]] = None,
         limit: Optional[int] = None,
     ):
         from pypaimon.read.merge_engine_support import check_supported
@@ -195,14 +197,15 @@ class TableRead:
         self.include_row_kind = include_row_kind
         self.nested_name_paths = nested_name_paths
         self.variant_fields = variant_fields
+        self.expression_projection = expression_projection
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
         self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
-        if self.variant_fields:
+        if self.expression_projection is not None:
             raise RuntimeError(
-                "variant_fields is not supported by to_iterator(); "
+                "Projection expressions are not supported by to_iterator(); "
                 "use to_arrow() or to_arrow_batch_reader()")
         self._check_python_merge_supported()
         self._begin_auth_read(splits)
@@ -431,7 +434,9 @@ class TableRead:
 
     def _output_arrow_schema(self) -> pyarrow.Schema:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
-        return self._apply_variant_fields_to_schema(schema, self.variant_fields)
+        schema = self._apply_variant_fields_to_schema(schema, self.variant_fields)
+        return self._apply_expression_projection_to_schema(
+            schema, self.expression_projection)
 
     @staticmethod
     def _apply_variant_fields_to_schema(
@@ -458,6 +463,27 @@ class TableRead:
                 nullable=source.nullable,
                 metadata=source.metadata,
             )
+        return pyarrow.schema(fields, metadata=schema.metadata)
+
+    @staticmethod
+    def _apply_expression_projection_to_schema(
+        schema: pyarrow.Schema,
+        expressions: Optional[List[Tuple[str, str, Optional[int]]]],
+    ) -> pyarrow.Schema:
+        if expressions is None:
+            return schema
+        fields = []
+        for alias, source, child in expressions:
+            index = schema.get_field_index(source)
+            if index < 0:
+                raise ValueError("Projection source %r is not in the read type" % source)
+            field = schema.field(index)
+            if child is None:
+                fields.append(field.with_name(alias))
+            else:
+                if not pyarrow.types.is_struct(field.type):
+                    raise TypeError("Variant projection %r is not a struct" % source)
+                fields.append(pyarrow.field(alias, field.type[child].type))
         return pyarrow.schema(fields, metadata=schema.metadata)
 
     def _native_fallback(
@@ -1319,6 +1345,7 @@ class TableRead:
                 limit=self.limit,
                 nested_name_paths=self.nested_name_paths,
                 variant_fields=self.variant_fields,
+                expression_projection=self.expression_projection,
                 include_row_kind=self.include_row_kind,
             )
         )
@@ -1391,9 +1418,9 @@ class TableRead:
         ):
             raise ValueError("batch_size must be a positive int or None")
         if batch_format == "row":
-            if self.variant_fields:
+            if self.expression_projection is not None:
                 raise RuntimeError(
-                    "variant_fields is not supported by Torch row format; "
+                    "Projection expressions are not supported by Torch row format; "
                     "use streaming=True with batch_format='pyarrow' or 'torch'")
             if batch_size is not None:
                 raise ValueError(
@@ -1654,6 +1681,31 @@ class TableRead:
         return tuple(converted)
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
+        if self.expression_projection is not None:
+            fields = []
+            arrays = []
+            if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
+                fields.append(batch.schema.field(ROW_KIND_COLUMN))
+                arrays.append(batch.column(ROW_KIND_COLUMN))
+            output_schema = self._output_arrow_schema()
+            for alias, source, child in self.expression_projection:
+                index = batch.schema.get_field_index(source)
+                if index < 0:
+                    raise ValueError("Projection source %r is missing" % source)
+                array = batch.column(index)
+                if child is not None:
+                    if not pyarrow.types.is_struct(array.type):
+                        raise TypeError("Variant projection %r is not a struct" % source)
+                    parent = array
+                    array = parent.field(child)
+                    if parent.null_count:
+                        array = pyarrow_compute.if_else(
+                            parent.is_null(),
+                            pyarrow.scalar(None, type=array.type), array)
+                arrays.append(array)
+                fields.append(output_schema.field(alias))
+            return pyarrow.RecordBatch.from_arrays(
+                arrays, schema=pyarrow.schema(fields))
         if not self._needs_output_projection():
             return batch
         output_names = list(self._output_column_names)
@@ -1668,7 +1720,7 @@ class TableRead:
             arrays, schema=pyarrow.schema(fields))
 
     def _needs_output_projection(self) -> bool:
-        return bool(self._predicate_extra_fields)
+        return bool(self._predicate_extra_fields or self.expression_projection)
 
     def _output_extract_name_paths(self) -> List[List[str]]:
         return [[f.name] for f in self.read_type]

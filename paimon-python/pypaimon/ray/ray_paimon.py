@@ -29,7 +29,7 @@ Usage::
 import hashlib
 import importlib
 import uuid
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from pypaimon.common.predicate import Predicate
 
@@ -55,7 +55,7 @@ def read_paimon(
     catalog_options: Dict[str, str],
     *,
     filter: Optional[Predicate] = None,
-    projection: Optional[List[str]] = None,
+    projection: Optional[Union[List[str], Dict[str, str]]] = None,
     limit: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     tag_name: Optional[str] = None,
@@ -73,7 +73,7 @@ def read_paimon(
         catalog_options: Options passed to ``CatalogFactory.create()``,
             e.g. ``{"warehouse": "/path/to/warehouse"}``.
         filter: Optional predicate to push down into the scan.
-        projection: Optional list of column names to read.
+        projection: Optional column names or output-name-to-expression mapping.
         limit: Optional row limit for the scan.
         snapshot_id: Optional snapshot id to time-travel to. Mutually
             exclusive with ``tag_name``.
@@ -120,6 +120,16 @@ def read_paimon(
         schema = PyarrowFieldParser.from_paimon_schema(
             split_provider.read_type()
         )
+        variant_fields = split_provider.variant_fields()
+        expression_projection = split_provider.expression_projection()
+        if variant_fields or expression_projection is not None:
+            from pypaimon.read.table_read import TableRead
+            if variant_fields:
+                schema = TableRead._apply_variant_fields_to_schema(
+                    schema, variant_fields)
+            if expression_projection is not None:
+                schema = TableRead._apply_expression_projection_to_schema(
+                    schema, expression_projection)
         import pyarrow
         empty_table = pyarrow.Table.from_arrays(
             [pyarrow.array([], type=field.type) for field in schema],

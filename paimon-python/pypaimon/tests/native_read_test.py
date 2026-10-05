@@ -48,6 +48,7 @@ def _table_read(limit=None):
     read.include_row_kind = False
     read.nested_name_paths = None
     read.variant_fields = None
+    read.expression_projection = None
     read.limit = limit
     read._read_parallelism = 1
     read._deferred_blob_fields = set()
@@ -70,7 +71,7 @@ def _id_batch(values):
         [pa.array(values, type=pa.int32())], names=['id'])
 
 
-def test_native_read_projects_variant_fields_before_python():
+def test_native_read_returns_named_variant_expression_columns():
     read = _table_read()
     read.read_type = [
         DataField(0, 'id', AtomicType('INT')),
@@ -82,9 +83,14 @@ def test_native_read_projects_variant_fields_before_python():
         'payload': {
             'paths': ['$.ratio', '$.missing'],
             'target_type': pa.float32(),
-            'fail_on_error': False,
+            'fail_on_error': [False, True],
         }
     }
+    read.expression_projection = [
+        ('identifier', 'id', None),
+        ('ratio', 'payload', 0),
+        ('missing', 'payload', 1),
+    ]
     split = _Split()
     split._native_split = object()
     payload_type = pa.struct([
@@ -92,10 +98,11 @@ def test_native_read_projects_variant_fields_before_python():
         pa.field('1', pa.float32()),
     ])
     batch = pa.record_batch([
-        pa.array([1, 2], type=pa.int32()),
+        pa.array([1, 2, 3], type=pa.int32()),
         pa.array([
             {'0': 1.25, '1': None},
             {'0': 2.5, '1': None},
+            None,
         ], type=payload_type),
     ], names=['id', 'payload'])
 
@@ -103,11 +110,11 @@ def test_native_read_projects_variant_fields_before_python():
                return_value=[batch]) as native:
         result = read.to_arrow([split])
 
-    assert result.schema.field('payload').type == payload_type
-    assert result.column('payload').to_pylist() == [
-        {'0': 1.25, '1': None},
-        {'0': 2.5, '1': None},
-    ]
+    assert result.column_names == ['identifier', 'ratio', 'missing']
+    assert result.schema.field('ratio').type == pa.float32()
+    assert result.column('identifier').to_pylist() == [1, 2, 3]
+    assert result.column('ratio').to_pylist() == [1.25, 2.5, None]
+    assert result.column('missing').to_pylist() == [None, None, None]
     assert native.call_args.kwargs['variant_fields'] == read.variant_fields
     assert native.call_args.kwargs['read_type'] == read.read_type
 
@@ -124,6 +131,7 @@ def test_variant_fields_never_silently_falls_back_to_python():
             'fail_on_error': False,
         }
     }
+    read.expression_projection = [('ratio', 'payload', 0)]
     read.table.options.native_read_enabled.return_value = False
 
     with pytest.raises(RuntimeError, match='read.native.enabled is false'):

@@ -126,6 +126,7 @@ class RayDatasource(Datasource):
         read_type = self._split_provider.read_type()
         nested_name_paths = self._split_provider.nested_name_paths()
         variant_fields = self._split_provider.variant_fields()
+        expression_projection = self._split_provider.expression_projection()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
         include_row_kind = self._split_provider.include_row_kind()
@@ -138,6 +139,10 @@ class RayDatasource(Datasource):
                 from pypaimon.read.table_read import TableRead
                 self._schema = TableRead._apply_variant_fields_to_schema(
                     self._schema, variant_fields)
+            if expression_projection is not None:
+                from pypaimon.read.table_read import TableRead
+                self._schema = TableRead._apply_expression_projection_to_schema(
+                    self._schema, expression_projection)
             if include_row_kind:
                 from pypaimon.read.table_read import TableRead
                 self._schema = TableRead._add_row_kind_to_schema(self._schema)
@@ -160,6 +165,7 @@ class RayDatasource(Datasource):
                 limit=limit,
                 nested_name_paths=nested_name_paths,
                 variant_fields=variant_fields,
+                expression_projection=expression_projection,
                 include_row_kind=include_row_kind,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
@@ -172,6 +178,7 @@ class RayDatasource(Datasource):
                 table, predicate, read_type, limit=limit,
                 nested_name_paths=nested_name_paths,
                 variant_fields=variant_fields,
+                expression_projection=expression_projection,
                 include_row_kind=include_row_kind)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
@@ -201,6 +208,7 @@ class RayDatasource(Datasource):
             limit=limit,
             nested_name_paths=nested_name_paths,
             variant_fields=variant_fields,
+            expression_projection=expression_projection,
             include_row_kind=include_row_kind,
         )
 

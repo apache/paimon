@@ -100,6 +100,15 @@ class SplitProviderTest(unittest.TestCase):
         field_names = [f.name for f in read_type]
         self.assertEqual(field_names, ['id'])
 
+        named = CatalogSplitProvider(
+            table_identifier=self.identifier,
+            catalog_options=self.catalog_options,
+            projection={'identifier': 'id'},
+        )
+        self.assertEqual([field.name for field in named.read_type()], ['id'])
+        self.assertEqual(named.expression_projection(),
+                         [('identifier', 'id', None)])
+
     def test_catalog_provider_propagates_predicate(self):
         """``predicate`` is held on the provider and surfaced via predicate()."""
         catalog = CatalogFactory.create(self.catalog_options)
@@ -285,8 +294,11 @@ class SplitProviderTest(unittest.TestCase):
 
         self.assertFalse(provider.include_row_kind())
         provider = PreResolvedSplitProvider(
-            table, splits, read_type, include_row_kind=True)
+            table, splits, read_type, include_row_kind=True,
+            expression_projection=[('alias', 'id', None)])
         self.assertTrue(provider.include_row_kind())
+        self.assertEqual([('alias', 'id', None)],
+                         provider.expression_projection())
 
 
 if __name__ == '__main__':

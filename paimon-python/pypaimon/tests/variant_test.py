@@ -40,6 +40,7 @@ Sections
                                shredded VARIANT.
 """
 
+import asyncio
 import io
 import json
 import os
@@ -1233,10 +1234,7 @@ class TestVariantPaimonTable(unittest.TestCase):
                 commit.close()
 
                 builder = table.new_read_builder().with_projection(
-                    ['payload'], variant_fields={'payload': {
-                        'paths': ['$.ratio'],
-                        'target_type': pa.float32(),
-                    }})
+                    {'ratio': "try_variant_get(payload, '$.ratio', 'float')"})
                 splits = builder.new_scan().plan().splits()
                 self.assertTrue(splits)
                 read = builder.new_read()
@@ -1274,17 +1272,18 @@ class TestVariantPaimonTable(unittest.TestCase):
         writer.close()
         commit.close()
 
-        for projection, column in (
-            (['payload.dot'], 'payload.dot'),
-            (['payload[raw]'], 'payload[raw]'),
-            (['id.dot', 'payload'], 'payload'),
+        for expressions, projection, column in (
+            ({'ratio': 'try_variant_get("payload.dot", "$.ratio", "float")'},
+             ['payload.dot'], 'payload.dot'),
+            ({'ratio': 'try_variant_get("payload[raw]", "$.ratio", "float")'},
+             ['payload[raw]'], 'payload[raw]'),
+            ({'id': 'id.dot',
+              'ratio': 'try_variant_get(payload, "$.ratio", "float")'},
+             ['id.dot', 'payload'], 'payload'),
         ):
-            with self.subTest(projection=projection):
+            with self.subTest(expressions=expressions):
                 builder = table.new_read_builder().with_projection(
-                    projection, variant_fields={column: {
-                        'paths': ['$.ratio'],
-                        'target_type': pa.float32(),
-                    }})
+                    expressions)
                 splits = builder.new_scan().plan().splits()
                 self.assertTrue(splits)
                 read = builder.new_read()
@@ -1293,14 +1292,14 @@ class TestVariantPaimonTable(unittest.TestCase):
                 self.assertNotIn('nested_projection', kwargs)
                 self.assertIn(column, kwargs['variant_fields'])
                 self.assertEqual(
-                    read._output_arrow_schema().field(column).type,
-                    pa.struct([pa.field('0', pa.float32())]))
+                    read._output_arrow_schema().field('ratio').type,
+                    pa.float32())
                 if native_read:
                     projected = read.to_arrow(splits)
-                    self.assertEqual(projected.column_names, projection)
+                    self.assertEqual(projected.column_names,
+                                     list(expressions))
                     self.assertEqual(
-                        projected[column].combine_chunks().field(0).to_pylist(),
-                        [1.25])
+                        projected['ratio'].to_pylist(), [1.25])
                 plain = table.new_read_builder().with_projection(projection)
                 self.assertEqual(
                     plain.new_read().to_arrow(splits).column_names,
@@ -1315,6 +1314,75 @@ class TestVariantPaimonTable(unittest.TestCase):
     def test_variant_projection_literal_top_level_names_native(self):
         self._check_variant_projection_literal_top_level_names(
             'native', native_read=True)
+
+    @unittest.skipUnless(_native_variant_projection_available(),
+                         'compatible native Variant projection API not installed')
+    def test_named_variant_projection_batch_and_stream(self):
+        schema = Schema.from_pyarrow_schema(
+            self._pa_schema(), options={'read.native.enabled': 'true'})
+        identifier = 'default.named_variant_projection'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        data = pa.table({
+            'id': [1, 2],
+            'payload': GenericVariant.to_arrow_array([
+                GenericVariant.from_python({'x': 1.25, 'y': 2}), None]),
+        }, schema=self._pa_schema())
+        writer_builder = table.new_batch_write_builder()
+        writer = writer_builder.new_write()
+        commit = writer_builder.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        expressions = {
+            'identifier': 'id',
+            'x': "try_variant_get(payload, '$.x', 'float')",
+            'y': "variant_get(payload, '$.y', 'float')",
+        }
+        batch_builder = table.new_read_builder().with_projection(expressions)
+        expected = {'identifier': [1, 2], 'x': [1.25, None], 'y': [2.0, None]}
+        result = batch_builder.new_read().to_arrow(
+            batch_builder.new_scan().plan().splits())
+        self.assertEqual(result.column_names, list(expressions))
+        self.assertEqual(result.to_pydict(), expected)
+
+        stream_builder = table.new_stream_read_builder().with_projection(
+            expressions)
+
+        async def first_plan():
+            stream = stream_builder.new_streaming_scan().stream()
+            try:
+                return await stream.__anext__()
+            finally:
+                await stream.aclose()
+
+        stream_result = stream_builder.new_read().to_arrow(
+            asyncio.run(first_plan()).splits())
+        self.assertEqual(stream_result.to_pydict(), expected)
+
+        bad = pa.table({
+            'id': [3],
+            'payload': GenericVariant.to_arrow_array([
+                GenericVariant.from_python({'x': 'bad'})]),
+        }, schema=self._pa_schema())
+        writer = writer_builder.new_write()
+        commit = writer_builder.new_commit()
+        writer.write_arrow(bad)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        tolerant = table.new_read_builder().with_projection({
+            'x': "try_variant_get(payload, '$.x', 'float')"})
+        result = tolerant.new_read().to_arrow(
+            tolerant.new_scan().plan().splits())
+        self.assertEqual(result['x'].to_pylist(), [1.25, None, None])
+        strict = table.new_read_builder().with_projection({
+            'x': "variant_get(payload, '$.x', 'float')"})
+        with self.assertRaisesRegex(Exception, 'Cannot cast Variant'):
+            strict.new_read().to_arrow(strict.new_scan().plan().splits())
 
     def test_plain_variant_write_and_read(self):
         """Plain VARIANT: GenericVariant → write_arrow → to_arrow → GenericVariant."""
