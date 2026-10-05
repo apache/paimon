@@ -24,6 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.map_shared_shredding import is_map_selected_keys_field
 from pypaimon.read.datasource.split_provider import CatalogSplitProvider, PreResolvedSplitProvider
@@ -260,6 +261,139 @@ def test_explicit_nested_read_type_preserves_structured_output(tmp_path, native)
     assert result.to_pylist() == [
         {'profile': {'detail': {'score': 7}}, 'id': 1}, {'profile': None, 'id': 2},
         {'profile': {'detail': None}, 'id': 3}]
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('mode', ['append', 'de', 'pk'])
+@pytest.mark.parametrize('entrypoint', ['read_type', 'projection'])
+def test_empty_reader_request_keeps_filtered_rows_and_limit(tmp_path, native, mode, entrypoint):
+    table, _ = _table(tmp_path, mode, True)
+    table = table.copy({'read.native.enabled': str(native).lower()})
+    builder = table.new_read_builder()
+    if entrypoint == 'read_type':
+        builder.with_read_type([])
+    else:
+        builder.with_projection([])
+    builder.with_filter(table.new_read_builder().new_predicate_builder().greater_than('id', 1)).with_limit(1)
+    splits = builder.new_scan().plan().splits()
+    read = builder.new_read()
+    for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+        assert result.num_columns == 0
+        assert result.num_rows == 1
+    rows = list(read.to_iterator(splits))
+    assert len(rows) == 1
+    assert len(rows[0]) == 0
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('mode', ['append', 'de', 'pk'])
+def test_named_map_alias_does_not_change_physical_predicate(tmp_path, native, mode):
+    table, _ = _table(tmp_path, mode, True)
+    table = table.copy({'read.native.enabled': str(native).lower()})
+    builder = table.new_read_builder().with_projection({'id': "attrs['overflow']"})
+    builder.with_filter(table.new_read_builder().new_predicate_builder().equal('id', 1))
+    read = builder.new_read()
+    splits = builder.new_scan().plan().splits()
+    for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+        assert result.to_pydict() == {'id': [20]}
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('mode', ['append', 'pk'])
+@pytest.mark.parametrize('projection', [
+    ['profile.detail.score', 'profile.detail.unused', 'profile.unused'],
+    ['profile', 'profile.detail.score'],
+    ['profile.detail.score', 'profile.detail.score'],
+])
+def test_leaf_predicate_survives_whole_row_and_all_children(tmp_path, native, mode, projection):
+    table, _ = _table(tmp_path, mode, True)
+    table = table.copy({'read.native.enabled': str(native).lower()})
+    splits = table.new_read_builder().new_scan().plan().splits()
+    builder = table.new_read_builder().with_projection(['profile.detail.score'])
+    predicate = builder.new_predicate_builder().equal('profile_detail_score', 7)
+    builder.with_filter(predicate).with_projection(projection)
+    builder.new_predicate_builder().equal('profile_detail_score', 7)
+    read = builder.new_read()
+    leaf_index = projection.index('profile.detail.score')
+    for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+        assert result.num_rows == 1
+        assert result.column(leaf_index).to_pylist() == [7]
+    rows = [tuple(row.get_field(i) for i in range(len(row))) for row in read.to_iterator(splits)]
+    assert len(rows) == 1
+    assert rows[0][leaf_index] == 7
+    if len(set(projection)) != len(projection):
+        duplicate = builder.new_predicate_builder().equal('profile_detail_score__0', 7)
+        builder.with_filter(duplicate)
+        assert builder.new_read().to_arrow(splits).num_rows == 1
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('projection', [['profile'], ['id']])
+@pytest.mark.parametrize('combine', ['leaf', 'and', 'or'])
+def test_removed_leaf_predicate_is_rejected_instead_of_ignored(tmp_path, native, projection, combine):
+    table, _ = _table(tmp_path, 'append', True)
+    table = table.copy({'read.native.enabled': str(native).lower()})
+    builder = table.new_read_builder().with_projection(['profile.detail.score'])
+    predicate = builder.new_predicate_builder().equal('profile_detail_score', 7)
+    if combine != 'leaf':
+        physical = table.new_read_builder().new_predicate_builder().greater_than('id', 0)
+        predicate = (PredicateBuilder.and_predicates if combine == 'and'
+                     else PredicateBuilder.or_predicates)([predicate, physical])
+    builder.with_filter(predicate).with_projection(projection)
+    with pytest.raises(ValueError, match='profile_detail_score'):
+        builder.new_read()
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+def test_whole_map_and_selected_key_share_the_reader(tmp_path, native, mode):
+    table, _ = _table(tmp_path, mode, True)
+    table = table.copy({'read.native.enabled': str(native).lower()})
+    builder = table.new_read_builder().with_projection(['attrs', "attrs['overflow']", 'id'])
+    splits = builder.new_scan().plan().splits()
+    read = builder.new_read()
+    for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+        result = result.sort_by('id')
+        assert result.column('attrs_overflow').to_pylist() == [20, None, None]
+        assert result.column('attrs').to_pylist() == [[('first', 10), ('overflow', 20), ('', 30)], None, []]
+    rows = sorted([(row.get_field(2), row.get_field(1)) for row in read.to_iterator(splits)])
+    assert rows == [(1, 20), (2, None), (3, None)]
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+@pytest.mark.parametrize('parent, child, mask_target', [
+    ('profile', 'profile.detail.score', 'profile'),
+    ('attrs', "attrs['overflow']", 'attrs'),
+    ('attrs', "attrs['overflow']", 'id'),
+])
+def test_whole_parent_and_child_apply_authorization_before_extraction(
+        tmp_path, native, mode, parent, child, mask_target):
+    from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
+    from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+
+    table, _ = _table(tmp_path, mode, True)
+    table = table.copy({'read.native.enabled': str(native).lower(), 'query-auth.enabled': 'true'})
+    builder = table.new_read_builder().with_projection([parent, child, 'id'])
+    auth = TableQueryAuthResult(None, {mask_target: json.dumps({'name': 'NULL'})})
+    with patch.object(FileSystemCatalog, 'auth_table_query', return_value=auth):
+        splits = builder.new_scan().plan().splits()
+        read = builder.new_read()
+        for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+            assert result.num_rows == 3
+            if mask_target == parent:
+                assert result.column(0).to_pylist() == [None] * 3
+                assert result.column(1).to_pylist() == [None] * 3
+            else:
+                assert result.column('id').to_pylist() == [None] * 3
+                assert sorted(value for value in result.column(1).to_pylist() if value is not None) == [20]
+        rows = [tuple(row.get_field(i) for i in range(len(row))) for row in read.to_iterator(splits)]
+        assert len(rows) == 3
+        if mask_target == parent:
+            assert all(row[0] is None and row[1] is None for row in rows)
+        else:
+            assert all(row[2] is None for row in rows)
+            assert sorted(row[1] for row in rows if row[1] is not None) == [20]
 
 
 def test_clipped_variant_reads_only_selected_paths_for_all_json_kinds(tmp_path):

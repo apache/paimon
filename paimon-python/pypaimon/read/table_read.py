@@ -168,7 +168,8 @@ class TableRead:
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.read_type = read_type
-        self._adapter_read_type = (reader_adapter(read_type, self._table_read_fields())[0]
+        self.output_projection = output_projection
+        self._adapter_read_type = (self._reader_adapter()[0]
                                    if output_projection is not None else read_type)
         # Split readers may need predicate-only columns that are absent from
         # the requested output. Read the widened schema internally, then use
@@ -196,7 +197,6 @@ class TableRead:
             if self.table.options.data_evolution_enabled() else set()
         )
         self.include_row_kind = include_row_kind
-        self.output_projection = output_projection
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
         self._parquet_row_group_cache = None
@@ -218,17 +218,17 @@ class TableRead:
                 remaining = None if limit is None else limit - count
                 reader = self.__create_reader_for_split(
                     split, limit=remaining)
-                if self.output_projection is not None:
-                    from pypaimon.read.reader.outer_projection_record_reader import OuterProjectionRecordReader
-                    _, paths = reader_adapter(self.read_type, self._table_read_fields())
-                    outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
-                    reader = OuterProjectionRecordReader(
-                        reader, [field.name for field in self._adapter_read_type],
-                        [path for _, path in outputs], file_io=getattr(reader, 'file_io', None),
-                        blob_field_indices=getattr(reader, 'blob_field_indices', None),
-                        descriptor_field_indices=getattr(reader, 'descriptor_field_indices', None),
-                        vector_field_indices=getattr(reader, 'vector_field_indices', None))
                 try:
+                    if self.output_projection is not None or not self._adapter_read_type:
+                        from pypaimon.read.reader.outer_projection_record_reader import OuterProjectionRecordReader
+                        _, paths = self._reader_adapter()
+                        outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
+                        reader = OuterProjectionRecordReader(
+                            reader, [field.name for field in self._adapter_read_type],
+                            [path for _, path in outputs], file_io=getattr(reader, 'file_io', None),
+                            blob_field_indices=getattr(reader, 'blob_field_indices', None),
+                            descriptor_field_indices=getattr(reader, 'descriptor_field_indices', None),
+                            vector_field_indices=getattr(reader, 'vector_field_indices', None))
                     for batch in iter(reader.read_batch, None):
                         for row in iter(batch.next, None):
                             yield row
@@ -445,8 +445,20 @@ class TableRead:
     def nested_name_paths(self):
         if self.output_projection is None:
             return None
-        _, paths = reader_adapter(self.read_type, self._table_read_fields())
+        _, paths = self._reader_adapter()
         return paths if any(len(path) > 1 for path in paths) else None
+
+    def _reader_adapter(self):
+        adapter = reader_adapter(self.read_type, self._table_read_fields())
+        if (self.predicate is None or self.output_projection is None
+                or self.output_projection.named):
+            return adapter
+        # Keep complete source columns for authorization and result extraction.
+        # Only a predicate on a flat list-projection leaf needs an additional
+        # local leaf view, even when its parent ROW is requested in full.
+        projected = reader_adapter(self.read_type, self._table_read_fields(), self.output_projection)
+        extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
+        return projected if predicate_field_names(self.predicate) & extra_names else adapter
 
     def _output_arrow_schema(self):
         return output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
@@ -846,7 +858,7 @@ class TableRead:
         return batch
 
     def _flatten_native_nested_batch(self, batch, schema):
-        _, paths = reader_adapter(self.read_type, self._table_read_fields())
+        _, paths = self._reader_adapter()
         arrays = [extract_array(batch, path) for path in paths]
         fields = list(PyarrowFieldParser.from_paimon_schema(self._adapter_read_type))
         if self.include_row_kind:
@@ -1656,7 +1668,7 @@ class TableRead:
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
         if self.output_projection is not None:
-            _, paths = reader_adapter(self.read_type, self._table_read_fields())
+            _, paths = self._reader_adapter()
             outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
             arrays = [extract_array(batch, path) for _, path in outputs]
             fields = list(self._output_arrow_schema())
@@ -1676,6 +1688,8 @@ class TableRead:
         name_to_pos = {name: i for i, name in enumerate(batch.schema.names)}
         arrays = [batch.column(name_to_pos[name]) for name in output_names]
         fields = [batch.schema.field(name_to_pos[name]) for name in output_names]
+        if not arrays:
+            return batch.select([])
         return pyarrow.RecordBatch.from_arrays(
             arrays, schema=pyarrow.schema(fields))
 
@@ -1698,7 +1712,12 @@ class TableRead:
         missing = predicate_fields - read_names
         if not missing:
             return []
-        return [f for f in self._table_read_fields() if f.name in missing]
+        table_fields = self._table_read_fields()
+        unknown = missing - {field.name for field in table_fields}
+        if unknown:
+            raise ValueError(
+                "Predicate fields %r are not in the table schema or the reader projection" % sorted(unknown))
+        return [f for f in table_fields if f.name in missing]
 
     def _table_read_fields(self) -> List[DataField]:
         from pypaimon.table.special_fields import SpecialFields

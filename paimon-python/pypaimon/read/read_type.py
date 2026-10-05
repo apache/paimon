@@ -79,11 +79,12 @@ def _adapter_source(source, requested):
     return source
 
 
-def reader_adapter(read_type, table_fields):
+def reader_adapter(read_type, table_fields, projection=None):
     """Derive flat Python-format adapter fields from the canonical read type.
 
-    Python split readers consume flat leaf requests. This is local adaptation;
-    no source paths are stored by builders or transported to Native or Ray.
+    Python split readers consume flat leaf requests. A result projection also
+    supplies their local extraction view, including leaves under a whole ROW.
+    Native and Ray still receive the complete canonical reader type.
     """
     paths = []
     source_fields = list(table_fields)
@@ -111,6 +112,10 @@ def reader_adapter(read_type, table_fields):
         else:
             source_fields.append(adapted)
         visit(field, source, [field.name])
+    if projection is not None and not projection.named:
+        paths = [path for _, path in projection.columns]
+        if all(len(path) == 1 for path in paths):
+            paths = [[name] for name in dict.fromkeys(path[0] for path in paths)]
     # Resolve aliases against the complete table, including unprojected
     # physical columns which can be referenced by a predicate.
     indexes = []

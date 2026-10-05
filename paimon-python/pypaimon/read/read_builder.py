@@ -187,7 +187,7 @@ class ReadBuilder:
 
     def _nested_name_paths(self):
         """Derive format-adapter paths; the read type remains authoritative."""
-        _, paths = reader_adapter(self.read_type(), self._table_read_fields())
+        _, paths = reader_adapter(self.read_type(), self._table_read_fields(), self._output_projection)
         return paths if any(len(path) > 1 for path in paths) else None
 
     def _output_name_paths(self):
@@ -200,7 +200,7 @@ class ReadBuilder:
         # evaluator. Derive that view without changing the reader request.
         fields = self.read_type()
         if self._output_projection is not None and not self._output_projection.named:
-            fields = reader_adapter(fields, self._table_read_fields())[0]
+            fields = reader_adapter(fields, self._table_read_fields(), self._output_projection)[0]
         return _ReadPredicateBuilder(
             fields, self._map_key_output_names())
 
@@ -387,7 +387,8 @@ class ReadBuilder:
             raise NotImplementedError("Filtering projected MAP keys is not supported: {}".format(sorted(unsupported)))
 
     def _map_key_output_names(self):
-        if self._output_projection is None:
+        if self._output_projection is None or self._output_projection.named:
+            # Named result aliases do not participate in source predicates.
             return set()
         fields = {field.name: field for field in self._table_read_fields()}
         return {alias for alias, path in self._output_projection.columns
