@@ -525,7 +525,8 @@ class TableRead:
                 "requires the Python reader")
         try:
             from pypaimon.read.native_plan import (
-                _prepare_native_read, native_read, native_split_from_python)
+                _prepare_native_read, _raise_if_native_fork_safety_error,
+                native_read, native_split_from_python)
         except Exception as e:
             return self._native_fallback(str(e), e, log=True)
         rust_splits = []
@@ -551,6 +552,7 @@ class TableRead:
             try:
                 read_splits = _prepare_native_read(self.table, **read_kwargs)
             except Exception as e:
+                _raise_if_native_fork_safety_error(e)
                 return self._native_fallback(str(e), e, log=True)
             if streaming:
                 groups = self._native_split_groups(
@@ -571,6 +573,7 @@ class TableRead:
                                     "another reader failed to start",
                                     exc_info=True,
                                 )
+                    _raise_if_native_fork_safety_error(e)
                     return self._native_fallback(str(e), e, log=True)
                 batches = self._native_batches_parallel_streaming(readers)
                 return self._convert_native_batches(batches, schema)
@@ -579,11 +582,13 @@ class TableRead:
                     read_splits, rust_splits, schema, parallelism,
                     split_weights)
             except _NativeReadSetupError as e:
+                _raise_if_native_fork_safety_error(e)
                 return self._native_fallback(str(e), e, log=True)
         try:
             read_kwargs = self._native_read_kwargs(blob_parallelism)
             batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
+            _raise_if_native_fork_safety_error(e)
             return self._native_fallback(str(e), e, log=True)
         return self._convert_native_batches(batches, schema)
 
