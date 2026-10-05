@@ -401,9 +401,8 @@ Limitations:
 
 ### Video
 
-Video is an independent, versioned format with the `.video` extension. It packs one or more
-complete encoded-video payloads and logical frame runs. The payloads are raw byte ranges without
-the ordinary BLOB entry header, length trailer, or per-entry CRC:
+`.video` stores complete encoded videos and logical frame runs. Video payloads have no BLOB entry
+header, length trailer, or per-entry CRC:
 
 ```
 +----------------------------+
@@ -419,7 +418,7 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 +----------------------------+
 | Physical Length Index      |  Delta-Varint video lengths
 +----------------------------+
-| Keyframe-Index Length Index |  Per-video index block lengths, Delta-Varint encoded (0 = absent)
+| Keyframe-Index Length Index |  Delta-Varint block lengths per video (0 = scan fallback)
 +----------------------------+
 | Run Length Index           |  Delta-Varint logical row counts
 +----------------------------+
@@ -437,26 +436,23 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 +----------------------------+
 ```
 
-The run arrays have equal element counts. A non-negative run reference is an ordinal in the
-physical length index. For logical row `r` in a run beginning at logical row `s`, the returned
-`VideoFrameDescriptor` identifies the referenced raw video range and frame ordinal
-`run_first_frame + (r - s)`. `-1` is a NULL run and `-2` is a data-evolution placeholder run.
-Non-negative runs have fixed frame stride one; a discontinuity starts another run. Each physical
-video may store one sparse keyframe index; a zero length selects the scan fallback.
+Run arrays have equal element counts. A non-negative run reference identifies a video in the
+physical length index; `-1` means NULL and `-2` means a data-evolution placeholder. For row `r`
+in a run starting at `s`, the frame ordinal is `run_first_frame + (r - s)`. Nonconsecutive frames
+start a new run.
 
-A keyframe-index block has a 17-byte header: version (`1`, uint8), magic (`0x564944454F4B4649`, uint64),
-metadata-range count (uint32), and keyframe count (uint32). It then stores metadata `(offset,
-length)` pairs (two int64 values) and zlib-compressed `(frame ordinal, PTS, packet position)`
-keyframe entries (three int64 values). Offsets are relative to the encoded video; writers reject
-out-of-range values. All numeric fields are little endian. One block is limited to 65,536
-metadata ranges, 65,536 keyframes, and 16 MiB; all blocks in one file are limited to 64 MiB.
+A keyframe-index block has a 17-byte header: version (`1`, uint8), magic (`0x564944454F4B4649`,
+uint64), metadata-range count (uint32), and keyframe count (uint32). It stores metadata `(offset,
+length)` pairs (int64 each) and zlib-compressed `(frame ordinal, PTS, packet position)` entries
+(int64 each). All numeric fields are little endian; offsets are relative to the video payload. Limits:
+65,536 metadata ranges, 65,536 keyframes, 16 MiB per block, and 64 MiB per file.
 
-The index covers the first video stream. Its time base remains in the video. A reader fetches the
-metadata and target GOP, seeks by PTS, and decodes forward in presentation order. It may include the
-following GOP for reordered frames.
+The index covers the first video stream; its time base stays in the video. Readers fetch metadata
+and the target GOP, seek by PTS, and decode in presentation order. Reordered frames may require
+bytes from the following GOP.
 
-The serialized `VideoFrameDescriptor` stored in an Arrow/data-file cell has its own versioned
-wire layout. All numeric values are little endian:
+An Arrow/data-file cell stores a versioned `VideoFrameDescriptor`. All numeric values are little
+endian:
 
 | Field | Size | Description |
 | --- | ---: | --- |
@@ -470,13 +466,10 @@ wire layout. All numeric values are little endian:
 | Keyframe-index offset | 8 bytes | Index offset in the `.video` file, or `-1` |
 | Keyframe-index length | 8 bytes | Index length, or `0` |
 
-Descriptor bytes are independently versioned from the `.video` container. Java and Python share
-canonical descriptor and container fixtures to keep both implementations byte-compatible.
+Descriptor and container versions are independent. Java and Python share byte-compatible fixtures.
 
-Readers validate footer and index bounds, positive physical lengths, full coverage of the payload
-region, equal run-index counts, positive run lengths, physical ordinals, and non-negative first
-frames. The format currently supports one scalar BLOB field per file. Physical video reuse uses
-exact input payload `BlobDescriptor` identity and is file-local; there are no cross-file payload
-references. Ordinary `.blob` files keep their existing version, wrappers, checksums, and layout.
+Readers reject invalid footer/index bounds, payload gaps, run counts, lengths, references, and
+frame ordinals. Files support one scalar BLOB field. Video reuse is file-local and keyed by exact
+input `BlobDescriptor` identity. Ordinary `.blob` files are unchanged.
 
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).
