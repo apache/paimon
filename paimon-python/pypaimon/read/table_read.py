@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import copy
 import logging
 import os
 import queue
@@ -378,6 +379,14 @@ class TableRead:
                 ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
                 shrunk to stay within it.
         """
+        if self.expression_projection is not None:
+            # Keep physical Struct columns through batch assembly. Do not change
+            # this reader: it may also be used for streaming or concurrent reads.
+            physical_read = copy.copy(self)
+            physical_read.expression_projection = None
+            table = physical_read.to_arrow(splits, parallelism, blob_parallelism)
+            return self._project_expression_output(table)
+
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         effective = self._effective_parallelism(parallelism, len(splits))
         schema = self._output_arrow_schema()
@@ -1668,30 +1677,7 @@ class TableRead:
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
         if self.expression_projection is not None:
-            fields = []
-            arrays = []
-            if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
-                fields.append(batch.schema.field(ROW_KIND_COLUMN))
-                arrays.append(batch.column(ROW_KIND_COLUMN))
-            output_schema = self._output_arrow_schema()
-            for alias, source, child in self.expression_projection:
-                index = batch.schema.get_field_index(source)
-                if index < 0:
-                    raise ValueError("Projection source %r is missing" % source)
-                array = batch.column(index)
-                if child is not None:
-                    if not pyarrow.types.is_struct(array.type):
-                        raise TypeError("Variant projection %r is not a struct" % source)
-                    parent = array
-                    array = parent.field(child)
-                    if parent.null_count:
-                        array = pyarrow_compute.if_else(
-                            parent.is_null(),
-                            pyarrow.scalar(None, type=array.type), array)
-                arrays.append(array)
-                fields.append(output_schema.field(alias))
-            return pyarrow.RecordBatch.from_arrays(
-                arrays, schema=pyarrow.schema(fields))
+            return self._project_expression_output(batch)
         if not self._needs_output_projection():
             return batch
         output_names = list(self._output_column_names)
@@ -1704,6 +1690,36 @@ class TableRead:
         fields = [batch.schema.field(name_to_pos[name]) for name in output_names]
         return pyarrow.RecordBatch.from_arrays(
             arrays, schema=pyarrow.schema(fields))
+
+    def _project_expression_output(self, data):
+        schema = getattr(self, '_expression_output_schema', None)
+        if schema is None:
+            schema = self._output_arrow_schema()
+            self._expression_output_schema = schema
+        sources = {}
+        children = {}
+        arrays = []
+        for _, source, child in self.expression_projection:
+            if source not in sources:
+                index = data.schema.get_field_index(source)
+                if index < 0:
+                    raise ValueError("Projection source %r is missing" % source)
+                sources[source] = data.column(index)
+            array = sources[source]
+            if child is not None:
+                if source not in children:
+                    if not pyarrow.types.is_struct(array.type):
+                        raise TypeError("Variant projection %r is not a struct" % source)
+                    # Arrow propagates parent validity, including sliced arrays.
+                    children[source] = array.flatten()
+                array = children[source][child]
+            arrays.append(array)
+        if self.include_row_kind and ROW_KIND_COLUMN in data.schema.names:
+            arrays.insert(0, data.column(ROW_KIND_COLUMN))
+            schema = schema.insert(0, data.schema.field(ROW_KIND_COLUMN))
+        if isinstance(data, pyarrow.Table):
+            return pyarrow.Table.from_arrays(arrays, schema=schema)
+        return pyarrow.RecordBatch.from_arrays(arrays, schema=schema)
 
     def _needs_output_projection(self) -> bool:
         return bool(self._predicate_extra_fields or self.expression_projection)

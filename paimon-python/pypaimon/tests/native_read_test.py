@@ -137,6 +137,78 @@ def test_variant_fields_never_silently_falls_back_to_python():
         read.to_arrow([_Split()])
 
 
+def _named_variant_read():
+    read = _table_read()
+    read.read_type = with_variant_extractions(
+        [DataField(0, 'payload', AtomicType('VARIANT'))],
+        {'payload': {'paths': ['$.x', '$.y'], 'target_type': pa.float32(),
+                     'fail_on_error': False}})
+    read._scan_read_type = read.read_type
+    read._output_column_names = ['payload']
+    read.expression_projection = [('y', 'payload', 1), ('x', 'payload', 0)]
+    return read
+
+
+@pytest.mark.parametrize('empty', [False, True])
+def test_named_projection_table_matches_streaming_with_nulls_and_slices(empty):
+    read = _named_variant_read()
+    payload = pa.StructArray.from_arrays([
+        pa.array([0, 1, 2, None, 4], type=pa.float32()),
+        pa.array([0, None, 2, 3, 4], type=pa.float32()),
+    ], names=['0', '1'], mask=pa.array([False, False, True, False, False]))
+    payload = payload.slice(1, 0 if empty else 3)
+    batches = [pa.record_batch([payload.slice(0, 1)], names=['payload']),
+               pa.record_batch([payload.slice(1)], names=['payload'])]
+    expected = pa.Table.from_batches(
+        [read._project_batch_to_output(b) for b in batches])
+    split = _Split()
+    split._native_split = object()
+    with patch('pypaimon.read.native_plan.native_read', return_value=batches):
+        with patch.object(read, '_project_expression_output',
+                          wraps=read._project_expression_output) as project:
+            actual = read.to_arrow([split])
+            project.assert_called_once()
+            assert isinstance(project.call_args.args[0], pa.Table)
+        again = read.to_arrow([split])
+        streamed = read.to_arrow_batch_reader([split]).read_all()
+    assert actual.equals(expected, check_metadata=True)
+    assert again.equals(expected, check_metadata=True)
+    assert streamed.equals(expected, check_metadata=True)
+    assert read.expression_projection == [('y', 'payload', 1), ('x', 'payload', 0)]
+    if not empty:
+        assert actual.to_pydict() == {'y': [None, None, 3.0], 'x': [1.0, None, None]}
+
+
+def test_named_projection_reuses_schema_and_value_buffers():
+    read = _named_variant_read()
+    payload = pa.StructArray.from_arrays([
+        pa.array([1, 2], type=pa.float32()),
+        pa.array([3, 4], type=pa.float32()),
+    ], names=['0', '1'])
+    batch = pa.record_batch([payload], names=['payload'])
+    with patch.object(read, '_output_arrow_schema',
+                      wraps=read._output_arrow_schema) as schema:
+        first = read._project_batch_to_output(batch)
+        second = read._project_batch_to_output(batch.slice(1))
+        schema.assert_called_once_with()
+    assert first.column(0).buffers()[1].address == payload.field(1).buffers()[1].address
+    assert second.column(1).buffers()[1].address == payload.field(0).buffers()[1].address
+
+
+def test_named_projection_retains_row_kind():
+    from pypaimon.read.table_read import ROW_KIND_COLUMN
+    read = _named_variant_read()
+    read.include_row_kind = True
+    payload = pa.StructArray.from_arrays([
+        pa.array([1], type=pa.float32()), pa.array([2], type=pa.float32()),
+    ], names=['0', '1'])
+    batch = pa.record_batch([pa.array(['+I']), payload],
+                            names=[ROW_KIND_COLUMN, 'payload'])
+    actual = read._project_batch_to_output(batch)
+    assert actual.column_names == [ROW_KIND_COLUMN, 'y', 'x']
+    assert actual.column(0).to_pylist() == ['+I']
+
+
 @pytest.mark.parametrize('type_', ['FLOAT', 'DOUBLE'])
 def test_floating_sequence_falls_back_before_native_read(type_):
     read = _table_read()
