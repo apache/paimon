@@ -178,7 +178,9 @@ public class DataEvolutionFullTextRead implements FullTextRead {
      *       dropped, or a {@code contains} / {@code endsWith} / {@code like} leaf, which BTree
      *       answers with every non-null row), the candidates are refined by reading their filter
      *       columns if {@code global-index.filter.refine-from-data} allows it, and excluded
-     *       otherwise.
+     *       otherwise. When every index covering the filter columns declines the predicate, the
+     *       rows are excluded in {@code fast} and otherwise decided by reading their filter
+     *       columns.
      *   <li>Rows whose filter columns are not covered follow {@code scalar-index.search-mode}:
      *       excluded in {@code fast}, otherwise decided by reading their filter columns.
      * </ul>
@@ -247,6 +249,11 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                 matched.or(fromIndex);
             } else {
                 warnUnindexedFilter();
+                if (table.coreOptions().scalarIndexSearchMode() != GlobalIndexSearchMode.FAST) {
+                    // No scalar index could evaluate the filter: decide these rows from the data,
+                    // like rows whose filter columns have no index.
+                    unindexed.or(decidedByIndex);
+                }
             }
         }
         if (!unindexed.isEmpty()) {
