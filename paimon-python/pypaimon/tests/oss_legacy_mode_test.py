@@ -47,6 +47,27 @@ def _probe_response(status_code, body):
 class OssLegacyModeTest(unittest.TestCase):
     """Behavior of OssFileIO when OSS runs on PyArrow < 16."""
 
+    def test_cpp_keeps_python_backend_and_original_properties(self):
+        for available, backend in ((True, 'jindo'), (False, 'legacy')):
+            for explicit in (None, 'legacy', 'jindo'):
+                options = Options({'fs.oss.impl': 'cpp',
+                                   'fs.oss.cpp.library.path': '/test/libbridge.so'})
+                if explicit is not None:
+                    options.set(OssOptions.OSS_PYTHON_IMPL, explicit)
+                expected = 'legacy' if explicit == 'legacy' else backend
+                with mock.patch('pypaimon.filesystem.pyarrow_file_io.JINDO_AVAILABLE', available), \
+                        mock.patch.object(OssFileIO, '_initialize_oss_fs') as legacy, \
+                        mock.patch.object(OssFileIO, '_initialize_jindo_fs') as jindo:
+                    file_io = OssFileIO(TABLE_PATH, options)
+                self.assertEqual(jindo.call_count, int(expected == 'jindo'))
+                self.assertEqual(legacy.call_count, int(expected == 'legacy'))
+                self.assertIs(file_io.properties, options)
+                self.assertEqual(options.get(OssOptions.OSS_IMPL), 'cpp')
+
+    def test_cpp_rejects_invalid_python_backend(self):
+        with self.assertRaisesRegex(ValueError, 'fs.oss.python.impl'):
+            OssFileIO(TABLE_PATH, Options({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'cpp'}))
+
     def _new_file_io(self, legacy):
         options = Options({
             OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
