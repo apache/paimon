@@ -225,4 +225,24 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       }
     }
   }
+
+  test("Paimon copy files procedure: rows written after the copy get new row ids") {
+    withTable("src", "dst") {
+      sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO src VALUES (1, 'a')")
+      sql("INSERT INTO src VALUES (2, 'b')")
+
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      // the copied rows keep their row ids
+      checkAnswer(sql("SELECT id, _ROW_ID FROM dst"), Seq(Row(1, 0), Row(2, 1)))
+
+      // rows written afterwards continue after them instead of reusing them
+      sql("INSERT INTO dst VALUES (3, 'c'), (4, 'd')")
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM dst"),
+        Seq(Row(1, 0), Row(2, 1), Row(3, 2), Row(4, 3)))
+    }
+  }
 }
