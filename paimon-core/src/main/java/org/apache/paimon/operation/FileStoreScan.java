@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
@@ -125,6 +126,25 @@ public interface FileStoreScan {
 
     Iterator<ManifestEntry> readFileIterator(List<ManifestFileMeta> manifestFileMetas);
 
+    /** Whether this scan can expose its effective files without first materializing them. */
+    default boolean supportsStreamingPlan() {
+        return false;
+    }
+
+    /** Produce snapshot metadata and an iterator over the effective files of the plan. */
+    default StreamingPlan streamingPlan() {
+        throw new UnsupportedOperationException(
+                "Streaming file planning is not supported by " + getClass().getName());
+    }
+
+    /** Signals that a scan discovered a shape which requires the eager planning implementation. */
+    final class StreamingPlanFallbackException extends UnsupportedOperationException {
+
+        public StreamingPlanFallbackException(String message) {
+            super(message);
+        }
+    }
+
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()
                 .map(PartitionEntry::partition)
@@ -163,5 +183,17 @@ public interface FileStoreScan {
             }
             return groupBy;
         }
+    }
+
+    /** Snapshot metadata plus a single-pass iterator over effective manifest entries. */
+    interface StreamingPlan {
+
+        @Nullable
+        Long watermark();
+
+        @Nullable
+        Snapshot snapshot();
+
+        CloseableIterator<ManifestEntry> files();
     }
 }

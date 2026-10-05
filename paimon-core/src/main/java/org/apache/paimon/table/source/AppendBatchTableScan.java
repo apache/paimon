@@ -34,4 +34,9 @@ public class AppendBatchTableScan extends AbstractBatchTableScan {
             TableQueryAuth queryAuth) {
         super(schema, schemaManager, options, snapshotReader, queryAuth);
     }
+
+    @Override
+    protected boolean incrementalSplitPlanningEnabled() {
+        return true;
+    }
 }

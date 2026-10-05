@@ -27,6 +27,14 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.metrics.Gauge;
+import org.apache.paimon.metrics.Histogram;
+import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.metrics.TestMetricRegistry;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -36,30 +44,38 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IndexFile;
 import org.apache.paimon.table.source.RawFile;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link SnapshotReader}. */
 public class SnapshotReaderTest {
@@ -259,6 +275,200 @@ public class SnapshotReaderTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testIncrementalSplitPlanningFallsBackBeforeDeletedManifests() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(rowType, Collections.emptyList(), Collections.emptyList());
+
+        String commitUser = UUID.randomUUID().toString();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10L));
+            commit.commit(1, write.prepareCommit(false, 1));
+            write.write(GenericRow.of(2, 20L));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+
+        BatchWriteBuilder overwrite = table.newBatchWriteBuilder().withOverwrite();
+        try (BatchTableWrite write = overwrite.newWrite();
+                BatchTableCommit commit = overwrite.newCommit()) {
+            write.write(GenericRow.of(3, 30L));
+            write.write(GenericRow.of(4, 40L));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<ManifestFileMeta> manifests =
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(
+                                table.latestSnapshot()
+                                        .orElseThrow(
+                                                () ->
+                                                        new IllegalStateException(
+                                                                "Expected a latest snapshot")));
+        assertThat(manifests).anyMatch(manifest -> manifest.numDeletedFiles() > 0);
+        assertThatThrownBy(() -> table.store().newScan().streamingPlan())
+                .isInstanceOf(FileStoreScan.StreamingPlanFallbackException.class);
+
+        SnapshotReader reader = table.newSnapshotReader();
+        assertThat(reader.supportsFineGrainedSplitPlanning()).isTrue();
+        SnapshotReader.SplitPlan plan = reader.openSplitPlan();
+        List<Split> emitted = readSplits(plan);
+        List<Split> eager = table.newSnapshotReader().read().splits();
+
+        assertThat(fileNames(emitted)).containsExactlyElementsOf(fileNames(eager));
+        assertThat(plan.fineGrained()).isFalse();
+        assertThat(plan.snapshotId()).isEqualTo(table.latestSnapshot().get().id());
+        assertThat(emitted.stream().mapToLong(Split::rowCount).sum())
+                .isEqualTo(eager.stream().mapToLong(Split::rowCount).sum());
+    }
+
+    @Test
+    public void testIncrementalSplitPlanningStreamsAddOnlyManifests() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(rowType, Collections.emptyList(), Collections.emptyList());
+
+        String commitUser = UUID.randomUUID().toString();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int identifier = 0; identifier < 4; identifier++) {
+                write.write(GenericRow.of(identifier, identifier * 10L));
+                commit.commit(identifier + 1L, write.prepareCommit(false, identifier + 1L));
+            }
+        }
+
+        SnapshotReader reader = table.newSnapshotReader();
+        assertThat(reader.supportsFineGrainedSplitPlanning()).isTrue();
+        SnapshotReader.SplitPlan plan = reader.openSplitPlan();
+        List<Split> streamed = readSplits(plan);
+        List<Split> eager = table.newSnapshotReader().read().splits();
+
+        assertThat(fileNames(streamed)).containsExactlyElementsOf(fileNames(eager));
+        assertThat(plan.fineGrained()).isTrue();
+        assertThat(plan.snapshotId()).isEqualTo(table.latestSnapshot().get().id());
+        assertThat(streamed)
+                .allSatisfy(
+                        split -> {
+                            DataSplit dataSplit = (DataSplit) split;
+                            assertThat(dataSplit.dataFiles()).hasSize(1);
+                            assertThat(dataSplit.rawConvertible()).isTrue();
+                        });
+        assertThat(streamed.stream().mapToLong(Split::rowCount).sum())
+                .isEqualTo(eager.stream().mapToLong(Split::rowCount).sum());
+    }
+
+    @Test
+    public void testIncrementalSplitPlanningReportsCompletedScanMetrics() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(rowType, Collections.emptyList(), Collections.emptyList());
+
+        String commitUser = UUID.randomUUID().toString();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int identifier = 0; identifier < 4; identifier++) {
+                write.write(GenericRow.of(identifier, identifier * 10L));
+                commit.commit(identifier + 1L, write.prepareCommit(false, identifier + 1L));
+            }
+        }
+
+        CapturingMetricRegistry registry = new CapturingMetricRegistry();
+        SnapshotReader reader = table.newSnapshotReader().withMetricRegistry(registry);
+        SnapshotReader.SplitPlan plan = reader.openSplitPlan();
+        List<Split> streamed = new ArrayList<>();
+        try (CloseableIterator<Split> iterator = plan.splits()) {
+            assertThat(iterator.hasNext()).isTrue();
+            streamed.add(iterator.next());
+            // Time spent by the caller between iterator operations is not scan planning time.
+            Thread.sleep(1500);
+            iterator.forEachRemaining(streamed::add);
+        }
+
+        Map<String, org.apache.paimon.metrics.Metric> metrics = registry.group.getMetrics();
+        Gauge<Long> snapshotId = (Gauge<Long>) metrics.get(ScanMetrics.LAST_SCANNED_SNAPSHOT_ID);
+        Gauge<Long> scannedManifests =
+                (Gauge<Long>) metrics.get(ScanMetrics.LAST_SCANNED_MANIFESTS);
+        Gauge<Long> resultedFiles =
+                (Gauge<Long>) metrics.get(ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES);
+        Histogram duration = (Histogram) metrics.get(ScanMetrics.SCAN_DURATION);
+
+        assertThat(snapshotId.getValue()).isEqualTo(table.latestSnapshot().get().id());
+        assertThat(scannedManifests.getValue()).isPositive();
+        assertThat(resultedFiles.getValue()).isEqualTo(fileNames(streamed).size());
+        assertThat(duration.getCount()).isOne();
+        assertThat(duration.getStatistics().getMax()).isLessThan(1000);
+    }
+
+    @Test
+    public void testFineGrainedPlanningFallsBackForLimit() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(rowType, Collections.emptyList(), Collections.emptyList());
+
+        String commitUser = UUID.randomUUID().toString();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int identifier = 0; identifier < 4; identifier++) {
+                write.write(GenericRow.of(identifier, identifier * 10L));
+                commit.commit(identifier + 1L, write.prepareCommit(false, identifier + 1L));
+            }
+        }
+
+        SnapshotReader reader = table.newSnapshotReader().withLimit(1);
+        assertThat(reader.supportsFineGrainedSplitPlanning()).isFalse();
+        SnapshotReader.SplitPlan plan = reader.openSplitPlan();
+        List<Split> actual = readSplits(plan);
+        List<Split> expected = table.newSnapshotReader().withLimit(1).read().splits();
+
+        assertThat(plan.fineGrained()).isFalse();
+        assertThat(fileNames(actual)).containsExactlyElementsOf(fileNames(expected));
+        assertThat(actual.stream().mapToLong(Split::rowCount).sum())
+                .isEqualTo(expected.stream().mapToLong(Split::rowCount).sum());
+    }
+
+    private static List<Split> readSplits(SnapshotReader.SplitPlan plan) throws Exception {
+        List<Split> splits = new ArrayList<>();
+        try (CloseableIterator<Split> iterator = plan.splits()) {
+            iterator.forEachRemaining(splits::add);
+        }
+        return splits;
+    }
+
+    private static List<String> fileNames(List<Split> splits) {
+        return splits.stream()
+                .map(DataSplit.class::cast)
+                .flatMap(split -> split.dataFiles().stream())
+                .map(DataFileMeta::fileName)
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    private static class CapturingMetricRegistry implements MetricRegistry {
+
+        private MetricGroup group;
+
+        @Override
+        public MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {
+            group = new TestMetricRegistry().createMetricGroup(groupName, variables);
+            return group;
+        }
     }
 
     @Test

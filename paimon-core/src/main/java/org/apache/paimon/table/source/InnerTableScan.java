@@ -24,6 +24,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -36,6 +37,11 @@ import java.util.Map;
 
 /** Inner {@link TableScan} contains filter push down. */
 public interface InnerTableScan extends TableScan {
+
+    /** Open a single-pass plan, falling back to the materialized plan by default. */
+    default SnapshotReader.SplitPlan openSplitPlan() {
+        return SnapshotReader.SplitPlan.fromTablePlan(plan());
+    }
 
     InnerTableScan withFilter(Predicate predicate);
 

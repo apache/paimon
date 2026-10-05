@@ -212,21 +212,32 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     }
 
     /**
-     * Scans projected manifest entries without materializing {@link PojoManifestEntry}s.
-     *
-     * <p>Every returned {@link ProjectedManifestEntry} has independent backing data and can be
-     * retained after the iterator advances or closes. The caller must close the iterator.
-     *
-     * <p>This method intentionally bypasses the manifest cache because cached entries are
-     * materialized with the complete manifest schema.
+     * Scans projected manifest entries without materializing {@link PojoManifestEntry}s. Returned
+     * entries have independent backing data. The caller must close the iterator.
      */
     public CloseableIterator<ProjectedManifestEntry> scan(String fileName, Projection projection) {
+        return scan(fileName, projection, null, null, null);
+    }
+
+    /**
+     * Scans projected entries with manifest pruning while keeping only the current reader block in
+     * memory.
+     */
+    public CloseableIterator<ProjectedManifestEntry> scan(
+            String fileName,
+            Projection projection,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            @Nullable ManifestSidecar.Selection selected) {
         try {
             CloseableIterator<InternalRow> rows =
                     createManifestIterator(
                             fileIO,
                             pathFactory.toPath(fileName),
                             projection.projectedType(),
+                            partitionFilter,
+                            bucketFilter,
+                            selected,
                             null,
                             null);
             return new CloseableIterator<ProjectedManifestEntry>() {

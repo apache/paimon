@@ -68,12 +68,14 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.tag.BatchReadTagCreator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -497,6 +499,71 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|22|202|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testIncrementalSplitPlanningHasEquivalentFiles() throws Exception {
+        writeData();
+        FileStoreTable table = createFileStoreTable();
+
+        List<Split> expected = table.newReadBuilder().newScan().plan().splits();
+        List<Split> actual = new ArrayList<>();
+        org.apache.paimon.table.source.snapshot.SnapshotReader.SplitPlan plan =
+                ((InnerTableScan) table.newReadBuilder().newScan()).openSplitPlan();
+        try (CloseableIterator<Split> splits = plan.splits()) {
+            splits.forEachRemaining(actual::add);
+        }
+
+        List<String> expectedFiles =
+                expected.stream()
+                        .map(DataSplit.class::cast)
+                        .flatMap(split -> split.dataFiles().stream())
+                        .map(DataFileMeta::fileName)
+                        .sorted()
+                        .collect(Collectors.toList());
+        List<String> actualFiles =
+                actual.stream()
+                        .map(DataSplit.class::cast)
+                        .flatMap(split -> split.dataFiles().stream())
+                        .map(DataFileMeta::fileName)
+                        .sorted()
+                        .collect(Collectors.toList());
+
+        assertThat(actualFiles).isEqualTo(expectedFiles);
+        assertThat(plan.fineGrained()).isTrue();
+        assertThat(actual)
+                .allSatisfy(
+                        split -> {
+                            DataSplit dataSplit = (DataSplit) split;
+                            assertThat(dataSplit.dataFiles()).hasSize(1);
+                            assertThat(dataSplit.rawConvertible()).isTrue();
+                        });
+        assertThat(actual.stream().mapToLong(Split::rowCount).sum())
+                .isEqualTo(expected.stream().mapToLong(Split::rowCount).sum());
+    }
+
+    @Test
+    public void testFineGrainedPlanCreatesReadProtectionBeforeIteration() throws Exception {
+        writeData();
+        FileStoreTable table =
+                createFileStoreTable()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_PLAN_AUTO_TAG_FOR_READ_TIME_RETAINED.key(),
+                                        "1 h"));
+        InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
+
+        org.apache.paimon.table.source.snapshot.SnapshotReader.SplitPlan plan =
+                scan.openSplitPlan();
+        String tagName = scan.readProtectionTagName();
+
+        assertThat(plan.fineGrained()).isTrue();
+        assertThat(tagName).startsWith(BatchReadTagCreator.BATCH_READ_TAG_PREFIX);
+        assertThat(table.tagManager().tagExists(tagName)).isTrue();
+        try (CloseableIterator<Split> splits = plan.splits()) {
+            assertThat(splits.hasNext()).isTrue();
+        }
+        table.deleteTag(tagName);
     }
 
     @Test

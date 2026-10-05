@@ -45,6 +45,16 @@ public abstract class ReadPlanStartingScanner extends AbstractStartingScanner {
         return StartingScanner.fromPlan(configured.read());
     }
 
+    /** Configure the fixed starting snapshot and open its single-pass plan. */
+    public SnapshotReader.SplitPlan openSplitPlan(SnapshotReader snapshotReader) {
+        SnapshotReader configured = configure(snapshotReader);
+        if (configured == null) {
+            return new SnapshotReader.SplitPlan(
+                    null, null, false, org.apache.paimon.utils.CloseableIterator.empty());
+        }
+        return configured.openSplitPlan();
+    }
+
     @Override
     public List<PartitionEntry> scanPartitions(SnapshotReader snapshotReader) {
         SnapshotReader configured = configure(snapshotReader);

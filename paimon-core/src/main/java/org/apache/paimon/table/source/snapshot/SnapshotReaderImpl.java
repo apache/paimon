@@ -43,6 +43,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
@@ -53,6 +54,7 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -407,6 +409,68 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, grouped);
         return new PlanImpl(
                 plan.watermark(), snapshot == null ? null : snapshot.id(), snapshot, (List) splits);
+    }
+
+    @Override
+    public boolean supportsFineGrainedSplitPlanning() {
+        return scanMode == ScanMode.ALL
+                && splitGenerator instanceof AppendOnlySplitGenerator
+                && !deletionVectors
+                && !options.scanPlanSortPartition()
+                && scan.supportsStreamingPlan();
+    }
+
+    @Override
+    public SplitPlan openSplitPlan() {
+        if (!supportsFineGrainedSplitPlanning()) {
+            return SnapshotReader.super.openSplitPlan();
+        }
+
+        FileStoreScan.StreamingPlan plan;
+        try {
+            plan = scan.streamingPlan();
+        } catch (FileStoreScan.StreamingPlanFallbackException ignored) {
+            return SnapshotReader.super.openSplitPlan();
+        }
+        @Nullable Snapshot snapshot = plan.snapshot();
+        long snapshotId = snapshot == null ? FIRST_SNAPSHOT_ID - 1 : snapshot.id();
+        CloseableIterator<ManifestEntry> files = plan.files();
+        CloseableIterator<Split> splits =
+                new CloseableIterator<Split>() {
+                    @Override
+                    public boolean hasNext() {
+                        return files.hasNext();
+                    }
+
+                    @Override
+                    public Split next() {
+                        ManifestEntry entry = files.next();
+                        if (entry.kind() != FileKind.ADD) {
+                            throw new IllegalStateException(
+                                    "Incremental full-snapshot planning produced a non-ADD entry");
+                        }
+                        DataFileMeta file = entry.file();
+                        return DataSplit.builder()
+                                .withSnapshot(snapshotId)
+                                .withPartition(entry.partition())
+                                .withBucket(entry.bucket())
+                                .withTotalBuckets(entry.totalBuckets())
+                                .withDataFiles(Collections.singletonList(file))
+                                .rawConvertible(true)
+                                .withBucketPath(
+                                        pathFactory
+                                                .bucketPath(entry.partition(), entry.bucket())
+                                                .toString())
+                                .build();
+                    }
+
+                    @Override
+                    public void close() throws Exception {
+                        files.close();
+                    }
+                };
+        return new SplitPlan(
+                plan.watermark(), snapshot == null ? null : snapshot.id(), true, splits);
     }
 
     private List<DataSplit> generateSplits(

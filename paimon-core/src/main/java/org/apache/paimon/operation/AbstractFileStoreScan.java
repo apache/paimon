@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.ScanStats;
@@ -41,6 +42,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
@@ -60,6 +62,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -433,6 +436,236 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     public Iterator<ManifestEntry> readFileIterator(List<ManifestFileMeta> manifestFileMetas) {
         // useSequential: reduce memory and iterator can be stopping
         return readManifestEntries(manifestFileMetas, true);
+    }
+
+    @Override
+    public boolean supportsStreamingPlan() {
+        return limit == null && !postFilterManifestEntriesEnabled();
+    }
+
+    @Override
+    public StreamingPlan streamingPlan() {
+        long started = System.nanoTime();
+        if (!supportsStreamingPlan()) {
+            throw new UnsupportedOperationException(
+                    "This scan requires post-processing the complete manifest entry list");
+        }
+        ManifestsReader.Result manifestsResult = readManifests();
+        if (manifestsResult.filteredManifests.stream()
+                .anyMatch(manifest -> manifest.numDeletedFiles() > 0)) {
+            throw new StreamingPlanFallbackException(
+                    "Streaming file planning requires add-only manifest entries");
+        }
+        Snapshot snapshot = manifestsResult.snapshot;
+        long allDataFiles =
+                manifestsResult.allManifests.stream()
+                        .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
+                        .sum();
+        CloseableIterator<ManifestEntry> files =
+                streamAddedManifestEntries(manifestsResult.filteredManifests);
+        CloseableIterator<ManifestEntry> measuredFiles =
+                reportStreamingScanOnCompletion(
+                        files,
+                        System.nanoTime() - started,
+                        snapshot,
+                        manifestsResult.filteredManifests.size(),
+                        allDataFiles);
+        return new StreamingPlan() {
+            @Nullable
+            @Override
+            public Long watermark() {
+                return snapshot == null ? null : snapshot.watermark();
+            }
+
+            @Nullable
+            @Override
+            public Snapshot snapshot() {
+                return snapshot;
+            }
+
+            @Override
+            public CloseableIterator<ManifestEntry> files() {
+                return measuredFiles;
+            }
+        };
+    }
+
+    private CloseableIterator<ManifestEntry> reportStreamingScanOnCompletion(
+            CloseableIterator<ManifestEntry> files,
+            long preparationNanos,
+            @Nullable Snapshot snapshot,
+            int scannedManifests,
+            long allDataFiles) {
+        return new CloseableIterator<ManifestEntry>() {
+            private long resultFiles;
+            private long scanNanos = preparationNanos;
+            private boolean reported;
+
+            @Override
+            public boolean hasNext() {
+                long started = System.nanoTime();
+                boolean hasNext;
+                try {
+                    hasNext = files.hasNext();
+                } finally {
+                    scanNanos = Math.addExact(scanNanos, System.nanoTime() - started);
+                }
+                if (!hasNext) {
+                    report();
+                }
+                return hasNext;
+            }
+
+            @Override
+            public ManifestEntry next() {
+                long started = System.nanoTime();
+                ManifestEntry entry;
+                try {
+                    entry = files.next();
+                } finally {
+                    scanNanos = Math.addExact(scanNanos, System.nanoTime() - started);
+                }
+                resultFiles = Math.addExact(resultFiles, 1);
+                return entry;
+            }
+
+            private void report() {
+                if (reported) {
+                    return;
+                }
+                reported = true;
+                long scanDuration = scanNanos / 1_000_000;
+                LOG.info(
+                        "Streaming file store scan plan completed in {} ms. Files size : {}",
+                        scanDuration,
+                        resultFiles);
+                if (scanMetrics != null) {
+                    scanMetrics.reportScan(
+                            new ScanStats(
+                                    scanDuration,
+                                    snapshot == null ? 0 : snapshot.id(),
+                                    scannedManifests,
+                                    allDataFiles - resultFiles,
+                                    resultFiles));
+                }
+            }
+
+            @Override
+            public void close() throws Exception {
+                files.close();
+            }
+        };
+    }
+
+    private CloseableIterator<ManifestEntry> streamAddedManifestEntries(
+            List<ManifestFileMeta> manifests) {
+        List<ManifestFileMeta> addedManifests =
+                manifests.stream()
+                        .filter(manifest -> manifest.numAddedFiles() > 0)
+                        .collect(Collectors.toList());
+        Iterator<ManifestFileMeta> manifestIterator = addedManifests.iterator();
+        Filter<InternalRow> rowFilter = createEntryRowFilter();
+        BucketFilter bucketFilter = createBucketFilter();
+        PartitionPredicate partitionFilter = manifestsReader.partitionFilter();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+
+        return new CloseableIterator<ManifestEntry>() {
+            private CloseableIterator<ProjectedManifestEntry> entries = CloseableIterator.empty();
+            private ManifestEntry next;
+            private boolean closed;
+
+            @Override
+            public boolean hasNext() {
+                if (next == null && !closed) {
+                    advance();
+                }
+                return next != null;
+            }
+
+            @Override
+            public ManifestEntry next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                ManifestEntry result = next;
+                next = null;
+                return result;
+            }
+
+            private void advance() {
+                try {
+                    while (next == null) {
+                        while (entries.hasNext()) {
+                            ProjectedManifestEntry projected = entries.next();
+                            try {
+                                if (rowFilter.test(projected.fullRow())
+                                        && (manifestEntryFilter == null
+                                                || manifestEntryFilter.test(projected))
+                                        && filterByStats(projected)) {
+                                    ManifestEntry materialized =
+                                            serializer.fromRow(projected.fullRow());
+                                    next =
+                                            dropStats
+                                                    ? materialized.copyWithoutStats()
+                                                    : materialized;
+                                    return;
+                                }
+                            } finally {
+                                projected.clear();
+                            }
+                        }
+
+                        closeEntries();
+                        if (!manifestIterator.hasNext()) {
+                            closed = true;
+                            return;
+                        }
+
+                        ManifestFileMeta manifest = manifestIterator.next();
+                        ManifestFile manifestFile = manifestFileFactory.create();
+                        ManifestSidecar.Selection selected =
+                                manifestFile.selectBlocks(
+                                        manifest, rowRangeIndex, partitionFilter, bucketFilter);
+                        if (selected != null && selected.blocks().isEmpty()) {
+                            continue;
+                        }
+                        entries =
+                                manifestFile.scan(
+                                        manifest.fileName(),
+                                        ProjectedManifestEntry.fullProjection(),
+                                        partitionFilter,
+                                        bucketFilter,
+                                        selected);
+                    }
+                } catch (RuntimeException | Error error) {
+                    try {
+                        close();
+                    } catch (Exception closeError) {
+                        error.addSuppressed(closeError);
+                    }
+                    throw error;
+                }
+            }
+
+            private void closeEntries() {
+                try {
+                    entries.close();
+                    entries = CloseableIterator.empty();
+                } catch (Exception error) {
+                    throw new RuntimeException("Failed to close streaming manifest reader", error);
+                }
+            }
+
+            @Override
+            public void close() throws Exception {
+                if (!closed) {
+                    closed = true;
+                    next = null;
+                    entries.close();
+                    entries = CloseableIterator.empty();
+                }
+            }
+        };
     }
 
     public Iterator<ManifestEntry> readManifestEntries(

@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.snapshot.ReadPlanStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
@@ -139,6 +140,36 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         }
 
         return postProcessPlan(DataFilePlan.fromResult(result));
+    }
+
+    @Override
+    protected SnapshotReader.SplitPlan openSplitPlanWithoutAuth() {
+        if (!incrementalSplitPlanningEnabled()
+                || !snapshotReader.supportsFineGrainedSplitPlanning()
+                || pushDownLimit != null
+                || topN != null) {
+            return super.openSplitPlanWithoutAuth();
+        }
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(false);
+        }
+        if (!(startingScanner instanceof ReadPlanStartingScanner)) {
+            return super.openSplitPlanWithoutAuth();
+        }
+        if (!hasNext) {
+            throw new EndOfScanException();
+        }
+        hasNext = false;
+        SnapshotReader.SplitPlan plan =
+                ((ReadPlanStartingScanner) startingScanner).openSplitPlan(snapshotReader);
+        if (plan.snapshotId() != null) {
+            maybeCreateReadProtectionTag(plan.snapshotId());
+        }
+        return plan;
+    }
+
+    protected boolean incrementalSplitPlanningEnabled() {
+        return false;
     }
 
     @Nullable

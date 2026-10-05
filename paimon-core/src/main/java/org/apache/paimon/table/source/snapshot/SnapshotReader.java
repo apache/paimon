@@ -38,6 +38,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -140,6 +141,23 @@ public interface SnapshotReader {
     /** Get splits plan from snapshot. */
     Plan read();
 
+    /** Whether this reader can expose fine-grained splits without materializing a complete plan. */
+    default boolean supportsFineGrainedSplitPlanning() {
+        return false;
+    }
+
+    /**
+     * Opens a single-pass split plan.
+     *
+     * <p>The default implementation adapts the fully materialized {@link Plan}. Implementations may
+     * instead return fine-grained splits, which preserve the files and rows of the logical plan but
+     * deliberately leave connector-specific task grouping to the caller. Callers must close the
+     * returned iterator and discard all previously consumed splits if iteration fails.
+     */
+    default SplitPlan openSplitPlan() {
+        return SplitPlan.fromPlan(read());
+    }
+
     /** Get splits plan from file changes. */
     Plan readChanges();
 
@@ -177,6 +195,69 @@ public interface SnapshotReader {
         @SuppressWarnings({"unchecked", "rawtypes"})
         default List<DataSplit> dataSplits() {
             return (List) splits();
+        }
+    }
+
+    /** Metadata and a closeable, single-use iterator for a split plan. */
+    final class SplitPlan {
+        @Nullable private final Long watermark;
+        @Nullable private final Long snapshotId;
+        private final boolean fineGrained;
+        private final CloseableIterator<Split> splits;
+
+        public SplitPlan(
+                @Nullable Long watermark,
+                @Nullable Long snapshotId,
+                boolean fineGrained,
+                CloseableIterator<Split> splits) {
+            this.watermark = watermark;
+            this.snapshotId = snapshotId;
+            this.fineGrained = fineGrained;
+            this.splits = splits;
+        }
+
+        public static SplitPlan fromPlan(Plan plan) {
+            return new SplitPlan(
+                    plan.watermark(),
+                    plan.snapshotId(),
+                    false,
+                    CloseableIterator.adapterForIterator(plan.splits().iterator()));
+        }
+
+        public static SplitPlan fromTablePlan(TableScan.Plan plan) {
+            if (plan instanceof Plan) {
+                return fromPlan((Plan) plan);
+            }
+            return fromTablePlan(plan, null, null);
+        }
+
+        public static SplitPlan fromTablePlan(
+                TableScan.Plan plan, @Nullable Long watermark, @Nullable Long snapshotId) {
+            return new SplitPlan(
+                    watermark,
+                    snapshotId,
+                    false,
+                    CloseableIterator.adapterForIterator(plan.splits().iterator()));
+        }
+
+        @Nullable
+        public Long watermark() {
+            return watermark;
+        }
+
+        @Nullable
+        public Long snapshotId() {
+            return snapshotId;
+        }
+
+        /** Whether the iterator intentionally leaves task grouping to the caller. */
+        public boolean fineGrained() {
+            return fineGrained;
+        }
+
+        /** Returns the single-use iterator. The caller must close it. */
+        public CloseableIterator<Split> splits() {
+            return splits;
         }
     }
 }

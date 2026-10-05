@@ -160,6 +160,30 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return plan;
     }
 
+    @Override
+    public final SnapshotReader.SplitPlan openSplitPlan() {
+        TableQueryAuthResult queryAuthResult = applyAuthRules();
+        applyAuthReadType(queryAuthResult);
+        if (queryAuthResult != null) {
+            Plan original = planWithoutAuth();
+            Long watermark =
+                    original instanceof SnapshotReader.Plan
+                            ? ((SnapshotReader.Plan) original).watermark()
+                            : null;
+            Long snapshotId =
+                    original instanceof SnapshotReader.Plan
+                            ? ((SnapshotReader.Plan) original).snapshotId()
+                            : null;
+            Plan converted = queryAuthResult.convertPlan(original);
+            return SnapshotReader.SplitPlan.fromTablePlan(converted, watermark, snapshotId);
+        }
+        return openSplitPlanWithoutAuth();
+    }
+
+    protected SnapshotReader.SplitPlan openSplitPlanWithoutAuth() {
+        return SnapshotReader.SplitPlan.fromTablePlan(planWithoutAuth());
+    }
+
     protected abstract TableScan.Plan planWithoutAuth();
 
     private void applyAuthFilter(@Nullable Predicate authPredicate) {
