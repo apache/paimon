@@ -160,6 +160,8 @@ class ArrayPredicateNumericTest(unittest.TestCase):
             {'id': 2, 'floats': [0.5], 'doubles': [float('nan')]},
             {'id': 3, 'floats': [0.25], 'doubles': [-0.0]},
             {'id': 4, 'floats': [0.75], 'doubles': [0.0]},
+            {'id': 5, 'floats': [float('inf')], 'doubles': [2.0]},
+            {'id': 6, 'floats': [float('-inf')], 'doubles': [3.0]},
         ]
         schema = Schema.from_pyarrow_schema(cls.pa_schema)
         cls.catalog.create_table('default.nums', schema, False)
@@ -208,6 +210,16 @@ class ArrayPredicateNumericTest(unittest.TestCase):
         self.assertEqual([4], self._ids(self._pb().array_contains('doubles', 0)))
         self.assertEqual([4], self._ids(self._pb().arrays_overlap('doubles', [0])))
         self.assertEqual([4], self._ids(self._pb().array_contains_all('doubles', [0])))
+
+    def test_finite_float_overflow_narrows_to_signed_infinity(self):
+        # A finite double beyond the float32 range narrows to the signed
+        # infinity (Java Number.floatValue() / PyArrow float32), matching the
+        # stored +inf / -inf row. A plain signed float32 pack would instead raise
+        # OverflowError before the read. All three public methods agree.
+        self.assertEqual([5], self._ids(self._pb().array_contains('floats', 1e40)))
+        self.assertEqual([5], self._ids(self._pb().arrays_overlap('floats', [1e40])))
+        self.assertEqual([5], self._ids(self._pb().array_contains_all('floats', [1e40])))
+        self.assertEqual([6], self._ids(self._pb().array_contains('floats', -1e40)))
 
 
 if __name__ == '__main__':

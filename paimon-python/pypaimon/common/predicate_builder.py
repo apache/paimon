@@ -79,7 +79,12 @@ class PredicateBuilder:
     def _to_float32(value: Any) -> Any:
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             return value
-        return struct.unpack('<f', struct.pack('<f', float(value)))[0]
+        try:
+            return struct.unpack('<f', struct.pack('<f', float(value)))[0]
+        except OverflowError:
+            # A finite double outside the float32 range narrows to the signed
+            # infinity, matching Java Number.floatValue() and PyArrow float32.
+            return float('inf') if value > 0 else float('-inf')
 
     def _build_predicate(self, method: str, field: str, literals: Optional[List[Any]] = None) -> Predicate:
         """Build a predicate with the given method, field, and literals."""
