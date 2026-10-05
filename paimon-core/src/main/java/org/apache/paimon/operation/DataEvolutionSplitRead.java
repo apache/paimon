@@ -286,10 +286,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             DeletionVectorWithRange deletionVector =
                                     readDeletionVector(needMergeFiles, deletionVectorFactory);
                             if (deletionVector != null
-                                    && !deletionVector.deletionVector.isEmpty()
-                                    && skipByFileIndex(
-                                            fileIndexResults, rowRanges, deletionVector)) {
-                                return new EmptyFileRecordReader<>();
+                                    && !deletionVector.deletionVector.isEmpty()) {
+                                fileIndexResults =
+                                        intersectFileIndexResults(
+                                                fileIndexResults, rowRanges, deletionVector);
+                                if (fileIndexResults == null) {
+                                    return new EmptyFileRecordReader<>();
+                                }
                             }
                             BitmapIndexResult groupSelection =
                                     buildGroupSelection(needMergeFiles, fileIndexResults);
@@ -994,16 +997,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     /**
      * Applies a group deletion vector to already evaluated file-index results.
      *
-     * <p>A merged group can only be skipped when one of the files responsible for the final
-     * predicate values has no live candidate rows. This method only intersects the saved results;
-     * it does not reopen or reevaluate any file index. The offset passed to the evaluator maps
-     * positions in the group's DV anchor range to positions local to the current file.
+     * <p>A merged group can be skipped when one of the files responsible for the final predicate
+     * values has no live candidate rows. Otherwise, the intersected results are retained for the
+     * group-level bitmap selection. This method only intersects the saved results; it does not
+     * reopen or reevaluate any file index. The offset passed to the evaluator maps positions in the
+     * group's DV anchor range to positions local to the current file.
      */
-    private boolean skipByFileIndex(
+    @Nullable
+    private List<FileIndexResultEntry> intersectFileIndexResults(
             List<FileIndexResultEntry> fileIndexResults,
             List<Range> rowRanges,
             DeletionVectorWithRange deletionVector) {
         DeletionVector dv = deletionVector.deletionVector;
+        List<FileIndexResultEntry> intersectedResults = new ArrayList<>(fileIndexResults.size());
         for (FileIndexResultEntry entry : fileIndexResults) {
             long fileOffset =
                     deletionVectorOffset(entry.file.nonNullRowIdRange(), rowRanges, deletionVector);
@@ -1011,10 +1017,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     FileIndexEvaluator.intersectDeletionVector(
                             entry.result, entry.file, dv, fileOffset);
             if (!result.remain()) {
-                return true;
+                return null;
             }
+            intersectedResults.add(new FileIndexResultEntry(entry.file, result));
         }
-        return false;
+        return intersectedResults;
     }
 
     /**
