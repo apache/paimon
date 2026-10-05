@@ -16,7 +16,9 @@
 # under the License.
 
 import ast
-from typing import List, Optional, Sequence, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import pyarrow
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -26,14 +28,59 @@ from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
-from pypaimon.read.table_read import TableRead
+from pypaimon.read.table_read import ROW_KIND_COLUMN, TableRead
 from pypaimon.read.table_scan import TableScan
+from pypaimon.read.variant_read_type import with_variant_extractions
 from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.projection import MapKey, Projection, is_row_type
 
 
 ProjectionPath = Sequence[Union[int, MapKey]]
+
+
+def _string_literal(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Str):
+        return node.s
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _normalize_sql_literals(expression: str) -> str:
+    """Decode SQL doubled quotes before validating the expression with AST."""
+    normalized = []
+    index = 0
+    previous_was_literal = False
+    while index < len(expression):
+        quote = expression[index]
+        if quote not in ("'", '"'):
+            normalized.append(quote)
+            if not quote.isspace():
+                previous_was_literal = False
+            index += 1
+            continue
+        if previous_was_literal:
+            raise ValueError("Adjacent string literals are not supported")
+        index += 1
+        literal = []
+        while index < len(expression):
+            char = expression[index]
+            if char == quote:
+                if index + 1 < len(expression) and expression[index + 1] == quote:
+                    literal.append(quote)
+                    index += 2
+                else:
+                    index += 1
+                    break
+            else:
+                literal.append(char)
+                index += 1
+        else:
+            raise ValueError("Unterminated string literal in projection expression")
+        normalized.append(repr(''.join(literal)))
+        previous_was_literal = True
+    return ''.join(normalized)
 
 
 class _ReadPredicateBuilder(PredicateBuilder):
@@ -58,12 +105,13 @@ class ReadBuilder:
 
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
-        # ``_projection`` stores the user-facing name list from
-        # :meth:`with_projection`. When nested selectors are present,
-        # ``_nested_paths`` is also populated and takes precedence
-        # in ``read_type()`` and downstream consumers.
+        # ``_projection`` stores physical source columns. Expression aliases
+        # are kept separately for the Arrow output schema.
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[ProjectionPath]] = None
+        self._resolved_read_type: Optional[List[DataField]] = None
+        self._expression_projection: Optional[
+            List[Tuple[str, str, Optional[int]]]] = None
         self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
@@ -75,23 +123,35 @@ class ReadBuilder:
         self._partition_filter = partition_filter
         return self
 
-    def with_projection(self, projection: List[str]) -> 'ReadBuilder':
-        """Project to the given column names.
+    def with_projection(
+        self,
+        projection: Union[List[str], Dict[str, str]],
+    ) -> 'ReadBuilder':
+        """Project columns or named float32 VARIANT expressions.
 
-        Names containing a dot (e.g. ``"struct.subfield"``) walk into ROW
-        children. A quoted bracket selector on a top-level
-        ``MAP<STRING, ...>`` selects one literal key (e.g.
-        ``"attrs['key.with.dots']"``). Unknown names are silently skipped to
-        preserve the pre-existing contract.
-
-        An exact top-level field match takes precedence over both forms.
+        Lists retain column, nested ROW and MAP-key projection semantics.
+        A mapping assigns output names to source columns or float32
+        ``variant_get`` / ``try_variant_get`` expressions. Variant
+        expressions require native reading.
         """
-        self._projection = projection
+        if isinstance(projection, dict):
+            projection, variants, outputs = self._parse_expression_projection(
+                projection)
+        else:
+            variants, outputs = None, None
         if projection and any(
                 '.' in name or '[' in name for name in projection):
-            self._nested_paths = self._resolve_projection_paths(projection)
+            paths = self._resolve_projection_paths(projection)
+            nested_paths = (paths if any(len(path) > 1 for path in paths)
+                            else None)
         else:
-            self._nested_paths = None
+            nested_paths = None
+        read_type = self._resolve_read_type(projection, nested_paths)
+        read_type = with_variant_extractions(read_type, variants)
+        self._projection = projection
+        self._nested_paths = nested_paths
+        self._resolved_read_type = read_type
+        self._expression_projection = outputs
         return self
 
     def with_limit(self, limit: int) -> 'ReadBuilder':
@@ -116,6 +176,7 @@ class ReadBuilder:
             predicate=self._predicate,
             read_type=self.read_type(),
             nested_name_paths=self._nested_name_paths(),
+            expression_projection=self._expression_projection,
             limit=self._limit,
         )
 
@@ -168,23 +229,102 @@ class ReadBuilder:
         )
 
     def read_type(self) -> List[DataField]:
+        return (self._resolved_read_type if self._resolved_read_type is not None
+                else self.table.fields)
+
+    def _resolve_read_type(
+            self, projection: Optional[List[str]],
+            nested_paths: Optional[List[ProjectionPath]]) -> List[DataField]:
         table_fields = self.table.fields
 
-        if not self._projection and not self._nested_paths:
+        if not projection and not nested_paths:
             return table_fields
 
         if self.table.options.row_tracking_enabled():
             table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
 
-        if self._nested_paths:
-            return Projection.of(self._nested_paths).project(table_fields)
+        if nested_paths:
+            return Projection.of(nested_paths).project(table_fields)
 
         field_map = {field.name: field for field in table_fields}
-        return [field_map[name] for name in self._projection if name in field_map]
+        return [field_map[name] for name in projection if name in field_map]
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _parse_expression_projection(self, expressions: Dict[str, str]):
+        if not expressions:
+            raise ValueError("Projection expression mapping must not be empty")
+        table_fields = self.table.fields
+        if self.table.options.row_tracking_enabled():
+            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
+        field_map = {field.name: field for field in table_fields}
+        projection = []
+        variants = {}
+        outputs = []
+        direct_columns = set()
+        for alias, expression in expressions.items():
+            if not isinstance(alias, str) or not alias:
+                raise TypeError("Projection output names must be non-empty strings")
+            if alias == ROW_KIND_COLUMN:
+                raise ValueError("Projection output name %r is reserved" % alias)
+            if not isinstance(expression, str) or not expression:
+                raise TypeError("Projection expressions must be non-empty strings")
+            if expression in field_map:
+                source, child = expression, None
+                direct_columns.add(source)
+            else:
+                try:
+                    call = ast.parse(
+                        _normalize_sql_literals(expression), mode='eval').body
+                except SyntaxError as error:
+                    raise ValueError(
+                        "Unsupported projection expression %r" % expression
+                    ) from error
+                if (not isinstance(call, ast.Call)
+                        or not isinstance(call.func, ast.Name)
+                        or call.func.id.lower() not in ('variant_get', 'try_variant_get')
+                        or len(call.args) != 3 or call.keywords
+                        or not (isinstance(call.args[0], ast.Name)
+                                or _string_literal(call.args[0]) is not None)
+                        or any(_string_literal(arg) is None
+                               for arg in call.args[1:])):
+                    raise ValueError(
+                        "Unsupported projection expression %r" % expression)
+                source = (call.args[0].id
+                          if isinstance(call.args[0], ast.Name)
+                          else _string_literal(call.args[0]))
+                field = field_map.get(source)
+                if (field is None
+                        or not isinstance(field.type, AtomicType)
+                        or field.type.type.upper() != 'VARIANT'):
+                    raise ValueError(
+                        "Variant extraction requires a VARIANT column: %r"
+                        % source)
+                path, target_type = (_string_literal(arg) for arg in call.args[1:])
+                if ';' in path:
+                    raise ValueError(
+                        "Variant extraction path must not contain ';': %s"
+                        % path)
+                if target_type.lower() != 'float':
+                    raise ValueError(
+                        "Only float32 Variant extractions are supported")
+                options = variants.setdefault(source, {
+                    'paths': [], 'target_type': pyarrow.float32(),
+                    'fail_on_error': [],
+                })
+                child = len(options['paths'])
+                options['paths'].append(path)
+                options['fail_on_error'].append(
+                    call.func.id.lower() == 'variant_get')
+            if source not in projection:
+                projection.append(source)
+            outputs.append((alias, source, child))
+        if direct_columns & variants.keys():
+            raise ValueError(
+                "A VARIANT column cannot be read both whole and extracted")
+        return projection, variants or None, outputs
 
     def _resolve_projection_paths(self, names: List[str]) -> List[ProjectionPath]:
         """Translate ROW paths and MAP-key selectors into internal paths."""

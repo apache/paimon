@@ -22,7 +22,7 @@ This module provides a builder for configuring streaming reads from Paimon
 tables, similar to ReadBuilder but for continuous streaming use cases.
 """
 
-from typing import Callable, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -54,7 +54,7 @@ class StreamReadBuilder:
 
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
-        self._projection: Optional[List[str]] = None
+        self._read_builder = ReadBuilder(table)
         self._poll_interval_ms: int = 1000
         self._include_row_kind: bool = False
         self._bucket_filter: Optional[Callable[[int], bool]] = None
@@ -63,11 +63,15 @@ class StreamReadBuilder:
     def with_filter(self, predicate: Predicate) -> 'StreamReadBuilder':
         """Set a filter predicate for the streaming read."""
         self._predicate = predicate
+        self._read_builder.with_filter(predicate)
         return self
 
-    def with_projection(self, projection: List[str]) -> 'StreamReadBuilder':
+    def with_projection(
+        self,
+        projection: Union[List[str], Dict[str, str]],
+    ) -> 'StreamReadBuilder':
         """Set column projection for the streaming read."""
-        self._projection = projection
+        self._read_builder.with_projection(projection)
         return self
 
     def with_poll_interval_ms(self, poll_interval_ms: int) -> 'StreamReadBuilder':
@@ -136,6 +140,7 @@ class StreamReadBuilder:
             predicate=self._predicate,
             read_type=projection.read_type(),
             nested_name_paths=projection._nested_name_paths(),
+            expression_projection=projection._expression_projection,
             include_row_kind=self._include_row_kind
         )
 
@@ -153,9 +158,4 @@ class StreamReadBuilder:
 
     def _projection_builder(self) -> ReadBuilder:
         """Share projection and validation semantics with batch reads."""
-        builder = ReadBuilder(self.table)
-        if self._projection is not None:
-            builder.with_projection(self._projection)
-        if self._predicate is not None:
-            builder.with_filter(self._predicate)
-        return builder
+        return self._read_builder
