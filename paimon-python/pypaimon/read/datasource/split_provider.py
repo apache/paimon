@@ -71,19 +71,8 @@ class SplitProvider(ABC):
         """Whether Arrow output should include the row kind column."""
         return False
 
-    def nested_name_paths(self) -> Optional[List[List[str]]]:
-        """Parallel name paths for a nested-leaf projection, or ``None``.
-
-        Forwarded to the per-task ``TableRead`` so a projection like
-        ``['mv.latest_value.x']`` is read by widening to the parent struct and
-        extracting the requested leaves. Without it the worker treats the
-        flattened leaf names as missing top-level columns and reads every
-        projected leaf as NULL.
-        """
-        return None
-
-    def expression_projection(self):
-        """Named output expressions for a pre-resolved read, or ``None``."""
+    def output_projection(self):
+        """Final result aliases/order, separate from the canonical reader type."""
         return None
 
 
@@ -145,8 +134,7 @@ class CatalogSplitProvider(SplitProvider):
         self._table_cached = None
         self._splits_cached = None
         self._read_type_cached = None
-        self._nested_name_paths_cached = None
-        self._expression_projection_cached = None
+        self._output_projection_cached = None
 
     def _ensure_table(self):
         if self._table_cached is None:
@@ -180,8 +168,7 @@ class CatalogSplitProvider(SplitProvider):
         if self._limit is not None:
             rb = rb.with_limit(self._limit)
         self._read_type_cached = rb.read_type()
-        self._nested_name_paths_cached = rb._nested_name_paths()
-        self._expression_projection_cached = rb._expression_projection
+        self._output_projection_cached = rb._output_projection
         self._splits_cached = rb.new_scan().plan().splits()
 
     @property
@@ -199,13 +186,9 @@ class CatalogSplitProvider(SplitProvider):
         self._ensure_planned()
         return self._read_type_cached
 
-    def nested_name_paths(self) -> Optional[List[List[str]]]:
+    def output_projection(self):
         self._ensure_planned()
-        return self._nested_name_paths_cached
-
-    def expression_projection(self):
-        self._ensure_planned()
-        return self._expression_projection_cached
+        return self._output_projection_cached
 
     def predicate(self):
         return self._predicate
@@ -226,16 +209,14 @@ class PreResolvedSplitProvider(SplitProvider):
     """
 
     def __init__(self, table, splits: List[Split], read_type, predicate=None,
-                 limit: Optional[int] = None, nested_name_paths=None,
-                 expression_projection=None,
+                 limit: Optional[int] = None, output_projection=None,
                  include_row_kind: bool = False):
         self._table = table
         self._splits = splits
         self._read_type = read_type
         self._predicate = predicate
         self._limit = limit
-        self._nested_name_paths = nested_name_paths
-        self._expression_projection = expression_projection
+        self._output_projection = output_projection
         self._include_row_kind = include_row_kind
 
     def table(self):
@@ -247,11 +228,8 @@ class PreResolvedSplitProvider(SplitProvider):
     def read_type(self):
         return self._read_type
 
-    def nested_name_paths(self) -> Optional[List[List[str]]]:
-        return self._nested_name_paths
-
-    def expression_projection(self):
-        return self._expression_projection
+    def output_projection(self):
+        return self._output_projection
 
     def include_row_kind(self) -> bool:
         return self._include_row_kind

@@ -18,6 +18,7 @@ import unittest
 from unittest.mock import Mock
 
 from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.read.read_type import OutputProjection
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
@@ -37,16 +38,16 @@ class NamedVariantProjectionTest(unittest.TestCase):
             'y': 'variant_get("payload", "$.y", "float")',
         })
 
-        self.assertEqual(builder._projection, ['id', 'payload'])
+        self.assertEqual([f.name for f in builder.read_type()], ['id', 'payload'])
         self.assertEqual(
             [field.description for field in builder.read_type()[1].type.fields],
             ['__VARIANT_METADATA$.x;false;UTC',
              '__VARIANT_METADATA$.y;true;UTC'])
-        self.assertEqual(builder._expression_projection, [
-            ('identifier', 'id', None),
-            ('x', 'payload', 0),
-            ('y', 'payload', 1),
-        ])
+        self.assertEqual(builder._output_projection, OutputProjection([
+            ('identifier', ['id']),
+            ('x', ['payload', '0']),
+            ('y', ['payload', '1']),
+        ], True))
 
 
 if __name__ == '__main__':

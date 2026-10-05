@@ -23,8 +23,9 @@ import pytest
 
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
+from pypaimon.read.read_type import OutputProjection, project_read_type, reader_adapter
 from pypaimon.read.variant_read_type import with_variant_extractions
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
 
 
 class _Split:
@@ -47,13 +48,17 @@ def _table_read(limit=None):
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
-    read.nested_name_paths = None
-    read.expression_projection = None
+    read.output_projection = None
+    read.table.options.row_tracking_enabled.return_value = False
+    read.table.fields = read.read_type
+    read._adapter_read_type = read.read_type
     read.limit = limit
     read._read_parallelism = 1
     read._deferred_blob_fields = set()
     read._predicate_extra_fields = []
-    read._scan_read_type = read.read_type
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
     read._output_column_names = ['id']
     return read
 
@@ -62,7 +67,9 @@ def _blob_table_read(limit=None):
     read = _table_read(limit)
     read.read_type = [DataField(0, 'payload', AtomicType('BLOB'))]
     read._output_column_names = ['payload']
-    read._scan_read_type = read.read_type
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
     return read
 
 
@@ -84,13 +91,15 @@ def test_native_read_returns_named_variant_expression_columns():
         DataField(0, 'id', AtomicType('INT')),
         DataField(1, 'payload', AtomicType('VARIANT')),
     ], variants)
-    read._scan_read_type = read.read_type
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
     read._output_column_names = ['id', 'payload']
-    read.expression_projection = [
-        ('identifier', 'id', None),
-        ('ratio', 'payload', 0),
-        ('missing', 'payload', 1),
-    ]
+    read.output_projection = OutputProjection([
+        ('identifier', ['id']),
+        ('ratio', ['payload', '0']),
+        ('missing', ['payload', '1']),
+    ], True)
     split = _Split()
     split._native_split = object()
     payload_type = pa.struct([
@@ -128,9 +137,11 @@ def test_variant_fields_never_silently_falls_back_to_python():
             'target_type': pa.float32(),
             'fail_on_error': False,
         }})
-    read._scan_read_type = read.read_type
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
     read._output_column_names = ['payload']
-    read.expression_projection = [('ratio', 'payload', 0)]
+    read.output_projection = OutputProjection([('ratio', ['payload', '0'])], True)
     read.table.options.native_read_enabled.return_value = False
 
     with pytest.raises(RuntimeError, match='read.native.enabled is false'):
@@ -175,15 +186,21 @@ def test_native_read_consumes_retained_rust_splits_and_enforces_limit():
 
 def test_native_read_flattens_nested_rows_and_map_keys_with_parent_nulls():
     read = _table_read()
-    read.read_type = [
-        DataField(2, 'payload_score', AtomicType('INT')),
-        DataField(3, 'attrs_selected', AtomicType('INT')),
+    read.table.fields = [
+        DataField(0, 'payload', RowType(True, [
+            DataField(1, 'details', RowType(True, [
+                DataField(2, 'score', AtomicType('INT')),
+                DataField(3, 'ignored', AtomicType('STRING'))])),
+            DataField(4, 'ignored', AtomicType('STRING'))])),
+        DataField(5, 'attrs', MapType(True, AtomicType('STRING'), AtomicType('INT'))),
     ]
-    read._output_column_names = [field.name for field in read.read_type]
-    read.nested_name_paths = [
-        ['payload', 'details', 'score'],
-        ['attrs', 'selected'],
-    ]
+    read.read_type = project_read_type(read.table.fields, [
+        ['payload', 'details', 'score'], ['attrs', 'selected']])
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._output_column_names = [field.name for field in read._adapter_read_type]
+    read.output_projection = OutputProjection([
+        ('payload_score', ['payload', 'details', 'score']),
+        ('attrs_selected', ['attrs', 'selected'])])
     split = _Split()
     split._native_split = object()
     payload_type = pa.struct([
@@ -211,7 +228,8 @@ def test_native_read_flattens_nested_rows_and_map_keys_with_parent_nulls():
         'payload_score': [7, None, None],
         'attrs_selected': [10, None, None],
     }
-    assert native.call_args.kwargs['nested_projection'] == read.nested_name_paths
+    assert native.call_args.kwargs['read_type'] == read.read_type
+    assert 'nested_projection' not in native.call_args.kwargs
 
 
 def test_native_read_preserves_physical_row_kinds():
@@ -1049,6 +1067,8 @@ def test_native_read_pruning_descriptor_limit_allows_non_blob_predicate():
 def test_native_read_supports_precision_zero_timestamps(data_type, values):
     read = _table_read()
     read.read_type = [DataField(0, 'ts', AtomicType('TIMESTAMP(0)'))]
+    read._adapter_read_type = read.read_type
+    read.table.fields = read.read_type
     read._output_column_names = ['ts']
     split = _Split()
     split._native_split = object()

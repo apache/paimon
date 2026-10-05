@@ -74,6 +74,11 @@ class StreamReadBuilder:
         self._read_builder.with_projection(projection)
         return self
 
+    def with_read_type(self, read_type: List[DataField]) -> 'StreamReadBuilder':
+        """Set the canonical reader type and reset the output projection."""
+        self._read_builder.with_read_type(read_type)
+        return self
+
     def with_poll_interval_ms(self, poll_interval_ms: int) -> 'StreamReadBuilder':
         """Set the poll interval in ms for checking new snapshots (default: 1000)."""
         self._poll_interval_ms = poll_interval_ms
@@ -128,7 +133,7 @@ class StreamReadBuilder:
             bucket_filter=self._bucket_filter,
             consumer_id=self._consumer_id
         )
-        scan._read_type = projection._scan_read_type()
+        scan._read_type = projection.read_type()
         return scan
 
     def new_read(self) -> TableRead:
@@ -139,8 +144,7 @@ class StreamReadBuilder:
             table=self.table,
             predicate=self._predicate,
             read_type=projection.read_type(),
-            nested_name_paths=projection._nested_name_paths(),
-            expression_projection=projection._expression_projection,
+            output_projection=projection._output_projection,
             include_row_kind=self._include_row_kind
         )
 

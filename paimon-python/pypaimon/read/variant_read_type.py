@@ -32,10 +32,20 @@ def with_variant_extractions(
     """Resolve expression paths once, using Java's DataField description format."""
     if not extractions:
         return read_type
+    normalized = {((name,) if isinstance(name, str) else tuple(name)): options
+                  for name, options in extractions.items()}
     fields = []
     projected = set()
     for field in read_type:
-        options = extractions.get(field.name)
+        options = normalized.get((field.name,))
+        nested = {path[1:]: options for path, options in normalized.items()
+                  if len(path) > 1 and path[0] == field.name}
+        if nested and isinstance(field.type, RowType):
+            children = with_variant_extractions(field.type.fields, nested)
+            fields.append(DataField(field.id, field.name, RowType(field.type.nullable, children),
+                                    field.description, field.default_value))
+            projected.update(path for path in normalized if path[0] == field.name)
+            continue
         if options is None:
             fields.append(field)
             continue
@@ -58,14 +68,14 @@ def with_variant_extractions(
                 index, str(index), AtomicType('FLOAT'),
                 '%s%s;%s;UTC' % (
                     _VARIANT_METADATA_PREFIX, path, str(fail_on_error).lower())))
-        projected.add(field.name)
+        projected.add((field.name,))
         fields.append(DataField(
             field.id, field.name, RowType(field.type.nullable, children),
             field.description, field.default_value))
-    missing = set(extractions) - projected
+    missing = set(normalized) - projected
     if missing:
         raise ValueError(
-            "Variant extraction column %r is not in the read type" % min(missing))
+            "Variant extraction column %r is not in the read type" % (min(missing),))
     return fields
 
 
@@ -77,4 +87,6 @@ def has_variant_extractions(read_type: List[DataField]) -> bool:
         and all(child.description is not None
                 and child.description.startswith(_VARIANT_METADATA_PREFIX)
                 for child in field.type.fields)
-        for field in read_type)
+        for field in read_type) or any(
+            isinstance(field.type, RowType) and has_variant_extractions(field.type.fields)
+            for field in read_type)

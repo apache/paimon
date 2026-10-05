@@ -16,7 +16,7 @@
 # under the License.
 
 import ast
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Union
 
 import pyarrow
 
@@ -30,6 +30,7 @@ from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import ROW_KIND_COLUMN, TableRead
 from pypaimon.read.table_scan import TableScan
+from pypaimon.read.read_type import OutputProjection, output_fields, project_read_type, reader_adapter
 from pypaimon.read.variant_read_type import with_variant_extractions
 from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
@@ -105,13 +106,8 @@ class ReadBuilder:
 
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
-        # ``_projection`` stores physical source columns. Expression aliases
-        # are kept separately for the Arrow output schema.
-        self._projection: Optional[List[str]] = None
-        self._nested_paths: Optional[List[ProjectionPath]] = None
-        self._resolved_read_type: Optional[List[DataField]] = None
-        self._expression_projection: Optional[
-            List[Tuple[str, str, Optional[int]]]] = None
+        self._read_type: Optional[List[DataField]] = None
+        self._output_projection: Optional[OutputProjection] = None
         self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
@@ -127,7 +123,7 @@ class ReadBuilder:
         self,
         projection: Union[List[str], Dict[str, str]],
     ) -> 'ReadBuilder':
-        """Project columns or named float32 VARIANT expressions.
+        """Project columns, nested ROW fields, MAP values or VARIANT expressions.
 
         Lists retain column, nested ROW and MAP-key projection semantics.
         A mapping assigns output names to source columns or float32
@@ -135,24 +131,32 @@ class ReadBuilder:
         expressions require native reading.
         """
         if isinstance(projection, dict):
-            projection, variants, outputs = self._parse_expression_projection(
-                projection)
+            name_paths, variants, outputs = self._parse_expression_projection(projection)
+            output = OutputProjection(outputs, True)
         else:
-            variants, outputs = None, None
-        if projection and any(
-                '.' in name or '[' in name for name in projection):
-            paths = self._resolve_projection_paths(projection)
-            nested_paths = (paths if any(len(path) > 1 for path in paths)
-                            else None)
-        else:
-            nested_paths = None
-        read_type = self._resolve_read_type(projection, nested_paths)
-        read_type = with_variant_extractions(read_type, variants)
-        self._projection = projection
-        self._nested_paths = nested_paths
-        self._resolved_read_type = read_type
-        self._expression_projection = outputs
+            fields = self._table_read_fields()
+            indexes = self._resolve_projection_paths(projection) if projection else []
+            if projection is None:
+                return self.with_read_type(self.table.fields)
+            name_paths = Projection.of(indexes).to_name_paths(fields)
+            flat_fields = Projection.of(indexes).project(fields)
+            output = OutputProjection([(field.name, path) for field, path in zip(flat_fields, name_paths)])
+            variants = None
+        read_type = project_read_type(self._table_read_fields(), name_paths)
+        self.with_read_type(with_variant_extractions(read_type, variants))
+        self._output_projection = output
         return self
+
+    def with_read_type(self, read_type: List[DataField]) -> 'ReadBuilder':
+        """Set one complete reader request, resetting the result projection."""
+        self._read_type = read_type
+        self._output_projection = None
+        return self
+
+    def _table_read_fields(self):
+        fields = self.table.fields
+        return (SpecialFields.row_type_with_row_tracking(fields)
+                if self.table.options.row_tracking_enabled() else fields)
 
     def with_limit(self, limit: int) -> 'ReadBuilder':
         self._limit = limit
@@ -166,7 +170,7 @@ class ReadBuilder:
             limit=self._limit,
             partition_predicate=self._partition_filter,
         )
-        scan._read_type = self._scan_read_type()
+        scan._read_type = self.read_type()
         return scan
 
     def new_read(self) -> TableRead:
@@ -175,26 +179,28 @@ class ReadBuilder:
             table=self.table,
             predicate=self._predicate,
             read_type=self.read_type(),
-            nested_name_paths=self._nested_name_paths(),
-            expression_projection=self._expression_projection,
+            output_projection=self._output_projection,
             limit=self._limit,
         )
 
-    def _nested_name_paths(self) -> Optional[List[List[str]]]:
-        """Resolve the current nested-projection state into a parallel list
-        of name paths against the underlying table schema. Returns ``None``
-        if the user only requested top-level projection (or no projection).
-        """
-        if not self._nested_paths:
-            return None
-        table_fields = self.table.fields
-        if self.table.options.row_tracking_enabled():
-            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
-        return Projection.of(self._nested_paths).to_name_paths(table_fields)
+    def _nested_name_paths(self):
+        """Derive format-adapter paths; the read type remains authoritative."""
+        _, paths = reader_adapter(self.read_type(), self._table_read_fields())
+        return paths if any(len(path) > 1 for path in paths) else None
+
+    def _output_name_paths(self):
+        paths = ([path for _, path in self._output_projection.columns]
+                 if self._output_projection is not None else [[field.name] for field in self.read_type()])
+        return paths if any(len(path) > 1 for path in paths) else None
 
     def new_predicate_builder(self) -> PredicateBuilder:
+        # List projections expose flat leaf names to the Python predicate
+        # evaluator. Derive that view without changing the reader request.
+        fields = self.read_type()
+        if self._output_projection is not None and not self._output_projection.named:
+            fields = reader_adapter(fields, self._table_read_fields())[0]
         return _ReadPredicateBuilder(
-            self.read_type(), self._map_key_output_names())
+            fields, self._map_key_output_names())
 
     def explain(self, verbose: bool = False) -> ExplainResult:
         """Produce a structured scan plan for this builder.
@@ -223,31 +229,23 @@ class ReadBuilder:
             plan=plan,
             stats=stats,
             predicate=self._predicate,
-            projection=self._projection,
+            projection=([alias for alias, _ in self._output_projection.columns]
+                        if self._output_projection else None),
             limit=self._limit,
             verbose=verbose,
         )
 
     def read_type(self) -> List[DataField]:
-        return (self._resolved_read_type if self._resolved_read_type is not None
-                else self.table.fields)
+        """Return the structured reader request, preserving source field IDs.
 
-    def _resolve_read_type(
-            self, projection: Optional[List[str]],
-            nested_paths: Optional[List[ProjectionPath]]) -> List[DataField]:
-        table_fields = self.table.fields
+        Nested ROWs are pruned in place. Selected MAP keys and VARIANT
+        extractions use field-description metadata, as in Java. Result aliases
+        and flat list-projection outputs are applied separately by TableRead.
+        """
+        return self._read_type if self._read_type is not None else self.table.fields
 
-        if not projection and not nested_paths:
-            return table_fields
-
-        if self.table.options.row_tracking_enabled():
-            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
-
-        if nested_paths:
-            return Projection.of(nested_paths).project(table_fields)
-
-        field_map = {field.name: field for field in table_fields}
-        return [field_map[name] for name in projection if name in field_map]
+    def _output_fields(self):
+        return output_fields(self.read_type(), self._output_projection)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -259,7 +257,6 @@ class ReadBuilder:
         table_fields = self.table.fields
         if self.table.options.row_tracking_enabled():
             table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
-        field_map = {field.name: field for field in table_fields}
         projection = []
         variants = {}
         outputs = []
@@ -271,9 +268,11 @@ class ReadBuilder:
                 raise ValueError("Projection output name %r is reserved" % alias)
             if not isinstance(expression, str) or not expression:
                 raise TypeError("Projection expressions must be non-empty strings")
-            if expression in field_map:
-                source, child = expression, None
-                direct_columns.add(source)
+            paths = self._resolve_projection_paths([expression])
+            if paths:
+                path = Projection.of(paths).to_name_paths(table_fields)[0]
+                source, child = path[0], None
+                direct_columns.add(tuple(path))
             else:
                 try:
                     call = ast.parse(
@@ -287,21 +286,20 @@ class ReadBuilder:
                         or call.func.id.lower() not in ('variant_get', 'try_variant_get')
                         or len(call.args) != 3 or call.keywords
                         or not (isinstance(call.args[0], ast.Name)
+                                or isinstance(call.args[0], ast.Attribute)
                                 or _string_literal(call.args[0]) is not None)
                         or any(_string_literal(arg) is None
                                for arg in call.args[1:])):
                     raise ValueError(
                         "Unsupported projection expression %r" % expression)
-                source = (call.args[0].id
-                          if isinstance(call.args[0], ast.Name)
-                          else _string_literal(call.args[0]))
-                field = field_map.get(source)
-                if (field is None
-                        or not isinstance(field.type, AtomicType)
+                source = _source_expression(call.args[0])
+                source_indexes = self._resolve_projection_paths([source]) if source else []
+                source_paths = Projection.of(source_indexes).to_name_paths(table_fields)
+                reader_path = source_paths[0] if source_paths else []
+                field = _field_at_path(table_fields, reader_path)
+                if (field is None or not isinstance(field.type, AtomicType)
                         or field.type.type.upper() != 'VARIANT'):
-                    raise ValueError(
-                        "Variant extraction requires a VARIANT column: %r"
-                        % source)
+                    raise ValueError("Variant extraction requires a VARIANT column: %r" % source)
                 path, target_type = (_string_literal(arg) for arg in call.args[1:])
                 if ';' in path:
                     raise ValueError(
@@ -310,7 +308,7 @@ class ReadBuilder:
                 if target_type.lower() != 'float':
                     raise ValueError(
                         "Only float32 Variant extractions are supported")
-                options = variants.setdefault(source, {
+                options = variants.setdefault(tuple(reader_path), {
                     'paths': [], 'target_type': pyarrow.float32(),
                     'fail_on_error': [],
                 })
@@ -318,10 +316,13 @@ class ReadBuilder:
                 options['paths'].append(path)
                 options['fail_on_error'].append(
                     call.func.id.lower() == 'variant_get')
-            if source not in projection:
-                projection.append(source)
-            outputs.append((alias, source, child))
-        if direct_columns & variants.keys():
+                path = reader_path + [str(child)]
+            if child is None:
+                reader_path = path
+            if reader_path not in projection:
+                projection.append(reader_path)
+            outputs.append((alias, path))
+        if any(variant[:len(direct)] == direct for direct in direct_columns for variant in variants):
             raise ValueError(
                 "A VARIANT column cannot be read both whole and extracted")
         return projection, variants or None, outputs
@@ -343,8 +344,8 @@ class ReadBuilder:
 
             map_selector = _map_key_selector(name, table_fields)
             if map_selector is not None:
-                top, key = map_selector
-                paths.append([top_index[top], MapKey(key)])
+                map_path, key = map_selector
+                paths.append(map_path + [MapKey(key)])
                 continue
 
             if "." not in name:
@@ -377,39 +378,19 @@ class ReadBuilder:
         return paths
 
     def _validate_map_key_filter(self):
-        if self._predicate is None or not self._nested_paths:
+        if self._predicate is None:
             return
-        unsupported = (
-            predicate_field_names(self._predicate)
-            & self._map_key_output_names()
-        )
+        unsupported = predicate_field_names(self._predicate) & self._map_key_output_names()
         if unsupported:
-            raise NotImplementedError(
-                "Filtering projected MAP keys is not supported: {}".format(
-                    sorted(unsupported)))
+            raise NotImplementedError("Filtering projected MAP keys is not supported: {}".format(sorted(unsupported)))
 
     def _map_key_output_names(self):
-        if not self._nested_paths:
+        if self._output_projection is None:
             return set()
-        return {
-            field.name
-            for field, path in zip(self.read_type(), self._nested_paths)
-            if any(isinstance(step, MapKey) for step in path)
-        }
-
-    def _scan_read_type(self):
-        if not self._nested_paths:
-            return self.read_type()
-        table_fields = self.table.fields
-        if self.table.options.row_tracking_enabled():
-            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
-        seen = set()
-        fields = []
-        for path in self._nested_paths:
-            if path[0] not in seen:
-                seen.add(path[0])
-                fields.append(table_fields[path[0]])
-        return fields
+        fields = {field.name: field for field in self._table_read_fields()}
+        return {alias for alias, path in self._output_projection.columns
+                if any(isinstance(_field_at_path(list(fields.values()), path[:i]).type, MapType)
+                       for i in range(1, len(path)))}
 
 
 def _resolve_row_path(
@@ -430,25 +411,46 @@ def _resolve_row_path(
     return path
 
 
+def _field_at_path(fields, path):
+    field = None
+    for name in path:
+        field = next((field for field in fields if field.name == name), None)
+        if field is None:
+            return None
+        fields = field.type.fields if is_row_type(field.type) else []
+    return field
+
+
+def _source_expression(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _source_expression(node.value)
+        return parent + '.' + node.attr if parent else None
+    return _string_literal(node)
+
+
 def _map_key_selector(name, table_fields):
     if not name.endswith("]"):
         return None
-    candidates = [
-        field
-        for field in table_fields
-        if _is_string_key_map(field.type) and name.startswith(field.name + "[")
-    ]
-    for field in sorted(
-        candidates, key=lambda candidate: len(candidate.name), reverse=True
-    ):
-        prefix_length = len(field.name)
-        selector = name[prefix_length:]
+    candidates = []
+
+    def visit(fields, prefix, indexes):
+        for index, field in enumerate(fields):
+            full = prefix + field.name
+            path = indexes + [index]
+            if _is_string_key_map(field.type) and name.startswith(full + "["):
+                candidates.append((full, path))
+            elif is_row_type(field.type):
+                visit(field.type.fields, full + '.', path)
+    visit(table_fields, '', [])
+    for full, path in sorted(candidates, key=lambda pair: len(pair[0]), reverse=True):
         try:
-            key = ast.literal_eval(selector[1:-1])
+            key = ast.literal_eval(name[len(full) + 1:-1])
         except (SyntaxError, ValueError):
             continue
         if isinstance(key, str):
-            return field.name, key
+            return path, key
     return None
 
 
