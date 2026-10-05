@@ -26,6 +26,7 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
+from pypaimon.read.table_read import _RemainingRows
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 
 
@@ -117,6 +118,21 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         with self.assertRaisesRegex(ValueError, "must not contain ';'"):
             ReadBuilder(table).with_projection(
                 {'x': 'try_variant_get(payload, "$[\'a;b\']", "float")'})
+
+    def test_variant_path_preserves_sql_escaped_quotes(self):
+        table = Mock()
+        table.fields = [DataField(1, 'payload', AtomicType('VARIANT'))]
+        for function in ('variant_get', 'try_variant_get'):
+            with self.subTest(function=function):
+                builder = ReadBuilder(table).with_projection({
+                    'x': "%s(payload, '$[\"it''s\"]', 'float')" % function,
+                })
+                self.assertEqual(
+                    ['$["it\'s"]'], builder._variant_fields['payload']['paths'])
+        with self.assertRaisesRegex(ValueError, 'Adjacent string literals'):
+            ReadBuilder(table).with_projection({
+                'x': "try_variant_get(payload, '$.it' 's', 'float')",
+            })
 
     def test_named_projection_rejects_unknown_and_non_variant_sources(self):
         table = Mock()
@@ -224,6 +240,45 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         self.assertEqual(['value', 'key'], projected.schema.names)
         self.assertEqual(['x'], projected.column('value').to_pylist())
         self.assertEqual([7], projected.column('key').to_pylist())
+
+    def test_named_duplicate_columns_after_primary_key_merge(self):
+        pa_schema = pa.schema([
+            pa.field('pk', pa.int64(), nullable=False),
+            pa.field('val', pa.int64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['pk'], options={
+                'bucket': '1', 'file.format': 'parquet',
+                'read.native.enabled': 'false',
+            })
+        self.catalog.create_table('default.rb_named_duplicate_pk', schema, False)
+        table = self.catalog.get_table('default.rb_named_duplicate_pk')
+        for value in (20, 30):
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+            commit = write_builder.new_commit()
+            writer.write_arrow(pa.Table.from_arrays([
+                pa.array([1], type=pa.int64()),
+                pa.array([value], type=pa.int64()),
+            ], schema=pa_schema))
+            commit.commit(writer.prepare_commit())
+            writer.close()
+            commit.close()
+
+        builder = table.new_read_builder().with_projection({
+            'one': 'pk', 'two': 'pk', 'value': 'val',
+        })
+        splits = builder.new_scan().plan().splits()
+        read = builder.new_read()
+        expected = {'one': [1], 'two': [1], 'value': [30]}
+        self.assertEqual(
+            expected, read.to_arrow(splits, parallelism=1).to_pydict())
+        self.assertEqual(
+            expected, read.to_arrow_batch_reader(
+                splits, parallelism=1).read_all().to_pydict())
+        batches = read._read_one_split_to_batches(
+            splits[0], read._output_arrow_schema(), _RemainingRows(None))
+        self.assertEqual(expected, pa.Table.from_batches(batches).to_pydict())
 
     def test_dotted_name_resolves_to_nested_path(self):
         rb = self.table.new_read_builder().with_projection(

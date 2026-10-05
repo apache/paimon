@@ -1317,6 +1317,41 @@ class TestVariantPaimonTable(unittest.TestCase):
 
     @unittest.skipUnless(_native_variant_projection_available(),
                          'compatible native Variant projection API not installed')
+    def test_named_variant_projection_sql_escaped_path(self):
+        schema = Schema.from_pyarrow_schema(
+            self._pa_schema(), options={'read.native.enabled': 'true'})
+        identifier = 'default.named_variant_escaped_path'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        data = pa.table({
+            'id': [1],
+            'payload': GenericVariant.to_arrow_array([
+                GenericVariant.from_python({"it's": 1.0, 'its': 2.0})]),
+        }, schema=self._pa_schema())
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        from pypaimon_rust.datafusion import SQLContext
+        context = SQLContext()
+        context.register_catalog(
+            'paimon', {'warehouse': os.path.join(self.tmpdir, 'warehouse')})
+        for function in ('variant_get', 'try_variant_get'):
+            expression = "%s(payload, '$[\"it''s\"]', 'float')" % function
+            builder = table.new_read_builder().with_projection({'x': expression})
+            splits = builder.new_scan().plan().splits()
+            actual = builder.new_read().to_arrow(splits)['x'].to_pylist()
+            sql = pa.Table.from_batches(context.sql(
+                'SELECT %s AS x FROM %s' % (expression, identifier)))
+            self.assertEqual([1.0], actual)
+            self.assertEqual(sql['x'].to_pylist(), actual)
+
+    @unittest.skipUnless(_native_variant_projection_available(),
+                         'compatible native Variant projection API not installed')
     def test_named_variant_projection_batch_and_stream(self):
         schema = Schema.from_pyarrow_schema(
             self._pa_schema(), options={'read.native.enabled': 'true'})

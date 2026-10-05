@@ -952,7 +952,7 @@ class TableRead:
                                     break
 
                             if len(row_tuple_chunk) >= chunk_size:
-                                yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                                yield from self._convert_rows_to_output_batches(
                                     row_tuple_chunk, row_kind_chunk, schema
                                 )
                                 row_tuple_chunk = []
@@ -961,7 +961,7 @@ class TableRead:
                             break
 
                     if row_tuple_chunk:
-                        yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                        yield from self._convert_rows_to_output_batches(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
             finally:
@@ -1183,16 +1183,33 @@ class TableRead:
                             row_kind_chunk.append(row.get_row_kind().to_string())
 
                         if len(row_tuple_chunk) >= chunk_size:
-                            out.extend(self._convert_rows_to_arrow_batches_with_row_kind(
+                            out.extend(self._convert_rows_to_output_batches(
                                 row_tuple_chunk, row_kind_chunk, schema))
                             row_tuple_chunk = []
                             row_kind_chunk = []
                 if row_tuple_chunk:
-                    out.extend(self._convert_rows_to_arrow_batches_with_row_kind(
+                    out.extend(self._convert_rows_to_output_batches(
                         row_tuple_chunk, row_kind_chunk, schema))
         finally:
             reader.close()
         return out
+
+    def _convert_rows_to_output_batches(
+        self,
+        row_tuples: List[tuple],
+        row_kinds: List[str],
+        schema: pyarrow.Schema,
+    ) -> Iterator[pyarrow.RecordBatch]:
+        if self.expression_projection is None:
+            yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                row_tuples, row_kinds, schema)
+            return
+        physical_schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        if self.include_row_kind:
+            physical_schema = self._add_row_kind_to_schema(physical_schema)
+        for batch in self._convert_rows_to_arrow_batches_with_row_kind(
+                row_tuples, row_kinds, physical_schema):
+            yield self._project_batch_to_output(batch)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,

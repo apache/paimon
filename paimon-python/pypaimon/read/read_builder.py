@@ -46,6 +46,42 @@ def _string_literal(node: ast.AST) -> Optional[str]:
     return None
 
 
+def _normalize_sql_literals(expression: str) -> str:
+    """Decode SQL doubled quotes before validating the expression with AST."""
+    normalized = []
+    index = 0
+    previous_was_literal = False
+    while index < len(expression):
+        quote = expression[index]
+        if quote not in ("'", '"'):
+            normalized.append(quote)
+            if not quote.isspace():
+                previous_was_literal = False
+            index += 1
+            continue
+        if previous_was_literal:
+            raise ValueError("Adjacent string literals are not supported")
+        index += 1
+        literal = []
+        while index < len(expression):
+            char = expression[index]
+            if char == quote:
+                if index + 1 < len(expression) and expression[index + 1] == quote:
+                    literal.append(quote)
+                    index += 2
+                else:
+                    index += 1
+                    break
+            else:
+                literal.append(char)
+                index += 1
+        else:
+            raise ValueError("Unterminated string literal in projection expression")
+        normalized.append(repr(''.join(literal)))
+        previous_was_literal = True
+    return ''.join(normalized)
+
+
 class _ReadPredicateBuilder(PredicateBuilder):
 
     def __init__(self, fields, unsupported_fields):
@@ -231,7 +267,8 @@ class ReadBuilder:
                 direct_columns.add(source)
             else:
                 try:
-                    call = ast.parse(expression, mode='eval').body
+                    call = ast.parse(
+                        _normalize_sql_literals(expression), mode='eval').body
                 except SyntaxError as error:
                     raise ValueError(
                         "Unsupported projection expression %r" % expression
