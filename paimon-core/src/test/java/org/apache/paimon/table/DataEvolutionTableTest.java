@@ -466,6 +466,8 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
 
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write1.prepareCommit();
+            // a column update of the rows written above
+            setFirstRowId(commitables, 0L);
             commit.commit(commitables);
         }
 
