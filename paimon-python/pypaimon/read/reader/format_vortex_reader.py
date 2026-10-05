@@ -42,7 +42,7 @@ class FormatVortexReader(RecordBatchReader):
         import vortex
 
         from pypaimon.read.reader.vortex_utils import to_vortex_specified
-        file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, file_path)
+        file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, file_path, is_read=True)
 
         if store_kwargs:
             from vortex import store

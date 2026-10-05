@@ -45,7 +45,7 @@ class FormatLanceReader(RecordBatchReader):
 
         self._read_field_names = [f.name for f in read_fields]
 
-        file_path_for_lance, storage_options = to_lance_specified(file_io, file_path)
+        file_path_for_lance, storage_options = to_lance_specified(file_io, file_path, is_read=True)
 
         # Read file metadata (footer only) to get actual schema
         file_schema_names = set(

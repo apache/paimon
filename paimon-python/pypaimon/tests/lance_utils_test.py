@@ -20,10 +20,38 @@ import unittest
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
+from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.read.reader.lance_utils import to_lance_specified
+from pypaimon.read.reader.vortex_utils import to_vortex_specified
 
 
 class LanceUtilsTest(unittest.TestCase):
+
+    def test_native_reads_use_target_addressing_and_writes_use_origin(self):
+        path = "oss://bkt/t/bucket-0/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-1.lance"
+        options = {
+            "fs.oss.endpoint": "https://origin.example.com",
+            "fs.oss.accessKeyId": "ak",
+            "fs.oss.accessKeySecret": "sk",
+            "io-cache.enabled": "true",
+            "io-cache.policy": "read,meta",
+            "io-cache.endpoint": "http://cache.example.com:8080",
+            "io-cache.target.default.path-style-access": "true",
+        }
+        routing = IoCacheRouting.create(options)
+        origin = FileIO.get(path, Options(routing.origin_options(options)))
+        file_io = IoCacheRoutingFileIO(routing, origin, lambda name: FileIO.get(
+            path, Options(routing.target_options(options, name))))
+        for convert in (to_lance_specified, to_vortex_specified):
+            with self.subTest(convert=convert.__name__):
+                _, read = convert(file_io, path, is_read=True)
+                self.assertEqual("http://cache.example.com:8080", read["endpoint"])
+                self.assertEqual("false", read["virtual_hosted_style_request"])
+                self.assertEqual("true", read["allow_http"])
+                _, write = convert(file_io, path)
+                self.assertEqual("https://bkt.origin.example.com", write["endpoint"])
+                self.assertEqual("true", write["virtual_hosted_style_request"])
 
     def test_oss_url_bucket_extraction_correctness(self):
         file_path = "oss://test-bucket/db-name.db/table-name/bucket-0/data.lance"

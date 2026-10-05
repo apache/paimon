@@ -149,6 +149,46 @@ class FileIOTest(unittest.TestCase):
                         "OSS+PyArrow<16 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
                     )
 
+    def test_legacy_oss_url_endpoint_passes_scheme(self):
+        options = {
+            OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+            OssOptions.OSS_IMPL.key(): 'legacy',
+        }
+        cases = (('http://127.0.0.1:9000/', 'http', '127.0.0.1:9000'),
+                 ('HTTPS://oss-cn-hangzhou.aliyuncs.com', 'https', 'oss-cn-hangzhou.aliyuncs.com'),
+                 ('oss-cn-hangzhou.aliyuncs.com', None, 'oss-cn-hangzhou.aliyuncs.com'))
+        for endpoint, scheme, host in cases:
+            with patch('pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem') as s3_file_system:
+                oss_io = OssFileIO("oss://test-bucket/warehouse", Options(
+                    {**options, OssOptions.OSS_ENDPOINT.key(): endpoint}))
+            kwargs = s3_file_system.call_args[1]
+            self.assertEqual(scheme, kwargs.get('scheme'))
+            expected = 'test-bucket.' + host if oss_io._oss_bucket_in_endpoint else host
+            self.assertEqual(expected, kwargs['endpoint_override'])
+
+    def test_legacy_oss_path_style_keeps_bucket_out_of_endpoint(self):
+        options = Options({
+            OssOptions.OSS_ENDPOINT.key(): 'http://10.0.0.1:8080',
+            OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+            OssOptions.OSS_IMPL.key(): 'legacy',
+            OssOptions.OSS_SECOND_LEVEL_DOMAIN_ENABLE.key(): 'true',
+        })
+        for version, virtual in (('15.0.0', None), ('16.0.0', False)):
+            # the retry strategy is missing from the old pyarrow some CI jobs install
+            with patch('pyarrow.__version__', version), \
+                    patch('pypaimon.filesystem.pyarrow_file_io.pafs.AwsStandardS3RetryStrategy', create=True), \
+                    patch('pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem') as s3_file_system:
+                oss_io = OssFileIO("oss://test-bucket/warehouse", options)
+            kwargs = s3_file_system.call_args[1]
+            self.assertEqual('10.0.0.1:8080', kwargs['endpoint_override'])
+            self.assertEqual(virtual, kwargs.get('force_virtual_addressing'))
+            self.assertFalse(oss_io._oss_bucket_in_endpoint)
+        oss_io = OssFileIO("oss://test-bucket/warehouse", options)
+        self.assertEqual("test-bucket/warehouse/data-1.parquet",
+                         oss_io.to_filesystem_path("oss://test-bucket/warehouse/data-1.parquet"))
+
     def test_exists(self):
         lt7 = _pyarrow_lt_7()
         with tempfile.TemporaryDirectory(prefix="file_io_nonexistent_") as tmpdir:

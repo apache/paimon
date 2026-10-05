@@ -59,8 +59,10 @@ class PyArrowFileIO(FileIO):
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
         self._pyarrow_gte_16 = parse(pyarrow.__version__) >= parse("16.0.0")
-        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16
         scheme, netloc, _ = self.parse_location(path)
+        # Path-style addressing sends bucket/key to the endpoint itself, so the bucket stays out of it.
+        self._oss_path_style = scheme == "oss" and self.properties.get(OssOptions.OSS_SECOND_LEVEL_DOMAIN_ENABLE)
+        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16 and not self._oss_path_style
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._oss_bucket = None
@@ -209,12 +211,18 @@ class PyArrowFileIO(FileIO):
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
 
+        endpoint = self.properties.get(OssOptions.OSS_ENDPOINT)
+        if endpoint and '://' in endpoint:
+            # endpoint_override takes host[:port]; a URL endpoint carries its scheme separately
+            scheme, _, endpoint = endpoint.partition('://')
+            client_kwargs['scheme'] = scheme.lower()
+            endpoint = endpoint.rstrip('/')
         if not self._oss_bucket_in_endpoint:
-            client_kwargs['force_virtual_addressing'] = True
-            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+            if self._pyarrow_gte_16:
+                client_kwargs['force_virtual_addressing'] = not self._oss_path_style
+            client_kwargs['endpoint_override'] = endpoint
         else:
-            client_kwargs['endpoint_override'] = (self._oss_bucket + "." +
-                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
+            client_kwargs['endpoint_override'] = self._oss_bucket + "." + endpoint
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
