@@ -1,0 +1,66 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>lock.zookeeper.connection-timeout</h5></td>
+            <td style="word-wrap: break-word;">15 s</td>
+            <td>Duration</td>
+            <td>ZooKeeper connection timeout.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.zookeeper.quorum</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>ZooKeeper connect string, e.g. 'host1:2181,host2:2181'. Required.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.zookeeper.retry-base-sleep</h5></td>
+            <td style="word-wrap: break-word;">1 s</td>
+            <td>Duration</td>
+            <td>Initial backoff between ZooKeeper connection retries.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.zookeeper.retry-max-attempts</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>Maximum ZooKeeper connection retry attempts.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.zookeeper.root</h5></td>
+            <td style="word-wrap: break-word;">"paimon/locks"</td>
+            <td>String</td>
+            <td>Root znode namespace for Paimon catalog locks.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.zookeeper.session-timeout</h5></td>
+            <td style="word-wrap: break-word;">30 s</td>
+            <td>Duration</td>
+            <td>ZooKeeper session timeout.</td>
+        </tr>
+    </tbody>
+</table>
