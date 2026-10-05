@@ -419,7 +419,7 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 +----------------------------+
 | Physical Length Index      |  Delta-Varint video lengths
 +----------------------------+
-| Keyframe-Index Length Index |  Delta-Varint keyframe-index lengths
+| Keyframe-Index Length Index |  Per-video index block lengths, Delta-Varint encoded (0 = absent)
 +----------------------------+
 | Run Length Index           |  Delta-Varint logical row counts
 +----------------------------+
