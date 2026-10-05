@@ -113,9 +113,10 @@ def _native_rest_table(table, schema_json):
     catalog_options = _catalog_context_options(table)
     catalog_options['metastore'] = 'rest'
     native_table = NativeCatalog(catalog_options).get_table((
-        table.identifier.get_database_name(), table.identifier.get_table_name()))
+        table.identifier.get_database_name(), table.identifier.get_object_name()))
     if (native_table.location() != table.table_path
-            or native_table.rest_table_uuid() != table.catalog_environment.uuid):
+            or native_table.rest_table_uuid() != table.catalog_environment.uuid
+            or native_table.branch() != table.current_branch()):
         return None
     return native_table.copy_with_resolved_schema(schema_json)
 
@@ -128,11 +129,9 @@ def create_native_write_table(table):
     from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
     from pypaimon.table.file_store_table import FileStoreTable
 
-    # Native writes currently require the main branch.
     environment = table.catalog_environment
     if (type(table) is not FileStoreTable
             or type(environment) is not CatalogEnvironment
-            or table.current_branch() != 'main'
             or table.options.query_auth_enabled):
         return None
 
@@ -161,7 +160,7 @@ def create_native_write_table(table):
     return NativeTable.from_resolved_schema(
         table.table_path, schema_json,
         database=table.identifier.get_database_name(),
-        table=table.identifier.get_table_name(),
+        table=table.identifier.get_table_name(), branch=table.current_branch(),
         options=file_io_options)
 
 
