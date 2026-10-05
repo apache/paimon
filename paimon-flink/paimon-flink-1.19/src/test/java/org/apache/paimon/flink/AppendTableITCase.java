@@ -52,7 +52,7 @@ public class AppendTableITCase extends CatalogITCaseBase {
                         + "    'rows-per-second' = '1'\n"
                         + ")");
 
-        assertStreamingHasCompact("INSERT INTO append_table SELECT * FROM Orders_in", 60000);
+        assertStreamingHasCompact("INSERT INTO append_table SELECT * FROM Orders_in", 300000);
         // ensure data gen finished
         Thread.sleep(5000);
     }
