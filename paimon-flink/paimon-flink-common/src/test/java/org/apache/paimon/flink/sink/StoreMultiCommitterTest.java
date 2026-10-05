@@ -31,6 +31,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -158,6 +159,43 @@ class StoreMultiCommitterTest {
     // ------------------------------------------------------------------------
     //  Recoverable operator tests
     // ------------------------------------------------------------------------
+
+    @Test
+    public void testMergeEndInputCommittables() throws Exception {
+        StoreMultiCommitter committer =
+                new StoreMultiCommitter(
+                        catalogLoader,
+                        Committer.createContext(initialCommitUser, null, true, true, null, 1, 0));
+        try {
+            long checkpointId = Long.MAX_VALUE;
+            WrappedManifestCommittable target =
+                    new WrappedManifestCommittable(checkpointId, Long.MIN_VALUE);
+            ManifestCommittable targetTableCommittable =
+                    new ManifestCommittable(checkpointId, Long.MIN_VALUE);
+            targetTableCommittable.addProperty("target", "value");
+            target.putManifestCommittable(firstTable, targetTableCommittable);
+
+            WrappedManifestCommittable source =
+                    new WrappedManifestCommittable(checkpointId, Long.MIN_VALUE);
+            ManifestCommittable sourceFirstTableCommittable =
+                    new ManifestCommittable(checkpointId, Long.MIN_VALUE);
+            sourceFirstTableCommittable.addProperty("source", "value");
+            source.putManifestCommittable(firstTable, sourceFirstTableCommittable);
+            source.putManifestCommittable(
+                    secondTable, new ManifestCommittable(checkpointId, Long.MIN_VALUE));
+
+            WrappedManifestCommittable merged =
+                    StoreMultiCommitter.END_INPUT_HANDLER.merge(target, source);
+
+            assertThat(merged).isSameAs(target);
+            assertThat(merged.manifestCommittables()).containsOnlyKeys(firstTable, secondTable);
+            assertThat(merged.manifestCommittables().get(firstTable).properties())
+                    .containsEntry("target", "value")
+                    .containsEntry("source", "value");
+        } finally {
+            committer.close();
+        }
+    }
 
     @SuppressWarnings("CatchMayIgnoreException")
     @Test
@@ -617,7 +655,9 @@ class StoreMultiCommitterTest {
                         initialCommitUser,
                         context -> new StoreMultiCommitter(catalogLoader, context),
                         new RestoreAndFailCommittableStateManager<>(
-                                WrappedManifestCommittableSerializer::new, true));
+                                WrappedManifestCommittableSerializer::new,
+                                true,
+                                StoreMultiCommitter.END_INPUT_HANDLER));
         return createTestHarness(operator);
     }
 
@@ -631,13 +671,16 @@ class StoreMultiCommitterTest {
                         context -> new StoreMultiCommitter(catalogLoader, context),
                         new CommittableStateManager<WrappedManifestCommittable>() {
                             @Override
-                            public void initializeState(
+                            public List<WrappedManifestCommittable> initializeState(
                                     Committer.Context context,
-                                    Committer<?, WrappedManifestCommittable> committer) {}
+                                    Committer<?, WrappedManifestCommittable> committer) {
+                                return Collections.emptyList();
+                            }
 
                             @Override
                             public void snapshotState(
-                                    List<WrappedManifestCommittable> committables) {}
+                                    List<WrappedManifestCommittable> committables,
+                                    boolean completeEndInput) {}
                         });
         return createTestHarness(operator);
     }
