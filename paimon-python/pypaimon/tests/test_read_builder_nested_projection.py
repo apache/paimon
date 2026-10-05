@@ -19,10 +19,17 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.read.datasource.split_provider import (
+    CatalogSplitProvider, PreResolvedSplitProvider)
+from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.read.stream_read_builder import StreamReadBuilder
+from pypaimon.read.table_read import _RemainingRows
+from pypaimon.schema.data_types import AtomicType, DataField, RowType
 
 
 class _ReadBuilderTestBase(unittest.TestCase):
@@ -60,6 +67,196 @@ class _ReadBuilderTestBase(unittest.TestCase):
 
 class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
 
+    @staticmethod
+    def _variant_descriptions(builder, column='payload'):
+        field = next(field for field in builder.read_type()
+                     if field.name == column)
+        return [child.description for child in field.type.fields]
+
+    def test_named_variant_expressions_group_paths_and_error_policies(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+        ]
+        builder = ReadBuilder(table).with_projection(
+            {'identifier': 'id',
+             'ratio': "try_variant_get(payload, '$.ratio', 'float')",
+             'age': "variant_get(payload, '$.age', 'float')"})
+
+        self.assertEqual(['id', 'payload'], builder._projection)
+        self.assertEqual(
+            ['__VARIANT_METADATA$.ratio;false;UTC',
+             '__VARIANT_METADATA$.age;true;UTC'],
+            self._variant_descriptions(builder))
+        self.assertEqual(
+            [('identifier', 'id', None), ('ratio', 'payload', 0),
+             ('age', 'payload', 1)], builder._expression_projection)
+
+        builder.with_projection(['id'])
+        self.assertEqual(['id'], [field.name for field in builder.read_type()])
+        self.assertIsNone(builder._expression_projection)
+
+    def test_variant_read_type_is_shared_by_batch_stream_and_ray_providers(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+        ]
+        table.options.row_tracking_enabled.return_value = False
+        expressions = {
+            'identifier': 'id',
+            'ratio': "try_variant_get(payload, '$.ratio', 'float')",
+        }
+        batch = ReadBuilder(table).with_projection(expressions)
+        stream = StreamReadBuilder(table).with_projection(expressions)
+        expected = batch.read_type()
+
+        with patch('pypaimon.read.read_builder.TableRead') as batch_read:
+            batch.new_read()
+        with patch('pypaimon.read.stream_read_builder.TableRead') as stream_read:
+            stream.new_read()
+        self.assertEqual(expected, batch_read.call_args.kwargs['read_type'])
+        self.assertEqual(expected, stream_read.call_args.kwargs['read_type'])
+        self.assertEqual(expected, stream.new_streaming_scan()._read_type)
+
+        pre_resolved = PreResolvedSplitProvider(table, [], expected)
+        self.assertIs(expected, pre_resolved.read_type())
+        catalog = CatalogSplitProvider('default.t', {}, projection=expressions)
+        with patch.object(catalog, '_ensure_table', return_value=table), \
+                patch('pypaimon.read.read_builder.ReadBuilder.new_scan') as scan:
+            scan.return_value.plan.return_value.splits.return_value = []
+            self.assertEqual(expected, catalog.read_type())
+
+        batch.with_projection(['id'])
+        stream.with_projection(['id'])
+        self.assertEqual([DataField(0, 'id', AtomicType('INT'))],
+                         batch.read_type())
+        self.assertEqual(batch.read_type(), stream.read_type())
+
+    def test_variant_target_type_matches_native_float32_only(self):
+        table = Mock()
+        table.fields = [DataField(1, 'payload', AtomicType('VARIANT'))]
+
+        builder = ReadBuilder(table).with_projection(
+            {'x': "try_variant_get(payload, '$.x', 'float')"})
+        self.assertEqual(AtomicType('FLOAT'),
+                         builder.read_type()[0].type.fields[0].type)
+        upper = ReadBuilder(table).with_projection(
+            {'x': "TRY_VARIANT_GET(payload, '$.x', 'FLOAT')"})
+        self.assertEqual(
+            ['__VARIANT_METADATA$.x;false;UTC'],
+            self._variant_descriptions(upper))
+
+        for target_type in ('double', 'int', 'string', 'timestamp', 'float32'):
+            with self.subTest(target_type=target_type):
+                with self.assertRaisesRegex(ValueError, 'Only float32'):
+                    ReadBuilder(table).with_projection(
+                        {'x': "try_variant_get(payload, '$.x', '%s')"
+                         % target_type})
+
+    def test_variant_path_rejects_java_metadata_delimiter(self):
+        table = Mock()
+        table.fields = [DataField(1, 'payload', AtomicType('VARIANT'))]
+
+        with self.assertRaisesRegex(ValueError, "must not contain ';'"):
+            ReadBuilder(table).with_projection(
+                {'x': 'try_variant_get(payload, "$[\'a;b\']", "float")'})
+
+    def test_variant_path_preserves_sql_escaped_quotes(self):
+        table = Mock()
+        table.fields = [DataField(1, 'payload', AtomicType('VARIANT'))]
+        for function in ('variant_get', 'try_variant_get'):
+            with self.subTest(function=function):
+                builder = ReadBuilder(table).with_projection({
+                    'x': "%s(payload, '$[\"it''s\"]', 'float')" % function,
+                })
+                self.assertEqual(
+                    ['__VARIANT_METADATA$["it\'s"];%s;UTC' %
+                     ('true' if function == 'variant_get' else 'false')],
+                    self._variant_descriptions(builder))
+        with self.assertRaisesRegex(ValueError, 'Adjacent string literals'):
+            ReadBuilder(table).with_projection({
+                'x': "try_variant_get(payload, '$.it' 's', 'float')",
+            })
+
+    def test_named_projection_rejects_unknown_and_non_variant_sources(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+        ]
+
+        with self.assertRaisesRegex(ValueError, 'Unsupported projection'):
+            ReadBuilder(table).with_projection(
+                {'missing': 'not_a_column'})
+        with self.assertRaisesRegex(ValueError, 'requires a VARIANT'):
+            ReadBuilder(table).with_projection(
+                {'x': "try_variant_get(id, '$.x', 'float')"})
+        with self.assertRaisesRegex(ValueError, 'both whole and extracted'):
+            ReadBuilder(table).with_projection({
+                'whole': 'payload',
+                'x': "try_variant_get(payload, '$.x', 'float')"})
+
+    def test_named_projection_accepts_literal_top_level_punctuation(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id.dot', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+            DataField(2, 'payload.dot', AtomicType('VARIANT')),
+            DataField(3, 'payload[raw]', AtomicType('VARIANT')),
+        ]
+        table.options.row_tracking_enabled.return_value = False
+
+        for projection, column, sources in (
+            ({'x': 'try_variant_get("payload.dot", "$.ratio", "float")'},
+             'payload.dot', ['payload.dot']),
+            ({'x': 'try_variant_get("payload[raw]", "$.ratio", "float")'},
+             'payload[raw]', ['payload[raw]']),
+            ({'id': 'id.dot',
+              'x': 'try_variant_get(payload, "$.ratio", "float")'},
+             'payload', ['id.dot', 'payload']),
+        ):
+            with self.subTest(projection=projection):
+                batch = ReadBuilder(table).with_projection(projection)
+                stream = StreamReadBuilder(table).with_projection(projection)
+                self.assertIsNone(batch._nested_paths)
+                self.assertIsNone(batch._nested_name_paths())
+                self.assertEqual(
+                    sources, [field.name for field in batch.read_type()])
+                self.assertIsNone(stream._nested_name_paths())
+                self.assertEqual(
+                    sources, [field.name for field in stream.read_type()])
+                with patch('pypaimon.read.read_builder.TableRead') as read:
+                    batch.new_read()
+                    self.assertIsNone(
+                        read.call_args.kwargs['nested_name_paths'])
+                    fields = read.call_args.kwargs['read_type']
+                    self.assertIn(column, [field.name for field in fields])
+                with patch('pypaimon.read.stream_read_builder.TableRead') as read:
+                    stream.new_read()
+                    self.assertIsNone(
+                        read.call_args.kwargs['nested_name_paths'])
+                    fields = read.call_args.kwargs['read_type']
+                    self.assertIn(column, [field.name for field in fields])
+
+    def test_mapping_rejects_other_expressions(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'row', RowType(True, [
+                DataField(1, 'value', AtomicType('INT'))])),
+            DataField(2, 'payload', AtomicType('VARIANT')),
+        ]
+        table.options.row_tracking_enabled.return_value = False
+        for expression in (
+            'row.value', 'payload + 1',
+            "try_variant_get(payload, '$.ratio', 'float') + 1",
+            "try_variant_get(payload, '$.ratio', 'float', 1)",
+        ):
+            with self.subTest(expression=expression):
+                with self.assertRaisesRegex(ValueError, 'Unsupported projection'):
+                    ReadBuilder(table).with_projection({'x': expression})
+
     def test_no_projection_returns_full_schema(self):
         rb = self.table.new_read_builder()
         fields = rb.read_type()
@@ -78,6 +275,57 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         # No nested paths derived; only names are stored.
         self.assertIsNone(rb._nested_paths)
 
+    def test_named_ordinary_columns_keep_aliases_without_native_read(self):
+        read = self.table.new_read_builder().with_projection({
+            'value': 'val', 'key': 'pk'}).new_read()
+        self.assertEqual(['value', 'key'], read._output_arrow_schema().names)
+        batch = pa.record_batch([
+            pa.array(['x']), pa.array([7], type=pa.int64()),
+        ], names=['val', 'pk'])
+        projected = read._project_batch_to_output(batch)
+        self.assertEqual(['value', 'key'], projected.schema.names)
+        self.assertEqual(['x'], projected.column('value').to_pylist())
+        self.assertEqual([7], projected.column('key').to_pylist())
+
+    def test_named_duplicate_columns_after_primary_key_merge(self):
+        pa_schema = pa.schema([
+            pa.field('pk', pa.int64(), nullable=False),
+            pa.field('val', pa.int64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['pk'], options={
+                'bucket': '1', 'file.format': 'parquet',
+                'read.native.enabled': 'false',
+            })
+        self.catalog.create_table('default.rb_named_duplicate_pk', schema, False)
+        table = self.catalog.get_table('default.rb_named_duplicate_pk')
+        for value in (20, 30):
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+            commit = write_builder.new_commit()
+            writer.write_arrow(pa.Table.from_arrays([
+                pa.array([1], type=pa.int64()),
+                pa.array([value], type=pa.int64()),
+            ], schema=pa_schema))
+            commit.commit(writer.prepare_commit())
+            writer.close()
+            commit.close()
+
+        builder = table.new_read_builder().with_projection({
+            'one': 'pk', 'two': 'pk', 'value': 'val',
+        })
+        splits = builder.new_scan().plan().splits()
+        read = builder.new_read()
+        expected = {'one': [1], 'two': [1], 'value': [30]}
+        self.assertEqual(
+            expected, read.to_arrow(splits, parallelism=1).to_pydict())
+        self.assertEqual(
+            expected, read.to_arrow_batch_reader(
+                splits, parallelism=1).read_all().to_pydict())
+        batches = read._read_one_split_to_batches(
+            splits[0], read._output_arrow_schema(), _RemainingRows(None))
+        self.assertEqual(expected, pa.Table.from_batches(batches).to_pydict())
+
     def test_dotted_name_resolves_to_nested_path(self):
         rb = self.table.new_read_builder().with_projection(
             ['mv.latest_version', 'pk'])
@@ -91,8 +339,8 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
     def test_dotted_name_unknown_top_silently_skipped(self):
         rb = self.table.new_read_builder().with_projection(
             ['nope.x', 'val'])
-        # Only 'val' resolved; the dot trigger still populates _nested_paths.
-        self.assertEqual(rb._nested_paths, [[2]])
+        # Only 'val' resolved, with no nested field actually selected.
+        self.assertIsNone(rb._nested_paths)
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['val'])
 
@@ -100,7 +348,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         rb = self.table.new_read_builder().with_projection(
             ['mv.no_such_subfield', 'pk'])
         # The bad path drops out, the plain name survives.
-        self.assertEqual(rb._nested_paths, [[0]])
+        self.assertIsNone(rb._nested_paths)
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['pk'])
 

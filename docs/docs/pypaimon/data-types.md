@@ -233,6 +233,20 @@ Field names are literal (`state.x` is not a nested path). Missing fields are
 omitted; VARIANT NULL is `None`. Values use natural Python types, even when
 types differ between rows. This does not reduce Parquet I/O.
 
+To project VARIANT fields as named float32 columns:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    'id': 'id',
+    'x': "try_variant_get(payload, '$.x', 'float')",
+})
+```
+
+This requires `read.native.enabled=true` and a compatible `pypaimon-rust`; it
+does not fall back to Python. `try_variant_get` returns NULL on cast errors,
+while `variant_get` raises. Row iterators, Torch row format, and paths containing
+`;` are unsupported.
+
 ### Read and update typed paths
 
 Read existing paths as Arrow arrays, use Arrow compute, and replace them

@@ -20,7 +20,7 @@ import os
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import pandas
 import pyarrow
@@ -38,6 +38,7 @@ from pypaimon.read.reader.auth_masking_reader import (
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.split import Split
+from pypaimon.read.variant_read_type import has_variant_extractions
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
@@ -147,6 +148,8 @@ class TableRead:
         read_type: List[DataField],
         include_row_kind: bool = False,
         nested_name_paths: Optional[List[List[str]]] = None,
+        expression_projection: Optional[
+            List[Tuple[str, str, Optional[int]]]] = None,
         limit: Optional[int] = None,
     ):
         from pypaimon.read.merge_engine_support import check_supported
@@ -193,11 +196,16 @@ class TableRead:
         )
         self.include_row_kind = include_row_kind
         self.nested_name_paths = nested_name_paths
+        self.expression_projection = expression_projection
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
         self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
+        if self.expression_projection is not None:
+            raise RuntimeError(
+                "Projection expressions are not supported by to_iterator(); "
+                "use to_arrow() or to_arrow_batch_reader()")
         self._check_python_merge_supported()
         self._begin_auth_read(splits)
         limit = self.limit
@@ -274,7 +282,7 @@ class TableRead:
             splits: List[Split],
             blob_parallelism: Optional[int] = None,
             parallelism: Optional[int] = None):
-        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        schema = self._output_arrow_schema()
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
         effective = self._effective_parallelism(parallelism, len(splits))
@@ -372,7 +380,7 @@ class TableRead:
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         effective = self._effective_parallelism(parallelism, len(splits))
-        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        schema = self._output_arrow_schema()
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
@@ -423,6 +431,48 @@ class TableRead:
                 schema=schema)
         return pyarrow.Table.from_batches(batches)
 
+    def _output_arrow_schema(self) -> pyarrow.Schema:
+        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        return self._apply_expression_projection_to_schema(
+            schema, self.expression_projection)
+
+    @staticmethod
+    def _apply_expression_projection_to_schema(
+        schema: pyarrow.Schema,
+        expressions: Optional[List[Tuple[str, str, Optional[int]]]],
+    ) -> pyarrow.Schema:
+        if expressions is None:
+            return schema
+        fields = []
+        for alias, source, child in expressions:
+            index = schema.get_field_index(source)
+            if index < 0:
+                raise ValueError("Projection source %r is not in the read type" % source)
+            field = schema.field(index)
+            if child is None:
+                fields.append(field.with_name(alias))
+            else:
+                if not pyarrow.types.is_struct(field.type):
+                    raise TypeError("Variant projection %r is not a struct" % source)
+                fields.append(pyarrow.field(alias, field.type[child].type))
+        return pyarrow.schema(fields, metadata=schema.metadata)
+
+    def _native_fallback(
+        self,
+        reason: str,
+        error: Optional[Exception] = None,
+        log: bool = False,
+    ):
+        if has_variant_extractions(self.read_type):
+            raise RuntimeError(
+                "Variant extraction requires a compatible native reader: %s"
+                % reason) from error
+        if log:
+            logger.warning(
+                "Native read failed, falling back to the Python reader: %s",
+                reason)
+        return None
+
     def _try_native_batches(
             self,
             splits: List[Split],
@@ -432,9 +482,10 @@ class TableRead:
             streaming: bool = False):
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         if not self.table.options.native_read_enabled():
-            return None
+            return self._native_fallback("read.native.enabled is false")
         if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
-            return None
+            return self._native_fallback(
+                "the table file format is not supported")
         if not splits:
             return []
         sequence_fields = self.table.options.sequence_field()
@@ -444,37 +495,40 @@ class TableRead:
             # Native merge cannot extract floating sequence values: they
             # would silently become missing sequence values.
             if any(pyarrow.types.is_floating(field.type) for field in sequence_schema):
-                return None
+                return self._native_fallback(
+                    "floating sequence fields are not supported")
         if not self._native_blob_view_supported():
-            return None
+            return self._native_fallback(
+                "the table uses an unsupported BLOB view")
         if (self._deferred_blob_limit_may_prune(splits)
                 and not self.table.options.data_evolution_enabled()):
-            return None
+            return self._native_fallback(
+                "deferred BLOB LIMIT pruning requires the Python reader")
         # Query authorization has additional filtering, masking and projection
         # semantics which are already implemented by the Python reader.
         if any(isinstance(split, QueryAuthSplit) for split in splits):
-            return None
+            return self._native_fallback(
+                "query authorization requires the Python reader")
         try:
             from pypaimon.read.native_plan import (
                 _prepare_native_read, native_read, native_split_from_python)
         except Exception as e:
-            logger.warning(
-                "Native read failed, falling back to the Python reader: %s", e)
-            return None
+            return self._native_fallback(str(e), e, log=True)
         rust_splits = []
         split_weights = []
         for split in splits:
             if not self._native_split_files_supported(split):
-                return None
+                return self._native_fallback(
+                    "a split contains a file unsupported by the native reader")
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
                 try:
                     rust_split = native_split_from_python(split)
                 except Exception as e:
-                    logger.warning(
-                        "Native split conversion failed, falling back to the "
-                        "Python reader: %s", e)
-                    return None
+                    return self._native_fallback(
+                        "native split conversion failed: %s" % e,
+                        e,
+                        log=True)
             rust_splits.append(rust_split)
             split_weights.append(self._native_split_weight(split))
         if (parallelism is not None
@@ -483,9 +537,7 @@ class TableRead:
             try:
                 read_splits = _prepare_native_read(self.table, **read_kwargs)
             except Exception as e:
-                logger.warning(
-                    "Native read failed, falling back to the Python reader: %s", e)
-                return None
+                return self._native_fallback(str(e), e, log=True)
             if streaming:
                 groups = self._native_split_groups(
                     rust_splits, parallelism, split_weights)
@@ -505,9 +557,7 @@ class TableRead:
                                     "another reader failed to start",
                                     exc_info=True,
                                 )
-                    logger.warning(
-                        "Native read failed, falling back to the Python reader: %s", e)
-                    return None
+                    return self._native_fallback(str(e), e, log=True)
                 batches = self._native_batches_parallel_streaming(readers)
                 return self._convert_native_batches(batches, schema)
             try:
@@ -515,28 +565,26 @@ class TableRead:
                     read_splits, rust_splits, schema, parallelism,
                     split_weights)
             except _NativeReadSetupError as e:
-                logger.warning(
-                    "Native read failed, falling back to the Python reader: %s", e)
-                return None
+                return self._native_fallback(str(e), e, log=True)
         try:
             read_kwargs = self._native_read_kwargs(blob_parallelism)
             batches = native_read(self.table, rust_splits, **read_kwargs)
         except Exception as e:
-            logger.warning(
-                "Native read failed, falling back to the Python reader: %s", e)
-            return None
+            return self._native_fallback(str(e), e, log=True)
         return self._convert_native_batches(batches, schema)
 
     def _native_read_kwargs(self, blob_parallelism=None):
         kwargs = {
             'predicate': self.predicate,
             'limit': self.limit,
-            'projection': [field.name for field in self.read_type],
         }
         if blob_parallelism is not None:
             kwargs['blob_parallelism'] = blob_parallelism
         if self.nested_name_paths:
+            # Nested and MAP-key selectors still need their source paths.
             kwargs['nested_projection'] = self.nested_name_paths
+        else:
+            kwargs['read_type'] = self.read_type
         if self.include_row_kind:
             kwargs['include_row_kind'] = True
         return kwargs
@@ -874,7 +922,7 @@ class TableRead:
                                     break
 
                             if len(row_tuple_chunk) >= chunk_size:
-                                yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                                yield from self._convert_rows_to_output_batches(
                                     row_tuple_chunk, row_kind_chunk, schema
                                 )
                                 row_tuple_chunk = []
@@ -883,7 +931,7 @@ class TableRead:
                             break
 
                     if row_tuple_chunk:
-                        yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                        yield from self._convert_rows_to_output_batches(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
             finally:
@@ -1105,16 +1153,33 @@ class TableRead:
                             row_kind_chunk.append(row.get_row_kind().to_string())
 
                         if len(row_tuple_chunk) >= chunk_size:
-                            out.extend(self._convert_rows_to_arrow_batches_with_row_kind(
+                            out.extend(self._convert_rows_to_output_batches(
                                 row_tuple_chunk, row_kind_chunk, schema))
                             row_tuple_chunk = []
                             row_kind_chunk = []
                 if row_tuple_chunk:
-                    out.extend(self._convert_rows_to_arrow_batches_with_row_kind(
+                    out.extend(self._convert_rows_to_output_batches(
                         row_tuple_chunk, row_kind_chunk, schema))
         finally:
             reader.close()
         return out
+
+    def _convert_rows_to_output_batches(
+        self,
+        row_tuples: List[tuple],
+        row_kinds: List[str],
+        schema: pyarrow.Schema,
+    ) -> Iterator[pyarrow.RecordBatch]:
+        if self.expression_projection is None:
+            yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                row_tuples, row_kinds, schema)
+            return
+        physical_schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        if self.include_row_kind:
+            physical_schema = self._add_row_kind_to_schema(physical_schema)
+        for batch in self._convert_rows_to_arrow_batches_with_row_kind(
+                row_tuples, row_kinds, physical_schema):
+            yield self._project_batch_to_output(batch)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -1243,7 +1308,7 @@ class TableRead:
         import ray
 
         if not splits:
-            schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+            schema = self._output_arrow_schema()
             if self.include_row_kind:
                 schema = self._add_row_kind_to_schema(schema)
             empty_table = pyarrow.Table.from_arrays(
@@ -1266,6 +1331,7 @@ class TableRead:
                 predicate=self.predicate,
                 limit=self.limit,
                 nested_name_paths=self.nested_name_paths,
+                expression_projection=self.expression_projection,
                 include_row_kind=self.include_row_kind,
             )
         )
@@ -1338,6 +1404,10 @@ class TableRead:
         ):
             raise ValueError("batch_size must be a positive int or None")
         if batch_format == "row":
+            if self.expression_projection is not None:
+                raise RuntimeError(
+                    "Projection expressions are not supported by Torch row format; "
+                    "use streaming=True with batch_format='pyarrow' or 'torch'")
             if batch_size is not None:
                 raise ValueError(
                     "batch_size requires batch_format='pyarrow' or 'torch'"
@@ -1597,6 +1667,31 @@ class TableRead:
         return tuple(converted)
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
+        if self.expression_projection is not None:
+            fields = []
+            arrays = []
+            if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
+                fields.append(batch.schema.field(ROW_KIND_COLUMN))
+                arrays.append(batch.column(ROW_KIND_COLUMN))
+            output_schema = self._output_arrow_schema()
+            for alias, source, child in self.expression_projection:
+                index = batch.schema.get_field_index(source)
+                if index < 0:
+                    raise ValueError("Projection source %r is missing" % source)
+                array = batch.column(index)
+                if child is not None:
+                    if not pyarrow.types.is_struct(array.type):
+                        raise TypeError("Variant projection %r is not a struct" % source)
+                    parent = array
+                    array = parent.field(child)
+                    if parent.null_count:
+                        array = pyarrow_compute.if_else(
+                            parent.is_null(),
+                            pyarrow.scalar(None, type=array.type), array)
+                arrays.append(array)
+                fields.append(output_schema.field(alias))
+            return pyarrow.RecordBatch.from_arrays(
+                arrays, schema=pyarrow.schema(fields))
         if not self._needs_output_projection():
             return batch
         output_names = list(self._output_column_names)
@@ -1611,7 +1706,7 @@ class TableRead:
             arrays, schema=pyarrow.schema(fields))
 
     def _needs_output_projection(self) -> bool:
-        return bool(self._predicate_extra_fields)
+        return bool(self._predicate_extra_fields or self.expression_projection)
 
     def _output_extract_name_paths(self) -> List[List[str]]:
         return [[f.name] for f in self.read_type]
