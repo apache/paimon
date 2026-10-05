@@ -57,7 +57,7 @@ import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, Data
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
 import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{DataTypes, Geography, GeographyType, Geometry, GeometryType, StructType, VariantType}
+import org.apache.spark.sql.types.{DataTypes, Decimal, Geography, GeographyType, Geometry, GeometryType, StructType, VariantType}
 import org.apache.spark.unsafe.types.VariantVal
 
 import java.net.URI
@@ -535,20 +535,25 @@ class Spark4Shim extends SparkShim {
             // accepts a `UTF8String`, and `Literal.toString` has no char/varchar/string branch at
             // all, so the value falls through to `other.toString`.)
             //
-            // The rendering is `Literal.toString`, NOT what upstream's own
-            // `DescribeTablePartitionExec` uses (`ToPrettyString(...)` + `escapePathName`), because
-            // the result is compared for equality against Paimon's `Partition.spec()` rather than
-            // displayed. Note this rendering and `Partition.spec()`'s own do not agree for every
-            // type: with `partition.legacy-name`
-            // (the default) Paimon stores `field.toString()`, so a DATE column holds the epoch day
-            // while this renders `2021-01-01`. That mismatch predates Spark 4.2 — on <= 4.1 the
-            // parser produced the same `2021-01-01` via `Cast(literal, StringType)`.
+            // The rendering is compared for equality against Paimon's `Partition.spec()` rather
+            // than displayed, so it is `Literal.toString`, NOT what upstream's own
+            // `DescribeTablePartitionExec` uses (`ToPrettyString(...)` + `escapePathName`). A
+            // decimal is rendered with `toPlainString` instead: `Literal.toString` gives `1E-7` for
+            // 0.0000001, while `Partition.spec()` holds `0.0000001` under either
+            // `partition.legacy-name` setting. Other types still differ: with
+            // `partition.legacy-name` (the default) Paimon stores `field.toString()`, so a DATE
+            // column holds the epoch day while this renders `2021-01-01`. That mismatch predates
+            // Spark 4.2 — on <= 4.1 the parser produced the same `2021-01-01` via
+            // `Cast(literal, StringType)`.
             val partSchema = table.partitionSchema()
             val values = spec.names.zipWithIndex.map {
               case (name, i) =>
                 val field = partSchema(name)
-                val value = spec.ident.get(i, field.dataType)
-                name -> Literal(value, field.dataType).toString
+                val rendered = spec.ident.get(i, field.dataType) match {
+                  case d: Decimal => d.toPlainString
+                  case value => Literal(value, field.dataType).toString
+                }
+                name -> rendered
             }
             Some((r, values.toMap, d.isExtended, d.output))
           case _ => None

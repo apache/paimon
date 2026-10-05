@@ -423,13 +423,13 @@ trait SparkShim {
    * they can be compared against Paimon's own `Partition.spec()` map. `ResolvedPartitionSpec`
    * stores them as an `InternalRow`, so each field is read by the type `table.partitionSchema()`
    * declares for it (the same schema `ResolvePartitionSpec` used to build the row) and rendered
-   * with `Literal.toString`.
+   * with `Literal.toString`, except that a decimal is rendered with `toPlainString`.
    *
    * Note that this is NOT what upstream's own `DescribeTablePartitionExec` does: it renders via
    * `ToPrettyString(...).eval(null)` plus `escapePathName`, which differs for null (`NULL` vs
-   * `null`), binary, and decimal. Paimon needs a string it can compare against `Partition.spec()`,
-   * not a display string. This rendering and `Partition.spec()`'s own do not agree for every type
-   * either; the 4.2 implementation's comment works DATE through as the example.
+   * `null`) and binary. Paimon needs a string it can compare against `Partition.spec()`, not a
+   * display string. This rendering and `Partition.spec()`'s own do not agree for every type either;
+   * the 4.2 implementation's comment works DATE through as the example.
    */
   def describeTablePartition(
       plan: LogicalPlan): Option[(LogicalPlan, Map[String, String], Boolean, Seq[Attribute])]

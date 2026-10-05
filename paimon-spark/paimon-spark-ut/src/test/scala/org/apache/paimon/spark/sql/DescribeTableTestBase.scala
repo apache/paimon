@@ -240,4 +240,35 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
       parameters.head.contains(PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME))
     Assertions.assertTrue(parameters.head.contains(PartitionStatistics.FIELD_RECORD_COUNT))
   }
+
+  test("Paimon describe: describe table partition with a small decimal value") {
+    // `Partition.spec()` stores `0.0000001`, which `Decimal.toString` would render as `1E-7`.
+    Seq(true, false).foreach {
+      legacyPartName =>
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT, p DECIMAL(10, 7))
+                       |PARTITIONED BY (p)
+                       |TBLPROPERTIES ('partition.legacy-name' = '$legacyPartName')
+                       |""".stripMargin)
+          spark.sql("INSERT INTO T VALUES (1, 0.0000001)")
+
+          // An unquoted value reaches Spark <= 4.1 through `Cast(_, StringType)`, which keeps a
+          // decimal plain only under ANSI and only from 3.4 on.
+          val specValues = if (gteqSpark3_4) Seq("'0.0000001'", "0.0000001") else Seq("'0.0000001'")
+          withSparkSQLConf("spark.sql.ansi.enabled" -> "true") {
+            specValues.foreach {
+              value =>
+                checkAnswer(
+                  spark
+                    .sql(s"DESCRIBE FORMATTED T PARTITION (p = $value)")
+                    .filter("col_name = 'Partition Values'")
+                    .select("data_type"),
+                  Row("[p=0.0000001]") :: Nil
+                )
+            }
+          }
+        }
+    }
+  }
 }
