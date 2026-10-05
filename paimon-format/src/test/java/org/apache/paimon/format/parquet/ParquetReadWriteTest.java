@@ -36,6 +36,8 @@ import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.ReadBatchSizer;
@@ -543,6 +545,67 @@ public class ParquetReadWriteTest {
             // OR must retain the status match, even though its column is not projected.
             assertThat(ids).contains(0);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testReadWithUnprojectedNestedFilter(boolean conjunction) throws IOException {
+        RowType nestedType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(2, "a", DataTypes.INT()),
+                        DataTypes.FIELD(3, "b", DataTypes.INT()));
+        RowType rowType =
+                RowType.builder().field("id", DataTypes.INT()).field("s", nestedType).build();
+        Path path =
+                createTempParquetFileByPaimon(
+                        folder,
+                        Arrays.asList(
+                                GenericRow.of(0, GenericRow.of(10, 7)),
+                                GenericRow.of(1, GenericRow.of(20, 8))),
+                        1024,
+                        rowType);
+        // Read only s.a, so a filter on s.b references a pruned nested field.
+        RowType readType =
+                new RowType(
+                        Arrays.asList(
+                                rowType.getField("id"),
+                                rowType.getField("s")
+                                        .newType(
+                                                new RowType(
+                                                        Collections.singletonList(
+                                                                nestedType.getField("a"))))));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        FieldRef s = new FieldRef(1, "s", nestedType);
+        NestedFieldTransform a = new NestedFieldTransform(s, Collections.singletonList("a"));
+        NestedFieldTransform b = new NestedFieldTransform(s, Collections.singletonList("b"));
+        Predicate pruned = builder.equal(b, 7);
+
+        if (conjunction) {
+            // AND must drop the pruned s.b conjunct but keep pushing the projected s.a one.
+            Predicate matching = PredicateBuilder.and(pruned, builder.equal(a, 10));
+            Predicate excluding = PredicateBuilder.and(pruned, builder.equal(a, -1));
+            assertThat(readIds(path, readType, matching)).contains(0);
+            assertThat(readIds(path, readType, excluding)).isEmpty();
+        } else {
+            // OR touching the pruned s.b must be dropped as a whole.
+            Predicate predicate = PredicateBuilder.or(pruned, builder.equal(0, -1));
+            assertThat(readIds(path, readType, predicate)).contains(0);
+        }
+    }
+
+    private List<Integer> readIds(Path path, RowType readType, Predicate predicate)
+            throws IOException {
+        ParquetReaderFactory factory =
+                new ParquetReaderFactory(
+                        new Options(), readType, 1024, Collections.singletonList(predicate));
+        LocalFileIO io = LocalFileIO.create();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                factory.createReader(
+                        new FormatReaderContext(io, path, io.getFileSize(path), null, null))) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
     }
 
     @ParameterizedTest
