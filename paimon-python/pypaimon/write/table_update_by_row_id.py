@@ -42,6 +42,7 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 from pypaimon.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.row_utils import (
+    inline_blob_value,
     require_columns,
     row_to_named_values,
     value_for_arrow,
@@ -56,6 +57,19 @@ _ARROW_MAJOR = int(pa.__version__.split('.')[0])
 _DEFAULT_PARQUET_BLOCK_SIZE = 128 * 1024 * 1024
 
 
+def _supports_parquet_row_id_update(table):
+    """Shared format constraints for ordinary row-ID updates."""
+    options = table.options
+    return (not table.is_primary_key_table
+            and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
+            == CoreOptions.FILE_FORMAT_PARQUET
+            and not options.variant_shredding_schema()
+            and not options.data_evolution_row_sidecar_enabled(False)
+            and not options.with_vector_format()
+            and options.changelog_producer() == ChangelogProducer.NONE
+            and not any(is_blob_file_field(f) for f in table.fields))
+
+
 class _RowIdUpdateFileWriter:
     """Write one plain-Parquet update file for a row-id file group."""
 
@@ -63,18 +77,9 @@ class _RowIdUpdateFileWriter:
 
     @staticmethod
     def supports_table(table):
-        options = table.options
-        return (not table.is_primary_key_table
-                and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
-                == CoreOptions.FILE_FORMAT_PARQUET
-                and not (options.variant_shredding_enabled()
-                         and options.variant_shredding_schema())
-                and not options.data_evolution_row_sidecar_enabled(False)
-                and not options.with_vector_format()
-                and options.changelog_producer() == ChangelogProducer.NONE
-                and not any(options.map_storage_layout(f.name) == 'shared-shredding'
-                            for f in table.fields)
-                and not any(is_blob_file_field(f) for f in table.fields))
+        return (_supports_parquet_row_id_update(table)
+                and not any(table.options.map_storage_layout(f.name) == 'shared-shredding'
+                            for f in table.fields))
 
     def __init__(self, table, partition, column_names):
         if not self.supports_table(table):
@@ -332,6 +337,8 @@ class TableUpdateByRowId:
         ]
         fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
         blob_object_columns: Dict[str, List[Any]] = {}
+        descriptor_fields = self.table.options.blob_descriptor_fields()
+        view_fields = self.table.options.blob_view_fields()
 
         for col_name in column_names:
             if self._is_blob_column(col_name):
@@ -346,7 +353,9 @@ class TableUpdateByRowId:
             arrays.append(
                 pa.array(
                     [
-                        value_for_arrow(values_by_name[col_name], table_field)
+                        value_for_arrow(inline_blob_value(
+                            values_by_name[col_name],
+                            col_name in descriptor_fields, col_name in view_fields), table_field)
                         for _, values_by_name in row_entries
                     ],
                     type=arrow_field.type,
@@ -475,8 +484,11 @@ class TableUpdateByRowId:
         # added after the original file was written, reading only those
         # missing columns can otherwise produce a zero-row table instead of
         # one null value per original row.
+        read_table = self.table
+        if wanted.intersection(self.table.options.blob_descriptor_fields() | self.table.options.blob_view_fields()):
+            read_table = self.table.copy({'blob-as-descriptor': 'true', 'blob-view.resolve.enabled': 'false'})
         table_read = TableRead(
-            self.table,
+            read_table,
             predicate=None,
             read_type=read_fields + [SpecialFields.ROW_ID],
         )
@@ -853,6 +865,8 @@ class TableUpdateByRowId:
         return pa.array(pylist, type=target_type)
 
     def _is_blob_column(self, column_name: str) -> bool:
+        if column_name in (self.table.options.blob_descriptor_fields() | self.table.options.blob_view_fields()):
+            return False
         for table_field in self.table.fields:
             if table_field.name == column_name:
                 return is_blob_file_field(table_field)

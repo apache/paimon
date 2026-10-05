@@ -29,11 +29,11 @@ from pypaimon.schema.data_types import (
     is_blob_type,
 )
 from pypaimon.table.row.blob import (
-    Blob,
     BlobConsumer,
     video_payload_descriptor,
 )
 from pypaimon.write.row_utils import (
+    inline_blob_value,
     require_columns,
     row_to_named_values,
     row_values_to_arrow_table,
@@ -317,25 +317,8 @@ class DedicatedFormatWriter(CompositeDataWriter):
             raise e
 
     def _normal_row_value(self, field_name: str, value):
-        if field_name in self.blob_descriptor_fields and value is not None:
-            if isinstance(value, Blob):
-                try:
-                    return value.to_descriptor().serialize()
-                except Exception as e:
-                    raise ValueError(
-                        "blob-descriptor-field row values must be serialized "
-                        "BlobDescriptor bytes or a Blob with a descriptor."
-                    ) from e
-            return value
-
-        if field_name in self.blob_view_fields and value is not None:
-            from pypaimon.table.row.blob import BlobView
-
-            if isinstance(value, BlobView):
-                return value.view_struct.serialize()
-            return value
-
-        return value
+        return inline_blob_value(value, field_name in self.blob_descriptor_fields,
+                                 field_name in self.blob_view_fields)
 
     def abort(self):
         """Abort all writers and clean up resources."""

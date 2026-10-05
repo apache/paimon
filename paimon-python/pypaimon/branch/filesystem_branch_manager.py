@@ -61,9 +61,7 @@ class FileSystemBranchManager(BranchManager):
     @staticmethod
     def _normalize_branch(branch: str) -> str:
         """Normalize branch name."""
-        if not branch or branch == "main":
-            return "main"
-        return branch
+        return BranchManager.normalize_branch(branch)
 
     def _branch_directory(self) -> str:
         """Return the root directory of branch."""

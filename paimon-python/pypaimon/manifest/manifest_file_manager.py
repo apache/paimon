@@ -112,6 +112,7 @@ class ManifestFileManager:
     """Writer for manifest files in Avro format using unified FileIO."""
 
     _AVRO_SYNC_INTERVAL = 16000
+    _CHECK_ROLLING_RECORD_COUNT = 1000
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
@@ -359,17 +360,20 @@ class ManifestFileManager:
 
         from fastavro.write import Writer
 
-        sync_interval = min(self._AVRO_SYNC_INTERVAL, suggested_file_size)
         result = []
         written_files = []
         chunk_start = 0
         buf = BytesIO()
         writer = Writer(buf, MANIFEST_ENTRY_SCHEMA,
-                        sync_interval=sync_interval, codec=self._codec)
+                        sync_interval=self._AVRO_SYNC_INTERVAL, codec=self._codec)
         try:
             for i, entry in enumerate(entries):
                 writer.write(self._to_avro_record(entry))
-                if buf.tell() >= suggested_file_size:
+                # Java checks the bytes already flushed by Avro every 1000
+                # records. Keep the count across files and the normal Avro
+                # block size, even when the requested target is very small.
+                if ((i + 1) % self._CHECK_ROLLING_RECORD_COUNT == 0
+                        and buf.tell() >= suggested_file_size):
                     writer.flush()
                     avro_bytes = buf.getvalue()
                     file_name = f"{name_prefix}-{len(result)}"
@@ -381,7 +385,7 @@ class ManifestFileManager:
                     buf = BytesIO()
                     writer = Writer(
                         buf, MANIFEST_ENTRY_SCHEMA,
-                        sync_interval=sync_interval, codec=self._codec)
+                        sync_interval=self._AVRO_SYNC_INTERVAL, codec=self._codec)
 
             if chunk_start < len(entries):
                 writer.flush()

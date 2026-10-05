@@ -99,6 +99,10 @@ def deferred_blob_field_names(table, read_fields: List[DataField],
                               predicate: Optional[Predicate],
                               limit: Optional[int],
                               has_post_filter: bool = False) -> set:
+    # Only append tables have dedicated Blob files to defer. Primary-key
+    # managed packs are resolved inside Rust's read pipeline.
+    if table.is_primary_key_table:
+        return set()
     # An auth filter also selects rows; defer past it too, like a predicate/limit.
     if ((predicate is None and limit is None and not has_post_filter)
             or CoreOptions.blob_as_descriptor(table.options)):
@@ -405,7 +409,8 @@ class SplitRead(ABC):
                                              batch_size=batch_size,
                                              row_indices=row_indices,
                                              blob_parallelism=blob_parallelism,
-                                             file_size=file.file_size)
+                                             file_size=file.file_size,
+                                             index_cache=self.table.catalog_environment.blob_index_cache())
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(
@@ -1187,10 +1192,8 @@ class MergeFileSplitRead(SplitRead):
         ``AGGREGATE`` is special-cased here because building the per-
         field aggregators needs the full ``DataField`` objects, the
         full primary-key list and the parsed ``CoreOptions`` -- which
-        sit outside the dispatch's raw-options contract. The writer-
-        side merge buffer falls back to dedupe for aggregation anyway
-        (see :meth:`FileStoreWrite._build_pk_merge_function`), so the
-        two sides only need to share the simple engines.
+        sit outside the dispatch's raw-options contract. FileStoreWrite uses
+        the same aggregator builder for writer-side folding and validation.
         """
         engine = self.table.options.merge_engine()
         if engine == MergeEngine.AGGREGATE:
@@ -1761,6 +1764,7 @@ class DataEvolutionSplitRead(SplitRead):
             row_indices=row_indices,
             blob_parallelism=blob_parallelism,
             file_size=file.file_size,
+            index_cache=self.table.catalog_environment.blob_index_cache(),
         )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:

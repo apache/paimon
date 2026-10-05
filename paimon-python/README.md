@@ -10,10 +10,25 @@ This PyPi package contains the Python APIs for using Paimon.
 
 Pypaimon requires Python 3.6+.
 
-# Dependencies
+# Build
 
-The core dependencies are listed in `dev/requirements.txt`.
-The development dependencies are listed in `dev/requirements-dev.txt`.
+Run from `paimon-python/` with pip supporting dependency groups.
+
+Normal build:
+
+```shell
+python -m pip install --group build
+python -m build
+```
+
+Development build (editable installation with development dependencies):
+
+```shell
+python -m pip install -e . --group dev
+python -m build
+```
+
+Both produce a source archive and wheel in `dist/`.
 
 # OSS metadata commits
 
@@ -89,22 +104,6 @@ All concurrent writers must use conditional creation. Older Python clients or
 other clients that overwrite snapshot objects can still overwrite a successful
 commit. This change does not add conditional writes for other object stores.
 
-# Build
-
-You can build the source package by executing the following command:
-
-```commandline
-python3 setup.py sdist
-```
-
-The package is under `dist/`. Then you can install the package by executing the following command:
-
-```commandline
-pip3 install dist/*.tar.gz
-```
-
-The command will install the package and core dependencies to your local Python environment.
-
 # Row ID column updates
 
 For a batch update of selected columns in a data-evolution table with row
@@ -168,6 +167,72 @@ sidecars select the Python writer. Writer methods requiring Python's specialized
 path select the Python writer before native data is written. If the runtime or table route is
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
+
+MAP columns configured with `fields.<name>.map.storage-layout=shared-shredding`
+also use native Parquet writes and data-evolution updates, including predicate
+updates and upserts. Rust applies Java's `plain`, `sequential` and `lru` column
+placement policies (`lru` by default), and adapts the physical column count
+between completed files. Files remain readable by the Python reader, including
+literal MAP-key projections. Shared-shredding requires `none`, `lz4` or `zstd`
+compression.
+
+Primary-key dynamic buckets (`bucket=-1`, with partition fields included in the
+primary key) also support native writes. HASH indexes are restored across writer
+restarts; `dynamic-bucket.max-buckets` bounds bucket growth and reuses existing
+buckets after that limit. Dynamic buckets use the trimmed primary key, so
+`bucket-key` must not be configured. As in Java, each bucket must have one writer
+owner: a HASH ADD replaces the complete previous index and does not carry a
+concurrent-writer baseline. Partitions with existing data but missing HASH indexes
+must be rewritten before incremental writes.
+
+Cross-partition primary keys (`bucket=-1`, with some partition columns outside
+of the primary key) also support native writes. Rust rebuilds the global index
+from live rows on writer startup and preserves the full primary key. Deduplicate
+moves a key by deleting its old location; first-row keeps its first partition;
+partial-update and aggregation apply changes in the existing partition, matching
+Java. Use one writer owner for the global key space. Index TTL is not supported,
+and `sequence.field` and `bucket-key` are invalid for this mode. The Python writer
+does not implement cross-partition routing, so this mode requires the native runtime.
+
+Ordinary postpone writes (`bucket=-2`) support native Parquet deduplicate writes
+without BLOB columns. Pending files retain input order, row kinds and duplicates, and
+roll at a batch boundary after reaching `target-file-row-num`. Normal scans expose
+only real buckets after deferred bucket assignment. Other postpone merge engines,
+BLOB writes use the Python writer.
+
+The fixed-bucket postpone builder uses native Parquet writes for deduplicate,
+first-row, partial-update and aggregation when supplied with a shared bucket plan
+or `postpone.default-bucket-num`. The default count is used exactly, without
+rounding or applying the inference limit. Append reuses each existing partition's
+bucket count; overwrite uses the new count for overwritten partitions. Pending
+files may coexist with real buckets and remain available for later assignment.
+
+```python
+from pypaimon.write.postpone_bucket import PostponeBucketPlan
+
+# A driver can serialize this small plan and give it to every worker.
+plan = PostponeBucketPlan({("2026-10-01",): 3, ("2026-10-02",): 5})
+builder = table.new_postpone_fixed_bucket_write_builder().with_bucket_plan(plan)
+writer = builder.new_write()
+try:
+    writer.write_arrow(arrow_table)
+    messages = writer.prepare_commit()
+finally:
+    writer.close()
+builder.new_commit().commit(messages)
+```
+
+All rows for one partition/bucket must have one writer owner. Python and native
+committers reject overlapping owners or writes that became stale after their
+baseline snapshot. Different real buckets and pending files can be appended
+concurrently. Overwrite detects concurrent changes to any overwritten partition.
+A shared plan must cover every input partition; a configured default does not
+fill missing entries in an explicit plan. Ray workers use native routing and
+writing with the driver's shared plan.
+
+Local automatic size estimation still uses the Python planner. Fixed-bucket
+native writes currently exclude BLOB and deletion-vector tables. They do not
+perform staging, compaction or automatic rescaling of existing partitions.
 
 Native writes honor `data-file.path-directory` and the configured
 `data-file.external-paths` strategy. Existing files keep their recorded locations
@@ -318,14 +383,15 @@ Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_range
 Watermark time travel requires Rust 0.4 or newer. Branch reads require the
 branch-aware binding exposing `Table.branch()`, and the resolved branch is
 checked before planning. Deletion-vector scans require `pypaimon-rust>=0.4.0`,
-which includes schema-aware decoding of Python-written index manifests and
-legacy bucket-index path compatibility. The reader honors explicit paths, then
-bucket paths, and can read older Python files placed in `table/index`.
+which includes schema-aware decoding of index manifests. Index paths follow
+Java: an explicit external path takes precedence; otherwise
+`index-file-in-data-file-dir` selects the bucket or table index directory.
 Bucket paths use the partition field types and `partition.legacy-name` to match
 Java formatting, including timestamp precision and different JVM float spellings.
-New Python writes honor `index-file-in-data-file-dir` and retain explicit paths
-when Python and Java partition-directory formatting differs. Older releases
-and prereleases before 0.4.0 use the Python planner for deletion vectors.
+Python bucket-index writes use Java partition paths. Explicit paths identify
+external files and floating partition directories whose spelling depends on the
+JDK version. Missing bucket indexes fail instead of searching Python layouts. Older releases and prereleases
+before 0.4.0 use the Python planner for deletion vectors.
 When using an unreleased 0.4.0 development wheel, rebuild it with these fixes;
 package version checks cannot distinguish local builds with identical versions.
 

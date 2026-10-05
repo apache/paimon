@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -66,7 +67,8 @@ class TestMultiFieldVectorGlobalIndexer implements VectorGlobalIndexer {
         this.vectorField = vectorField;
         this.scalarField = extraFields.get(0);
         this.vectorIndexer = new TestVectorGlobalIndexer(vectorField.type(), options);
-        this.scalarIndexer = new BTreeGlobalIndexer(scalarField, options);
+        this.scalarIndexer =
+                new BTreeGlobalIndexer(Collections.singletonList(scalarField), options);
     }
 
     @Override

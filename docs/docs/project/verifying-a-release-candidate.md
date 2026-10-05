@@ -189,7 +189,7 @@ Check at least the following:
 - All bundled third-party material is compatible with the Apache License 2.0
   and is recorded in `LICENSE` or `NOTICE` where required.
 - Maven POMs use `PAIMON_VERSION` without `-SNAPSHOT`.
-- `paimon-python/setup.py` and PyPaimon package metadata use
+- `paimon-python/pypaimon/_version.py` and PyPaimon package metadata use
   `PAIMON_VERSION` without `.dev`.
 
 Extract the Paimon candidate:
@@ -324,10 +324,11 @@ First build the official PyPaimon source candidate in an isolated environment:
 ```shell
 python3 -m venv pypaimon-rc-venv
 . pypaimon-rc-venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
+python -m pip install --upgrade pip
 
 cd "pypaimon-${PAIMON_VERSION}"
-python setup.py sdist bdist_wheel
+python -m pip install --group build
+python -m build
 python -m pip install "dist/pypaimon-${PAIMON_VERSION}"*.whl
 python -c "import pypaimon; print('PyPaimon import OK')"
 cd ..
@@ -349,14 +350,17 @@ than assuming that a matrix from another release applies:
 ```shell
 (
   cd "paimon-${PAIMON_VERSION}/paimon-python"
-  python -m pip install -r dev/requirements.txt
-  python -m pip install -r dev/requirements-dev.txt
+  python -m pip install -e . --group dev
   python -m pytest pypaimon/tests -v
 )
 ```
 
 Some optional integration tests need additional services or packages. Record
 which tests ran, skipped, or failed.
+
+For Python 3.6/3.7, install a compatible `tomli`, run `python dev/install.py legacy`,
+and use `bash dev/lint-python.sh -i pytest` to select the supported core test subset.
+The complete dev group is intended for a modern Python environment.
 
 ## Verify the TestPyPI candidate
 

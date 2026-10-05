@@ -26,7 +26,9 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
                                       CreateFunctionRequest, CreatePartitionsRequest,
                                       CreateTableRequest, CreateTagRequest,
                                       ForwardBranchRequest,
+                                      GrantPermissionRequest,
                                       RenameBranchRequest, RenameTableRequest,
+                                      RevokePermissionRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
@@ -37,6 +39,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
+                                       ListPermissionsResponse,
                                        CreatePartitionsResponse,
                                        ListPartitionsResponse,
                                        ListTablesResponse, ListTagsResponse,
@@ -54,6 +57,10 @@ from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
+from pypaimon.management.list_permissions_request import \
+    ListPermissionsRequest
+from pypaimon.management.permission_assignment import PermissionAssignment
+from pypaimon.management.permission_resource import PermissionResource
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -730,6 +737,45 @@ class RESTApi:
             self.rest_auth_function,
         )
 
+    def list_permissions(self, request: ListPermissionsRequest) -> ListPermissionsResponse:
+        query_params = {}
+        RESTApi._put_query_parameter(query_params, "resourceType", request.get_resource_type().name)
+        RESTApi._put_query_parameter(query_params, "database", request.get_database())
+        RESTApi._put_query_parameter(query_params, "table", request.get_table())
+        RESTApi._put_query_parameter(query_params, "function", request.get_function())
+        RESTApi._put_query_parameter(query_params, "view", request.get_view())
+        RESTApi._put_query_parameter(query_params, "principal", request.get_principal())
+        RESTApi._put_query_parameter(query_params, "access", request.get_access())
+        if request.get_max_results() is not None:
+            query_params[RESTApi.MAX_RESULTS] = str(request.get_max_results())
+        RESTApi._put_query_parameter(query_params, RESTApi.PAGE_TOKEN, request.get_page_token())
+        return self.client.get_with_params(
+            self.resource_paths.permissions(),
+            query_params,
+            ListPermissionsResponse,
+            self.rest_auth_function,
+        )
+
+    def grant_permission(self, assignment: PermissionAssignment) -> None:
+        self.client.post(
+            self.resource_paths.grant_permission(),
+            GrantPermissionRequest(assignment),
+            self.rest_auth_function,
+        )
+
+    def revoke_permission(self, resource: PermissionResource, access: str, principal: str) -> None:
+        self.client.post(
+            self.resource_paths.revoke_permission(),
+            RevokePermissionRequest(resource, access, principal),
+            self.rest_auth_function,
+        )
+
+    @staticmethod
+    def _put_query_parameter(query_params: Dict[str, str], name: str, value: Optional[str]):
+        # Java isNotEmpty: unlike __build_paged_query_params, a whitespace value is sent.
+        if value:
+            query_params[name] = value
+
     @staticmethod
     def __validate_identifier(identifier: Identifier):
         if not identifier:
@@ -743,7 +789,8 @@ class RESTApi:
         if not table_name or not table_name.strip():
             raise ValueError("Table name cannot be None")
 
-        return database_name.strip(), table_name.strip()
+        # Validation must not rename a resource, including a branch suffix.
+        return database_name, table_name
 
 
 from pypaimon.catalog.catalog_exception import IllegalArgumentError

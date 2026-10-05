@@ -453,6 +453,15 @@ Please refer to [Trino S3](https://trino.io/docs/current/object-storage/file-sys
 
 </Tabs>
 
+### Temporary Credentials
+
+When using temporary credentials (for example from AWS STS), also provide the session token
+together with the access key and secret key.
+
+```yaml
+s3.session-token: zzz
+```
+
 ### S3 Compliant Object Stores
 
 The S3 Filesystem also support using S3 compliant object stores such as MinIO, Tencent's COS and IBM's Cloud Object

@@ -108,7 +108,7 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
             try:
                 index_file = entry.index_file
                 file_name = index_file.file_name
-                if index_file.index_type == 'DELETION_VECTORS':
+                if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
                     path = table.path_factory().bucket_index_path(
                         tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
                 else:
@@ -222,6 +222,14 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
+    def _set_fixed_bucket_commit_check(self, messages):
+        from pypaimon.write.commit.fixed_bucket_commit_check import FixedBucketCommitCheck
+
+        self.conflict_detection.fixed_bucket_commit_check = (
+            FixedBucketCommitCheck(messages)
+            if any(message.total_buckets is not None for message in messages)
+            else None)
+
     def commit(
             self,
             commit_messages: List[CommitMessage],
@@ -234,6 +242,7 @@ class FileStoreCommit:
 
         _reject_compact_increment(commit_messages)
         check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
         # A committer can be reused; an untagged commit clears the prior baseline.
         self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
 
@@ -317,8 +326,9 @@ class FileStoreCommit:
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
         _reject_compact_increment(commit_messages)
-        self.conflict_detection._row_id_check_from_snapshot = (
-            _row_id_check_from_messages(commit_messages))
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
@@ -1155,11 +1165,14 @@ class FileStoreCommit:
         ]
 
     def _assign_snapshot_id(self, snapshot_id: int, commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
-        """Assign snapshot ID to delta entries whose minSequenceNumber is 0."""
+        """Replace pending sequence numbers as in Java RowTrackingCommitUtils."""
         result = []
         for entry in commit_entries:
             if entry.file.min_sequence_number == 0:
                 result.append(entry.assign_sequence_number(snapshot_id, snapshot_id))
+            elif entry.file.max_sequence_number == 0:
+                result.append(entry.assign_sequence_number(
+                    entry.file.min_sequence_number, snapshot_id))
             else:
                 result.append(entry)
         return result

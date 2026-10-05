@@ -40,29 +40,36 @@ case class PaimonViewResolver(spark: SparkSession)
 
   protected lazy val catalogManager = spark.sessionState.catalogManager
 
-  override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
-    case u @ UnresolvedRelation(parts @ CatalogAndIdentifier(catalog: SupportView, ident), _, _) =>
-      try {
-        val view = catalog.loadView(ident)
-        createViewRelation(parts, view)
-      } catch {
-        case _: ViewNotExistException =>
-          u
-      }
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    val dependencyChecker = new PaimonViewDependencyChecker(spark)
+    plan.resolveOperatorsDown {
+      case u @ UnresolvedRelation(
+            parts @ CatalogAndIdentifier(catalog: SupportView, ident),
+            _,
+            _) =>
+        try {
+          val view = catalog.loadView(ident)
+          dependencyChecker.validate(catalog, ident, view.query(SupportView.DIALECT))
+          createViewRelation(parts, view)
+        } catch {
+          case _: ViewNotExistException =>
+            u
+        }
 
-    // Match by type and use the named accessor instead of a positional pattern, because the
-    // number of `UnresolvedTableOrView` parameters differs across supported Spark versions.
-    case u: UnresolvedTableOrView =>
-      u.multipartIdentifier match {
-        case CatalogAndIdentifier(catalog: SupportView, ident) =>
-          try {
-            catalog.loadView(ident)
-            ResolvedPaimonView(catalog, ident)
-          } catch {
-            case _: ViewNotExistException => u
-          }
-        case _ => u
-      }
+      // Match by type and use the named accessor instead of a positional pattern, because the
+      // number of `UnresolvedTableOrView` parameters differs across supported Spark versions.
+      case u: UnresolvedTableOrView =>
+        u.multipartIdentifier match {
+          case CatalogAndIdentifier(catalog: SupportView, ident) =>
+            try {
+              catalog.loadView(ident)
+              ResolvedPaimonView(catalog, ident)
+            } catch {
+              case _: ViewNotExistException => u
+            }
+          case _ => u
+        }
+    }
   }
 
   private def createViewRelation(nameParts: Seq[String], view: View): LogicalPlan = {

@@ -306,7 +306,7 @@ class TableUpdate:
             from pypaimon.write.native_update import create_native_predicate_update
             try:
                 native = create_native_predicate_update(
-                    self.table, self.commit_user, predicate)
+                    self.table, self.commit_user, predicate, list(assignments))
             except Exception as error:
                 logger.debug('Native predicate update preparation failed: %s', error)
             else:
@@ -558,7 +558,7 @@ class TableUpdate:
             self.table,
             lambda: ([], None),
             partition_predicate=partition_filter,
-        ).read_manifest_entries(manifest_list_manager.read_all(snapshot))
+        ).with_all_buckets().read_manifest_entries(manifest_list_manager.read_all(snapshot))
 
         for entry in data_entries:
             message = self._partition_delete_message(

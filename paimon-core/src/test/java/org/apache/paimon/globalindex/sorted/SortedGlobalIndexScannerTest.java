@@ -128,7 +128,7 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         FileStoreTable table = getTableDefault();
 
         SortedGlobalIndexScanner builder = new SortedGlobalIndexScanner(table, "btree");
-        builder.withIndexField("f0");
+        builder.withIndexFields(Collections.singletonList("f0"));
         builder.withPartitionPredicate(partitionPredicate);
         ScanResult<DataSplit> scanResult =
                 builder.scan()
@@ -212,7 +212,7 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
 
         ScanResult<DataSplit> scanResult =
                 new SortedGlobalIndexScanner(table, "btree")
-                        .withIndexField("f0")
+                        .withIndexFields(Collections.singletonList("f0"))
                         .scan()
                         .orElseThrow(() -> new IllegalStateException("Expected scan result."));
 
@@ -226,7 +226,7 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         SortedGlobalIndexScanner builder = new SortedGlobalIndexScanner(table, "btree");
-        builder.withIndexField("f0");
+        builder.withIndexFields(Collections.singletonList("f0"));
 
         Assertions.assertFalse(
                 builder.incrementalScan().isPresent(),
@@ -240,7 +240,7 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
 
         FileStoreTable table = getTableDefault();
         SortedGlobalIndexScanner builder = new SortedGlobalIndexScanner(table, "btree");
-        builder.withIndexField("f0");
+        builder.withIndexFields(Collections.singletonList("f0"));
 
         Assertions.assertFalse(
                 builder.incrementalScan().isPresent(),
@@ -270,7 +270,7 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
 
         table = getTableDefault();
         SortedGlobalIndexScanner builder = new SortedGlobalIndexScanner(table, "btree");
-        builder.withIndexField("f0");
+        builder.withIndexFields(Collections.singletonList("f0"));
 
         Optional<ScanResult<DataSplit>> incrementalScan = builder.incrementalScan();
         Assertions.assertTrue(
@@ -311,7 +311,11 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         assertThat(table.snapshotManager().earliestSnapshotId())
                 .isEqualTo(table.snapshotManager().latestSnapshotId());
 
-        assertThat(dataEvolutionScanner(table).withIndexField("f0").incrementalScan()).isEmpty();
+        assertThat(
+                        dataEvolutionScanner(table)
+                                .withIndexFields(Collections.singletonList("f0"))
+                                .incrementalScan())
+                .isEmpty();
     }
 
     @Test
@@ -320,13 +324,16 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         createIndex(null);
 
         updateColumnAndCompact("f1", 1);
-        assertThat(dataEvolutionScanner(getTableDefault()).withIndexField("f0").incrementalScan())
+        assertThat(
+                        dataEvolutionScanner(getTableDefault())
+                                .withIndexFields(Collections.singletonList("f0"))
+                                .incrementalScan())
                 .isEmpty();
 
         DataFileMeta compacted = updateColumnAndCompact("f0", 2);
         ScanResult<DataSplit> scanResult =
                 dataEvolutionScanner(getTableDefault())
-                        .withIndexField("f0")
+                        .withIndexFields(Collections.singletonList("f0"))
                         .incrementalScan()
                         .orElseThrow(
                                 () ->
@@ -439,7 +446,7 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
                 PartitionPredicate.createPartitionPredicate(
                         partType, Collections.singletonMap("dt", BinaryString.fromString("p0")));
         SortedGlobalIndexScanner builder = new SortedGlobalIndexScanner(table, "btree");
-        builder.withIndexField("f0");
+        builder.withIndexFields(Collections.singletonList("f0"));
         builder.withPartitionPredicate(PartitionPredicate.fromPredicate(partType, predicate));
 
         List<DataSplit> splits =
@@ -482,7 +489,8 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         updateColumn(table, 0L, 5);
 
         SortedGlobalIndexScanner scanner =
-                new SortedGlobalIndexScanner(table, "btree").withIndexField("f0");
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexFields(Collections.singletonList("f0"));
         ScanResult<DataSplit> scanResult =
                 scanner.incrementalScan()
                         .orElseThrow(
@@ -616,7 +624,8 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
                 "Test table should contain blob manifest entries.");
 
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, "btree").withIndexField("f0");
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexFields(Collections.singletonList("f0"));
         assertNoBlobFiles(
                 builder.scan()
                         .map(ScanResult::entries)

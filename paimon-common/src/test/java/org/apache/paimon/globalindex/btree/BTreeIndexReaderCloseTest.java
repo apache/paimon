@@ -43,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -82,7 +83,9 @@ public class BTreeIndexReaderCloseTest {
                 };
 
         BTreeGlobalIndexer indexer =
-                new BTreeGlobalIndexer(new DataField(1, "testField", dataType), new Options());
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        new Options());
         GlobalIndexSingleColumnWriter writer = indexer.createWriter(fileWriter);
         for (int i = 0; i < RECORD_NUM; i++) {
             writer.write(i, (long) i);

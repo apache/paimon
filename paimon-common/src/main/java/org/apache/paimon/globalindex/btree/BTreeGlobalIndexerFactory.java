@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
+import java.util.Optional;
 
 /** The {@link GlobalIndexerFactory} for btree index. */
 public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -41,16 +42,18 @@ public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public List<GlobalIndexIOMeta> selectFiles(
-            DataField indexField,
-            List<DataField> extraFields,
-            Predicate predicate,
-            List<GlobalIndexIOMeta> files) {
+            List<DataField> indexFields, Predicate predicate, List<GlobalIndexIOMeta> files) {
+        if (indexFields.size() > 1) {
+            Optional<CompositeBTreePredicate.Plan> plan =
+                    CompositeBTreePredicate.plan(indexFields, predicate);
+            return plan.map(value -> value.selectFiles(files)).orElse(files);
+        }
         return SortedFileMetaSelector.selectFiles(
-                predicate, files, KeySerializer.create(indexField.type()));
+                predicate, files, KeySerializer.create(indexFields.get(0).type()));
     }
 
     @Override
-    public GlobalIndexer create(DataField dataField, Options options) {
-        return new BTreeGlobalIndexer(dataField, options);
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        return new BTreeGlobalIndexer(indexFields, options);
     }
 }
