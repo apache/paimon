@@ -20,16 +20,32 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -150,5 +166,99 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.METASTORE_PARTITIONED_TABLE.key())
                 .hasMessageContaining("REST catalog");
+    }
+
+    @Test
+    public void testLookupTableWithFullCompactionDeltaCommitsStillLoads() throws Exception {
+        String database = "lookup_delta_commits_db";
+        catalog.createDatabase(database, false);
+        Identifier identifier = Identifier.create(database, "t");
+        Identifier dropped = Identifier.create(database, "dropped");
+        String deltaCommits = CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key();
+        // Tables created before the combination was rejected carry both options.
+        for (Identifier legacy : new Identifier[] {identifier, dropped}) {
+            createLookupTableWithDeltaCommits(legacy);
+        }
+
+        Table table = catalog.getTable(identifier);
+        assertThat(table.options()).containsEntry(deltaCommits, "1000");
+        // Flink restates the stored options as dynamic options.
+        ((FileStoreTable) table).copy(table.options());
+        writeRow(table, 2);
+        assertThat(readKeys(catalog.getTable(identifier))).containsExactlyInAnyOrder(1, 2);
+
+        FileStoreTable loaded = (FileStoreTable) catalog.getTable(identifier);
+        // Altering the table still rejects the combination, until the option is removed.
+        SchemaChange unrelated = SchemaChange.setOption("snapshot.time-retained", "2h");
+        assertThatThrownBy(() -> catalog.alterTable(identifier, unrelated, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(deltaCommits);
+        catalog.alterTable(identifier, SchemaChange.removeOption(deltaCommits), false);
+        assertThat(catalog.getTable(identifier).options()).doesNotContainKey(deltaCommits);
+        // A table loaded before the option was removed can still refresh its schema.
+        loaded.copyWithLatestSchema();
+        catalog.alterTable(identifier, unrelated, false);
+
+        catalog.dropTable(dropped, false);
+        assertThat(catalog.listTables(database)).containsExactly("t");
+
+        // Setting up the combination with a dynamic option is still rejected.
+        FileStoreTable lookupTable = (FileStoreTable) catalog.getTable(identifier);
+        assertThatThrownBy(() -> lookupTable.copy(Collections.singletonMap(deltaCommits, "1000")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(deltaCommits);
+    }
+
+    private void createLookupTableWithDeltaCommits(Identifier identifier) throws Exception {
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .primaryKey("k")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup")
+                        .build(),
+                false);
+        writeRow(catalog.getTable(identifier), 1);
+
+        // Write the schema file directly, as the combination can no longer be created.
+        Path tablePath =
+                ((FileSystemCatalog) DelegateCatalog.rootCatalog(catalog))
+                        .getTableLocation(identifier);
+        TableSchema latest = new FileSystemSchemaManager(fileIO, tablePath).latest().get();
+        Map<String, String> options = new HashMap<>(latest.options());
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1000");
+        TableSchema legacy =
+                new TableSchema(
+                        latest.id() + 1,
+                        latest.fields(),
+                        latest.highestFieldId(),
+                        latest.partitionKeys(),
+                        latest.primaryKeys(),
+                        options,
+                        latest.comment());
+        fileIO.writeFile(
+                new Path(tablePath, "schema/schema-" + legacy.id()), legacy.toString(), false);
+    }
+
+    private void writeRow(Table table, int key) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(IOManager.create(tempFile.toString()));
+            write.write(GenericRow.of(key, key));
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private static List<Integer> readKeys(Table table) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Integer> keys = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> keys.add(row.getInt(0)));
+        return keys;
     }
 }

@@ -398,7 +398,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         // validate schema with new options
         SchemaValidation.validateTableSchema(
-                withoutIcebergMirror(newTableSchema), dynamicOptions.keySet());
+                withoutExistingDeltaCommitsOfLookup(
+                        withoutIcebergMirror(newTableSchema), tableSchema.options()),
+                dynamicOptions.keySet());
         if (new CoreOptions(tableSchema.options())
                         .toConfiguration()
                         .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
@@ -424,7 +426,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
             mergedOptions.putAll(tableSchema.options());
             TableSchema newTableSchema = latestSchema.copy(mergedOptions);
-            SchemaValidation.validateTableSchema(withoutIcebergMirror(newTableSchema));
+            SchemaValidation.validateTableSchema(
+                    withoutExistingDeltaCommitsOfLookup(
+                            withoutIcebergMirror(newTableSchema), tableSchema.options()));
             return copy(newTableSchema);
         } else {
             return this;
@@ -436,6 +440,28 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Map<String, String> options = new HashMap<>(schema.options());
         options.remove(IcebergOptions.METADATA_ICEBERG_STORAGE.key());
         return schema.copy(options);
+    }
+
+    /**
+     * Tables created with {@code full-compaction.delta-commits} and the lookup changelog producer
+     * before the combination was rejected must still load, so that the option can be removed. Only
+     * the combination this table already has is skipped, so setting it up by altering the table or
+     * by dynamic options is still rejected.
+     */
+    private static TableSchema withoutExistingDeltaCommitsOfLookup(
+            TableSchema schema, Map<String, String> existingOptions) {
+        CoreOptions options = new CoreOptions(schema.options());
+        CoreOptions existing = new CoreOptions(existingOptions);
+        if (options.fullCompactionDeltaCommits() == null
+                || options.changelogProducer() != CoreOptions.ChangelogProducer.LOOKUP
+                || existing.changelogProducer() != CoreOptions.ChangelogProducer.LOOKUP
+                || !options.fullCompactionDeltaCommits()
+                        .equals(existing.fullCompactionDeltaCommits())) {
+            return schema;
+        }
+        Map<String, String> withoutDeltaCommits = new HashMap<>(schema.options());
+        withoutDeltaCommits.remove(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key());
+        return schema.copy(withoutDeltaCommits);
     }
 
     @Override
