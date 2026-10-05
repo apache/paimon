@@ -312,4 +312,50 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
       checkAnswer(sql("SELECT id, v, _ROW_ID FROM t"), Seq(Row(1, 11, 0)))
     }
   }
+
+  test("Paimon Procedure: rows copied by sys.copy keep their row ids after the conversion") {
+    withTable("src", "dst") {
+      sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO src VALUES (1, 'a')")
+      sql("INSERT INTO src VALUES (2, 'b')")
+      sql("CALL sys.copy(source_table => 'src', target_table => 'dst')").collect()
+      // the copied files keep their row ids, but the next row id of dst does not cover them
+      checkAnswer(sql("SELECT id, v, _ROW_ID FROM dst"), Seq(Row(1, "a", 0), Row(2, "b", 1)))
+      assert(loadTable("dst").snapshotManager().latestSnapshot().nextRowId() == 0L)
+
+      val result = sql("CALL sys.enable_data_evolution(table => 'dst')").collect()
+      assert(result(0).getString(0).startsWith("Success."), result(0).getString(0))
+      assert(result(0).getString(0).contains("nextRowId=2"), result(0).getString(0))
+
+      // new rows continue after the copied ones instead of hiding them
+      sql("INSERT INTO dst VALUES (3, 'c'), (4, 'd')")
+      checkAnswer(
+        sql("SELECT id, v, _ROW_ID FROM dst"),
+        Seq(Row(1, "a", 0), Row(2, "b", 1), Row(3, "c", 2), Row(4, "d", 3)))
+    }
+  }
+
+  test("Paimon Procedure: enable data evolution refuses overlapping row ids of copied rows") {
+    withTable("src", "dst") {
+      sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO src VALUES (1, 'a'), (2, 'b')")
+      sql("CALL sys.copy(source_table => 'src', target_table => 'dst')").collect()
+      // rows written after the copy get the row ids of the copied rows again
+      sql("INSERT INTO dst VALUES (3, 'c'), (4, 'd')")
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM dst"),
+        Seq(Row(1, 0), Row(2, 1), Row(3, 0), Row(4, 1)))
+
+      val error = intercept[Exception] {
+        sql("CALL sys.enable_data_evolution(table => 'dst')").collect()
+      }
+      assert(
+        ExceptionUtils.stringifyException(error).contains("overlapping row ids"),
+        ExceptionUtils.stringifyException(error))
+      assert(!loadTable("dst").coreOptions().dataEvolutionEnabled())
+      checkAnswer(
+        sql("SELECT id, v FROM dst"),
+        Seq(Row(1, "a"), Row(2, "b"), Row(3, "c"), Row(4, "d")))
+    }
+  }
 }

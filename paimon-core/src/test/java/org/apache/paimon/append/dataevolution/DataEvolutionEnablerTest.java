@@ -928,6 +928,127 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
+    public void testCopyOnWriteDuringConversionIsRefusedBeforeTheSchemaSwitch() throws Exception {
+        FileStoreTable staleTable = createRowTrackingTableForCopyOnWrite();
+
+        // A writer on the row-tracking schema commits a copy-on-write after the plan.
+        DataEvolutionEnabler enabler =
+                new DataEvolutionEnabler(
+                        catalog, TABLE, () -> {}, () -> commitCopyOnWriteUpdate(staleTable));
+        assertThatThrownBy(() -> enabler.run(false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot enable data evolution on table default.t")
+                .hasMessageContaining("store the row ids of their rows");
+
+        // refused before the schema switch: the table is still a row-tracking table
+        FileStoreTable table = loadTable();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
+        assertThat(table.schemaManager().listAllIds()).containsExactly(0L);
+        assertThat(rowIdsById(table))
+                .containsEntry(1, 0L)
+                .containsEntry(2, 1L)
+                .containsEntry(3, 2L);
+        assertThat(valuesById(table)).containsEntry(1, "A");
+        assertThatThrownBy(() -> enabler().run(false))
+                .hasMessageContaining("store the row ids of their rows");
+    }
+
+    @Test
+    public void testCopyOnWriteBeforeTheFenceIsReportedUntilTheRowsAreRewritten() throws Exception {
+        createRowTrackingTableForCopyOnWrite();
+        // A copy-on-write that passed its schema check before the switch and commits after it,
+        // before the fence: the only window that the checks before the switch cannot close.
+        PausedWriter copyOnWrite = new PausedWriter(true, this::copyOnWriteUpdate);
+        DataEvolutionEnabler enabler =
+                new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        copyOnWrite::startAndAwaitPause,
+                        () -> assertThat(copyOnWrite.releaseAndJoin()).isNull());
+        assertThatThrownBy(() -> enabler.run(false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Table default.t has data evolution enabled, but cannot be")
+                .hasMessageContaining("store the row ids of their rows");
+        assertThat(loadTable().coreOptions().dataEvolutionEnabled()).isTrue();
+
+        // Every later run reports the file instead of reporting the table as done.
+        assertThatThrownBy(() -> enabler().run(true))
+                .hasMessageContaining("store the row ids of their rows");
+        assertThatThrownBy(() -> enabler().run(false))
+                .hasMessageContaining("store the row ids of their rows");
+
+        // Rewriting the rows gives them first row ids, after which the table is done.
+        BatchWriteBuilder builder = loadTable().newBatchWriteBuilder().withOverwrite();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(row(1, "A", "p1"));
+            write.write(row(2, "b", "p1"));
+            write.write(row(3, "c", "p1"));
+            commit.commit(write.prepareCommit());
+        }
+        assertThat(enabler().run(false).skipped).isTrue();
+        FileStoreTable table = loadTable();
+        assertThat(liveFiles(table)).allMatch(file -> file.firstRowId() != null);
+        assertThat(valuesById(table))
+                .containsEntry(1, "A")
+                .containsEntry(2, "b")
+                .containsEntry(3, "c");
+        assertThat(rowIdsById(table).values()).doesNotContainNull().doesNotHaveDuplicates();
+    }
+
+    @Test
+    public void testFilesCopiedWithTheirRowIdsKeepThemAndNewRowsContinueAfterThem()
+            throws Exception {
+        Identifier source = createRowTrackingSource();
+        createTable(Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        copyFiles(source);
+        FileStoreTable table = loadTable();
+        assertThat(rowIdsById(table)).containsEntry(1, 0L).containsEntry(2, 1L);
+        // the copy keeps the row ids of the files, but not the next row id of the table
+        assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(0L);
+
+        DataEvolutionEnabler.Result result = enabler().run(false);
+        assertThat(result.describe(TABLE)).startsWith("Success.");
+        assertThat(result.nextRowId).isEqualTo(2L);
+
+        writeRows(loadTable(), row(3, "c", "p1"), row(4, "d", "p1"));
+        table = loadTable();
+        assertThat(valuesById(table)).containsOnlyKeys(1, 2, 3, 4);
+        assertNoDuplicateOrMissingRowIds(table, 4);
+        assertThat(rowIdsById(table)).containsEntry(1, 0L).containsEntry(2, 1L);
+    }
+
+    @Test
+    public void testOverlappingRowIdsOfCopiedFilesAreRefused() throws Exception {
+        Identifier source = createRowTrackingSource();
+        createTable(Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        copyFiles(source);
+        // rows written after the copy get the row ids of the copied rows again
+        writeRows(loadTable(), row(3, "c", "p1"), row(4, "d", "p1"));
+        FileStoreTable table = loadTable();
+        assertThat(rowIdsById(table))
+                .containsEntry(1, 0L)
+                .containsEntry(2, 1L)
+                .containsEntry(3, 0L)
+                .containsEntry(4, 1L);
+        long snapshot = table.snapshotManager().latestSnapshotId();
+
+        // a data-evolution read would let one pair of rows hide the other: refuse
+        assertThatThrownBy(() -> enabler().run(true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("overlapping row ids");
+        assertThatThrownBy(() -> enabler().run(false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot enable data evolution on table default.t")
+                .hasMessageContaining("overlapping row ids");
+        table = loadTable();
+        assertThat(table.coreOptions().dataEvolutionEnabled()).isFalse();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
+        assertThat(valuesById(table)).containsOnlyKeys(1, 2, 3, 4);
+    }
+
+    @Test
     public void testRowTrackingOnlyCompactorCannotCommitAfterConversion() throws Exception {
         FileStoreTable staleTable =
                 createTable(
@@ -1579,6 +1700,116 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         }
     }
 
+    /**
+     * Like a copy-on-write UPDATE of id 1 on the row-tracking table created by {@link
+     * #createRowTrackingTableForCopyOnWrite}: rewrites the file of row ids 0 and 1 with the row ids
+     * stored in it. {@code write} stores the row id field.
+     */
+    private List<CommitMessage> copyOnWriteUpdate(FileStoreTable table, BatchTableWrite write)
+            throws Exception {
+        List<DataFileMeta> rewritten = new ArrayList<>();
+        for (DataFileMeta file : liveFiles(table)) {
+            if (file.firstRowId() != null && file.firstRowId() == 0L) {
+                rewritten.add(file);
+            }
+        }
+        assertThat(rewritten).hasSize(1);
+        write.write(
+                GenericRow.of(
+                        1, BinaryString.fromString("A"), BinaryString.fromString("p1"), 0L, null));
+        write.write(
+                GenericRow.of(
+                        2, BinaryString.fromString("b"), BinaryString.fromString("p1"), 1L, null));
+        CommitMessageImpl message = (CommitMessageImpl) write.prepareCommit().get(0);
+        return Collections.singletonList(
+                new CommitMessageImpl(
+                        message.partition(),
+                        message.bucket(),
+                        message.totalBuckets(),
+                        new DataIncrement(
+                                message.newFilesIncrement().newFiles(),
+                                rewritten,
+                                Collections.emptyList()),
+                        CompactIncrement.emptyIncrement()));
+    }
+
+    private void commitCopyOnWriteUpdate(FileStoreTable table) {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(
+                                        SpecialFields.rowTypeWithRowTracking(
+                                                table.rowType(), false, true));
+                BatchTableCommit commit = builder.newCommit()) {
+            commit.commit(copyOnWriteUpdate(table, write));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Rows 1 and 2 in one file (row ids 0 and 1), row 3 in another (row id 2). */
+    private FileStoreTable createRowTrackingTableForCopyOnWrite() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
+        writeRows(table, row(1, "a", "p1"), row(2, "b", "p1"));
+        writeRows(table, row(3, "c", "p1"));
+        return loadTable();
+    }
+
+    /**
+     * Copies the data files of row-tracking table {@code source} into {@code TABLE} and commits
+     * them with the row ids they have, like {@code sys.copy} does.
+     */
+    private void copyFiles(Identifier source) throws Exception {
+        FileStoreTable from = (FileStoreTable) catalog.getTable(source);
+        FileStoreTable to = loadTable();
+        List<DataFileMeta> files = liveFiles(from);
+        Path fromBucket = from.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0);
+        Path toBucket = to.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0);
+        to.fileIO().mkdirs(toBucket);
+        for (DataFileMeta file : files) {
+            to.fileIO()
+                    .copyFile(
+                            new Path(fromBucket, file.fileName()),
+                            new Path(toBucket, file.fileName()),
+                            false);
+        }
+        try (BatchTableCommit commit = to.newBatchWriteBuilder().withOverwrite().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    to.coreOptions().bucket(),
+                                    new DataIncrement(
+                                            files,
+                                            Collections.emptyList(),
+                                            Collections.emptyList()),
+                                    CompactIncrement.emptyIncrement())));
+        }
+    }
+
+    /**
+     * A row-tracking table {@code default.src} with rows 1 and 2 (row ids 0 and 1) in two files.
+     */
+    private Identifier createRowTrackingSource() throws Exception {
+        Identifier source = new Identifier("default", "src");
+        catalog.createTable(
+                source,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("v", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(source);
+        writeRows(table, row(1, "a", "p1"));
+        writeRows(table, row(2, "b", "p1"));
+        return source;
+    }
+
     private DataEvolutionEnabler enabler() {
         return new DataEvolutionEnabler(catalog, TABLE);
     }
@@ -1760,16 +1991,29 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         private final Thread thread;
 
         private PausedWriter(GenericRow... rows) throws Exception {
+            this(
+                    false,
+                    (table, write) -> {
+                        for (GenericRow row : rows) {
+                            write.write(row);
+                        }
+                        return write.prepareCommit();
+                    });
+        }
+
+        /** {@code writeRowIds}: the write stores the row id field, as a copy-on-write does. */
+        private PausedWriter(boolean writeRowIds, MessagesWriter messagesWriter) throws Exception {
             AtomicReference<Thread> committer = new AtomicReference<>();
             FileStoreTable table =
                     FileStoreTableFactory.create(
                             new PausingFileIO(committer, paused, released), loadTable().location());
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             BatchTableWrite write = writeBuilder.newWrite();
-            for (GenericRow row : rows) {
-                write.write(row);
+            if (writeRowIds) {
+                write.withWriteType(
+                        SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true));
             }
-            List<CommitMessage> messages = write.prepareCommit();
+            List<CommitMessage> messages = messagesWriter.write(table, write);
             BatchTableCommit commit = writeBuilder.newCommit();
             this.thread =
                     new Thread(
@@ -1809,6 +2053,11 @@ public class DataEvolutionEnablerTest extends TableTestBase {
             assertThat(thread.isAlive()).isFalse();
             return error.get();
         }
+    }
+
+    /** Writes the commit messages of a {@link PausedWriter}. */
+    private interface MessagesWriter {
+        List<CommitMessage> write(FileStoreTable table, BatchTableWrite write) throws Exception;
     }
 
     private static class PausingFileIO extends LocalFileIO {

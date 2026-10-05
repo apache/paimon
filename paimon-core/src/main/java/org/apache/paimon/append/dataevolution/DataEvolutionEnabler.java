@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -51,6 +52,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -59,7 +61,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.storesRowIds;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -136,11 +140,13 @@ public class DataEvolutionEnabler {
         long schemaBefore = table.schema().id();
         Long snapshotBefore = table.snapshotManager().latestSnapshotId();
         Assignment planned = plan(table);
+        // Also before reporting the table as done: an earlier run may have switched the schema and
+        // then found files it cannot convert.
+        checkConvertible(planned, enabled);
         if (enabled && !planned.hasChanges() && hasFence(table, planned.snapshot)) {
             return Result.skipped(
                     schemaBefore, snapshotBefore, "data evolution is already enabled");
         }
-        checkNoFileStoresRowIds(planned);
         if (dryRun) {
             return Result.dryRun(schemaBefore, snapshotBefore, enabled, planned);
         }
@@ -161,7 +167,7 @@ public class DataEvolutionEnabler {
         beforeFence.run();
         commitFence(table);
         Assignment remaining = plan(table);
-        checkNoFileStoresRowIds(remaining);
+        checkConvertible(remaining, true);
         if (remaining.hasChanges()) {
             LOG.info(
                     "Repairing row ids or sequence numbers of table {} after fencing old writers.",
@@ -204,34 +210,74 @@ public class DataEvolutionEnabler {
             // a concurrent run switched the schema already
             return;
         }
+        // A writer on the current schema may have committed files that cannot be converted since
+        // the plan. Refuse while the table is still unchanged: once the schema is switched, the
+        // table stays on it. Only a writer that passed its schema check before the switch and
+        // commits before the fence can still slip in, see run.
+        checkConvertible(plan(table), false);
         catalog.alterTable(identifier, new EnableDataEvolution(), false);
     }
 
     /**
-     * A copy-on-write UPDATE, DELETE or MERGE INTO on a row-tracking table rewrites a file with the
-     * row ids of its rows stored in it, and no first row id. Such ids need not be contiguous, so no
-     * first row id describes them, and a new one would contradict the stored ids: a later column
-     * update by the row ids the rows read with would not reach them. A commit never assigns a first
-     * row id to such a file either. Refuse the conversion; rewriting those rows, for example with
-     * INSERT OVERWRITE, gives them new row ids that the conversion can assign.
+     * Refuses files that the conversion cannot give correct row ids. {@code enabled} tells whether
+     * the schema is switched already, so that the message says the table is left on it.
+     *
+     * <ul>
+     *   <li>A copy-on-write UPDATE, DELETE or MERGE INTO on a row-tracking table rewrites a file
+     *       with the row ids of its rows stored in it, and no first row id. Such ids need not be
+     *       contiguous, so no first row id describes them, and a new one would contradict the
+     *       stored ids: a later column update by the row ids the rows read with would not reach
+     *       them. A commit never assigns a first row id to such a file either.
+     *   <li>Files written before the conversion are complete-row files, so their row id ranges must
+     *       not overlap: a data-evolution read merges files of overlapping ranges, and rows of one
+     *       would hide the rows of the other. Ranges overlap when files that carry row ids are
+     *       copied into a table, for example by {@code sys.copy}, which does not advance the next
+     *       row id of the table, and rows are written afterwards.
+     * </ul>
+     *
+     * <p>Rewriting those rows, for example with INSERT OVERWRITE, gives them new row ids.
      */
-    private void checkNoFileStoresRowIds(Assignment assignment) {
-        if (assignment.storingRowIds.isEmpty()) {
+    private void checkConvertible(Assignment assignment, boolean enabled) {
+        String problem;
+        if (!assignment.storingRowIds.isEmpty()) {
+            problem =
+                    String.format(
+                            "%d data file(s) store the row ids of their rows, written by a "
+                                    + "copy-on-write UPDATE, DELETE or MERGE INTO on the "
+                                    + "row-tracking table, and have no first row id, so their "
+                                    + "rows cannot be addressed by a data-evolution update. "
+                                    + "Files: %s",
+                            assignment.storingRowIds.size(), describe(assignment.storingRowIds));
+        } else if (!assignment.overlappingRowIds.isEmpty()) {
+            problem =
+                    String.format(
+                            "data files written before the conversion were assigned "
+                                    + "overlapping row ids, for example by copying files into "
+                                    + "the table with sys.copy and writing rows afterwards, so a "
+                                    + "data-evolution read would let the rows of one hide the "
+                                    + "rows of another. Files: %s",
+                            describe(assignment.overlappingRowIds));
+        } else {
             return;
         }
-        int shown = Math.min(5, assignment.storingRowIds.size());
         throw new IllegalArgumentException(
                 String.format(
-                        "Cannot enable data evolution on table %s: %d data file(s) store the row "
-                                + "ids of their rows, written by a copy-on-write UPDATE, DELETE or "
-                                + "MERGE INTO on the row-tracking table, and have no first row "
-                                + "id, so their rows cannot be addressed by a data-evolution "
-                                + "update. Rewrite those rows first, for example with INSERT "
-                                + "OVERWRITE. Files: %s%s",
-                        identifier.getFullName(),
-                        assignment.storingRowIds.size(),
-                        assignment.storingRowIds.subList(0, shown),
-                        shown < assignment.storingRowIds.size() ? " ..." : ""));
+                        "%s: %s. Rewrite those rows first, for example with INSERT OVERWRITE, "
+                                + "and run the procedure again.",
+                        enabled
+                                ? String.format(
+                                        "Table %s has data evolution enabled, but cannot be "
+                                                + "fully converted",
+                                        identifier.getFullName())
+                                : String.format(
+                                        "Cannot enable data evolution on table %s",
+                                        identifier.getFullName()),
+                        problem));
+    }
+
+    private static String describe(List<String> files) {
+        int shown = Math.min(5, files.size());
+        return files.subList(0, shown) + (shown < files.size() ? " ..." : "");
     }
 
     private boolean dataEvolutionEnabled(FileStoreTable table) {
@@ -326,14 +372,31 @@ public class DataEvolutionEnabler {
         List<String> storingRowIds = new ArrayList<>();
         Set<FileEntry.Identifier> resetSequences = new HashSet<>();
         Map<Long, Boolean> rowTrackingOnlySchemas = new HashMap<>();
+        Map<Long, Boolean> dataEvolutionSchemas = new HashMap<>();
+        List<ManifestEntry> completeRowFiles = new ArrayList<>();
+        long maxRowIdEnd = 0L;
         for (ManifestEntry entry : live.values()) {
             if (entry.kind() != FileKind.ADD) {
                 continue;
             }
             if (entry.file().firstRowId() == null && storesRowIds(entry.file())) {
-                // see checkNoFileStoresRowIds
+                // see checkConvertible
                 storingRowIds.add(entry.file().fileName());
                 continue;
+            }
+            if (entry.file().firstRowId() != null) {
+                maxRowIdEnd =
+                        Math.max(maxRowIdEnd, entry.file().firstRowId() + entry.file().rowCount());
+                if (!isBlobFile(entry.file().fileName())
+                        && !isVectorStoreFile(entry.file().fileName())
+                        && !dataEvolutionSchemas.computeIfAbsent(
+                                entry.file().schemaId(),
+                                id ->
+                                        CoreOptions.fromMap(
+                                                        table.schemaManager().schema(id).options())
+                                                .dataEvolutionEnabled())) {
+                    completeRowFiles.add(entry);
+                }
             }
             if (entry.file().firstRowId() == null) {
                 withoutRowId.add(entry);
@@ -353,7 +416,29 @@ public class DataEvolutionEnabler {
                 resetSequences.add(entry.identifier());
             }
         }
-        long start = latest.nextRowId() == null ? 0L : latest.nextRowId();
+        // Files written before the conversion hold complete rows, see checkConvertible. Files of a
+        // data-evolution writer (a column update) share the range of the file they update.
+        completeRowFiles.sort(Comparator.comparingLong(entry -> entry.file().nonNullFirstRowId()));
+        List<String> overlappingRowIds = new ArrayList<>();
+        for (int i = 1; i < completeRowFiles.size(); i++) {
+            DataFileMeta previous = completeRowFiles.get(i - 1).file();
+            DataFileMeta current = completeRowFiles.get(i).file();
+            if (current.nonNullFirstRowId() < previous.nonNullFirstRowId() + previous.rowCount()) {
+                overlappingRowIds.add(
+                        String.format(
+                                "%s %s and %s %s",
+                                previous.fileName(),
+                                previous.nonNullRowIdRange(),
+                                current.fileName(),
+                                current.nonNullRowIdRange()));
+            }
+        }
+
+        // The next row id of a snapshot does not cover files committed with a first row id they
+        // already had, for example files copied into the table by sys.copy: continue after them.
+        long snapshotNextRowId = latest.nextRowId() == null ? 0L : latest.nextRowId();
+        long start = Math.max(snapshotNextRowId, maxRowIdEnd);
+        boolean advancesNextRowId = start > snapshotNextRowId;
         if (withoutRowId.isEmpty()) {
             return new Assignment(
                     latest,
@@ -362,6 +447,8 @@ public class DataEvolutionEnabler {
                     Collections.emptyMap(),
                     resetSequences,
                     storingRowIds,
+                    overlappingRowIds,
+                    advancesNextRowId,
                     0L,
                     start);
         }
@@ -390,6 +477,8 @@ public class DataEvolutionEnabler {
                 firstRowIds,
                 resetSequences,
                 storingRowIds,
+                overlappingRowIds,
+                true,
                 rowCount,
                 next);
     }
@@ -421,6 +510,7 @@ public class DataEvolutionEnabler {
             // Another commit landed: plan again from the new latest snapshot. Files that already
             // received an id in it (written by a writer on the new schema) keep it.
             assignment = plan(table);
+            checkConvertible(assignment, dataEvolutionEnabled(table));
             if (!assignment.hasChanges()) {
                 return assignment;
             }
@@ -529,6 +619,10 @@ public class DataEvolutionEnabler {
         final Set<FileEntry.Identifier> resetSequences;
         /** Files without a first row id that store the row id field physically. */
         final List<String> storingRowIds;
+        /** Pairs of files written before the conversion whose row id ranges overlap. */
+        final List<String> overlappingRowIds;
+        /** Whether the snapshot's next row id lags behind the row ids of its files. */
+        final boolean advancesNextRowId;
 
         final long rowCount;
         final long nextRowId;
@@ -540,6 +634,8 @@ public class DataEvolutionEnabler {
                 Map<FileEntry.Identifier, Long> firstRowIds,
                 Set<FileEntry.Identifier> resetSequences,
                 List<String> storingRowIds,
+                List<String> overlappingRowIds,
+                boolean advancesNextRowId,
                 long rowCount,
                 long nextRowId) {
             this.snapshot = snapshot;
@@ -548,12 +644,14 @@ public class DataEvolutionEnabler {
             this.firstRowIds = firstRowIds;
             this.resetSequences = resetSequences;
             this.storingRowIds = storingRowIds;
+            this.overlappingRowIds = overlappingRowIds;
+            this.advancesNextRowId = advancesNextRowId;
             this.rowCount = rowCount;
             this.nextRowId = nextRowId;
         }
 
         boolean hasChanges() {
-            return !files.isEmpty() || !resetSequences.isEmpty();
+            return !files.isEmpty() || !resetSequences.isEmpty() || advancesNextRowId;
         }
 
         static Assignment empty(@Nullable Snapshot snapshot, long nextRowId) {
@@ -564,6 +662,8 @@ public class DataEvolutionEnabler {
                     Collections.emptyMap(),
                     Collections.emptySet(),
                     Collections.emptyList(),
+                    Collections.emptyList(),
+                    false,
                     0L,
                     nextRowId);
         }
