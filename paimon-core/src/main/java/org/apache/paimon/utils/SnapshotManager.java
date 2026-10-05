@@ -41,6 +41,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -577,6 +578,23 @@ public class SnapshotManager implements Serializable {
                 },
                 paths);
 
+        return snapshots;
+    }
+
+    public List<Snapshot> safelyGetAllSnapshotsWithConsistentLatest() throws IOException {
+        Long latestBefore = latestSnapshotIdFromFileSystem();
+        List<Snapshot> snapshots = safelyGetAllSnapshots();
+        Long latestAfter = latestSnapshotIdFromFileSystem();
+
+        boolean latestIncluded =
+                latestAfter == null
+                        || snapshots.stream().anyMatch(snapshot -> snapshot.id() == latestAfter);
+        if (!Objects.equals(latestBefore, latestAfter) || !latestIncluded) {
+            throw new IOException(
+                    String.format(
+                            "Incomplete snapshot enumeration: latest snapshot changed from %s to %s or was not included.",
+                            latestBefore, latestAfter));
+        }
         return snapshots;
     }
 

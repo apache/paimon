@@ -245,7 +245,8 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected Set<Snapshot> safelyGetLiveSnapshots(String branch) throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
-        return new HashSet<>(branchTable.snapshotManager().safelyGetAllSnapshots());
+        return new HashSet<>(
+                branchTable.snapshotManager().safelyGetAllSnapshotsWithConsistentLatest());
     }
 
     protected Set<Snapshot> snapshotsIncludingTagsAndChangelogs(
@@ -255,6 +256,11 @@ public abstract class OrphanFilesClean implements Serializable {
         snapshots.addAll(branchTable.tagManager().taggedSnapshots());
         snapshots.addAll(branchTable.changelogManager().safelyGetAllChangelogs());
         return snapshots;
+    }
+
+    protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
+        Set<Snapshot> liveSnapshots = safelyGetLiveSnapshots(branch);
+        return snapshotsIncludingTagsAndChangelogs(branch, liveSnapshots);
     }
 
     protected void collectWithoutDataFile(
@@ -316,7 +322,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
         // index files
         String indexManifest = snapshot.indexManifest();
-        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
+        if (indexManifest != null) {
             List<IndexManifestEntry> indexEntries =
                     retryReadingFiles(
                             () -> indexFileHandler.readManifestWithIOException(indexManifest),
