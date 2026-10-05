@@ -156,7 +156,8 @@ class JindoInputFile:
         if whence == os.SEEK_END and self._file_size is not None:
             position = self._file_size + position
             whence = os.SEEK_SET
-        return self._stream.seek(position, whence)
+        self._stream.seek(position, whence)
+        return self._stream.tell()
 
     def tell(self) -> int:
         if self.closed:

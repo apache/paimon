@@ -48,6 +48,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -59,6 +61,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link VideoFileFormat}. */
 public class VideoFileFormatTest {
+
+    private static final String KEYFRAME_INDEX_HEX =
+            "0149464b4f45444956010000000200000000000000000000000100000000000000"
+                    + "789c6360c00e78a0f4821e08cd04e503001394013b";
 
     @TempDir java.nio.file.Path tempPath;
 
@@ -122,23 +128,47 @@ public class VideoFileFormatTest {
 
     @Test
     public void testCrossLanguageV1Fixture() throws IOException {
-        byte[] fixture =
-                fromHex(
-                        new String(
-                                        IOUtils.readFully(
-                                                VideoFileFormatTest.class
-                                                        .getClassLoader()
-                                                        .getResourceAsStream(
-                                                                "org/apache/paimon/format/blob/video-v1.hex"),
-                                                true),
-                                        StandardCharsets.UTF_8)
-                                .trim());
-
-        Blob a2 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 2);
-        Blob a3 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 3);
+        byte[] fixture = fixture("video-v1.hex");
+        byte[] video = "abc".getBytes(StandardCharsets.UTF_8);
+        byte[] mapping = fromHex(KEYFRAME_INDEX_HEX);
+        java.nio.file.Path source = tempPath.resolve("indexed.mp4");
+        byte[] sourceBytes = new byte[video.length + mapping.length];
+        System.arraycopy(video, 0, sourceBytes, 0, video.length);
+        System.arraycopy(mapping, 0, sourceBytes, video.length, mapping.length);
+        Files.write(source, sourceBytes);
+        VideoFrameDescriptor descriptor =
+                new VideoFrameDescriptor(
+                        new Path(source.toUri()).toString(),
+                        0,
+                        video.length,
+                        2,
+                        video.length,
+                        mapping.length);
+        Blob a2 =
+                Blob.fromDescriptor(org.apache.paimon.utils.UriReader.fromFile(fileIO), descriptor);
+        Blob a3 =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                descriptor.uri(),
+                                0,
+                                video.length,
+                                3,
+                                video.length,
+                                mapping.length));
         Blob b7 = sourceFrame("b.mp4", "WXYZ".getBytes(StandardCharsets.UTF_8), 7);
         Blob b8 = sourceFrame("b.mp4", "WXYZ".getBytes(StandardCharsets.UTF_8), 8);
-        Blob a10 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 10);
+        Blob a10 =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                descriptor.uri(),
+                                0,
+                                video.length,
+                                10,
+                                video.length,
+                                mapping.length));
+
         write(a2, a3, null, BlobPlaceholder.INSTANCE, b7, b8, a10);
 
         assertThat(Files.readAllBytes(java.nio.file.Paths.get(file.toUri()))).isEqualTo(fixture);
@@ -146,12 +176,182 @@ public class VideoFileFormatTest {
             VideoFileMeta meta = new VideoFileMeta(in, fixture.length, null);
             assertThat(meta.recordNumber()).isEqualTo(7);
             assertThat(meta.physicalVideoNumber()).isEqualTo(2);
-            assertThat(meta.frameIndex(0)).isEqualTo(2);
-            assertThat(meta.frameIndex(1)).isEqualTo(3);
-            assertThat(meta.frameIndex(4)).isEqualTo(7);
-            assertThat(meta.frameIndex(5)).isEqualTo(8);
-            assertThat(meta.frameIndex(6)).isEqualTo(10);
+            assertThat(meta.videoLength(0)).isEqualTo(video.length);
+            assertThat(meta.keyframeIndexOffset(0)).isEqualTo(7);
+            assertThat(meta.keyframeIndexLength(0)).isEqualTo(mapping.length);
+            assertThat(meta.keyframeIndexLength(4)).isZero();
         }
+        VideoFrameDescriptor restored = descriptor(read(null).get(0));
+        assertThat(
+                        VideoFrameDescriptor.keyframeIndexBlob(
+                                        Blob.fromDescriptor(
+                                                org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                                                restored))
+                                .toData())
+                .isEqualTo(mapping);
+    }
+
+    @Test
+    public void testRejectInvalidKeyframeIndex() throws IOException {
+        byte[] video = "video".getBytes(StandardCharsets.UTF_8);
+        byte[] mapping = "mapping".getBytes(StandardCharsets.UTF_8);
+        java.nio.file.Path source = tempPath.resolve("invalid-index.mp4");
+        byte[] sourceBytes = new byte[video.length + mapping.length];
+        System.arraycopy(video, 0, sourceBytes, 0, video.length);
+        System.arraycopy(mapping, 0, sourceBytes, video.length, mapping.length);
+        Files.write(source, sourceBytes);
+        Blob frame =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                new Path(source.toUri()).toString(),
+                                0,
+                                video.length,
+                                0,
+                                video.length,
+                                mapping.length));
+
+        assertThatThrownBy(() -> write(frame))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid video keyframe index");
+    }
+
+    @Test
+    public void testRejectTooManyKeyframes() {
+        byte[] mapping =
+                ByteBuffer.allocate(18)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .put((byte) 1)
+                        .putLong(0x564944454F4B4649L)
+                        .putInt(0)
+                        .putInt((int) VideoKeyframeIndex.MAX_KEYFRAME_COUNT + 1)
+                        .put((byte) 0)
+                        .array();
+
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("keyframe count exceeds limit");
+    }
+
+    @Test
+    public void testRejectTooManyMetadataRanges() {
+        byte[] mapping =
+                ByteBuffer.allocate(18)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .put((byte) 1)
+                        .putLong(0x564944454F4B4649L)
+                        .putInt((int) VideoKeyframeIndex.MAX_METADATA_RANGE_COUNT + 1)
+                        .putInt(1)
+                        .put((byte) 0)
+                        .array();
+
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("metadata range count exceeds limit");
+    }
+
+    @Test
+    public void testRejectOversizedKeyframeIndexesBeforeFetch() throws IOException {
+        String missing = new Path(tempPath.resolve("missing.mp4").toUri()).toString();
+        Blob frame =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                missing,
+                                0,
+                                1,
+                                0,
+                                1,
+                                VideoFormatWriter.MAX_KEYFRAME_INDEX_BYTES + 1));
+
+        assertThatThrownBy(() -> write(frame))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("keyframe index length")
+                .hasMessageContaining("limit");
+        assertThatThrownBy(
+                        () ->
+                                VideoFormatWriter.checkKeyframeIndexSize(
+                                        1, VideoFormatWriter.MAX_TOTAL_KEYFRAME_INDEX_BYTES))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Buffered video keyframe indexes")
+                .hasMessageContaining("limit");
+    }
+
+    @Test
+    public void testRejectSeekOffsetsOutsideVideoPayload() throws IOException {
+        byte[] video = "video".getBytes(StandardCharsets.UTF_8);
+        byte[] mapping =
+                fromHex(
+                        "0149464b4f45444956010000000100000000000000000000000600000000000000"
+                                + "789c6360c00e0000180001");
+        java.nio.file.Path source = tempPath.resolve("out-of-range-index.mp4");
+        byte[] sourceBytes = new byte[video.length + mapping.length];
+        int offset = put(sourceBytes, 0, video);
+        put(sourceBytes, offset, mapping);
+        Files.write(source, sourceBytes);
+        Blob frame =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                new Path(source.toUri()).toString(),
+                                0,
+                                video.length,
+                                0,
+                                video.length,
+                                mapping.length));
+
+        assertThatThrownBy(() -> write(frame))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("video payload");
+    }
+
+    @Test
+    public void testRejectInconsistentKeyframeIndexesForSamePayload() throws IOException {
+        byte[] video = "video".getBytes(StandardCharsets.UTF_8);
+        byte[] firstIndex = fromHex(KEYFRAME_INDEX_HEX);
+        byte[] secondIndex =
+                fromHex(
+                        "0149464b4f454449560000000002000000789c6360c00ed8a074801b846682f201"
+                                + "09ea009f");
+        java.nio.file.Path source = tempPath.resolve("inconsistent-index.mp4");
+        byte[] sourceBytes = new byte[video.length + firstIndex.length + secondIndex.length];
+        int offset = put(sourceBytes, 0, video);
+        offset = put(sourceBytes, offset, firstIndex);
+        put(sourceBytes, offset, secondIndex);
+        Files.write(source, sourceBytes);
+        String uri = new Path(source.toUri()).toString();
+        org.apache.paimon.utils.UriReader reader =
+                org.apache.paimon.utils.UriReader.fromFile(fileIO);
+        Blob unindexed =
+                Blob.fromDescriptor(
+                        reader, new VideoFrameDescriptor(uri, 0, video.length, 0, -1, 0));
+        Blob first =
+                Blob.fromDescriptor(
+                        reader,
+                        new VideoFrameDescriptor(
+                                uri, 0, video.length, 1, video.length, firstIndex.length));
+        Blob second =
+                Blob.fromDescriptor(
+                        reader,
+                        new VideoFrameDescriptor(
+                                uri,
+                                0,
+                                video.length,
+                                2,
+                                video.length + firstIndex.length,
+                                secondIndex.length));
+
+        assertThatThrownBy(() -> write(unindexed, first))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same payload");
+        fileIO.delete(file, false);
+        assertThatThrownBy(() -> write(first, unindexed))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same payload");
+        fileIO.delete(file, false);
+        assertThatThrownBy(() -> write(first, second))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same payload");
     }
 
     @Test
@@ -224,22 +424,26 @@ public class VideoFileFormatTest {
     @Test
     public void testRejectCorruptRunReference() throws IOException {
         byte[] physicalIndex = DeltaVarintCompressor.compress(new long[0]);
+        byte[] keyframeLengthIndex = DeltaVarintCompressor.compress(new long[0]);
         byte[] runLengthIndex = DeltaVarintCompressor.compress(new long[] {1});
         byte[] runReferenceIndex = DeltaVarintCompressor.compress(new long[] {0});
         byte[] firstFrameIndex = DeltaVarintCompressor.compress(new long[] {0});
         byte[] bytes =
                 new byte
                         [physicalIndex.length
+                                + keyframeLengthIndex.length
                                 + runLengthIndex.length
                                 + runReferenceIndex.length
                                 + firstFrameIndex.length
                                 + VideoFormatWriter.FILE_FOOTER_LENGTH];
         int position = 0;
         position = put(bytes, position, physicalIndex);
+        position = put(bytes, position, keyframeLengthIndex);
         position = put(bytes, position, runLengthIndex);
         position = put(bytes, position, runReferenceIndex);
         position = put(bytes, position, firstFrameIndex);
         position = putInt(bytes, position, physicalIndex.length);
+        position = putInt(bytes, position, keyframeLengthIndex.length);
         position = putInt(bytes, position, runLengthIndex.length);
         position = putInt(bytes, position, runReferenceIndex.length);
         position = putInt(bytes, position, firstFrameIndex.length);
@@ -265,7 +469,7 @@ public class VideoFileFormatTest {
         }
         VideoFrameDescriptor descriptor =
                 new VideoFrameDescriptor(
-                        new Path(source.toUri()).toString(), 0, bytes.length, frameIndex);
+                        new Path(source.toUri()).toString(), 0, bytes.length, frameIndex, -1, 0);
         return Blob.fromDescriptor(org.apache.paimon.utils.UriReader.fromFile(fileIO), descriptor);
     }
 
@@ -317,5 +521,18 @@ public class VideoFileFormatTest {
                                     + Character.digit(hex.charAt(offset + 1), 16));
         }
         return bytes;
+    }
+
+    private static byte[] fixture(String name) throws IOException {
+        return fromHex(
+                new String(
+                                IOUtils.readFully(
+                                        VideoFileFormatTest.class
+                                                .getClassLoader()
+                                                .getResourceAsStream(
+                                                        "org/apache/paimon/format/blob/" + name),
+                                        true),
+                                StandardCharsets.UTF_8)
+                        .trim());
     }
 }

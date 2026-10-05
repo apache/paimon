@@ -25,6 +25,7 @@ from fractions import Fraction
 from itertools import chain
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 def _encode_images_to_video(
@@ -151,7 +152,8 @@ class VideoFrameCollator:
             output_column="frame",
             max_open_videos=8,
             collate_fn=None,
-            decode_batch_fn=None):
+            decode_batch_fn=None,
+            range_parallelism=4):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
@@ -171,6 +173,10 @@ class VideoFrameCollator:
             raise ValueError("max_open_videos must be a positive int.")
         if collate_fn is not None and not callable(collate_fn):
             raise ValueError("collate_fn must be callable or None.")
+        if (isinstance(range_parallelism, bool)
+                or not isinstance(range_parallelism, int)
+                or range_parallelism <= 0):
+            raise ValueError("range_parallelism must be a positive int.")
 
         raw_table = getattr(table, "raw_table", table)
         file_io = getattr(raw_table, "file_io", None)
@@ -185,6 +191,7 @@ class VideoFrameCollator:
         self.output_column = output_column
         self.max_open_videos = max_open_videos
         self.collate_fn = collate_fn
+        self.range_parallelism = range_parallelism
         self._decoders = OrderedDict()
         self._owner_pid = os.getpid()
 
@@ -226,12 +233,17 @@ class VideoFrameCollator:
             if descriptor is None:
                 decoded[position] = output
                 continue
-            grouped.setdefault(descriptor.payload_descriptor, []).append(
-                (descriptor.frame_index, position, output)
-            )
+            payload = descriptor.payload_descriptor
+            index = descriptor.keyframe_index_descriptor
+            group = grouped.setdefault(payload, [index, []])
+            if group[0] != index:
+                raise ValueError(
+                    "One video payload references different keyframe indexes."
+                )
+            group[1].append((descriptor.frame_index, position, output))
 
-        for payload, frames in grouped.items():
-            decoder = self._decoder(payload)
+        for payload, (index, frames) in grouped.items():
+            decoder = self._decoder(payload, index)
             frames.sort(key=lambda frame: frame[0])
             if self.decode_batch_fn is not None:
                 values = self.decode_batch_fn(
@@ -284,10 +296,11 @@ class VideoFrameCollator:
             )
         return output, descriptor
 
-    def _decoder(self, descriptor):
-        resource = self._decoders.pop(descriptor, None)
+    def _decoder(self, descriptor, keyframe_index_descriptor=None):
+        cache_key = (descriptor, keyframe_index_descriptor)
+        resource = self._decoders.pop(cache_key, None)
         if resource is not None:
-            self._decoders[descriptor] = resource
+            self._decoders[cache_key] = resource
             return resource[0]
 
         # Reuse the table's resolved FileIO. Rebuilding a reader from raw URI
@@ -299,12 +312,31 @@ class VideoFrameCollator:
             descriptor.length,
         ).new_input_stream()
         try:
+            if keyframe_index_descriptor is not None:
+                mapping = self.file_io.read_file_range(
+                    keyframe_index_descriptor.uri,
+                    keyframe_index_descriptor.offset,
+                    keyframe_index_descriptor.length,
+                )
+                stream.video_keyframe_index = (
+                    VideoKeyframeIndex.deserialize(mapping, descriptor.length))
+                stream.video_length = descriptor.length
+                stream.video_read_ranges = lambda ranges: (
+                    self.file_io.read_ranges_coalesced(
+                        [(
+                            descriptor.uri,
+                            descriptor.offset + offset,
+                            length,
+                        ) for offset, length in ranges],
+                        self.range_parallelism,
+                    )
+                )
             decoder = self.decoder_factory(stream)
         except Exception:
             stream.close()
             raise
         resource = (decoder, stream)
-        self._decoders[descriptor] = resource
+        self._decoders[cache_key] = resource
         if len(self._decoders) > self.max_open_videos:
             _, evicted = self._decoders.popitem(last=False)
             self._close_resource(evicted)
