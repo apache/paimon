@@ -401,39 +401,20 @@ Limitations:
 
 ### Video
 
-`.video` stores complete encoded videos and logical frame runs. Video payloads have no BLOB entry
-header, length trailer, or per-entry CRC:
+`.video` stores complete encoded videos and logical frame runs. Its payloads have no BLOB entry
+header, length trailer, or per-entry CRC. On-disk order:
 
 ```
-+----------------------------+
-| Encoded Video Payload 1    |  Raw complete video bytes
-+----------------------------+
-| Encoded Video Payload 2    |
-+----------------------------+
-| ...                        |
-+----------------------------+
-| Keyframe Index 1           |  Video metadata ranges and compressed keyframe entries
-+----------------------------+
-| Keyframe Index 2           |
-+----------------------------+
-| Physical Length Index      |  Delta-Varint video lengths
-+----------------------------+
-| Keyframe-Index Length Index |  Delta-Varint block lengths per video (0 = scan fallback)
-+----------------------------+
-| Run Length Index           |  Delta-Varint logical row counts
-+----------------------------+
-| Run Reference Index        |  Delta-Varint physical video ordinals
-+----------------------------+
-| Run First-Frame Index      |  Delta-Varint frame ordinals
-+----------------------------+
-| Physical Index Length      |  4 bytes (Little Endian)
-| Keyframe Length-Index Size |  4 bytes (Little Endian)
-| Run-Length Index Length    |  4 bytes (Little Endian)
-| Run-Reference Index Length |  4 bytes (Little Endian)
-| First-Frame Index Length   |  4 bytes (Little Endian)
-| Magic Number               |  4 bytes (0x4F454449, Little Endian)
-| Version                    |  1 byte
-+----------------------------+
+Video payloads A, B, ...
+Keyframe-index blocks A, B, ...
+Five Delta-Varint indexes:
+  1. Physical Length: video byte lengths
+  2. Keyframe-Index Length: block byte lengths (0 = scan fallback)
+  3. Run Length: logical row counts
+  4. Run Reference: physical video ordinals
+  5. Run First-Frame: frame ordinals
+Footer: byte lengths of indexes 1–5 (5 × uint32 LE),
+        magic 0x4F454449 (uint32 LE), version 1 (uint8)
 ```
 
 Run arrays have equal element counts. A non-negative run reference identifies a video in the
@@ -447,12 +428,9 @@ length)` pairs (int64 each) and zlib-compressed `(frame ordinal, PTS, packet pos
 (int64 each). All numeric fields are little endian; offsets are relative to the video payload. Limits:
 65,536 metadata ranges, 65,536 keyframes, 16 MiB per block, and 64 MiB per file.
 
-The index covers the first video stream; its time base stays in the video. Readers fetch metadata
-and the target GOP, seek by PTS, and decode in presentation order. Reordered frames may require
-bytes from the following GOP.
+The index covers the first video stream; its time base stays in the video.
 
-An Arrow/data-file cell stores a versioned `VideoFrameDescriptor`. All numeric values are little
-endian:
+An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 
 | Field | Size | Description |
 | --- | ---: | --- |
@@ -466,10 +444,7 @@ endian:
 | Keyframe-index offset | 8 bytes | Index offset in the `.video` file, or `-1` |
 | Keyframe-index length | 8 bytes | Index length, or `0` |
 
-Descriptor and container versions are independent. Java and Python share byte-compatible fixtures.
-
-Readers reject invalid footer/index bounds, payload gaps, run counts, lengths, references, and
-frame ordinals. Files support one scalar BLOB field. Video reuse is file-local and keyed by exact
-input `BlobDescriptor` identity. Ordinary `.blob` files are unchanged.
+One `.video` file supports one scalar BLOB field; references stay within the file. The `.blob`
+format is unchanged.
 
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).
