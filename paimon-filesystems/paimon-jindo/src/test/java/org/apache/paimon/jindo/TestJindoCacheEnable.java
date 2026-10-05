@@ -148,6 +148,22 @@ public class TestJindoCacheEnable {
     }
 
     @Test
+    public void testLegacyPolicyMatchingRemainsUnchanged() {
+        // JindoCache RPC policies intentionally keep their historical substring matching.
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(createCatalogContext(true, "read,nonetheless", true, null));
+        verifyCacheFlags(fileIO, false, false, false);
+
+        fileIO = new JindoFileIO();
+        fileIO.configure(createCatalogContext(true, "thread,metadata", true, null));
+        verifyCacheFlags(fileIO, true, true, false);
+
+        fileIO = new JindoFileIO();
+        fileIO.configure(createCatalogContext(true, " READ , Meta ", true, null));
+        verifyCacheFlags(fileIO, false, false, false);
+    }
+
+    @Test
     public void testCacheWhitelist() {
         // default config
         CatalogContext context = createCatalogContext(true, "meta,read,write", true, null);
