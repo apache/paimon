@@ -641,6 +641,29 @@ class VideoFormatTest(unittest.TestCase):
                 blob_as_descriptor=True,
             )
 
+    def test_reader_keyframe_index_size_limits(self):
+        limit = 16 * 1024 * 1024
+        for lengths, error in (([limit + 1], "16 MiB"),
+                               ([limit] * 4 + [1], "64 MiB"),
+                               ([limit] * 4, None), ([0], None)):
+            with self.subTest(lengths=lengths):
+                indexes = [DeltaVarintCompressor.compress(values) for values in
+                           ([1] * len(lengths), lengths, [], [], [])]
+                path = self.root / "index-limits.video"
+                with path.open("wb") as output:
+                    # Sparse payload region: test declared sizes without allocating them.
+                    output.seek(len(lengths) + sum(lengths))
+                    output.write(b"".join(indexes))
+                    output.write(struct.pack(
+                        '<IIIIIIB', *(len(index) for index in indexes),
+                        VideoFormatWriter.FOOTER_MAGIC_NUMBER, VideoFormatWriter.VERSION))
+                with path.open("rb") as stream:
+                    if error:
+                        with self.assertRaisesRegex(IOError, error):
+                            VideoFileMeta(stream, path.stat().st_size)
+                    else:
+                        VideoFileMeta(stream, path.stat().st_size)
+
     def _read(self, target, row_indices=None):
         reader = FormatBlobReader(
             file_io=self.file_io,

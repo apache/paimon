@@ -48,6 +48,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -460,6 +461,53 @@ public class VideoFileFormatTest {
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining(
                         "run 0 references physical video 0, but physical video count is 0");
+    }
+
+    @Test
+    public void testReaderKeyframeIndexSizeLimits() throws IOException {
+        long limit = VideoFormatWriter.MAX_KEYFRAME_INDEX_BYTES;
+        long[][] cases = {
+            {limit + 1}, {limit, limit, limit, limit, 1}, {limit, limit, limit, limit}, {0}
+        };
+        for (int i = 0; i < cases.length; i++) {
+            long[] lengths = cases[i];
+            long[] physicalLengths = new long[lengths.length];
+            java.util.Arrays.fill(physicalLengths, 1);
+            byte[][] indexes = {
+                DeltaVarintCompressor.compress(physicalLengths),
+                DeltaVarintCompressor.compress(lengths),
+                DeltaVarintCompressor.compress(new long[0]),
+                DeltaVarintCompressor.compress(new long[0]),
+                DeltaVarintCompressor.compress(new long[0])
+            };
+            try (RandomAccessFile out =
+                    new RandomAccessFile(java.nio.file.Paths.get(file.toUri()).toFile(), "rw")) {
+                out.setLength(0);
+                long indexStart = lengths.length;
+                for (long length : lengths) {
+                    indexStart += length;
+                }
+                out.seek(indexStart);
+                for (byte[] index : indexes) {
+                    out.write(index);
+                }
+                for (byte[] index : indexes) {
+                    out.write(intToLittleEndian(index.length));
+                }
+                out.write(intToLittleEndian(VideoFormatWriter.MAGIC_NUMBER));
+                out.write(VideoFormatWriter.VERSION);
+            }
+            try (SeekableInputStream in = fileIO.newInputStream(file)) {
+                if (i < 2) {
+                    String message = i == 0 ? "16 MiB" : "64 MiB";
+                    assertThatThrownBy(() -> new VideoFileMeta(in, fileIO.getFileSize(file), null))
+                            .isInstanceOf(IOException.class)
+                            .hasMessageContaining(message);
+                } else {
+                    new VideoFileMeta(in, fileIO.getFileSize(file), null);
+                }
+            }
+        }
     }
 
     private Blob sourceFrame(String name, byte[] bytes, long frameIndex) throws IOException {

@@ -93,6 +93,10 @@ class VideoFileMeta:
             )
 
         keyframe_index_size = sum(keyframe_index_lengths)
+        if any(length > 16 * 1024 * 1024 for length in keyframe_index_lengths):
+            raise IOError("Corrupt video file: keyframe index exceeds the 16 MiB limit.")
+        if keyframe_index_size > 64 * 1024 * 1024:
+            raise IOError("Corrupt video file: keyframe indexes exceed the 64 MiB limit.")
         mapping_start = index_start - keyframe_index_size
         if mapping_start < 0:
             raise IOError(

@@ -109,6 +109,12 @@ public class VideoFileMeta {
                 throw corrupt("invalid keyframe index length %s.", length);
             }
             keyframeIndexSize += length;
+            if (length > VideoFormatWriter.MAX_KEYFRAME_INDEX_BYTES) {
+                throw corrupt("keyframe index exceeds the 16 MiB limit.");
+            }
+            if (keyframeIndexSize > VideoFormatWriter.MAX_TOTAL_KEYFRAME_INDEX_BYTES) {
+                throw corrupt("keyframe indexes exceed the 64 MiB limit.");
+            }
         }
         long keyframeIndexStart = indexStart - keyframeIndexSize;
         if (keyframeIndexStart < 0) {
