@@ -1594,6 +1594,8 @@ class _FallbackVideoDecoder:
 
 class _RangeBackedVideo(io.RawIOBase):
 
+    _MAX_CACHE_BYTES = 16 * 1024 * 1024
+
     def __init__(self, length, read_ranges):
         if length < 0:
             raise ValueError("Video length must be non-negative.")
@@ -1635,9 +1637,13 @@ class _RangeBackedVideo(io.RawIOBase):
         if self._position >= end:
             return b''
         start = self._position
-        self._ensure([(start, end - start)])
+        chunks = []
+        for offset in range(start, end, self._MAX_CACHE_BYTES):
+            limit = min(offset + self._MAX_CACHE_BYTES, end)
+            self._ensure([(offset, limit - offset)])
+            chunks.append(self._cached(offset, limit))
         self._position = end
-        return self._cached(start, end)
+        return b''.join(chunks)
 
     def readinto(self, value):
         data = self.read(len(value))
@@ -1645,7 +1651,20 @@ class _RangeBackedVideo(io.RawIOBase):
         return len(data)
 
     def prefetch(self, ranges):
-        self._ensure(ranges)
+        selected = []
+        remaining = self._MAX_CACHE_BYTES
+        for offset, length in _merge_video_ranges(ranges):
+            if offset < 0 or length < 0 or offset + length > self._length:
+                raise ValueError("Video byte range is outside the payload.")
+            size = min(length, remaining)
+            if size:
+                selected.append((offset, size))
+                remaining -= size
+        self._ensure(selected)
+
+    def close(self):
+        self._segments.clear()
+        super().close()
 
     def _ensure(self, ranges):
         requested = []
@@ -1656,6 +1675,10 @@ class _RangeBackedVideo(io.RawIOBase):
         missing = _merge_video_ranges(requested)
         if not missing:
             return
+        if (sum(end - start for start, end, _ in self._segments)
+                + sum(length for _, length in missing) > self._MAX_CACHE_BYTES):
+            self._segments.clear()
+            missing = _merge_video_ranges(ranges)
         bodies = self._read_ranges(missing)
         if len(bodies) != len(missing):
             raise IOError("Video range reader returned an invalid result count.")
@@ -1816,16 +1839,17 @@ class _PyAVVideoDecoder:
 
     def _decode_indexed(self, indices):
         import av
-        groups, ranges = self._indexed_plan(indices)
+        groups, unused_ranges = self._indexed_plan(indices)
         decoded = {}
         source = _RangeBackedVideo(
             self._video_length(), self._read_video_ranges)
         try:
-            source.prefetch(_merge_video_ranges(
-                list(self._keyframe_index.metadata_ranges) + ranges))
+            source.prefetch(self._keyframe_index.metadata_ranges)
             with av.open(source) as container:
                 stream = container.streams.video[0]
                 for anchor, targets in sorted(groups.items()):
+                    unused_groups, ranges = self._indexed_plan(targets)
+                    source.prefetch(ranges)
                     self._decode_indexed_group(
                         container,
                         stream,

@@ -388,6 +388,29 @@ class LeRobotValidationTest(unittest.TestCase):
             finally:
                 decoder.close()
 
+    def test_range_backed_video_bounds_prefetch_and_cache(self):
+        payload = bytes(range(256))
+        calls = []
+
+        def read_ranges(ranges):
+            self.assertLessEqual(sum(length for _, length in ranges), 16)
+            calls.append(list(ranges))
+            return [payload[offset:offset + length] for offset, length in ranges]
+
+        with patch.object(_RangeBackedVideo, '_MAX_CACHE_BYTES', 16):
+            reader = _RangeBackedVideo(len(payload), read_ranges)
+            reader.prefetch([(0, 8), (64, 8), (128, 8), (192, 8)])
+            self.assertEqual([[(0, 8), (64, 8)]], calls)
+            for offset in (192, 0, 128, 64, 192):
+                reader.prefetch([(offset, 48)])
+                reader.seek(offset)
+                self.assertEqual(payload[offset:offset + 32], reader.read(32))
+                self.assertLessEqual(sum(end - start for start, end, _ in reader._segments), 16)
+            reader.seek(0)
+            self.assertEqual(payload, reader.read())
+            reader.close()
+            self.assertEqual([], reader._segments)
+
     def test_range_backed_video_fetches_only_missing_bytes(self):
         payload = bytes(range(32))
         calls = []
@@ -429,6 +452,7 @@ class LeRobotValidationTest(unittest.TestCase):
         av is not None and importlib.util.find_spec("torch") is not None,
         "PyAV and Torch are required for video decoding",
     )
+    @patch.object(_RangeBackedVideo, '_MAX_CACHE_BYTES', 1024)
     def test_indexed_pyav_decoder_handles_b_frames_and_fragmented_video(self):
         cases = (
             ("mpeg4", None, None),
@@ -486,6 +510,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 range_calls = []
 
                 def read_ranges(ranges):
+                    self.assertLessEqual(
+                        sum(length for _, length in ranges),
+                        _RangeBackedVideo._MAX_CACHE_BYTES)
                     range_calls.append(list(ranges))
                     return [
                         payload[offset:offset + length]
