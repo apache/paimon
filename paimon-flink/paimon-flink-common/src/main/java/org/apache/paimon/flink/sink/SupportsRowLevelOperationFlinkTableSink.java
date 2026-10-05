@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
@@ -27,6 +28,9 @@ import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.dataevolution.DataEvolutionDeleteSink;
 import org.apache.paimon.flink.dataevolution.DataEvolutionRowLevelModificationScanContext;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -34,6 +38,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -228,7 +233,12 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                 commit.truncateTable();
             } else {
                 checkArgument(deleteIsDropPartition());
-                commit.truncatePartitions(Collections.singletonList(deletePartitions()));
+                List<Map<String, String>> partitions = deletePartitions();
+                if (partitions.isEmpty()) {
+                    commit.commit(Collections.emptyList());
+                } else {
+                    commit.truncatePartitions(partitions);
+                }
             }
             return Optional.empty();
         } catch (Exception e) {
@@ -243,20 +253,82 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     }
 
     private boolean deleteIsDropPartition() {
-        if (deletePredicate == null) {
+        if (deletePredicate == null
+                || !deletePredicate.visit(
+                        new OnlyPartitionKeyEqualVisitor(table.partitionKeys()))) {
             return false;
         }
-        return deletePredicate.visit(new OnlyPartitionKeyEqualVisitor(table.partitionKeys()));
+        if (!PredicateConverter.referencesFloatingPoint(table.rowType(), deletePredicate)) {
+            return true;
+        }
+        // FLOAT/DOUBLE partitions are matched by the predicate, see matchedPartitions. Flink never
+        // finds NaN equal to anything, while the predicate finds NaN equal to NaN, so such a
+        // delete is left to Flink.
+        return table instanceof FileStoreTable && !hasNaNLiteral(deletePredicate);
     }
 
-    private Map<String, String> deletePartitions() {
-        if (deletePredicate == null) {
-            return null;
+    private List<Map<String, String>> deletePartitions() {
+        if (PredicateConverter.referencesFloatingPoint(table.rowType(), deletePredicate)) {
+            return matchedPartitions((FileStoreTable) table);
         }
         OnlyPartitionKeyEqualVisitor visitor =
                 new OnlyPartitionKeyEqualVisitor(table.partitionKeys());
         deletePredicate.visit(visitor);
-        return visitor.partitions();
+        return Collections.singletonList(visitor.partitions());
+    }
+
+    /**
+     * The existing partitions the delete predicate matches. A partition spelled from the
+     * predicate's literals is dropped by its exact value, so {@code d = 0.0} would keep the -0.0
+     * partition, which Flink deletes; the predicate, like Flink's equality, treats the two zeros as
+     * equal. Deleting row by row is no way out either: Flink writes the key back as the literal it
+     * was compared with, +0.0, so the -0.0 row would not be found.
+     */
+    private List<Map<String, String>> matchedPartitions(FileStoreTable fileStoreTable) {
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.splitPartitionPredicate(
+                                deletePredicate,
+                                fileStoreTable.rowType(),
+                                fileStoreTable.partitionKeys())
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Delete predicate "
+                                                        + deletePredicate
+                                                        + " is not on partition keys."));
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        fileStoreTable.coreOptions().partitionDefaultName(),
+                        fileStoreTable.schema().logicalPartitionType(),
+                        fileStoreTable.partitionKeys().toArray(new String[0]),
+                        fileStoreTable.coreOptions().legacyPartitionName());
+        List<Map<String, String>> partitions = new ArrayList<>();
+        for (BinaryRow partition :
+                fileStoreTable
+                        .newSnapshotReader()
+                        .withPartitionFilter(partitionPredicate)
+                        .partitions()) {
+            partitions.add(partitionComputer.generatePartValues(partition));
+        }
+        return partitions;
+    }
+
+    private static boolean hasNaNLiteral(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                if (hasNaNLiteral(child)) {
+                    return true;
+                }
+            }
+        } else if (predicate instanceof LeafPredicate) {
+            for (Object literal : ((LeafPredicate) predicate).literals()) {
+                if ((literal instanceof Double && ((Double) literal).isNaN())
+                        || (literal instanceof Float && ((Float) literal).isNaN())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private boolean isDataEvolutionTable() {

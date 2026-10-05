@@ -33,6 +33,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
@@ -149,6 +150,70 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
                         .as("%s", conditions.get(i))
                         .containsExactlyInAnyOrderElementsOf(expected);
             }
+        }
+    }
+
+    /**
+     * A DELETE on partition keys only drops whole partitions. Spelled from the literals, a
+     * FLOAT/DOUBLE partition would be matched by its exact value and {@code d = 0.0} would keep the
+     * -0.0 partition. Flink's own evaluation of each condition is the oracle.
+     */
+    @ParameterizedTest(name = "partitioned by: {0}")
+    @CsvSource(
+            value = {"d", "d, f"},
+            delimiter = ';')
+    public void testSignedZeroDeleteOnPartitionAgreesWithFlink(String partitionKeys) {
+        // constants are folded through DECIMAL, which has no -0.0, so negate at runtime
+        sql("CREATE TABLE ZERO_SRC (d DOUBLE, f FLOAT)");
+        batchSql("INSERT INTO ZERO_SRC VALUES (CAST(0 AS DOUBLE), CAST(0 AS FLOAT))");
+
+        // only conditions Paimon converts and that are on partition keys only: otherwise Flink
+        // deletes row by row and writes d back as the literal it was compared with, so it cannot
+        // find -0.0 by key. f = 0.0 is not converted, Flink compares CAST(f AS DOUBLE).
+        List<String> conditions =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "d = 0.0",
+                                "d = 0",
+                                "d = CAST('-0.0' AS DOUBLE)",
+                                "d = CAST('NaN' AS DOUBLE)"));
+        if (partitionKeys.contains("f")) {
+            conditions.addAll(
+                    Arrays.asList(
+                            "f = 0",
+                            "d = 0.0 AND f = 0",
+                            // the planner fails on CAST('NaN' AS FLOAT) next to a comparison
+                            "d = CAST('NaN' AS DOUBLE) AND f = 0"));
+        }
+        for (int i = 0; i < conditions.size(); i++) {
+            String table = "DZ" + i;
+            sql(
+                    "CREATE TABLE %s (id INT, d DOUBLE, f FLOAT, PRIMARY KEY (id, %s) NOT ENFORCED)"
+                            + " PARTITIONED BY (%s)",
+                    table, partitionKeys, partitionKeys);
+            batchSql(
+                    "INSERT INTO %s SELECT 1, -d, -f FROM ZERO_SRC"
+                            + " UNION ALL SELECT 2, d, f FROM ZERO_SRC"
+                            + " UNION ALL SELECT 3, d + 1, f + 1 FROM ZERO_SRC"
+                            + " UNION ALL SELECT 4, d / d, f / f FROM ZERO_SRC",
+                    table);
+            assertThat(batchSql("SELECT id, CAST(d AS STRING), CAST(f AS STRING) FROM %s", table))
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, "-0.0", "-0.0"),
+                            Row.of(2, "0.0", "0.0"),
+                            Row.of(3, "1.0", "1.0"),
+                            Row.of(4, "NaN", "NaN"));
+
+            String condition = conditions.get(i);
+            List<Row> expected =
+                    batchSql("SELECT id, %s FROM %s", condition, table).stream()
+                            .filter(row -> !Boolean.TRUE.equals(row.getField(1)))
+                            .map(row -> Row.of(row.getField(0)))
+                            .collect(Collectors.toList());
+            batchSql("DELETE FROM %s WHERE %s", table, condition);
+            assertThat(batchSql("SELECT id FROM %s", table))
+                    .as("%s", condition)
+                    .containsExactlyInAnyOrderElementsOf(expected);
         }
     }
 
