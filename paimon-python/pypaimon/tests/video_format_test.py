@@ -382,6 +382,26 @@ class VideoFormatTest(unittest.TestCase):
         self.assertFalse(writer.reach_target_size(len(video) + len(mapping) + 1))
         self.assertTrue(writer.reach_target_size(len(video) + len(mapping)))
 
+    @unittest.skipIf(av is None, "PyAV is required")
+    def test_ffmpeg_index_errors_preserve_video_payload(self):
+        for error_type in (av.error.DecoderNotFoundError, av.error.FFmpegError):
+            with self.subTest(error=error_type.__name__):
+                payload = b"video"
+                source = self.root / "index-fallback.mp4"
+                source.write_bytes(payload)
+                descriptor = VideoFrameDescriptor(
+                    source.as_uri(), 0, len(payload), 0, -1, 0)
+                blob = Blob.from_descriptor(
+                    self.file_io.uri_reader_factory.create(descriptor.uri), descriptor)
+                output = io.BytesIO()
+                writer = VideoFormatWriter(output)
+                with mock.patch.object(
+                        VideoKeyframeIndex, "inspect",
+                        side_effect=error_type(1, "Cannot index video")):
+                    writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+                self.assertEqual(payload, output.getvalue())
+                self.assertEqual([b""], writer._keyframe_indexes)
+
     def test_rejects_invalid_keyframe_index(self):
         video = b"video"
         mapping = b"mapping"

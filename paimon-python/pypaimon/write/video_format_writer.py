@@ -16,6 +16,7 @@
 # under the License.
 
 import struct
+import sys
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.schema.data_types import is_blob_type
@@ -26,6 +27,13 @@ from pypaimon.table.row.blob import (
 )
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+
+def _video_index_fallback_errors():
+    errors = (ImportError, OSError, ValueError, EOFError)
+    av = sys.modules.get("av")
+    ffmpeg_error = getattr(getattr(av, "error", None), "FFmpegError", None)
+    return errors if ffmpeg_error is None else errors + (ffmpeg_error,)
 
 
 class VideoFormatWriter(BlobFormatWriter):
@@ -177,7 +185,7 @@ class VideoFormatWriter(BlobFormatWriter):
                         stream.seek(position)
                     mapping = VideoKeyframeIndex.inspect(
                         stream, payload_length).serialize()
-                except (ImportError, OSError, ValueError, EOFError):
+                except _video_index_fallback_errors():
                     return b''
             finally:
                 stream.close()
