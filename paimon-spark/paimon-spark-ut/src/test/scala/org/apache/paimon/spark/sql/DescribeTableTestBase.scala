@@ -271,4 +271,21 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
         }
     }
   }
+
+  test("Paimon describe: describe table partition with a binary value") {
+    // Only the non-legacy name is readable for a binary partition; it stores the bytes as text.
+    spark.sql("""
+                |CREATE TABLE T (id INT, p BINARY)
+                |PARTITIONED BY (p)
+                |TBLPROPERTIES ('partition.legacy-name' = 'false')
+                |""".stripMargin)
+    spark.sql("INSERT INTO T VALUES (1, CAST('2021' AS BINARY))")
+    checkAnswer(
+      spark
+        .sql("DESCRIBE FORMATTED T PARTITION (p = '2021')")
+        .filter("col_name = 'Partition Values'")
+        .select("data_type"),
+      Row("[p=2021]") :: Nil
+    )
+  }
 }

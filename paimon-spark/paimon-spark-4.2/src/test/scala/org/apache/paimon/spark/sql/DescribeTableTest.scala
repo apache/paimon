@@ -18,4 +18,31 @@
 
 package org.apache.paimon.spark.sql
 
-class DescribeTableTest extends DescribeTableTestBase {}
+import org.apache.spark.sql.Row
+
+class DescribeTableTest extends DescribeTableTestBase {
+
+  // Spark 4.2 hands the partition values over typed, so these match the partition Paimon stored
+  // even though the spec is not spelled the way Paimon names it.
+
+  private def partitionValues(spec: String): Seq[Row] =
+    spark
+      .sql(s"DESCRIBE FORMATTED T PARTITION ($spec)")
+      .filter("col_name = 'Partition Values'")
+      .select("data_type")
+      .collect()
+      .toSeq
+
+  test("Paimon describe: describe table partition with a null value") {
+    spark.sql("CREATE TABLE T (id INT, p INT) PARTITIONED BY (p)")
+    spark.sql("INSERT INTO T VALUES (1, NULL)")
+    assert(partitionValues("p = null") == Seq(Row("[p=__DEFAULT_PARTITION__]")))
+  }
+
+  test("Paimon describe: describe table partition with a date value and legacy name") {
+    // With `partition.legacy-name` (the default) Paimon stores a DATE partition as its epoch day.
+    spark.sql("CREATE TABLE T (id INT, dt DATE) PARTITIONED BY (dt)")
+    spark.sql("INSERT INTO T VALUES (1, DATE '2021-01-01')")
+    assert(partitionValues("dt = '2021-01-01'") == Seq(Row("[dt=18628]")))
+  }
+}

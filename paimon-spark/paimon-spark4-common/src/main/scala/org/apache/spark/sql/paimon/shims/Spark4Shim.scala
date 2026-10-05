@@ -20,6 +20,7 @@ package org.apache.spark.sql.paimon.shims
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.{GenericVariant, Variant}
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
@@ -38,7 +39,7 @@ import org.apache.spark.sql.catalyst.analysis.{UnresolvedIdentifier, UnresolvedT
 import org.apache.spark.sql.catalyst.analysis.CTESubstitution
 import org.apache.spark.sql.catalyst.analysis.NamedRelation
 import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CreateTableLike, CTERelationRef, DescribeRelation, DescribeTablePartition, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, OverwriteByExpression, OverwritePartitionsDynamic, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
@@ -46,7 +47,7 @@ import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, STUtils}
-import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Column, Identifier, StagingTableCatalog, SupportsPartitionManagement, Table, TableCatalog}
+import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
@@ -57,7 +58,7 @@ import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, Data
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
 import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{DataTypes, Decimal, Geography, GeographyType, Geometry, GeometryType, StructType, VariantType}
+import org.apache.spark.sql.types.{DataTypes, Geography, GeographyType, Geometry, GeometryType, StructType, VariantType}
 import org.apache.spark.unsafe.types.VariantVal
 
 import java.net.URI
@@ -521,41 +522,11 @@ class Spark4Shim extends SparkShim {
     plan match {
       case d: DescribeTablePartition =>
         (d.table, d.partitionSpec) match {
-          case (
-                r @ ResolvedTable(_, _, table: SupportsPartitionManagement, _),
-                spec: ResolvedPartitionSpec) =>
-            // `ResolvedPartitionSpec` holds the values as an `InternalRow`, so read each field by
-            // its declared type and render it. Read the types from `partitionSchema()`, the same
-            // schema `ResolvePartitionSpec` used to build `names` and `ident`, so a name can never
-            // be missing. (Char/varchar is the one place the declared type and the stored value
-            // differ: `convertToPartIdent` casts through `replaceCharVarcharWithString`, leaving a
-            // plain `UTF8String` under a `CharType(n)` field. Harmless here — `InternalRow.get`
-            // ignores the type argument for a `GenericInternalRow`, `Literal`'s validation
-            // dispatches on the physical type, where `CharType` maps to `PhysicalStringType` and
-            // accepts a `UTF8String`, and `Literal.toString` has no char/varchar/string branch at
-            // all, so the value falls through to `other.toString`.)
-            //
-            // The rendering is compared for equality against Paimon's `Partition.spec()` rather
-            // than displayed, so it is `Literal.toString`, NOT what upstream's own
-            // `DescribeTablePartitionExec` uses (`ToPrettyString(...)` + `escapePathName`). A
-            // decimal is rendered with `toPlainString` instead: `Literal.toString` gives `1E-7` for
-            // 0.0000001, while `Partition.spec()` holds `0.0000001` under either
-            // `partition.legacy-name` setting. Other types still differ: with
-            // `partition.legacy-name` (the default) Paimon stores `field.toString()`, so a DATE
-            // column holds the epoch day while this renders `2021-01-01`. That mismatch predates
-            // Spark 4.2 — on <= 4.1 the parser produced the same `2021-01-01` via
-            // `Cast(literal, StringType)`.
-            val partSchema = table.partitionSchema()
-            val values = spec.names.zipWithIndex.map {
-              case (name, i) =>
-                val field = partSchema(name)
-                val rendered = spec.ident.get(i, field.dataType) match {
-                  case d: Decimal => d.toPlainString
-                  case value => Literal(value, field.dataType).toString
-                }
-                name -> rendered
-            }
-            Some((r, values.toMap, d.isExtended, d.output))
+          // `PaimonStrategy` only plans Paimon's own `SparkTable`; anything else stays with Spark.
+          case (r @ ResolvedTable(_, _, table: SparkTable, _), spec: ResolvedPartitionSpec) =>
+            // The values arrive typed, so name the partition the way Paimon itself does, which is
+            // how `Partition.spec()` was produced.
+            Some((r, table.paimonPartitionSpec(spec.ident, spec.names), d.isExtended, d.output))
           case _ => None
         }
       case _ => None

@@ -419,17 +419,11 @@ trait SparkShim {
    * rows and `# Column Not Null` section). The node cannot be named here because
    * `paimon-spark-common` also compiles against Spark 3.5.
    *
-   * The spec values are returned already rendered to strings, keyed by partition column name, so
-   * they can be compared against Paimon's own `Partition.spec()` map. `ResolvedPartitionSpec`
-   * stores them as an `InternalRow`, so each field is read by the type `table.partitionSchema()`
-   * declares for it (the same schema `ResolvePartitionSpec` used to build the row) and rendered
-   * with `Literal.toString`, except that a decimal is rendered with `toPlainString`.
-   *
-   * Note that this is NOT what upstream's own `DescribeTablePartitionExec` does: it renders via
-   * `ToPrettyString(...).eval(null)` plus `escapePathName`, which differs for null (`NULL` vs
-   * `null`) and binary. Paimon needs a string it can compare against `Partition.spec()`, not a
-   * display string. This rendering and `Partition.spec()`'s own do not agree for every type either;
-   * the 4.2 implementation's comment works DATE through as the example.
+   * The spec values are returned as strings keyed by partition column name, named the way Paimon
+   * names the partition, so they can be compared against Paimon's own `Partition.spec()` map. That
+   * is not what upstream's own `DescribeTablePartitionExec` renders (`ToPrettyString(...)` plus
+   * `escapePathName`); Paimon needs a string it can compare, not a display string. `None` when the
+   * table is not a Paimon `SparkTable`.
    */
   def describeTablePartition(
       plan: LogicalPlan): Option[(LogicalPlan, Map[String, String], Boolean, Seq[Attribute])]
