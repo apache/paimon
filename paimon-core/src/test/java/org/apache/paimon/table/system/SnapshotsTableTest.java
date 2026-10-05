@@ -29,6 +29,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -45,6 +46,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -134,6 +136,52 @@ public class SnapshotsTableTest extends TableTestBase {
                 .forEachRemaining(result::add);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testReadSnapshotsWithOutOfRangeFilterReturnsEmpty() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        int snapshotIdIdx = snapshotsTable.rowType().getFieldNames().indexOf("snapshot_id");
+
+        // snapshots 1 and 2 exist
+        // lower bound above the latest snapshot id
+        assertThat(readWithFilter(builder.greaterThan(snapshotIdIdx, 99L))).isEmpty();
+        // upper bound below the earliest snapshot id
+        assertThat(readWithFilter(builder.lessThan(snapshotIdIdx, 1L))).isEmpty();
+        // lower bound above the upper bound, both within [earliest, latest]
+        assertThat(
+                        readWithFilter(
+                                PredicateBuilder.and(
+                                        builder.greaterThan(snapshotIdIdx, 1L),
+                                        builder.lessThan(snapshotIdIdx, 2L))))
+                .isEmpty();
+
+        // expire snapshot 1, then query a range that ends below the new earliest snapshot
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier(tableName));
+        table.newExpireSnapshots()
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(1)
+                                .snapshotRetainMin(1)
+                                .snapshotTimeRetain(Duration.ZERO)
+                                .snapshotMaxDeletes(Integer.MAX_VALUE)
+                                .build())
+                .expire();
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(2L);
+        assertThat(readWithFilter(builder.lessOrEqual(snapshotIdIdx, 1L))).isEmpty();
+        assertThat(readWithFilter(builder.lessOrEqual(snapshotIdIdx, 2L)))
+                .containsExactlyElementsOf(getExpectedResult(new long[] {2}));
+    }
+
+    private List<InternalRow> readWithFilter(Predicate predicate) throws Exception {
+        ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(snapshotsTable.rowType());
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> result.add(serializer.copy(row)));
+        return result;
     }
 
     private List<InternalRow> getExpectedResult(long[] snapshotIds) {
