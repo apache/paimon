@@ -87,6 +87,11 @@ class PartialUpdateMergeFunction:
         self._value_field_names = value_field_names
         # Lazily allocated on first add(); ``None`` means "no rows yet".
         self._accumulator: Optional[List[Any]] = None
+        # Whether a non-retract (INSERT / UPDATE_AFTER) row has been seen for
+        # the current key. A group seen only as retracts must not materialize
+        # (Java emits a RowKind.DELETE there, which the reader drops), so
+        # get_result() returns None unless this is True.
+        self._meet_insert: bool = False
         # Reference to the most recently added kv. We use it only to
         # propagate the key + sequence_number into the result row, and we
         # snapshot those two values into a fresh tuple in ``get_result()``
@@ -95,6 +100,7 @@ class PartialUpdateMergeFunction:
 
     def reset(self) -> None:
         self._accumulator = None
+        self._meet_insert = False
         self._latest_kv = None
 
     def add(self, kv: KeyValue) -> None:
@@ -103,6 +109,19 @@ class PartialUpdateMergeFunction:
             if self._ignore_delete:
                 # ignore-delete: drop the retract row and keep merging the
                 # rest of the group, as Java PartialUpdateMergeFunction does.
+                # But first, when this retract is the *first* record seen for
+                # the key, seed the accumulator from its values -- Java runs
+                # initRow() before the ignore-delete short-circuit (see
+                # PartialUpdateMergeFunction.add / notNullColumnFilled). A
+                # 0.7-era writer could persist a DELETE carrying the full
+                # prior value; a later partial INSERT that leaves a field
+                # unset must then preserve that value instead of resetting it
+                # to null. The group still stays absent unless a non-retract
+                # row arrives (tracked by ``_meet_insert``).
+                if self._accumulator is None:
+                    self._accumulator = [None] * self._value_arity
+                    self._merge_non_null_fields(kv)
+                    self._latest_kv = kv
                 return
             # DELETE / UPDATE_BEFORE without ignore-delete has no defined
             # partial-update semantics (remove-record-on-delete, which would
@@ -123,6 +142,21 @@ class PartialUpdateMergeFunction:
         # row that breaks the schema invariant.
         if self._accumulator is None:
             self._accumulator = [None] * self._value_arity
+        self._merge_non_null_fields(kv)
+        # A non-retract row makes the group materialize; see get_result().
+        self._meet_insert = True
+        self._latest_kv = kv
+
+    def _merge_non_null_fields(self, kv: KeyValue) -> None:
+        """Write the kv's non-null value fields into the accumulator.
+
+        Mirrors Java ``updateNonNullFields`` (and ``initRow`` on the
+        first-retract seed): a non-null input overwrites, a null input is
+        absorbed so the earlier value survives, and a null on a NOT NULL
+        field raises. On the seed path the accumulator is freshly all-null,
+        so writing only the non-null fields leaves exactly the retract's
+        populated values -- identical to ``initRow`` on a new row.
+        """
         for i in range(self._value_arity):
             v = kv.value.get_field(i)
             if v is not None:
@@ -137,10 +171,15 @@ class PartialUpdateMergeFunction:
                     "{}. Declare the field nullable in the table schema "
                     "if writes can leave it unset, or supply a value."
                     .format(field_ref))
-        self._latest_kv = kv
 
     def get_result(self) -> Optional[KeyValue]:
-        if self._accumulator is None or self._latest_kv is None:
+        # A group with no non-retract row never materializes: Java's
+        # getResult emits RowKind.DELETE when ``!meetInsert`` and the reader
+        # drops it, so returning None here is the same observable outcome
+        # (the key is absent). This covers both a retract-only key and a key
+        # seeded only from ignored retracts.
+        if not self._meet_insert or self._accumulator is None \
+                or self._latest_kv is None:
             return None
 
         kv = self._latest_kv

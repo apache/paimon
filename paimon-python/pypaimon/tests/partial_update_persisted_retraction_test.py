@@ -150,3 +150,108 @@ def test_python_read_skips_persisted_partial_update_retractions(tmp_path):
     # (UPDATE_BEFORE) and is absent -- exactly the ignore-delete semantics the
     # merge function implements, now proven over a persisted retract file.
     assert _read_sorted(table) == [{'id': 1, 'value': 100}]
+
+
+def _persist_overlapping_retract_then_update(table):
+    """Write two overlapping level-0 KV files and return their metas.
+
+    Mirrors the realistic 0.7-era layout the merge function must honor: an
+    older file persists a DELETE carrying the full prior value, a newer file
+    persists a partial INSERT that leaves that field unset. Because the two
+    files overlap on key 1 they land in one IntervalPartition section -> one
+    split -> merged oldest-to-newest by (key, seq), so the retract is seen
+    *before* the later partial add.
+
+    * file A (older): key 1 DELETE(seq 1) value=100, key 2 UPDATE_BEFORE(seq 2)
+      value=200 -- retract-only, must vanish
+    * file B (newer): key 1 INSERT(seq 3) with value unset (null)
+    """
+    kv_schema = pa.schema([
+        pa.field('_KEY_id', pa.int64(), nullable=False),
+        pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
+        pa.field('_VALUE_KIND', pa.int8(), nullable=False),
+        pa.field('id', pa.int64(), nullable=False),
+        pa.field('value', pa.int64(), nullable=True),
+    ])
+    id_field = table.trimmed_primary_keys_fields[0]
+    bucket_dir = table.path_factory().bucket_path((), 0)
+
+    file_a = pa.Table.from_arrays([
+        pa.array([1, 2], type=pa.int64()),           # _KEY_id
+        pa.array([1, 2], type=pa.int64()),           # _SEQUENCE_NUMBER
+        pa.array([3, 1], type=pa.int8()),            # DELETE, UPDATE_BEFORE
+        pa.array([1, 2], type=pa.int64()),           # id (value side)
+        pa.array([100, 200], type=pa.int64()),       # value (value side)
+    ], schema=kv_schema)
+    name_a = 'data-retract-then-update-a-0.parquet'
+    path_a = bucket_dir + '/' + name_a
+    table.file_io.write_parquet(path_a, file_a)
+    meta_a = DataFileMeta(
+        file_name=name_a,
+        file_size=table.file_io.get_file_size(path_a),
+        row_count=2,
+        min_key=GenericRow([1], [id_field]),
+        max_key=GenericRow([2], [id_field]),
+        key_stats=SimpleStats(
+            GenericRow([1], [id_field]), GenericRow([2], [id_field]), [0]),
+        value_stats=SimpleStats.empty_stats(),
+        min_sequence_number=1,
+        max_sequence_number=2,
+        schema_id=0,
+        level=0,
+        extra_files=[],
+        delete_row_count=2,
+        value_stats_cols=[],
+    )
+
+    file_b = pa.Table.from_arrays([
+        pa.array([1], type=pa.int64()),              # _KEY_id
+        pa.array([3], type=pa.int64()),              # _SEQUENCE_NUMBER
+        pa.array([0], type=pa.int8()),               # INSERT
+        pa.array([1], type=pa.int64()),              # id (value side)
+        pa.array([None], type=pa.int64()),           # value unset -> keep 100
+    ], schema=kv_schema)
+    name_b = 'data-retract-then-update-b-0.parquet'
+    path_b = bucket_dir + '/' + name_b
+    table.file_io.write_parquet(path_b, file_b)
+    meta_b = DataFileMeta(
+        file_name=name_b,
+        file_size=table.file_io.get_file_size(path_b),
+        row_count=1,
+        min_key=GenericRow([1], [id_field]),
+        max_key=GenericRow([1], [id_field]),
+        key_stats=SimpleStats(
+            GenericRow([1], [id_field]), GenericRow([1], [id_field]), [0]),
+        value_stats=SimpleStats.empty_stats(),
+        min_sequence_number=3,
+        max_sequence_number=3,
+        schema_id=0,
+        level=0,
+        extra_files=[],
+        delete_row_count=0,
+        value_stats_cols=[],
+    )
+    return [meta_a, meta_b]
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.python_commit
+def test_python_read_preserves_field_value_from_first_retract(tmp_path):
+    table = _partial_update_table(tmp_path)
+    metas = _persist_overlapping_retract_then_update(table)
+    message = CommitMessage(
+        partition=(), bucket=0, new_files=metas, total_buckets=1)
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        commit.commit([message])
+    finally:
+        commit.close()
+
+    # The first record for key 1 is a retract carrying value=100; the later
+    # INSERT leaves value unset, so the retract's value must survive (Java
+    # initializes the accumulator from the first retract before ignore-delete).
+    # key 2 is retract-only and stays absent. Without the first-retract seed
+    # this reads {id:1, value:None}.
+    assert _read_sorted(table) == [{'id': 1, 'value': 100}]

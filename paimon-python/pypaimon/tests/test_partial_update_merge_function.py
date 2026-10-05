@@ -174,6 +174,47 @@ class PartialUpdateMergeFunctionTest(unittest.TestCase):
         mf.add(_kv((1,), 101, RowKind.UPDATE_BEFORE, ('b', 'y')))
         self.assertIsNone(mf.get_result())
 
+    def test_first_retract_seeds_value_preserved_by_later_null_insert(self):
+        # A 0.7-era writer could persist a DELETE carrying the full prior
+        # value. When that retract is the first record for the key and a
+        # later INSERT leaves a field unset, the retract's value must survive
+        # -- Java initializes the accumulator from the first retract (initRow)
+        # before applying ignore-delete. Without the seed the result would be
+        # (None, None); with it the retract's values are preserved.
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, ignore_delete=True)
+        mf.reset()
+        mf.add(_kv((1,), 1, RowKind.DELETE, ('kept_a', 'kept_b')))
+        mf.add(_kv((1,), 2, RowKind.INSERT, (None, None)))
+        result = mf.get_result()
+        self.assertIsNotNone(result)
+        self.assertEqual(_result_value(result), ('kept_a', 'kept_b'))
+        # The later INSERT materializes the group as an INSERT at its seq.
+        self.assertEqual(result.value_row_kind_byte, RowKind.INSERT.value)
+        self.assertEqual(result.sequence_number, 2)
+
+    def test_first_retract_seed_is_overwritten_by_later_non_null(self):
+        # The seed only fills fields the later rows leave null: a non-null
+        # INSERT field still overwrites the seeded value.
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, ignore_delete=True)
+        mf.reset()
+        mf.add(_kv((1,), 1, RowKind.DELETE, ('old_a', 'old_b')))
+        mf.add(_kv((1,), 2, RowKind.INSERT, (None, 'new_b')))
+        result = mf.get_result()
+        self.assertEqual(_result_value(result), ('old_a', 'new_b'))
+
+    def test_mid_group_retract_does_not_reseed_or_clobber(self):
+        # Only the *first* record seeds; a retract in the middle of a group
+        # is dropped without re-seeding or overwriting the merged value.
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, ignore_delete=True)
+        mf.reset()
+        mf.add(_kv((1,), 1, RowKind.INSERT, ('a', None)))
+        mf.add(_kv((1,), 2, RowKind.DELETE, ('zzz', 'zzz')))
+        mf.add(_kv((1,), 3, RowKind.INSERT, (None, 'x')))
+        self.assertEqual(_result_value(mf.get_result()), ('a', 'x'))
+
     def test_result_is_decoupled_from_input_kv(self):
         """The merge function must build a fresh result tuple — upstream
         readers reuse a single KeyValue instance and call ``replace`` on
