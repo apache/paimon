@@ -401,34 +401,51 @@ Limitations:
 
 ### Video
 
-`.video` stores complete encoded videos and logical frame runs. Its payloads have no BLOB entry
-header, length trailer, or per-entry CRC. On-disk order:
+`.video` stores complete encoded videos and frame runs, without BLOB entry headers, length
+trailers, or per-entry CRC. On-disk order:
 
 ```
-Video payloads A, B, ...
-Keyframe-index blocks A, B, ...
-Five Delta-Varint indexes:
-  1. Physical Length: video byte lengths
-  2. Keyframe-Index Length: block byte lengths (0 = scan fallback)
-  3. Run Length: logical row counts
-  4. Run Reference: physical video ordinals
-  5. Run First-Frame: frame ordinals
-Footer: byte lengths of indexes 1–5 (5 × uint32 LE),
-        magic 0x4F454449 (uint32 LE), version 1 (uint8)
++----------------------------+
+| Encoded Video Payload 1    |  Raw complete video bytes
++----------------------------+
+| Encoded Video Payload 2    |
++----------------------------+
+| ...                        |
++----------------------------+
+| Keyframe Index 1           |  Video metadata ranges and compressed keyframe entries
++----------------------------+
+| Keyframe Index 2           |
++----------------------------+
+| Physical Length Index      |  Delta-Varint video lengths
++----------------------------+
+| Keyframe-Index Length Index |  Delta-Varint block lengths per video (0 = scan fallback)
++----------------------------+
+| Run Length Index           |  Delta-Varint logical row counts
++----------------------------+
+| Run Reference Index        |  Delta-Varint physical video ordinals
++----------------------------+
+| Run First-Frame Index      |  Delta-Varint frame ordinals
++----------------------------+
+| Physical Index Length      |  4 bytes (Little Endian)
+| Keyframe Length-Index Size |  4 bytes (Little Endian)
+| Run-Length Index Length    |  4 bytes (Little Endian)
+| Run-Reference Index Length |  4 bytes (Little Endian)
+| First-Frame Index Length   |  4 bytes (Little Endian)
+| Magic Number               |  4 bytes (0x4F454449, Little Endian)
+| Version                    |  1 byte
++----------------------------+
 ```
 
-Run arrays have equal element counts. A non-negative run reference identifies a video in the
-physical length index; `-1` means NULL and `-2` means a data-evolution placeholder. For row `r`
-in a run starting at `s`, the frame ordinal is `run_first_frame + (r - s)`. Nonconsecutive frames
-start a new run.
+Run arrays have equal lengths. Non-negative references select a video; `-1` means NULL and `-2`
+means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
+`run_first_frame + r - s`; gaps start new runs.
 
-A keyframe-index block has a 17-byte header: version (`1`, uint8), magic (`0x564944454F4B4649`,
-uint64), metadata-range count (uint32), and keyframe count (uint32). It stores metadata `(offset,
-length)` pairs (int64 each) and zlib-compressed `(frame ordinal, PTS, packet position)` entries
-(int64 each). All numeric fields are little endian; offsets are relative to the video payload. Limits:
-65,536 metadata ranges, 65,536 keyframes, 16 MiB per block, and 64 MiB per file.
-
-The index covers the first video stream; its time base stays in the video.
+A keyframe-index block contains a 17-byte header (version `1`: uint8; magic `0x564944454F4B4649`:
+uint64; metadata-range and keyframe counts: uint32 each), metadata `(offset, length)` pairs
+(int64 each), and zlib-compressed `(frame ordinal, PTS, packet position)` entries (int64 each).
+Numeric fields are little endian; offsets are payload-relative. Limits: 65,536 metadata ranges
+and 65,536 keyframes, 16 MiB per block, 64 MiB per file. The index covers the first video
+stream; its time base stays in the video.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 
@@ -444,7 +461,6 @@ An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrame
 | Keyframe-index offset | 8 bytes | Index offset in the `.video` file, or `-1` |
 | Keyframe-index length | 8 bytes | Index length, or `0` |
 
-One `.video` file supports one scalar BLOB field; references stay within the file. The `.blob`
-format is unchanged.
+A `.video` file serves one scalar BLOB field; references are file-local. `.blob` is unchanged.
 
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).
