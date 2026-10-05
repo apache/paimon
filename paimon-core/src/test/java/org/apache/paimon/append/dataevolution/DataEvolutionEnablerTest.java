@@ -998,40 +998,64 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
-    public void testFilesCopiedWithTheirRowIdsKeepThemAndNewRowsContinueAfterThem()
-            throws Exception {
+    public void testCopiedRowIdsAreKeptOnTableWithOnlyCopiedRows() throws Exception {
+        checkCopiedRowIdsAreKept();
+    }
+
+    @Test
+    public void testCopiedRowIdsAreKeptAndRowsWrittenAfterTheCopyFollowThem() throws Exception {
+        checkCopiedRowIdsAreKept(row(3, "c", "p1"), row(4, "d", "p1"));
+    }
+
+    @Test
+    public void testCopiedRowIdsAreKeptAndARowWrittenAfterTheCopyFollowsThem() throws Exception {
+        checkCopiedRowIdsAreKept(row(3, "c", "p1"));
+    }
+
+    /**
+     * Files committed with the first row ids they had in another table, for example by {@code
+     * sys.copy}, into a table without row tracking, which keeps no next row id. Rows written into
+     * it afterwards have no row id. The conversion keeps the copied row ids and continues after
+     * them.
+     */
+    private void checkCopiedRowIdsAreKept(GenericRow... writtenAfterTheCopy) throws Exception {
         Identifier source = createRowTrackingSource();
-        createTable(Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
-        copyFiles(source);
+        createTable(Collections.emptyMap());
+        commitFilesOf(source, true);
+        if (writtenAfterTheCopy.length > 0) {
+            writeRows(loadTable(), writtenAfterTheCopy);
+        }
         FileStoreTable table = loadTable();
-        assertThat(rowIdsById(table)).containsEntry(1, 0L).containsEntry(2, 1L);
-        // the copy keeps the row ids of the files, but not the next row id of the table
-        assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(0L);
+        assertThat(liveFiles(table).stream().map(DataFileMeta::firstRowId))
+                .isSubsetOf(0L, 1L, null)
+                .contains(0L, 1L);
+        // a table without row tracking does not advance its next row id
+        assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isIn(null, 0L);
+        int rows = 2 + writtenAfterTheCopy.length;
 
         DataEvolutionEnabler.Result result = enabler().run(false);
         assertThat(result.describe(TABLE)).startsWith("Success.");
-        assertThat(result.nextRowId).isEqualTo(2L);
+        assertThat(result.nextRowId).isEqualTo((long) rows);
 
-        writeRows(loadTable(), row(3, "c", "p1"), row(4, "d", "p1"));
         table = loadTable();
-        assertThat(valuesById(table)).containsOnlyKeys(1, 2, 3, 4);
-        assertNoDuplicateOrMissingRowIds(table, 4);
         assertThat(rowIdsById(table)).containsEntry(1, 0L).containsEntry(2, 1L);
+        assertNoDuplicateOrMissingRowIds(table, rows);
+        writeRows(table, row(10, "x", "p1"));
+        assertThat(rowIdsById(loadTable())).containsEntry(10, (long) rows);
+        assertNoDuplicateOrMissingRowIds(loadTable(), rows + 1);
     }
 
     @Test
     public void testOverlappingRowIdsOfCopiedFilesAreRefused() throws Exception {
+        // the files of two row-tracking tables, both with row ids 0 and 1, in one table
         Identifier source = createRowTrackingSource();
-        createTable(Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
-        copyFiles(source);
-        // rows written after the copy get the row ids of the copied rows again
-        writeRows(loadTable(), row(3, "c", "p1"), row(4, "d", "p1"));
+        Identifier source2 = createRowTrackingSource("src2", row(3, "c", "p1"), row(4, "d", "p1"));
+        createTable(Collections.emptyMap());
+        commitFilesOf(source, true);
+        commitFilesOf(source2, false);
         FileStoreTable table = loadTable();
-        assertThat(rowIdsById(table))
-                .containsEntry(1, 0L)
-                .containsEntry(2, 1L)
-                .containsEntry(3, 0L)
-                .containsEntry(4, 1L);
+        assertThat(liveFiles(table).stream().map(DataFileMeta::firstRowId))
+                .containsExactlyInAnyOrder(0L, 1L, 0L, 1L);
         long snapshot = table.snapshotManager().latestSnapshotId();
 
         // a data-evolution read would let one pair of rows hide the other: refuse
@@ -1761,7 +1785,11 @@ public class DataEvolutionEnablerTest extends TableTestBase {
      * Copies the data files of row-tracking table {@code source} into {@code TABLE} and commits
      * them with the row ids they have, like {@code sys.copy} does.
      */
-    private void copyFiles(Identifier source) throws Exception {
+    /**
+     * Commits the data files of row-tracking table {@code source} into {@code TABLE} with the first
+     * row ids they have, the way files copied from another table arrive.
+     */
+    private void commitFilesOf(Identifier source, boolean overwrite) throws Exception {
         FileStoreTable from = (FileStoreTable) catalog.getTable(source);
         FileStoreTable to = loadTable();
         List<DataFileMeta> files = liveFiles(from);
@@ -1775,7 +1803,11 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                             new Path(toBucket, file.fileName()),
                             false);
         }
-        try (BatchTableCommit commit = to.newBatchWriteBuilder().withOverwrite().newCommit()) {
+        BatchWriteBuilder builder = to.newBatchWriteBuilder();
+        if (overwrite) {
+            builder.withOverwrite();
+        }
+        try (BatchTableCommit commit = builder.newCommit()) {
             commit.commit(
                     Collections.singletonList(
                             new CommitMessageImpl(
@@ -1794,7 +1826,12 @@ public class DataEvolutionEnablerTest extends TableTestBase {
      * A row-tracking table {@code default.src} with rows 1 and 2 (row ids 0 and 1) in two files.
      */
     private Identifier createRowTrackingSource() throws Exception {
-        Identifier source = new Identifier("default", "src");
+        return createRowTrackingSource("src", row(1, "a", "p1"), row(2, "b", "p1"));
+    }
+
+    /** A row-tracking table with one file per row, so row ids 0, 1, ... */
+    private Identifier createRowTrackingSource(String name, GenericRow... rows) throws Exception {
+        Identifier source = new Identifier("default", name);
         catalog.createTable(
                 source,
                 Schema.newBuilder()
@@ -1805,8 +1842,9 @@ public class DataEvolutionEnablerTest extends TableTestBase {
                         .build(),
                 false);
         FileStoreTable table = (FileStoreTable) catalog.getTable(source);
-        writeRows(table, row(1, "a", "p1"));
-        writeRows(table, row(2, "b", "p1"));
+        for (GenericRow row : rows) {
+            writeRows(table, row);
+        }
         return source;
     }
 

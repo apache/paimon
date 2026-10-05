@@ -19,8 +19,12 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.fs.Path
+import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.sink.CommitMessageImpl
 import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.sql.Row
@@ -318,33 +322,47 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
       sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO src VALUES (1, 'a')")
       sql("INSERT INTO src VALUES (2, 'b')")
+      // an ordinary table: the copied files keep their row ids, but the table keeps no next row
+      // id, and rows written into it afterwards have none
+      sql("CREATE TABLE dst (id INT, v STRING)")
       sql("CALL sys.copy(source_table => 'src', target_table => 'dst')").collect()
-      // the copied files keep their row ids, but the next row id of dst does not cover them
-      checkAnswer(sql("SELECT id, v, _ROW_ID FROM dst"), Seq(Row(1, "a", 0), Row(2, "b", 1)))
-      assert(loadTable("dst").snapshotManager().latestSnapshot().nextRowId() == 0L)
+      sql("INSERT INTO dst VALUES (3, 'c'), (4, 'd')")
+      assert(!loadTable("dst").coreOptions().rowTrackingEnabled())
 
       val result = sql("CALL sys.enable_data_evolution(table => 'dst')").collect()
       assert(result(0).getString(0).startsWith("Success."), result(0).getString(0))
-      assert(result(0).getString(0).contains("nextRowId=2"), result(0).getString(0))
+      assert(result(0).getString(0).contains("nextRowId=4"), result(0).getString(0))
 
-      // new rows continue after the copied ones instead of hiding them
-      sql("INSERT INTO dst VALUES (3, 'c'), (4, 'd')")
+      // the copied rows keep their row ids, the others continue after them
       checkAnswer(
         sql("SELECT id, v, _ROW_ID FROM dst"),
         Seq(Row(1, "a", 0), Row(2, "b", 1), Row(3, "c", 2), Row(4, "d", 3)))
+      sql("""
+            |MERGE INTO dst USING (SELECT _ROW_ID AS rid FROM dst WHERE id = 1) s
+            |ON dst._ROW_ID = s.rid
+            |WHEN MATCHED THEN UPDATE SET v = 'updated'
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT id, v FROM dst"),
+        Seq(Row(1, "updated"), Row(2, "b"), Row(3, "c"), Row(4, "d")))
+      sql("INSERT INTO dst VALUES (5, 'e')")
+      checkAnswer(sql("SELECT _ROW_ID FROM dst WHERE id = 5"), Row(4) :: Nil)
     }
   }
 
-  test("Paimon Procedure: enable data evolution refuses overlapping row ids of copied rows") {
-    withTable("src", "dst") {
+  test("Paimon Procedure: enable data evolution refuses overlapping row ids of copied files") {
+    withTable("src", "src2", "dst") {
       sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO src VALUES (1, 'a'), (2, 'b')")
-      sql("CALL sys.copy(source_table => 'src', target_table => 'dst')").collect()
-      // rows written after the copy get the row ids of the copied rows again
-      sql("INSERT INTO dst VALUES (3, 'c'), (4, 'd')")
+      sql("CREATE TABLE src2 (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO src2 VALUES (3, 'c'), (4, 'd')")
+      // the files of both tables, each with row ids 0 and 1, committed into one table
+      sql("CREATE TABLE dst (id INT, v STRING)")
+      commitFilesOf("src", "dst")
+      commitFilesOf("src2", "dst")
       checkAnswer(
-        sql("SELECT id, _ROW_ID FROM dst"),
-        Seq(Row(1, 0), Row(2, 1), Row(3, 0), Row(4, 1)))
+        sql("SELECT id, v FROM dst"),
+        Seq(Row(1, "a"), Row(2, "b"), Row(3, "c"), Row(4, "d")))
 
       val error = intercept[Exception] {
         sql("CALL sys.enable_data_evolution(table => 'dst')").collect()
@@ -356,6 +374,41 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT id, v FROM dst"),
         Seq(Row(1, "a"), Row(2, "b"), Row(3, "c"), Row(4, "d")))
+    }
+  }
+
+  /** Commits the data files of {@code source} into {@code target} with the row ids they have. */
+  private def commitFilesOf(source: String, target: String): Unit = {
+    val from = loadTable(source)
+    val to = loadTable(target)
+    val files = new java.util.ArrayList[DataFileMeta]()
+    from.newSnapshotReader().readFileIterator().asScala.foreach(entry => files.add(entry.file()))
+    val fromBucket = from.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0)
+    val toBucket = to.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0)
+    to.fileIO().mkdirs(toBucket)
+    files.asScala.foreach {
+      file =>
+        to.fileIO()
+          .copyFile(
+            new Path(fromBucket, file.fileName()),
+            new Path(toBucket, file.fileName()),
+            false)
+    }
+    val commit = to.newBatchWriteBuilder().newCommit()
+    try {
+      commit.commit(
+        java.util.Collections.singletonList(new CommitMessageImpl(
+          BinaryRow.EMPTY_ROW,
+          0,
+          to.coreOptions().bucket(),
+          new DataIncrement(
+            files,
+            java.util.Collections.emptyList(),
+            java.util.Collections.emptyList()),
+          CompactIncrement.emptyIncrement()
+        )))
+    } finally {
+      commit.close()
     }
   }
 }
