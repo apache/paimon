@@ -613,21 +613,19 @@ class FileStoreTable(Table):
             historical_schema: TableSchema, options: Options, dynamic_option_keys: Set[str]) -> dict:
         # Keep scan and runtime options, but restore column declarations to match historical fields.
         historical_options = dict(options.to_map())
-        for key in (
-                CoreOptions.VECTOR_FIELD.key(),
-                CoreOptions.BLOB_FIELD.key(),
-                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
-                CoreOptions.BLOB_VIEW_FIELD.key(),
-                # Restore the legacy key verbatim, not as a canonical descriptor option:
-                # Python intentionally ignores it when choosing the read layout.
-                'blob.stored-descriptor-fields'):
-            if key in dynamic_option_keys:
+        for keys in (
+                (CoreOptions.VECTOR_FIELD.key(),),
+                (CoreOptions.BLOB_FIELD.key(),),
+                (CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), 'blob.stored-descriptor-fields'),
+                (CoreOptions.BLOB_VIEW_FIELD.key(),)):
+            if any(key in dynamic_option_keys for key in keys):
                 # Preserve explicit overrides and removals, including those from earlier copies.
                 continue
-            if key in historical_schema.options:
-                historical_options[key] = historical_schema.options[key]
-            else:
-                historical_options.pop(key, None)
+            for key in keys:
+                if key in historical_schema.options:
+                    historical_options[key] = historical_schema.options[key]
+                else:
+                    historical_options.pop(key, None)
         return historical_options
 
     def _create_external_paths(self) -> List[str]:
