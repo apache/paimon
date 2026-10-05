@@ -244,12 +244,13 @@ class TimeSerializer(IntSerializer):
 class TimestampSerializer(KeySerializer):
     """Serializer for TIMESTAMP and TIMESTAMP WITH LOCAL TIME ZONE types."""
 
-    def __init__(self, precision: int):
+    def __init__(self, precision: int, local_time_zone: bool = False):
         self._precision = precision
+        self._local_time_zone = local_time_zone
 
     def serialize(self, key: object) -> bytes:
         millis, nano_of_millisecond = _timestamp_to_millis_nanos(
-            key, self._precision)
+            key, self._precision, self._local_time_zone)
         if self._precision <= 3:
             return struct.pack('<q', millis)
         return struct.pack('<q', millis) + _write_var_len_int(nano_of_millisecond)
@@ -268,8 +269,8 @@ class TimestampSerializer(KeySerializer):
     def create_comparator(self) -> Callable[[object, object], int]:
         def compare(a: object, b: object) -> int:
             return _cmp(
-                _timestamp_to_millis_nanos(a, self._precision),
-                _timestamp_to_millis_nanos(b, self._precision),
+                _timestamp_to_millis_nanos(a, self._precision, self._local_time_zone),
+                _timestamp_to_millis_nanos(b, self._precision, self._local_time_zone),
             )
         return compare
 
@@ -358,16 +359,16 @@ def _time_to_millis(value: object) -> int:
 
 
 def _timestamp_to_millis_nanos(
-    value: object, precision: int = 6
+    value: object, precision: int = 6, local_time_zone: bool = False
 ) -> Tuple[int, int]:
     if hasattr(value, "get_millisecond") and hasattr(value, "get_nano_of_millisecond"):
         return int(value.get_millisecond()), int(value.get_nano_of_millisecond())
     if isinstance(value, datetime.datetime):
-        if value.tzinfo is None:
-            epoch = datetime.datetime(1970, 1, 1)
-        else:
-            epoch = datetime.datetime(1970, 1, 1, tzinfo=value.tzinfo)
-        delta = value - epoch
+        # LTZ keys represent instants; ordinary TIMESTAMP keys retain wall time.
+        # Naive LTZ values (including deserialized keys) already represent UTC.
+        if local_time_zone and value.utcoffset() is not None:
+            value = value.astimezone(datetime.timezone.utc)
+        delta = value.replace(tzinfo=None) - datetime.datetime(1970, 1, 1)
         total_micros = (
             delta.days * 86_400_000_000
             + delta.seconds * 1_000_000
@@ -434,5 +435,6 @@ def create_serializer(data_type: DataType) -> KeySerializer:
     if type_name.startswith('TIME') and not type_name.startswith('TIMESTAMP'):
         return TimeSerializer()
     if type_name.startswith('TIMESTAMP'):
-        return TimestampSerializer(_parse_precision(type_name, 6))
+        is_ltz = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
+        return TimestampSerializer(_parse_precision(type_name, 6), local_time_zone=is_ltz)
     raise ValueError(f"DataType: {data_type} is not supported by global index now.")
