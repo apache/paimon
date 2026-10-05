@@ -18,39 +18,38 @@
 
 package org.apache.paimon.migrate;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.PojoDataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.Iterator;
+import java.util.Comparator;
 import java.util.List;
 import java.util.ListIterator;
-import java.util.Map;
-import java.util.TreeSet;
+
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 
 /**
- * Adapts the metadata of data files copied from another table, as {@code sys.copy} does, to the
- * table they are committed into.
+ * Prepares data files copied from another table, as {@code sys.copy} does, for the commit into the
+ * table they are copied to.
  *
- * <ul>
- *   <li>Row ids: a copied file keeps the first row id it had in the source table. When the target
- *       has given out those row ids already, for example to rows of a partition the copy does not
- *       overwrite, the copied rows would share row ids with them. All copied row ids are then
- *       shifted by the same offset, so that they follow the row ids of the target and keep their
- *       layout: files that update columns of the same rows keep sharing a row id range.
- *   <li>Sequence numbers: a data-evolution read takes each column from the file with the highest
- *       sequence number, and a commit stamps new files with its snapshot id. Copied files keep the
- *       sequence numbers of the source, which can exceed the snapshot ids of the target, so later
- *       updates in the target would be ignored. On a data-evolution target, the copied sequence
- *       numbers are mapped, in order, to values up to the snapshot id of the copy: the newest
- *       becomes 0, which the commit stamps with its snapshot id, older ones -1, -2 and so on.
- * </ul>
+ * <p>A copied file arrives with the first row id and the sequence numbers it had in the source
+ * table. Row ids identify rows within one table, and the target has its own: committing the source
+ * ones would let the copied rows share row ids with rows of the target, and on a data-evolution
+ * target the source sequence numbers could hide later updates. The copied files are therefore
+ * committed like files written for the target: without a first row id and with sequence numbers
+ * that the commit stamps with its snapshot id. A row-tracking commit then assigns the row ids,
+ * against the snapshot it commits on, as it does for any writer, so a concurrent commit to the
+ * target cannot take the same row ids.
+ *
+ * <p>A row-tracking commit gives a blob or vector-store file the row ids of the normal file before
+ * it, so the files of one row id range are committed in order: the normal file, then its dedicated
+ * files. A file that updates columns of rows another copied file holds cannot be committed that
+ * way, and is refused: compacting the source first merges it into one file per row id range.
  */
 public final class CopiedDataFiles {
 
@@ -59,92 +58,88 @@ public final class CopiedDataFiles {
     /** Replaces, in place, every copied file by its metadata for {@code target}. */
     public static void adaptToTarget(
             FileStoreTable target, Collection<List<DataFileMeta>> copiedFilesByBucket) {
-        List<DataFileMeta> copied = new ArrayList<>();
-        copiedFilesByBucket.forEach(copied::addAll);
-        if (copied.isEmpty()) {
-            return;
-        }
-        long rowIdShift = rowIdShift(target, copied);
-        if (target.coreOptions().rowTrackingEnabled() || rowIdShift != 0) {
-            checkNoFileStoresRowIds(target, copied);
-        }
-        Map<Long, Long> sequences =
-                target.coreOptions().dataEvolutionEnabled() ? sequenceMapping(copied) : null;
-        if (rowIdShift == 0 && sequences == null) {
-            return;
-        }
+        boolean rowTracking = target.coreOptions().rowTrackingEnabled();
         for (List<DataFileMeta> files : copiedFilesByBucket) {
+            checkNoColumnUpdates(target, files);
+            if (rowTracking) {
+                checkNoFileStoresRowIds(target, files);
+                // a normal file before the dedicated files of its row id range
+                files.sort(
+                        Comparator.comparing(
+                                        (DataFileMeta file) -> file.firstRowId(),
+                                        Comparator.nullsLast(Comparator.naturalOrder()))
+                                .thenComparingInt(CopiedDataFiles::kind));
+            }
             ListIterator<DataFileMeta> iterator = files.listIterator();
             while (iterator.hasNext()) {
-                iterator.set(adapt(iterator.next(), rowIdShift, sequences));
+                DataFileMeta file = iterator.next();
+                // A table without row tracking keeps no row ids: its own files have none either.
+                iterator.set(rowTracking ? asNewFile(file) : file.newFirstRowId(null));
             }
         }
-    }
-
-    private static DataFileMeta adapt(
-            DataFileMeta file, long rowIdShift, @Nullable Map<Long, Long> sequences) {
-        DataFileMeta result = file;
-        if (rowIdShift != 0 && file.firstRowId() != null) {
-            result = result.newFirstRowId(file.firstRowId() + rowIdShift);
-        }
-        if (sequences != null) {
-            result =
-                    result.assignSequenceNumber(
-                            sequences.get(file.minSequenceNumber()),
-                            sequences.get(file.maxSequenceNumber()));
-            long[] writeColsSequences = file.writeColsSequences();
-            if (writeColsSequences != null) {
-                long[] mapped = new long[writeColsSequences.length];
-                for (int i = 0; i < writeColsSequences.length; i++) {
-                    mapped[i] = sequences.get(writeColsSequences[i]);
-                }
-                result = result.withWriteColsSequences(mapped);
-            }
-        }
-        return result;
     }
 
     /**
-     * The offset that moves the smallest copied row id past every row id the target has given out:
-     * its next row id, and the row ids of its live files, which a copy may have committed without
-     * advancing it.
+     * A file written for the target: no first row id, an append so that the commit assigns one, and
+     * sequence numbers starting at 0 so that the commit stamps them with its snapshot id.
      */
-    private static long rowIdShift(FileStoreTable target, List<DataFileMeta> copied) {
-        long minCopied = Long.MAX_VALUE;
-        for (DataFileMeta file : copied) {
-            if (file.firstRowId() != null) {
-                minCopied = Math.min(minCopied, file.firstRowId());
-            }
-        }
-        if (minCopied == Long.MAX_VALUE) {
-            return 0;
-        }
-        Snapshot latest = target.snapshotManager().latestSnapshot();
-        if (latest == null) {
-            return 0;
-        }
-        long used = latest.nextRowId() == null ? 0 : latest.nextRowId();
-        Iterator<DataFileMeta> live = liveFiles(target, latest);
-        while (live.hasNext()) {
-            DataFileMeta file = live.next();
-            if (file.firstRowId() != null) {
-                used = Math.max(used, file.firstRowId() + file.rowCount());
-            }
-        }
-        if (minCopied >= used) {
-            return 0;
-        }
+    private static DataFileMeta asNewFile(DataFileMeta file) {
+        return new PojoDataFileMeta(
+                file.fileName(),
+                file.fileSize(),
+                file.rowCount(),
+                file.minKey(),
+                file.maxKey(),
+                file.keyStats(),
+                file.valueStats(),
+                0L,
+                0L,
+                file.schemaId(),
+                file.level(),
+                file.extraFiles(),
+                file.creationTime(),
+                file.deleteRowCount().orElse(null),
+                file.embeddedIndex(),
+                FileSource.APPEND,
+                file.valueStatsCols(),
+                file.externalPath().orElse(null),
+                null,
+                file.writeCols(),
+                null);
+    }
 
-        return used - minCopied;
+    /**
+     * Refuses a normal file whose row ids another normal file of the copy holds too: a column
+     * update of a data-evolution table, which only shares the row ids of the file it updates.
+     */
+    private static void checkNoColumnUpdates(FileStoreTable target, List<DataFileMeta> files) {
+        List<DataFileMeta> normal = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            if (file.firstRowId() != null && kind(file) == 0) {
+                normal.add(file);
+            }
+        }
+        normal.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
+        for (int i = 1; i < normal.size(); i++) {
+            DataFileMeta previous = normal.get(i - 1);
+            DataFileMeta current = normal.get(i);
+            if (current.nonNullFirstRowId() < previous.nonNullFirstRowId() + previous.rowCount()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Cannot copy data files %s and %s into table %s: they hold the "
+                                        + "same rows, one updating columns of the other. Compact "
+                                        + "the source table first, which merges them.",
+                                previous.fileName(), current.fileName(), target.name()));
+            }
+        }
     }
 
     /**
      * A file that stores the row ids of its rows, as a copy-on-write update writes it, has no first
-     * row id. Its row ids are in its data: they cannot be shifted, and a commit does not move the
-     * next row id of a row-tracking table past them, so rows written later would get them again.
+     * row id: its row ids are in its data and would collide with the row ids of the target.
      */
-    private static void checkNoFileStoresRowIds(FileStoreTable target, List<DataFileMeta> copied) {
-        for (DataFileMeta file : copied) {
+    private static void checkNoFileStoresRowIds(FileStoreTable target, List<DataFileMeta> files) {
+        for (DataFileMeta file : files) {
             List<String> writeCols = file.writeCols();
             if (writeCols != null && writeCols.contains(SpecialFields.ROW_ID.name())) {
                 throw new IllegalArgumentException(
@@ -159,40 +154,11 @@ public final class CopiedDataFiles {
         }
     }
 
-    private static Iterator<DataFileMeta> liveFiles(FileStoreTable target, Snapshot snapshot) {
-        Iterator<org.apache.paimon.manifest.ManifestEntry> entries =
-                target.newSnapshotReader().withSnapshot(snapshot).readFileIterator();
-        return new Iterator<DataFileMeta>() {
-            @Override
-            public boolean hasNext() {
-                return entries.hasNext();
-            }
-
-            @Override
-            public DataFileMeta next() {
-                return entries.next().file();
-            }
-        };
-    }
-
-    /** Maps every sequence value of the copied files, newest first, to 0, -1, -2 and so on. */
-    private static Map<Long, Long> sequenceMapping(List<DataFileMeta> copied) {
-        TreeSet<Long> values = new TreeSet<>();
-        for (DataFileMeta file : copied) {
-            values.add(file.minSequenceNumber());
-            values.add(file.maxSequenceNumber());
-            long[] writeColsSequences = file.writeColsSequences();
-            if (writeColsSequences != null) {
-                for (long value : writeColsSequences) {
-                    values.add(value);
-                }
-            }
+    /** 0 for a normal file, 1 for a blob file, 2 for a vector-store file. */
+    private static int kind(DataFileMeta file) {
+        if (isBlobFile(file.fileName())) {
+            return 1;
         }
-        Map<Long, Long> mapping = new HashMap<>();
-        long mapped = 0;
-        for (Long value : values.descendingSet()) {
-            mapping.put(value, mapped--);
-        }
-        return mapping;
+        return isVectorStoreFile(file.fileName()) ? 2 : 0;
     }
 }
