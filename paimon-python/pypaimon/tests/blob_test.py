@@ -1597,14 +1597,12 @@ class BlobTest(unittest.TestCase):
             BlobDescriptor("file:///tmp/blob.bin", 0, 10),
         )
 
-    def test_blob_descriptor_fields_ignores_legacy_stored_key(self):
+    def test_blob_descriptor_fields_uses_java_fallback_key(self):
         from pypaimon.common.options.core_options import CoreOptions
 
-        # Python master ignored this key and wrote dedicated .blob files.
-        # A global fallback would break rolling upgrades.
         legacy_only = CoreOptions(
             Options({"blob.stored-descriptor-fields": "legacy_col"}))
-        self.assertEqual(set(), legacy_only.blob_descriptor_fields())
+        self.assertEqual({'legacy_col'}, legacy_only.blob_descriptor_fields())
 
         canonical_wins = CoreOptions(Options({
             "blob-descriptor-field": "canon",
@@ -2428,7 +2426,7 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(needs_blob_inline_convert(_Table({
             "blob-as-descriptor": "true",
         })))
-        self.assertFalse(needs_blob_inline_convert(_Table({
+        self.assertTrue(needs_blob_inline_convert(_Table({
             "blob.stored-descriptor-fields": "picture",
         })))
 
