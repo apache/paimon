@@ -35,6 +35,8 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SensitiveConfigUtils;
 
@@ -127,11 +129,9 @@ public abstract class FlinkTableSource
                 unConsumedFilters.add(filter);
             } else {
                 Predicate p = predicateOptional.get();
-                // a predicate on a FLOAT/DOUBLE partition field only prunes partitions, Flink
-                // still evaluates it
                 if (isUnbounded()
                         || !p.visit(onlyPartFieldsVisitor)
-                        || PredicateConverter.referencesFloatingPoint(table.rowType(), p)) {
+                        || referencesFloatingPoint(p)) {
                     unConsumedFilters.add(filter);
                 } else {
                     consumedFilters.add(filter);
@@ -143,6 +143,24 @@ public abstract class FlinkTableSource
         LOG.info("Consumed filters: {} of {}", consumedFilters, filters);
 
         return Result.of(filters, unConsumedFilters);
+    }
+
+    /**
+     * Whether the predicate reads a FLOAT/DOUBLE field. Flink may decide such a comparison
+     * differently from Paimon (signed zeros, NaN, see {@link PredicateConverter}), so a predicate
+     * on a FLOAT/DOUBLE partition field only prunes partitions and Flink still evaluates it.
+     */
+    private boolean referencesFloatingPoint(Predicate predicate) {
+        RowType rowType = table.rowType();
+        for (String name : PredicateVisitor.collectFieldNames(predicate)) {
+            if (rowType.containsField(name)) {
+                DataTypeRoot root = rowType.getField(name).type().getTypeRoot();
+                if (root == DataTypeRoot.FLOAT || root == DataTypeRoot.DOUBLE) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

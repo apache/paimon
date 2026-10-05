@@ -23,9 +23,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.flink.table.data.conversion.DataStructureConverters;
@@ -740,24 +738,6 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } catch (UnsupportedExpression e) {
             return Optional.empty();
         }
-    }
-
-    /**
-     * Whether the converted predicate reads a FLOAT/DOUBLE field of the table. Flink may decide
-     * such a comparison differently from Paimon (signed zeros, NaN), so the predicate can prune but
-     * must not stand in for Flink's own evaluation of the filter.
-     */
-    public static boolean referencesFloatingPoint(
-            org.apache.paimon.types.RowType tableType, Predicate predicate) {
-        for (String name : PredicateVisitor.collectFieldNames(predicate)) {
-            if (tableType.containsField(name)) {
-                DataTypeRoot root = tableType.getField(name).type().getTypeRoot();
-                if (root == DataTypeRoot.FLOAT || root == DataTypeRoot.DOUBLE) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     /** Encounter an unsupported expression, the caller can choose to ignore this filter branch. */
