@@ -789,7 +789,8 @@ class RESTApi:
         if not table_name or not table_name.strip():
             raise ValueError("Table name cannot be None")
 
-        return database_name.strip(), table_name.strip()
+        # Validation must not rename a resource, including a branch suffix.
+        return database_name, table_name
 
 
 from pypaimon.catalog.catalog_exception import IllegalArgumentError

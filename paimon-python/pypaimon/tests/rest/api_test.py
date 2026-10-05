@@ -38,6 +38,26 @@ from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 class ApiTest(unittest.TestCase):
 
+    def test_resource_names_match_java_form_url_encoding(self):
+        from pypaimon.api.rest_util import RESTUtil
+        from pypaimon.api.resource_paths import ResourcePaths
+
+        # Golden values from Java URLEncoder / URLDecoder, not from Python's
+        # encoder. Spaces and literal '+' characters must remain distinct.
+        cases = [
+            ("a b", "a+b"),
+            ("a+b", "a%2Bb"),
+            ("t$branch_ dev ", "t%24branch_+dev+"),
+            ("*~/.?&=", "*%7E%2F.%3F%26%3D"),
+            ("分支", "%E5%88%86%E6%94%AF"),
+        ]
+        for value, encoded in cases:
+            with self.subTest(value=value):
+                self.assertEqual(RESTUtil.encode_string(value), encoded)
+                self.assertEqual(RESTUtil.decode_string(encoded), value)
+                self.assertEqual(ResourcePaths("test").table("db", value),
+                                 "/v1/test/databases/db/tables/" + encoded)
+
     def test_parse_data(self):
         simple_type_test_cases = [
             "DECIMAL",
