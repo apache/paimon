@@ -505,9 +505,10 @@ class DataTypeParser:
 
     @staticmethod
     def parse_nullability(type_string: str) -> bool:
-        if "NOT NULL" in type_string:
+        type_upper = type_string.upper()
+        if "NOT NULL" in type_upper:
             return False
-        elif "NULL" in type_string:
+        elif "NULL" in type_upper:
             return True
         return True
 
