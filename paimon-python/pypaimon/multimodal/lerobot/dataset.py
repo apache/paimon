@@ -1825,13 +1825,16 @@ class _PyAVVideoDecoder:
         requested = [operator.index(index) for index in indices]
         if any(index < 0 for index in requested):
             raise IndexError("Video frame index is out of range.")
-        missing = sorted(set(requested) - set(self._cache))
-        decoded = self._decode_indexed(missing) if missing else {}
+        requested_set = set(requested)
+        frames = {
+            index: self._cache[index]
+            for index in requested_set if index in self._cache
+        }
+        missing = sorted(requested_set - set(frames))
+        if missing:
+            frames.update(self._decode_indexed(missing))
         try:
-            return [
-                self._cache[index] if index in self._cache else decoded[index]
-                for index in requested
-            ]
+            return [frames[index] for index in requested]
         except KeyError as error:
             raise IndexError(
                 "Video frame index %d is out of range." % error.args[0]

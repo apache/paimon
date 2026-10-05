@@ -536,6 +536,12 @@ class LeRobotValidationTest(unittest.TestCase):
                             indices=indices
                         ).data.permute(0, 2, 3, 1).numpy()
                     np.testing.assert_array_equal(expected, actual)
+                    if codec == "libx264":
+                        decoder[0]
+                        actual = decoder.get_frames_at(
+                            indices=list(range(16))
+                        ).data.permute(0, 2, 3, 1).numpy()
+                        np.testing.assert_array_equal(expected[:16], actual)
                 finally:
                     decoder.close()
 
