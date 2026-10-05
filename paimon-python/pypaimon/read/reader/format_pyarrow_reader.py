@@ -468,8 +468,6 @@ class FormatPyArrowReader(RecordBatchReader):
             self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
             self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
 
-        self._variant_shredding_enabled = (
-            options is None or options.variant_shredding_enabled())
         self._variant_schema_cache: Dict[pa.DataType, VariantSchema] = {}
         self._shared_shredding_maps = {}
         self._selected_key_maps = {}
@@ -817,8 +815,7 @@ class FormatPyArrowReader(RecordBatchReader):
         if self._selected_key_maps:
             batch = self._assemble_selected_key_maps(batch)
 
-        if self._variant_shredding_enabled:
-            batch = self._assemble_shredded_variants(batch)
+        batch = self._assemble_shredded_variants(batch)
 
         if not self.missing_fields:
             return batch

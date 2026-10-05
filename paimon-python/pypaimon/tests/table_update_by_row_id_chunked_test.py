@@ -40,7 +40,7 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
         table.fields = []
         options = table.options
         options.file_format.return_value = 'parquet'
-        options.variant_shredding_enabled.return_value = False
+        options.variant_shredding_schema.return_value = None
         options.data_evolution_row_sidecar_enabled.return_value = False
         options.with_vector_format.return_value = False
         options.changelog_producer.return_value = ChangelogProducer.NONE
@@ -59,7 +59,7 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
         table.fields = [field]
         options = table.options
         options.file_format.return_value = 'parquet'
-        options.variant_shredding_enabled.return_value = False
+        options.variant_shredding_schema.return_value = None
         options.data_evolution_row_sidecar_enabled.return_value = False
         options.with_vector_format.return_value = False
         options.changelog_producer.return_value = ChangelogProducer.NONE
