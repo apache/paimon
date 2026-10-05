@@ -70,6 +70,11 @@ public class AliyunFieldParser {
     protected static String getEnumValueByIndex(String mysqlType, int elementIndex) {
         String[] options = extractEnumValueByIndex(mysqlType);
 
+        // MySQL uses enum index 0 for an empty or invalid value; map it to the empty
+        // string instead of indexing options[-1].
+        if (elementIndex <= 0) {
+            return "";
+        }
         return options[elementIndex - 1];
     }
 
