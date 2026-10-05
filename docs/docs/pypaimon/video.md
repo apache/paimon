@@ -115,8 +115,8 @@ video = pm.BlobDescriptor(
 frames.add_video(video, episode_43_rows)
 ```
 
-With PyAV, PyPaimon indexes supported MP4 files for range reads; other videos
-use the scan fallback.
+With PyAV, PyPaimon builds keyframe indexes for supported ISO BMFF videos (such
+as MP4); other decodable videos use the scan fallback.
 
 The writer deduplicates exact payload descriptor identity inside each `.video`
 file. Its video grouping policy coordinates normal, BLOB, and vector rolling
