@@ -38,6 +38,14 @@ from pypaimon.utils.projection import MapKey, Projection, is_row_type
 ProjectionPath = Sequence[Union[int, MapKey]]
 
 
+def _string_literal(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Str):
+        return node.s
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
 class _ReadPredicateBuilder(PredicateBuilder):
 
     def __init__(self, fields, unsupported_fields):
@@ -233,16 +241,14 @@ class ReadBuilder:
                         or call.func.id.lower() not in ('variant_get', 'try_variant_get')
                         or len(call.args) != 3 or call.keywords
                         or not (isinstance(call.args[0], ast.Name)
-                                or (isinstance(call.args[0], ast.Constant)
-                                    and isinstance(call.args[0].value, str)))
-                        or not all(isinstance(arg, ast.Constant)
-                                   and isinstance(arg.value, str)
-                                   for arg in call.args[1:])):
+                                or _string_literal(call.args[0]) is not None)
+                        or any(_string_literal(arg) is None
+                               for arg in call.args[1:])):
                     raise ValueError(
                         "Unsupported projection expression %r" % expression)
                 source = (call.args[0].id
                           if isinstance(call.args[0], ast.Name)
-                          else call.args[0].value)
+                          else _string_literal(call.args[0]))
                 field = field_map.get(source)
                 if (field is None
                         or not isinstance(field.type, AtomicType)
@@ -250,7 +256,7 @@ class ReadBuilder:
                     raise ValueError(
                         "Variant extraction requires a VARIANT column: %r"
                         % source)
-                path, target_type = (arg.value for arg in call.args[1:])
+                path, target_type = (_string_literal(arg) for arg in call.args[1:])
                 if ';' in path:
                     raise ValueError(
                         "Variant extraction path must not contain ';': %s"
