@@ -26,9 +26,8 @@ import json
 import os
 from threading import Lock
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-import pyarrow
 from packaging.version import InvalidVersion, Version
 
 from pypaimon.common.options.config import CatalogOptions, OssOptions
@@ -38,7 +37,7 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import (
     deserialize_split_v1, serialize_split_v1)
-from pypaimon.schema.data_types import AtomicType, DataField, RowType
+from pypaimon.schema.data_types import DataField, RowType
 
 
 def native_runtime_available() -> bool:
@@ -350,66 +349,19 @@ def _native_read_builder(table):
     return rt.new_read_builder()
 
 
-def _variant_read_type_json(
-        read_type: List[DataField],
-        variant_fields: Dict[str, Dict[str, Any]]) -> str:
-    """Encode Variant extraction in a Paimon ROW read type."""
-    fields = []
-    projected = set()
-    for field in read_type:
-        options = variant_fields.get(field.name)
-        if options is None:
-            fields.append(field)
-            continue
-        if not isinstance(field.type, AtomicType) or field.type.type.upper() != 'VARIANT':
-            raise ValueError("variant_fields column %r must be VARIANT" % field.name)
-        if options['target_type'] != pyarrow.float32():
-            raise ValueError("variant_fields[%r]['target_type'] must be float32" % field.name)
-        for path in options['paths']:
-            if ';' in path:
-                raise ValueError(
-                    "Variant extraction path must not contain ';': %s" % path)
-        error_policy = options['fail_on_error']
-        if isinstance(error_policy, bool):
-            error_policy = [error_policy] * len(options['paths'])
-        if len(error_policy) != len(options['paths']):
-            raise ValueError("Variant paths and error policies must match")
-        projected.add(field.name)
-        children = [
-            DataField(
-                index, str(index), AtomicType('FLOAT'),
-                '__VARIANT_METADATA%s;%s;UTC' % (
-                    path, str(fail_on_error).lower()))
-            for index, (path, fail_on_error) in enumerate(
-                zip(options['paths'], error_policy))
-        ]
-        fields.append(DataField(
-            field.id, field.name, RowType(field.type.nullable, children),
-            field.description, field.default_value))
-    missing = set(variant_fields) - projected
-    if missing:
-        raise ValueError("variant_fields column %r is not in the read type" % min(missing))
-    return json.dumps(RowType(True, fields).to_dict())
-
-
 def _configure_native_read_builder(builder, predicate, limit, projection,
                                    nested_projection=None,
-                                   variant_fields=None,
                                    read_type: Optional[List[DataField]] = None,
                                    include_row_kind=False):
-    if variant_fields is not None:
+    if read_type is not None:
         if nested_projection is not None:
             raise ValueError(
-                "variant_fields cannot be combined with nested projection")
-        if projection is None:
-            raise ValueError("variant_fields requires a projection")
-        if read_type is None:
-            raise ValueError("variant_fields requires a resolved read type")
+                "read_type cannot be combined with nested projection")
         builder = builder.with_read_type(
-            _variant_read_type_json(read_type, variant_fields))
+            json.dumps(RowType(True, read_type).to_dict()))
     if nested_projection is not None:
         builder = builder.with_nested_projection(nested_projection)
-    elif projection is not None and variant_fields is None:
+    elif projection is not None and read_type is None:
         builder = builder.with_projection(projection)
     if predicate is not None:
         builder = builder.with_filter(_predicate_to_native(predicate))
@@ -425,8 +377,6 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
                          projection: Optional[List[str]] = None,
                          blob_parallelism: Optional[int] = None,
                          nested_projection: Optional[List[List[str]]] = None,
-                         variant_fields: Optional[
-                             Dict[str, Dict[str, Any]]] = None,
                          read_type: Optional[List[DataField]] = None,
                          include_row_kind: bool = False):
     """Create one Rust reader reusable across split groups."""
@@ -436,7 +386,6 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, limit, projection,
         nested_projection=nested_projection,
-        variant_fields=variant_fields,
         read_type=read_type,
         include_row_kind=include_row_kind)
     if blob_parallelism is not None:
@@ -451,7 +400,6 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
                 projection: Optional[List[str]] = None,
                 blob_parallelism: Optional[int] = None,
                 nested_projection: Optional[List[List[str]]] = None,
-                variant_fields: Optional[Dict[str, Dict[str, Any]]] = None,
                 read_type: Optional[List[DataField]] = None,
                 include_row_kind: bool = False):
     """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
@@ -462,7 +410,6 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
         projection=projection,
         blob_parallelism=blob_parallelism,
         nested_projection=nested_projection,
-        variant_fields=variant_fields,
         read_type=read_type,
         include_row_kind=include_row_kind)
     return read_splits(splits)

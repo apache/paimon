@@ -120,16 +120,11 @@ def read_paimon(
         schema = PyarrowFieldParser.from_paimon_schema(
             split_provider.read_type()
         )
-        variant_fields = split_provider.variant_fields()
         expression_projection = split_provider.expression_projection()
-        if variant_fields or expression_projection is not None:
+        if expression_projection is not None:
             from pypaimon.read.table_read import TableRead
-            if variant_fields:
-                schema = TableRead._apply_variant_fields_to_schema(
-                    schema, variant_fields)
-            if expression_projection is not None:
-                schema = TableRead._apply_expression_projection_to_schema(
-                    schema, expression_projection)
+            schema = TableRead._apply_expression_projection_to_schema(
+                schema, expression_projection)
         import pyarrow
         empty_table = pyarrow.Table.from_arrays(
             [pyarrow.array([], type=field.type) for field in schema],

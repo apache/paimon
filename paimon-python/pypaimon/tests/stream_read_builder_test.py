@@ -115,8 +115,8 @@ class TestStreamReadBuilderValidation:
             builder.new_read()
         assert read.call_args.kwargs['expression_projection'] == [
             ('id_alias', 'id', None), ('ratio', 'payload', 0)]
-        assert read.call_args.kwargs['variant_fields']['payload']['paths'] == [
-            '$.ratio']
+        assert (read.call_args.kwargs['read_type'][1].type.fields[0].description
+                == '__VARIANT_METADATA$.ratio;false;UTC')
 
 
 class TestAsyncStreamingTableScanFiltering:

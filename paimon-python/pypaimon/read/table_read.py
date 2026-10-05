@@ -38,6 +38,7 @@ from pypaimon.read.reader.auth_masking_reader import (
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.split import Split
+from pypaimon.read.variant_read_type import has_variant_extractions
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
@@ -147,7 +148,6 @@ class TableRead:
         read_type: List[DataField],
         include_row_kind: bool = False,
         nested_name_paths: Optional[List[List[str]]] = None,
-        variant_fields: Optional[Dict[str, Dict[str, Any]]] = None,
         expression_projection: Optional[
             List[Tuple[str, str, Optional[int]]]] = None,
         limit: Optional[int] = None,
@@ -196,7 +196,6 @@ class TableRead:
         )
         self.include_row_kind = include_row_kind
         self.nested_name_paths = nested_name_paths
-        self.variant_fields = variant_fields
         self.expression_projection = expression_projection
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
@@ -434,36 +433,8 @@ class TableRead:
 
     def _output_arrow_schema(self) -> pyarrow.Schema:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
-        schema = self._apply_variant_fields_to_schema(schema, self.variant_fields)
         return self._apply_expression_projection_to_schema(
             schema, self.expression_projection)
-
-    @staticmethod
-    def _apply_variant_fields_to_schema(
-        schema: pyarrow.Schema,
-        variant_fields: Optional[Dict[str, Dict[str, Any]]],
-    ) -> pyarrow.Schema:
-        if not variant_fields:
-            return schema
-        fields = list(schema)
-        for column, options in variant_fields.items():
-            index = schema.get_field_index(column)
-            if index < 0:
-                raise ValueError(
-                    "variant_fields column %r is not in the read projection"
-                    % column)
-            source = fields[index]
-            target_type = options['target_type']
-            fields[index] = pyarrow.field(
-                source.name,
-                pyarrow.struct([
-                    pyarrow.field(str(position), target_type)
-                    for position, _ in enumerate(options['paths'])
-                ]),
-                nullable=source.nullable,
-                metadata=source.metadata,
-            )
-        return pyarrow.schema(fields, metadata=schema.metadata)
 
     @staticmethod
     def _apply_expression_projection_to_schema(
@@ -492,9 +463,9 @@ class TableRead:
         error: Optional[Exception] = None,
         log: bool = False,
     ):
-        if self.variant_fields:
+        if has_variant_extractions(self.read_type):
             raise RuntimeError(
-                "variant_fields requires a compatible native reader: %s"
+                "Variant extraction requires a compatible native reader: %s"
                 % reason) from error
         if log:
             logger.warning(
@@ -606,14 +577,13 @@ class TableRead:
         kwargs = {
             'predicate': self.predicate,
             'limit': self.limit,
-            'projection': [field.name for field in self.read_type],
         }
         if blob_parallelism is not None:
             kwargs['blob_parallelism'] = blob_parallelism
         if self.nested_name_paths:
+            # Nested and MAP-key selectors still need their source paths.
             kwargs['nested_projection'] = self.nested_name_paths
-        if self.variant_fields:
-            kwargs['variant_fields'] = self.variant_fields
+        else:
             kwargs['read_type'] = self.read_type
         if self.include_row_kind:
             kwargs['include_row_kind'] = True
@@ -1361,7 +1331,6 @@ class TableRead:
                 predicate=self.predicate,
                 limit=self.limit,
                 nested_name_paths=self.nested_name_paths,
-                variant_fields=self.variant_fields,
                 expression_projection=self.expression_projection,
                 include_row_kind=self.include_row_kind,
             )

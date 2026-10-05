@@ -23,6 +23,7 @@ import pytest
 
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
+from pypaimon.read.variant_read_type import with_variant_extractions
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
@@ -47,7 +48,6 @@ def _table_read(limit=None):
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
     read.nested_name_paths = None
-    read.variant_fields = None
     read.expression_projection = None
     read.limit = limit
     read._read_parallelism = 1
@@ -73,19 +73,19 @@ def _id_batch(values):
 
 def test_native_read_returns_named_variant_expression_columns():
     read = _table_read()
-    read.read_type = [
-        DataField(0, 'id', AtomicType('INT')),
-        DataField(1, 'payload', AtomicType('VARIANT')),
-    ]
-    read._scan_read_type = read.read_type
-    read._output_column_names = ['id', 'payload']
-    read.variant_fields = {
+    variants = {
         'payload': {
             'paths': ['$.ratio', '$.missing'],
             'target_type': pa.float32(),
             'fail_on_error': [False, True],
         }
     }
+    read.read_type = with_variant_extractions([
+        DataField(0, 'id', AtomicType('INT')),
+        DataField(1, 'payload', AtomicType('VARIANT')),
+    ], variants)
+    read._scan_read_type = read.read_type
+    read._output_column_names = ['id', 'payload']
     read.expression_projection = [
         ('identifier', 'id', None),
         ('ratio', 'payload', 0),
@@ -115,22 +115,21 @@ def test_native_read_returns_named_variant_expression_columns():
     assert result.column('identifier').to_pylist() == [1, 2, 3]
     assert result.column('ratio').to_pylist() == [1.25, 2.5, None]
     assert result.column('missing').to_pylist() == [None, None, None]
-    assert native.call_args.kwargs['variant_fields'] == read.variant_fields
+    assert 'variant_fields' not in native.call_args.kwargs
     assert native.call_args.kwargs['read_type'] == read.read_type
 
 
 def test_variant_fields_never_silently_falls_back_to_python():
     read = _table_read()
-    read.read_type = [DataField(0, 'payload', AtomicType('VARIANT'))]
-    read._scan_read_type = read.read_type
-    read._output_column_names = ['payload']
-    read.variant_fields = {
-        'payload': {
+    read.read_type = with_variant_extractions(
+        [DataField(0, 'payload', AtomicType('VARIANT'))],
+        {'payload': {
             'paths': ['$.ratio'],
             'target_type': pa.float32(),
             'fail_on_error': False,
-        }
-    }
+        }})
+    read._scan_read_type = read.read_type
+    read._output_column_names = ['payload']
     read.expression_projection = [('ratio', 'payload', 0)]
     read.table.options.native_read_enabled.return_value = False
 
@@ -169,7 +168,7 @@ def test_native_read_consumes_retained_rust_splits_and_enforces_limit():
         [first._native_split, second._native_split],
         predicate=None,
         limit=2,
-        projection=['id'],
+        read_type=read.read_type,
         blob_parallelism=1,
     )
 
@@ -265,7 +264,7 @@ def test_native_read_bridges_python_planned_split():
         [converted],
         predicate=None,
         limit=None,
-        projection=['id'],
+        read_type=read.read_type,
     )
 
 

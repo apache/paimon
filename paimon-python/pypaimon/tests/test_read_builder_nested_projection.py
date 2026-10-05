@@ -24,6 +24,8 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.read.datasource.split_provider import (
+    CatalogSplitProvider, PreResolvedSplitProvider)
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
 from pypaimon.read.table_read import _RemainingRows
@@ -65,6 +67,12 @@ class _ReadBuilderTestBase(unittest.TestCase):
 
 class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
 
+    @staticmethod
+    def _variant_descriptions(builder, column='payload'):
+        field = next(field for field in builder.read_type()
+                     if field.name == column)
+        return [child.description for child in field.type.fields]
+
     def test_named_variant_expressions_group_paths_and_error_policies(self):
         table = Mock()
         table.fields = [
@@ -78,18 +86,53 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
 
         self.assertEqual(['id', 'payload'], builder._projection)
         self.assertEqual(
-            ['$.ratio', '$.age'],
-            builder._variant_fields['payload']['paths'])
-        self.assertEqual(
-            [False, True],
-            builder._variant_fields['payload']['fail_on_error'])
+            ['__VARIANT_METADATA$.ratio;false;UTC',
+             '__VARIANT_METADATA$.age;true;UTC'],
+            self._variant_descriptions(builder))
         self.assertEqual(
             [('identifier', 'id', None), ('ratio', 'payload', 0),
              ('age', 'payload', 1)], builder._expression_projection)
 
         builder.with_projection(['id'])
-        self.assertIsNone(builder._variant_fields)
+        self.assertEqual(['id'], [field.name for field in builder.read_type()])
         self.assertIsNone(builder._expression_projection)
+
+    def test_variant_read_type_is_shared_by_batch_stream_and_ray_providers(self):
+        table = Mock()
+        table.fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+        ]
+        table.options.row_tracking_enabled.return_value = False
+        expressions = {
+            'identifier': 'id',
+            'ratio': "try_variant_get(payload, '$.ratio', 'float')",
+        }
+        batch = ReadBuilder(table).with_projection(expressions)
+        stream = StreamReadBuilder(table).with_projection(expressions)
+        expected = batch.read_type()
+
+        with patch('pypaimon.read.read_builder.TableRead') as batch_read:
+            batch.new_read()
+        with patch('pypaimon.read.stream_read_builder.TableRead') as stream_read:
+            stream.new_read()
+        self.assertEqual(expected, batch_read.call_args.kwargs['read_type'])
+        self.assertEqual(expected, stream_read.call_args.kwargs['read_type'])
+        self.assertEqual(expected, stream.new_streaming_scan()._read_type)
+
+        pre_resolved = PreResolvedSplitProvider(table, [], expected)
+        self.assertIs(expected, pre_resolved.read_type())
+        catalog = CatalogSplitProvider('default.t', {}, projection=expressions)
+        with patch.object(catalog, '_ensure_table', return_value=table), \
+                patch('pypaimon.read.read_builder.ReadBuilder.new_scan') as scan:
+            scan.return_value.plan.return_value.splits.return_value = []
+            self.assertEqual(expected, catalog.read_type())
+
+        batch.with_projection(['id'])
+        stream.with_projection(['id'])
+        self.assertEqual([DataField(0, 'id', AtomicType('INT'))],
+                         batch.read_type())
+        self.assertEqual(batch.read_type(), stream.read_type())
 
     def test_variant_target_type_matches_native_float32_only(self):
         table = Mock()
@@ -97,12 +140,13 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
 
         builder = ReadBuilder(table).with_projection(
             {'x': "try_variant_get(payload, '$.x', 'float')"})
-        self.assertEqual(pa.float32(),
-                         builder._variant_fields['payload']['target_type'])
+        self.assertEqual(AtomicType('FLOAT'),
+                         builder.read_type()[0].type.fields[0].type)
         upper = ReadBuilder(table).with_projection(
             {'x': "TRY_VARIANT_GET(payload, '$.x', 'FLOAT')"})
-        self.assertEqual([False],
-                         upper._variant_fields['payload']['fail_on_error'])
+        self.assertEqual(
+            ['__VARIANT_METADATA$.x;false;UTC'],
+            self._variant_descriptions(upper))
 
         for target_type in ('double', 'int', 'string', 'timestamp', 'float32'):
             with self.subTest(target_type=target_type):
@@ -128,7 +172,9 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
                     'x': "%s(payload, '$[\"it''s\"]', 'float')" % function,
                 })
                 self.assertEqual(
-                    ['$["it\'s"]'], builder._variant_fields['payload']['paths'])
+                    ['__VARIANT_METADATA$["it\'s"];%s;UTC' %
+                     ('true' if function == 'variant_get' else 'false')],
+                    self._variant_descriptions(builder))
         with self.assertRaisesRegex(ValueError, 'Adjacent string literals'):
             ReadBuilder(table).with_projection({
                 'x': "try_variant_get(payload, '$.it' 's', 'float')",
@@ -185,14 +231,14 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
                     batch.new_read()
                     self.assertIsNone(
                         read.call_args.kwargs['nested_name_paths'])
-                    self.assertIn(column,
-                                  read.call_args.kwargs['variant_fields'])
+                    fields = read.call_args.kwargs['read_type']
+                    self.assertIn(column, [field.name for field in fields])
                 with patch('pypaimon.read.stream_read_builder.TableRead') as read:
                     stream.new_read()
                     self.assertIsNone(
                         read.call_args.kwargs['nested_name_paths'])
-                    self.assertIn(column,
-                                  read.call_args.kwargs['variant_fields'])
+                    fields = read.call_args.kwargs['read_type']
+                    self.assertIn(column, [field.name for field in fields])
 
     def test_mapping_rejects_other_expressions(self):
         table = Mock()

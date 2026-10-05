@@ -1288,9 +1288,14 @@ class TestVariantPaimonTable(unittest.TestCase):
                 self.assertTrue(splits)
                 read = builder.new_read()
                 kwargs = read._native_read_kwargs()
-                self.assertEqual(kwargs['projection'], projection)
+                self.assertEqual(
+                    [field.name for field in kwargs['read_type']], projection)
                 self.assertNotIn('nested_projection', kwargs)
-                self.assertIn(column, kwargs['variant_fields'])
+                field = next(field for field in kwargs['read_type']
+                             if field.name == column)
+                self.assertEqual(
+                    field.type.fields[0].description,
+                    '__VARIANT_METADATA$.ratio;false;UTC')
                 self.assertEqual(
                     read._output_arrow_schema().field('ratio').type,
                     pa.float32())

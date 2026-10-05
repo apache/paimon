@@ -16,7 +16,7 @@
 # under the License.
 
 import ast
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import pyarrow
 
@@ -30,6 +30,7 @@ from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import ROW_KIND_COLUMN, TableRead
 from pypaimon.read.table_scan import TableScan
+from pypaimon.read.variant_read_type import with_variant_extractions
 from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.projection import MapKey, Projection, is_row_type
@@ -108,7 +109,7 @@ class ReadBuilder:
         # are kept separately for the Arrow output schema.
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[ProjectionPath]] = None
-        self._variant_fields: Optional[Dict[str, Dict[str, Any]]] = None
+        self._resolved_read_type: Optional[List[DataField]] = None
         self._expression_projection: Optional[
             List[Tuple[str, str, Optional[int]]]] = None
         self._partition_filter: Optional[Predicate] = None
@@ -138,15 +139,18 @@ class ReadBuilder:
                 projection)
         else:
             variants, outputs = None, None
-        self._projection = projection
         if projection and any(
                 '.' in name or '[' in name for name in projection):
             paths = self._resolve_projection_paths(projection)
-            self._nested_paths = (paths if any(len(path) > 1 for path in paths)
-                                  else None)
+            nested_paths = (paths if any(len(path) > 1 for path in paths)
+                            else None)
         else:
-            self._nested_paths = None
-        self._variant_fields = variants
+            nested_paths = None
+        read_type = self._resolve_read_type(projection, nested_paths)
+        read_type = with_variant_extractions(read_type, variants)
+        self._projection = projection
+        self._nested_paths = nested_paths
+        self._resolved_read_type = read_type
         self._expression_projection = outputs
         return self
 
@@ -172,7 +176,6 @@ class ReadBuilder:
             predicate=self._predicate,
             read_type=self.read_type(),
             nested_name_paths=self._nested_name_paths(),
-            variant_fields=self._variant_fields,
             expression_projection=self._expression_projection,
             limit=self._limit,
         )
@@ -226,19 +229,25 @@ class ReadBuilder:
         )
 
     def read_type(self) -> List[DataField]:
+        return (self._resolved_read_type if self._resolved_read_type is not None
+                else self.table.fields)
+
+    def _resolve_read_type(
+            self, projection: Optional[List[str]],
+            nested_paths: Optional[List[ProjectionPath]]) -> List[DataField]:
         table_fields = self.table.fields
 
-        if not self._projection and not self._nested_paths:
+        if not projection and not nested_paths:
             return table_fields
 
         if self.table.options.row_tracking_enabled():
             table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
 
-        if self._nested_paths:
-            return Projection.of(self._nested_paths).project(table_fields)
+        if nested_paths:
+            return Projection.of(nested_paths).project(table_fields)
 
         field_map = {field.name: field for field in table_fields}
-        return [field_map[name] for name in self._projection if name in field_map]
+        return [field_map[name] for name in projection if name in field_map]
 
     # ------------------------------------------------------------------
     # Helpers

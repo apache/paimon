@@ -125,7 +125,6 @@ class RayDatasource(Datasource):
         predicate = self._split_provider.predicate()
         read_type = self._split_provider.read_type()
         nested_name_paths = self._split_provider.nested_name_paths()
-        variant_fields = self._split_provider.variant_fields()
         expression_projection = self._split_provider.expression_projection()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
@@ -135,10 +134,6 @@ class RayDatasource(Datasource):
 
         if self._schema is None:
             self._schema = PyarrowFieldParser.from_paimon_schema(read_type)
-            if variant_fields:
-                from pypaimon.read.table_read import TableRead
-                self._schema = TableRead._apply_variant_fields_to_schema(
-                    self._schema, variant_fields)
             if expression_projection is not None:
                 from pypaimon.read.table_read import TableRead
                 self._schema = TableRead._apply_expression_projection_to_schema(
@@ -164,7 +159,6 @@ class RayDatasource(Datasource):
                 schema=schema,
                 limit=limit,
                 nested_name_paths=nested_name_paths,
-                variant_fields=variant_fields,
                 expression_projection=expression_projection,
                 include_row_kind=include_row_kind,
         ) -> Iterable[pyarrow.Table]:
@@ -177,7 +171,6 @@ class RayDatasource(Datasource):
             worker_table_read = TableRead(
                 table, predicate, read_type, limit=limit,
                 nested_name_paths=nested_name_paths,
-                variant_fields=variant_fields,
                 expression_projection=expression_projection,
                 include_row_kind=include_row_kind)
 
@@ -207,7 +200,6 @@ class RayDatasource(Datasource):
             schema=schema,
             limit=limit,
             nested_name_paths=nested_name_paths,
-            variant_fields=variant_fields,
             expression_projection=expression_projection,
             include_row_kind=include_row_kind,
         )

@@ -38,10 +38,10 @@ class NamedVariantProjectionTest(unittest.TestCase):
         })
 
         self.assertEqual(builder._projection, ['id', 'payload'])
-        self.assertEqual(builder._variant_fields['payload']['paths'],
-                         ['$.x', '$.y'])
-        self.assertEqual(builder._variant_fields['payload']['fail_on_error'],
-                         [False, True])
+        self.assertEqual(
+            [field.description for field in builder.read_type()[1].type.fields],
+            ['__VARIANT_METADATA$.x;false;UTC',
+             '__VARIANT_METADATA$.y;true;UTC'])
         self.assertEqual(builder._expression_projection, [
             ('identifier', 'id', None),
             ('x', 'payload', 0),

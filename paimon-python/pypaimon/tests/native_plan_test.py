@@ -39,17 +39,22 @@ from pypaimon.read.native_plan import (
     _predicate_to_native,
     _resolved_schema_json,
     _restore_python_partition_paths,
-    _variant_read_type_json,
     native_family_search_modes_available,
     native_plan,
     native_version_at_least,
 )
 from pypaimon.read.plan import Plan
 from pypaimon.read.table_scan import TableScan
+from pypaimon.read.variant_read_type import with_variant_extractions
 from pypaimon.schema.data_types import AtomicType, DataField, MapType, MultisetType, RowType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.utils.range import Range
+
+
+def _variant_read_type_json(read_type, options):
+    return json.dumps(RowType(True, with_variant_extractions(
+        read_type, options)).to_dict())
 
 
 def _scan(native_enabled, file_scanner):
@@ -167,8 +172,7 @@ class NativePlanTest(unittest.TestCase):
             predicate=None,
             limit=None,
             projection=['id', 'payload'],
-            variant_fields=variant_fields,
-            read_type=read_type,
+            read_type=with_variant_extractions(read_type, variant_fields),
         )
 
         self.assertIs(result, builder)
