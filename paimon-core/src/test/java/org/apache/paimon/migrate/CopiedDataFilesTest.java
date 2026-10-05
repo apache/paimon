@@ -19,20 +19,27 @@
 package org.apache.paimon.migrate;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -49,29 +56,30 @@ import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 
-import javax.annotation.Nullable;
-
+import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
 /**
- * Tests for {@link CopiedDataFiles}: data files copied from another table, committed the way {@code
- * CopyFilesCommitOperator} of {@code sys.copy} does.
+ * Tests for {@link CopiedDataFiles}: data files copied from another table and committed the way
+ * {@code CopyFilesCommitOperator} of {@code sys.copy} does.
  */
 public class CopiedDataFilesTest extends TableTestBase {
 
     private static final Identifier SOURCE = new Identifier("default", "src");
-    private static final Identifier SOURCE2 = new Identifier("default", "src2");
     private static final Identifier TARGET = new Identifier("default", "dst");
 
     // ---------------------------------------------------------------------------------------------
@@ -79,7 +87,7 @@ public class CopiedDataFilesTest extends TableTestBase {
     // ---------------------------------------------------------------------------------------------
 
     @Test
-    public void testCopyIntoTableWithoutRowsKeepsTheRowIdsOfTheSource() throws Exception {
+    public void testCopyIntoTableWithoutRowsAssignsRowIdsInOrder() throws Exception {
         createTable(SOURCE, Options.ROW_TRACKING, false);
         write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
         write(table(SOURCE), row(3, "c", "p1"));
@@ -98,7 +106,7 @@ public class CopiedDataFilesTest extends TableTestBase {
     }
 
     @Test
-    public void testCopyIntoOnePartitionShiftsPastTheRowsOfOtherPartitions() throws Exception {
+    public void testCopyIntoOnePartitionFollowsTheRowsOfOtherPartitions() throws Exception {
         createTable(SOURCE, Options.ROW_TRACKING, true);
         write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
         createTable(TARGET, Options.ROW_TRACKING, true);
@@ -115,13 +123,11 @@ public class CopiedDataFilesTest extends TableTestBase {
                 .containsEntry(1, 2L)
                 .containsEntry(2, 3L);
         assertThat(target.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(4L);
-        write(target, row(3, "c", "p1"));
-        assertThat(rowIds(table(TARGET))).containsEntry(3, 4L);
-        assertUniqueRowIds(table(TARGET));
+        assertUniqueRowIds(target);
     }
 
     @Test
-    public void testCopyWithPartitionFilterShiftsPastTheRowsOfOtherPartitions() throws Exception {
+    public void testCopyWithPartitionFilterFollowsTheRowsOfOtherPartitions() throws Exception {
         createTable(SOURCE, Options.ROW_TRACKING, true);
         write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p2"));
         createTable(TARGET, Options.ROW_TRACKING, true);
@@ -135,7 +141,7 @@ public class CopiedDataFilesTest extends TableTestBase {
     }
 
     @Test
-    public void testCopyOverEveryRowStillShiftsPastTheRowIdsGivenOut() throws Exception {
+    public void testCopyOverEveryRowFollowsTheRowIdsGivenOut() throws Exception {
         createTable(SOURCE, Options.ROW_TRACKING, false);
         write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
         createTable(TARGET, Options.ROW_TRACKING, false);
@@ -150,45 +156,144 @@ public class CopiedDataFilesTest extends TableTestBase {
     }
 
     @Test
-    public void testCopyShiftsPastCopiedRowIdsTheNextRowIdDoesNotCover() throws Exception {
-        // A table without row tracking keeps no next row id, but files copied into it keep theirs.
+    public void testAppendCommittedWhileTheCopyIsPreparedGetsOtherRowIds() throws Exception {
         createTable(SOURCE, Options.ROW_TRACKING, true);
         write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
-        createTable(SOURCE2, Options.ROW_TRACKING, true);
-        write(table(SOURCE2), row(3, "c", "p2"), row(4, "d", "p2"));
-        createTable(TARGET, Options.PLAIN, true);
+        createTable(TARGET, Options.ROW_TRACKING, true);
+        write(table(TARGET), row(10, "x", "p1"), row(11, "y", "p1"));
 
-        copy(SOURCE, TARGET, null);
-        copy(SOURCE2, TARGET, null);
+        // the copy is prepared, then another writer appends to p2, then the copy commits
+        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> files = prepareCopy(SOURCE, TARGET);
+        write(table(TARGET), row(20, "u", "p2"), row(21, "v", "p2"));
+        commitCopy(table(TARGET), files);
 
-        Map<Long, Integer> byFirstRowId = new TreeMap<>();
-        for (DataFileMeta file : liveFiles(table(TARGET))) {
-            byFirstRowId.put(file.firstRowId(), (int) file.rowCount());
-        }
-        assertThat(byFirstRowId).containsOnlyKeys(0L, 2L);
+        Map<Integer, Long> rowIds = rowIds(table(TARGET));
+        assertThat(rowIds).containsOnlyKeys(1, 2, 20, 21);
+        assertThat(rowIds).containsEntry(20, 2L).containsEntry(21, 3L);
+        assertThat(rowIds).containsEntry(1, 4L).containsEntry(2, 5L);
+        assertUniqueRowIds(table(TARGET));
     }
 
     @Test
-    public void testShiftKeepsColumnUpdatesOnTheirRows() throws Exception {
+    public void testAppendToEmptyTargetWhileTheCopyIsPreparedGetsOtherRowIds() throws Exception {
+        createTable(SOURCE, Options.ROW_TRACKING, true);
+        write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
+        createTable(TARGET, Options.ROW_TRACKING, true);
+
+        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> files = prepareCopy(SOURCE, TARGET);
+        write(table(TARGET), row(20, "u", "p2"), row(21, "v", "p2"));
+        commitCopy(table(TARGET), files);
+
+        assertThat(rowIds(table(TARGET)))
+                .containsEntry(20, 0L)
+                .containsEntry(21, 1L)
+                .containsEntry(1, 2L)
+                .containsEntry(2, 3L);
+        assertUniqueRowIds(table(TARGET));
+    }
+
+    @Test
+    public void testCopyCommitRetriedAfterAConcurrentAppendGetsOtherRowIds() throws Exception {
+        createTable(SOURCE, Options.ROW_TRACKING, true);
+        write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
+        createTable(TARGET, Options.ROW_TRACKING, true);
+        write(table(TARGET), row(10, "x", "p1"));
+        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> files = prepareCopy(SOURCE, TARGET);
+
+        // The copy commit reads the latest snapshot and stops at its first manifest write. An
+        // append commits meanwhile, so the copy loses the next snapshot id and retries.
+        CountDownLatch paused = new CountDownLatch(1);
+        CountDownLatch released = new CountDownLatch(1);
+        AtomicReference<Thread> committer = new AtomicReference<>();
+        FileStoreTable pausing =
+                FileStoreTableFactory.create(
+                        new PausingFileIO(committer, paused, released), table(TARGET).location());
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        Thread thread =
+                new Thread(
+                        () -> {
+                            try {
+                                commitCopy(pausing, files);
+                            } catch (Throwable t) {
+                                error.set(t);
+                            }
+                        });
+        committer.set(thread);
+        thread.start();
+        assertThat(paused.await(30, TimeUnit.SECONDS)).isTrue();
+        write(table(TARGET), row(20, "u", "p2"), row(21, "v", "p2"));
+        released.countDown();
+        thread.join(TimeUnit.SECONDS.toMillis(60));
+        assertThat(error.get()).isNull();
+
+        Map<Integer, Long> rowIds = rowIds(table(TARGET));
+        assertThat(rowIds).containsOnlyKeys(1, 2, 20, 21);
+        assertThat(rowIds).containsEntry(20, 1L).containsEntry(21, 2L);
+        assertThat(rowIds).containsEntry(1, 3L).containsEntry(2, 4L);
+        assertUniqueRowIds(table(TARGET));
+    }
+
+    @Test
+    public void testColumnUpdatesOfTheSourceAreRefused() throws Exception {
         createTable(SOURCE, Options.DATA_EVOLUTION, false);
         write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
         // a column update of both rows: shares the row id range of the file above
         updateColumn(table(SOURCE), 0, "a2", "b2");
         createTable(TARGET, Options.DATA_EVOLUTION, false);
-        write(table(TARGET), row(10, "x", "p1"), row(11, "y", "p1"));
+
+        assertThatThrownBy(() -> copy(SOURCE, TARGET, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("they hold the same rows")
+                .hasMessageContaining("Compact the source table first");
+        assertThat(table(TARGET).snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    public void testCompactedDataEvolutionSourceIsCopied() throws Exception {
+        createTable(
+                SOURCE,
+                Options.DATA_EVOLUTION,
+                false,
+                Collections.singletonMap(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2"));
+        write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
+        updateColumn(table(SOURCE), 0, "a2", "b2");
+        compactDataEvolution(table(SOURCE));
+        assertThat(liveFiles(table(SOURCE))).hasSize(1);
+        createTable(TARGET, Options.DATA_EVOLUTION, false);
+        write(table(TARGET), row(10, "x", "p1"));
 
         copy(SOURCE, TARGET, null);
 
         FileStoreTable target = table(TARGET);
-        // both copied files moved by the same offset: the update still covers its rows
-        assertThat(values(target)).containsOnly(entry(1, "a2"), entry(2, "b2"));
-        assertThat(rowIds(target)).containsEntry(1, 2L).containsEntry(2, 3L);
-        assertThat(liveFiles(target)).allMatch(file -> file.firstRowId() == 2L);
-        assertUniqueRowIds(target);
+        assertThat(values(target)).containsEntry(1, "a2").containsEntry(2, "b2");
+        assertThat(rowIds(target)).containsEntry(1, 1L).containsEntry(2, 2L);
+        // later column updates of the copied rows win
+        updateColumn(target, 1, "a3", "b3");
+        assertThat(values(table(TARGET))).containsEntry(1, "a3").containsEntry(2, "b3");
+    }
 
-        // and the shifted rows take later column updates by their new row ids
-        updateColumn(target, 2, "a3", "b3");
-        assertThat(values(table(TARGET))).containsOnly(entry(1, "a3"), entry(2, "b3"));
+    @Test
+    public void testBlobFilesKeepTheRowIdsOfTheirRows() throws Exception {
+        createBlobTable(SOURCE);
+        writeBlobs(table(SOURCE), 1, 2);
+        writeBlobs(table(SOURCE), 3);
+        assertThat(liveFiles(table(SOURCE))).anyMatch(file -> file.fileName().endsWith(".blob"));
+        createBlobTable(TARGET);
+        writeBlobs(table(TARGET), 10);
+
+        copy(SOURCE, TARGET, null);
+
+        // the copy replaces the row of the target; every copied row reads its own blob, under
+        // row ids after the one the target gave out
+        Map<Integer, Long> rowIds = new TreeMap<>();
+        RowType readType =
+                SpecialFields.rowTypeWithRowTracking(table(TARGET).rowType(), true, true);
+        for (InternalRow row : read(table(TARGET), readType)) {
+            int id = row.getInt(0);
+            assertThat(row.getBlob(1).toData()).isEqualTo(blob(id));
+            rowIds.put(id, row.getLong(2));
+        }
+        assertThat(rowIds).containsExactly(entry(1, 1L), entry(2, 2L), entry(3, 3L));
     }
 
     @Test
@@ -198,22 +303,12 @@ public class CopiedDataFilesTest extends TableTestBase {
         copyOnWriteUpdate(table(SOURCE));
         assertThat(liveFiles(table(SOURCE))).anyMatch(CopiedDataFilesTest::storesRowIds);
 
-        // into a table with rows, whose row ids the stored ones collide with
         createTable(TARGET, Options.ROW_TRACKING, false);
-        write(table(TARGET), row(10, "x", "p1"));
-        long snapshot = table(TARGET).snapshotManager().latestSnapshotId();
         assertThatThrownBy(() -> copy(SOURCE, TARGET, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("its rows store their row ids")
                 .hasMessageContaining("INSERT OVERWRITE");
-        assertThat(table(TARGET).snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
-
-        // and into an empty one: the commit would not move the next row id past them
-        Identifier empty = new Identifier("default", "empty");
-        createTable(empty, Options.ROW_TRACKING, false);
-        assertThatThrownBy(() -> copy(SOURCE, empty, null))
-                .hasMessageContaining("its rows store their row ids");
-        assertThat(table(empty).snapshotManager().latestSnapshot()).isNull();
+        assertThat(table(TARGET).snapshotManager().latestSnapshot()).isNull();
 
         // a table without row tracking does not use them
         Identifier plain = new Identifier("default", "plain");
@@ -222,8 +317,12 @@ public class CopiedDataFilesTest extends TableTestBase {
         assertThat(liveFiles(table(plain))).anyMatch(CopiedDataFilesTest::storesRowIds);
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // file metadata and sequence numbers
+    // ---------------------------------------------------------------------------------------------
+
     @Test
-    public void testLaterColumnUpdatesWinOverCopiedSequenceNumbers() throws Exception {
+    public void testLaterColumnUpdatesWinOverCopiedRows() throws Exception {
         createTable(SOURCE, Options.DATA_EVOLUTION, false);
         for (int i = 0; i < 20; i++) {
             write(table(SOURCE), row(i, "v" + i, "p1"));
@@ -234,65 +333,51 @@ public class CopiedDataFilesTest extends TableTestBase {
 
         FileStoreTable target = table(TARGET);
         long copySnapshot = target.snapshotManager().latestSnapshotId();
-        assertThat(liveFiles(target)).allMatch(file -> file.maxSequenceNumber() <= copySnapshot);
+        assertThat(liveFiles(target))
+                .allMatch(
+                        file ->
+                                file.minSequenceNumber() == copySnapshot
+                                        && file.maxSequenceNumber() == copySnapshot);
         updateColumn(target, 19, "updated");
         assertThat(values(table(TARGET))).containsEntry(19, "updated").containsEntry(18, "v18");
     }
 
     @Test
-    public void testCopyKeepsTheOrderOfColumnUpdatesFromTheSource() throws Exception {
+    public void testCopiedFilesAreCommittedAsFilesWrittenForTheTarget() throws Exception {
         createTable(SOURCE, Options.DATA_EVOLUTION, false);
         write(table(SOURCE), row(1, "a", "p1"));
-        updateColumn(table(SOURCE), 0, "a2");
-        updateColumn(table(SOURCE), 0, "a3");
-        assertThat(values(table(SOURCE))).containsEntry(1, "a3");
-        createTable(TARGET, Options.DATA_EVOLUTION, false);
+        write(table(SOURCE), row(2, "b", "p1"));
+        createTable(TARGET, Options.ROW_TRACKING, false);
+        List<DataFileMeta> source = liveFiles(table(SOURCE));
+        List<DataFileMeta> copied = new ArrayList<>();
+        for (DataFileMeta file : source) {
+            copied.add(file.withWriteColsSequences(new long[] {7L, 7L, 7L}));
+        }
+
+        CopiedDataFiles.adaptToTarget(table(TARGET), Collections.singletonList(copied));
+
+        assertThat(copied).hasSize(source.size());
+        for (DataFileMeta file : copied) {
+            assertThat(file.firstRowId()).isNull();
+            assertThat(file.fileSource()).contains(FileSource.APPEND);
+            assertThat(file.minSequenceNumber()).isZero();
+            assertThat(file.maxSequenceNumber()).isZero();
+            assertThat(file.writeColsSequences()).isNull();
+        }
+        // in row id order
+        assertThat(copied.get(0).fileName()).isEqualTo(fileWithFirstRowId(source, 0L));
+    }
+
+    @Test
+    public void testTableWithoutRowTrackingDropsCopiedRowIds() throws Exception {
+        createTable(SOURCE, Options.ROW_TRACKING, false);
+        write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
+        createTable(TARGET, Options.PLAIN, false);
 
         copy(SOURCE, TARGET, null);
 
-        assertThat(values(table(TARGET))).containsEntry(1, "a3");
-        updateColumn(table(TARGET), 0, "a4");
-        assertThat(values(table(TARGET))).containsEntry(1, "a4");
-    }
-
-    @Test
-    public void testSequenceNumbersAreMappedInOrderIncludingPerColumnOnes() throws Exception {
-        createTable(SOURCE, Options.DATA_EVOLUTION, false);
-        write(table(SOURCE), row(1, "a", "p1"));
-        updateColumn(table(SOURCE), 0, "a2");
-        createTable(TARGET, Options.DATA_EVOLUTION, false);
-
-        List<DataFileMeta> files = new ArrayList<>(liveFiles(table(SOURCE)));
-        files.sort((a, b) -> Long.compare(a.maxSequenceNumber(), b.maxSequenceNumber()));
-        DataFileMeta older = files.get(0);
-        DataFileMeta newer = files.get(1);
-        // a compacted file records the sequence of each column
-        long[] perColumn = {
-            older.maxSequenceNumber(), newer.maxSequenceNumber(), older.maxSequenceNumber() - 1
-        };
-        List<DataFileMeta> copied =
-                new ArrayList<>(Arrays.asList(older.withWriteColsSequences(perColumn), newer));
-
-        CopiedDataFiles.adaptToTarget(table(TARGET), Collections.singletonList(copied));
-
-        // newest -> 0, which the commit stamps with its snapshot id; older -> -1, -2, ...
-        assertThat(copied.get(1).maxSequenceNumber()).isEqualTo(0L);
-        assertThat(copied.get(1).minSequenceNumber()).isEqualTo(0L);
-        assertThat(copied.get(0).maxSequenceNumber()).isEqualTo(-1L);
-        assertThat(copied.get(0).writeColsSequences()).containsExactly(-1L, 0L, -2L);
-    }
-
-    @Test
-    public void testRowTrackingOnlyTargetKeepsSequenceNumbers() throws Exception {
-        createTable(SOURCE, Options.ROW_TRACKING, false);
-        write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
-        createTable(TARGET, Options.ROW_TRACKING, false);
-        List<DataFileMeta> before = liveFiles(table(SOURCE));
-
-        List<DataFileMeta> copied = new ArrayList<>(before);
-        CopiedDataFiles.adaptToTarget(table(TARGET), Collections.singletonList(copied));
-
-        assertThat(copied).isEqualTo(before);
+        assertThat(values(table(TARGET))).containsOnlyKeys(1, 2);
+        assertThat(liveFiles(table(TARGET))).allMatch(file -> file.firstRowId() == null);
     }
 
     @Test
@@ -321,11 +406,21 @@ public class CopiedDataFilesTest extends TableTestBase {
 
     private void createTable(Identifier identifier, Options options, boolean partitioned)
             throws Exception {
+        createTable(identifier, options, partitioned, Collections.emptyMap());
+    }
+
+    private void createTable(
+            Identifier identifier,
+            Options options,
+            boolean partitioned,
+            Map<String, String> extraOptions)
+            throws Exception {
         Schema.Builder builder =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column("v", DataTypes.STRING())
-                        .column("pt", DataTypes.STRING());
+                        .column("pt", DataTypes.STRING())
+                        .options(extraOptions);
         if (partitioned) {
             builder.partitionKeys("pt");
         }
@@ -336,6 +431,33 @@ public class CopiedDataFilesTest extends TableTestBase {
             builder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         }
         catalog.createTable(identifier, builder.build(), false);
+    }
+
+    private void createBlobTable(Identifier identifier) throws Exception {
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("b", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+    }
+
+    private static byte[] blob(int id) {
+        return ("blob-" + id).getBytes();
+    }
+
+    private static void writeBlobs(FileStoreTable table, int... ids) throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int id : ids) {
+                write.write(GenericRow.of(id, new BlobData(blob(id))));
+            }
+            commit.commit(write.prepareCommit());
+        }
     }
 
     private FileStoreTable table(Identifier identifier) throws Exception {
@@ -378,6 +500,20 @@ public class CopiedDataFilesTest extends TableTestBase {
                                         .newFiles()
                                         .add(f.assignFirstRowId(firstRowId)));
             }
+            commit.commit(messages);
+        }
+    }
+
+    private static void compactDataEvolution(FileStoreTable table) throws Exception {
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.snapshotManager().latestSnapshot());
+        List<CommitMessage> messages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : coordinator.plan()) {
+            messages.add(task.doCompact(table, "compact"));
+        }
+        assertThat(messages).isNotEmpty();
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(messages);
         }
     }
@@ -432,13 +568,19 @@ public class CopiedDataFilesTest extends TableTestBase {
         }
     }
 
-    /**
-     * Copies the live data files of {@code source}, or of one of its partitions, into {@code
-     * target} and commits them as {@code CopyFilesCommitOperator} does: grouped by partition and
-     * bucket, adapted by {@link CopiedDataFiles}, with an overwrite commit.
-     */
-    private void copy(Identifier source, Identifier target, @Nullable String partition)
-            throws Exception {
+    /** Copies and commits like {@code CopyFilesCommitOperator}, optionally one partition only. */
+    private void copy(Identifier source, Identifier target, String partition) throws Exception {
+        commitCopy(table(target), prepareCopy(source, target, partition));
+    }
+
+    private Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> prepareCopy(
+            Identifier source, Identifier target) throws Exception {
+        return prepareCopy(source, target, null);
+    }
+
+    /** Copies the data files physically and adapts their metadata to the target. */
+    private Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> prepareCopy(
+            Identifier source, Identifier target, String partition) throws Exception {
         FileStoreTable from = table(source);
         FileStoreTable to = table(target);
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> files = new LinkedHashMap<>();
@@ -462,25 +604,39 @@ public class CopiedDataFilesTest extends TableTestBase {
                             k -> new ArrayList<>())
                     .add(entry.file());
         }
-
         CopiedDataFiles.adaptToTarget(to, files.values());
+        return files;
+    }
 
+    /** The overwrite commit of {@code CopyFilesCommitOperator}. */
+    private static void commitCopy(
+            FileStoreTable target, Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> files)
+            throws Exception {
         List<CommitMessage> messages = new ArrayList<>();
         for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : files.entrySet()) {
             messages.add(
                     new CommitMessageImpl(
                             entry.getKey().getLeft(),
                             entry.getKey().getRight(),
-                            to.coreOptions().bucket(),
+                            target.coreOptions().bucket(),
                             new DataIncrement(
                                     entry.getValue(),
                                     Collections.emptyList(),
                                     Collections.emptyList()),
                             CompactIncrement.emptyIncrement()));
         }
-        try (BatchTableCommit commit = to.newBatchWriteBuilder().withOverwrite().newCommit()) {
+        try (BatchTableCommit commit = target.newBatchWriteBuilder().withOverwrite().newCommit()) {
             commit.commit(messages);
         }
+    }
+
+    private static String fileWithFirstRowId(List<DataFileMeta> files, long firstRowId) {
+        for (DataFileMeta file : files) {
+            if (file.firstRowId() != null && file.firstRowId() == firstRowId) {
+                return file.fileName();
+            }
+        }
+        throw new AssertionError("no file with first row id " + firstRowId);
     }
 
     private static List<ManifestEntry> entries(FileStoreTable table) {
@@ -501,7 +657,7 @@ public class CopiedDataFilesTest extends TableTestBase {
 
     private static Map<Integer, String> values(FileStoreTable table) throws Exception {
         Map<Integer, String> result = new TreeMap<>();
-        for (InternalRow row : read(table)) {
+        for (InternalRow row : read(table, table.rowType())) {
             result.put(row.getInt(0), row.getString(1).toString());
         }
         return result;
@@ -509,7 +665,8 @@ public class CopiedDataFilesTest extends TableTestBase {
 
     private static Map<Integer, Long> rowIds(FileStoreTable table) throws Exception {
         Map<Integer, Long> result = new TreeMap<>();
-        for (InternalRow row : read(table)) {
+        RowType readType = SpecialFields.rowTypeWithRowTracking(table.rowType(), true, true);
+        for (InternalRow row : read(table, readType)) {
             result.put(row.getInt(0), row.isNullAt(3) ? null : row.getLong(3));
         }
         return result;
@@ -521,8 +678,7 @@ public class CopiedDataFilesTest extends TableTestBase {
         assertThat(new HashSet<>(ids)).hasSameSizeAs(ids);
     }
 
-    private static List<InternalRow> read(FileStoreTable table) throws Exception {
-        RowType readType = SpecialFields.rowTypeWithRowTracking(table.rowType(), true, true);
+    private static List<InternalRow> read(FileStoreTable table, RowType readType) throws Exception {
         ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
         TableRead read = readBuilder.newRead();
         InternalRowSerializer serializer = new InternalRowSerializer(readType);
@@ -533,5 +689,37 @@ public class CopiedDataFilesTest extends TableTestBase {
             }
         }
         return rows;
+    }
+
+    /** Pauses the committer thread at its first manifest write. */
+    private static class PausingFileIO extends LocalFileIO {
+
+        private final AtomicReference<Thread> committer;
+        private final CountDownLatch paused;
+        private final CountDownLatch released;
+        private final AtomicBoolean pausedOnce = new AtomicBoolean();
+
+        private PausingFileIO(
+                AtomicReference<Thread> committer, CountDownLatch paused, CountDownLatch released) {
+            this.committer = committer;
+            this.paused = paused;
+            this.released = released;
+        }
+
+        @Override
+        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                throws IOException {
+            if (Thread.currentThread() == committer.get()
+                    && path.getParent().getName().equals("manifest")
+                    && pausedOnce.compareAndSet(false, true)) {
+                paused.countDown();
+                try {
+                    released.await(60, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    throw new IOException(e);
+                }
+            }
+            return super.newOutputStream(path, overwrite);
+        }
     }
 }

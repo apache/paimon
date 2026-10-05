@@ -280,17 +280,28 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       sql("""
             |CREATE TABLE src (id INT, v STRING) TBLPROPERTIES (
             |  'row-tracking.enabled' = 'true',
-            |  'data-evolution.enabled' = 'true')
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
             |""".stripMargin)
-      // many snapshots: the copied files carry sequence numbers above the snapshots of dst
+      // many snapshots: the source files carry sequence numbers above the snapshots of dst
       (1 to 10).foreach(i => sql(s"INSERT INTO src VALUES ($i, 'v$i')"))
       sql("UPDATE src SET v = 'u1' WHERE id = 1")
 
+      // the update is a file holding the same rows as another one, which cannot be copied
+      val error = intercept[Exception] {
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')")
+      }
+      val trace = ExceptionUtils.stringifyException(error)
+      assert(trace.contains("Compact the source table first"), trace)
+      checkAnswer(sql("SELECT count(*) FROM dst"), Row(0) :: Nil)
+
+      sql("CALL sys.compact(table => 'src')")
       checkAnswer(
         sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
         Row(true) :: Nil)
       checkAnswer(sql("SELECT id, v FROM dst"), sql("SELECT id, v FROM src"))
       checkAnswer(sql("SELECT v FROM dst WHERE id = 1"), Row("u1") :: Nil)
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID), count(*) FROM dst"), Row(10, 10) :: Nil)
 
       sql("UPDATE dst SET v = 'u2' WHERE id = 2")
       sql("""
