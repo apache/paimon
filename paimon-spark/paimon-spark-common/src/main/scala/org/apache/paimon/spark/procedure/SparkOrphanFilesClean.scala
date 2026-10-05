@@ -174,12 +174,25 @@ case class SparkOrphanFilesClean(
         cachedDatasets.toSeq)
     }
 
-    val dataFiles = dataFilesWithFlag.filter(!_._2).map(_._1)
+    val dataFiles = dataFilesWithFlag.map {
+      case (name, isMissing) =>
+        if (isMissing) {
+          throw new RuntimeException(
+            "Detected missing live manifest while collecting data files, aborting clean.")
+        }
+        name
+    }
 
     // union manifest and data files
     val usedFiles = usedManifestFiles
-      .filter(!_.isMissing)
-      .map(_.manifestName)
+      .map {
+        file =>
+          if (file.isMissing) {
+            throw new RuntimeException(
+              "Detected missing live manifest during used-files collection, aborting clean.")
+          }
+          file.manifestName
+      }
       .union(dataFiles)
       .toDF("used_name")
 
