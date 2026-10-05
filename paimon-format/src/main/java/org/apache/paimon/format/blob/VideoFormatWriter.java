@@ -137,6 +137,15 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
             long keyframeIndexLength =
                     keyframeIndexDescriptor == null ? 0 : keyframeIndexDescriptor.length();
             checkKeyframeIndexSize(keyframeIndexLength, keyframeIndexBytes);
+            Blob keyframeIndex = VideoFrameDescriptor.keyframeIndexBlob(blob);
+            byte[] mapping = payloadWriter.readIndex(keyframeIndex, keyframeIndexLength);
+            if (mapping == null) {
+                append(NULL_REFERENCE, 0);
+                return;
+            }
+            if (mapping.length > 0) {
+                VideoKeyframeIndex.validate(mapping, payload.length());
+            }
             long length = payloadWriter.write(element);
             if (length == BlobFormatWriter.NULL_LENGTH) {
                 append(NULL_REFERENCE, 0);
@@ -144,16 +153,6 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
             }
             ordinal = physicalVideoLengths.size();
             physicalVideoLengths.add(length);
-            Blob keyframeIndex = VideoFrameDescriptor.keyframeIndexBlob(blob);
-            byte[] mapping = keyframeIndex == null ? new byte[0] : keyframeIndex.toData();
-            checkArgument(
-                    mapping.length == keyframeIndexLength,
-                    "Video keyframe index length changed while reading: expected %s, read %s.",
-                    keyframeIndexLength,
-                    mapping.length);
-            if (mapping.length > 0) {
-                VideoKeyframeIndex.validate(mapping, length);
-            }
             keyframeIndexes.add(mapping);
             keyframeIndexBytes += mapping.length;
             physicalVideos.put(payload, ordinal);
@@ -258,6 +257,27 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
 
     /** Copies raw video bytes without the ordinary BLOB record header and trailer. */
     private static class RawVideoPayloadWriter extends AbstractBlobElementWriter {
+
+        private byte[] readIndex(Blob index, long expectedLength) throws IOException {
+            if (index == null) {
+                return new byte[0];
+            }
+            byte[] bytes;
+            try {
+                bytes = index.toData();
+                if (bytes.length != expectedLength) {
+                    throw new java.io.EOFException(
+                            "Video keyframe index length changed while reading.");
+                }
+            } catch (IOException | RuntimeException e) {
+                if (handleFetchFailure(e, index)) {
+                    return null;
+                }
+                throw e;
+            }
+            recordSuccess(bytes.length);
+            return bytes;
+        }
 
         private RawVideoPayloadWriter(
                 PositionOutputStream out,

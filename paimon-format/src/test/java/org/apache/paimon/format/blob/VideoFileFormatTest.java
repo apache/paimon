@@ -510,6 +510,118 @@ public class VideoFileFormatTest {
         }
     }
 
+    @Test
+    public void testIndexFetchNullPolicyBeforePayloadWrite() throws IOException {
+        for (int status : new int[] {404, 416, 503, 0}) {
+            for (boolean missing : new boolean[] {false, true}) {
+                for (boolean failure : new boolean[] {false, true}) {
+                    SeekableInputStream source =
+                            new SeekableInputStream() {
+                                private long position;
+
+                                @Override
+                                public void close() {}
+
+                                @Override
+                                public int read(byte[] bytes, int offset, int length)
+                                        throws IOException {
+                                    if (length == 0) {
+                                        return 0;
+                                    }
+                                    int value = read();
+                                    if (value < 0) {
+                                        return -1;
+                                    }
+                                    bytes[offset] = (byte) value;
+                                    return 1;
+                                }
+
+                                @Override
+                                public void seek(long pos) throws IOException {
+                                    if (pos == 5 && status != 0) {
+                                        throw new IOException("HTTP error code: " + status);
+                                    }
+                                    position = pos;
+                                }
+
+                                @Override
+                                public long getPos() {
+                                    return position;
+                                }
+
+                                @Override
+                                public int read() throws IOException {
+                                    if (position >= 5 && status != 0) {
+                                        throw new IOException("HTTP error code: " + status);
+                                    }
+                                    return position++ < 5 ? 1 : -1;
+                                }
+                            };
+                    Blob frame =
+                            Blob.fromDescriptor(
+                                    uri -> source,
+                                    new VideoFrameDescriptor(
+                                            "http://example/video", 0, 5, 0, 5, 1));
+                    int[] counts = new int[4];
+                    org.apache.paimon.data.BlobFetchMetricReporter metrics =
+                            new org.apache.paimon.data.BlobFetchMetricReporter() {
+                                public void recordSuccess(long bytes) {
+                                    counts[0]++;
+                                }
+
+                                public void recordMissingFileNullWritten(boolean http) {
+                                    counts[1]++;
+                                }
+
+                                public void recordFetchFailureNullWritten(Throwable e) {
+                                    counts[2]++;
+                                }
+
+                                public void recordFetchFailure(Throwable e) {
+                                    counts[3]++;
+                                }
+                            };
+                    try (PositionOutputStream out = fileIO.newOutputStream(file, true)) {
+                        VideoFormatWriter writer =
+                                new VideoFormatWriter(
+                                        out,
+                                        rowType,
+                                        missing,
+                                        failure,
+                                        metrics,
+                                        BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+                        writer.setFile(file);
+                        boolean fallback = status == 404 ? missing : failure;
+                        if (fallback) {
+                            writer.addElement(GenericRow.of(frame));
+                            assertThat(counts[status == 404 ? 1 : 2]).isEqualTo(1);
+                        } else {
+                            assertThatThrownBy(
+                                            () -> writer.addElement(GenericRow.of(frame)),
+                                            "status=%s missing=%s failure=%s",
+                                            status,
+                                            missing,
+                                            failure)
+                                    .isInstanceOfAny(IOException.class, RuntimeException.class);
+                            assertThat(counts[3]).isEqualTo(1);
+                        }
+                        assertThat(out.getPos()).isZero();
+                        writer.close();
+                        if (fallback) {
+                            try (SeekableInputStream in = fileIO.newInputStream(file)) {
+                                assertThat(
+                                                new VideoFileMeta(
+                                                                in, fileIO.getFileSize(file), null)
+                                                        .isNull(0))
+                                        .isTrue();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private Blob sourceFrame(String name, byte[] bytes, long frameIndex) throws IOException {
         java.nio.file.Path source = tempPath.resolve(name);
         if (!Files.exists(source)) {
