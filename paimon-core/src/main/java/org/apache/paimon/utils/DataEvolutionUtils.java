@@ -434,8 +434,10 @@ public class DataEvolutionUtils {
 
     /**
      * Whether a data file still needs what {@code sys.enable_data_evolution} gives the files of a
-     * converted table: a first row id, or, for a file of a row-tracking-only writer, a sequence
-     * baseline older than every data-evolution update. Mirrors the plan of the conversion.
+     * converted table: a first row id, or, for a file written before data evolution, the sequence
+     * baseline 1, older than every data-evolution update. This includes files that a copy, for
+     * example {@code sys.copy}, committed with the row ids and sequence numbers of another table.
+     * Mirrors the plan of the conversion.
      */
     public static boolean needsDataEvolutionConversion(
             DataFileMeta file, Function<Long, TableSchema> schemaLoader) {
@@ -450,7 +452,7 @@ public class DataEvolutionUtils {
         }
         CoreOptions fileOptions =
                 CoreOptions.fromMap(schemaLoader.apply(file.schemaId()).options());
-        return fileOptions.rowTrackingEnabled() && !fileOptions.dataEvolutionEnabled();
+        return !fileOptions.dataEvolutionEnabled();
     }
 
     /** The files among {@code files} that still need the conversion. */

@@ -1067,7 +1067,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (options.dataEvolutionEnabled()) {
-            deltaFiles = stampFilesOfWritersBeforeDataEvolution(newSnapshotId, deltaFiles);
+            deltaFiles = stampFilesOfWritersBeforeDataEvolution(deltaFiles);
         }
 
         if (latestSnapshot == null) {
@@ -1452,10 +1452,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
      * that does not start at 0. They can exceed the snapshot ids of later commits and hide later
      * column updates. A committer loaded after the conversion can still commit such files, for
      * example when a job restores them from a checkpoint taken before the conversion. Their rows
-     * are new and get their row ids from this commit, so stamp them like a data-evolution writer's.
+     * are new, get their row ids from this commit and hold complete rows: stamp them with the
+     * baseline sequence 1 that the conversion gives every file from before data evolution.
      */
     private List<ManifestEntry> stampFilesOfWritersBeforeDataEvolution(
-            long snapshotId, List<ManifestEntry> deltaFiles) {
+            List<ManifestEntry> deltaFiles) {
         Map<Long, Boolean> dataEvolutionSchemas = new HashMap<>();
         List<ManifestEntry> result = new ArrayList<>(deltaFiles.size());
         for (ManifestEntry entry : deltaFiles) {
@@ -1469,7 +1470,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             id ->
                                     CoreOptions.fromMap(schemaManager.schema(id).options())
                                             .dataEvolutionEnabled())) {
-                result.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+                result.add(
+                        entry.assignSequenceNumber(
+                                Snapshot.FIRST_SNAPSHOT_ID, Snapshot.FIRST_SNAPSHOT_ID));
             } else {
                 result.add(entry);
             }

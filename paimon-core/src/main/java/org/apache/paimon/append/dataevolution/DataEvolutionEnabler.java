@@ -354,7 +354,9 @@ public class DataEvolutionEnabler {
         }
     }
 
-    /** Plans missing row ids and normalizes the baseline of row-tracking-only files. */
+    /**
+     * Plans missing row ids and normalizes the sequence baseline of files before data evolution.
+     */
     private Assignment plan(FileStoreTable table) {
         Snapshot latest = table.snapshotManager().latestSnapshot();
         if (latest == null) {
@@ -371,7 +373,6 @@ public class DataEvolutionEnabler {
         List<ManifestEntry> withoutRowId = new ArrayList<>();
         List<String> storingRowIds = new ArrayList<>();
         Set<FileEntry.Identifier> resetSequences = new HashSet<>();
-        Map<Long, Boolean> rowTrackingOnlySchemas = new HashMap<>();
         Map<Long, Boolean> dataEvolutionSchemas = new HashMap<>();
         List<ManifestEntry> completeRowFiles = new ArrayList<>();
         long maxRowIdEnd = 0L;
@@ -401,18 +402,18 @@ public class DataEvolutionEnabler {
             if (entry.file().firstRowId() == null) {
                 withoutRowId.add(entry);
             }
+            // Every file written before data evolution holds complete rows and gets the baseline
+            // sequence 1, older than every data-evolution update. Its own sequence numbers can be
+            // higher: a row-tracking-only writer numbers the rows of a file, and a file copied
+            // from another table, for example by sys.copy, keeps the numbers it had there.
             if ((entry.file().firstRowId() == null
                             || entry.file().minSequenceNumber() != Snapshot.FIRST_SNAPSHOT_ID
                             || entry.file().maxSequenceNumber() != Snapshot.FIRST_SNAPSHOT_ID)
-                    && rowTrackingOnlySchemas.computeIfAbsent(
+                    && !dataEvolutionSchemas.computeIfAbsent(
                             entry.file().schemaId(),
-                            id -> {
-                                CoreOptions fileOptions =
-                                        CoreOptions.fromMap(
-                                                table.schemaManager().schema(id).options());
-                                return fileOptions.rowTrackingEnabled()
-                                        && !fileOptions.dataEvolutionEnabled();
-                            })) {
+                            id ->
+                                    CoreOptions.fromMap(table.schemaManager().schema(id).options())
+                                            .dataEvolutionEnabled())) {
                 resetSequences.add(entry.identifier());
             }
         }
@@ -531,10 +532,12 @@ public class DataEvolutionEnabler {
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
         ManifestList manifestList = table.store().manifestListFactory().create();
 
-        // A plain append writer numbers its rows, so a file's sequence numbers can exceed the
-        // snapshot ids of later commits, while a row-tracking commit stamps its files with its
-        // snapshot id and a data-evolution read takes the column of the file with the highest one.
-        // Stamp the converted files like the commit that gives them their row ids.
+        // A data-evolution read takes each column from the file with the highest sequence number,
+        // and a commit stamps new files with its snapshot id. A file from before data evolution
+        // gets the baseline sequence 1, see plan: its own sequence numbers can exceed the snapshot
+        // ids of later commits and would hide later updates. Using this commit's snapshot id could
+        // hide an update committed before a retry. A file of a data-evolution schema without row
+        // id is stamped like the commit that gives it its row ids.
         long sequenceNumber = assignment.snapshot.id() + 1;
         List<ManifestFileMeta> baseManifests = new ArrayList<>();
         for (ManifestFileMeta manifest : assignment.manifests) {
@@ -554,9 +557,7 @@ public class DataEvolutionEnabler {
                                     .assignSequenceNumber(assignedSequence, assignedSequence));
                     changed = true;
                 } else if (assignment.resetSequences.contains(entry.identifier())) {
-                    // Row-tracking-only writers can retain row-count sequences after rolling a
-                    // file. Keep their row ids, but make them older than every DE update. Using
-                    // this repair's snapshot id could hide an update committed before a retry.
+                    // Keep its row ids, but make it older than every data-evolution update.
                     rewritten.add(
                             entry.assignSequenceNumber(
                                     Snapshot.FIRST_SNAPSHOT_ID, Snapshot.FIRST_SNAPSHOT_ID));

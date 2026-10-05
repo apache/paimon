@@ -270,16 +270,14 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         table = loadTable();
         List<DataFileMeta> after = liveFiles(table);
         assertThat(after).hasSize(2);
-        long rowIdSnapshot = table.snapshotManager().latestSnapshotId() - 1;
         for (DataFileMeta file : after) {
             assertThat(file.firstRowId()).isNotNull();
-            // the first row id and the sequence numbers of the row id commit are the only
-            // differences
+            // the first row id and the baseline sequence number are the only differences
             assertThat(file)
                     .isEqualTo(
                             before.get(file.fileName())
                                     .assignFirstRowId(file.firstRowId())
-                                    .assignSequenceNumber(rowIdSnapshot, rowIdSnapshot));
+                                    .assignSequenceNumber(1L, 1L));
         }
 
         // the files are still read from their external path, statistics still prune
@@ -376,9 +374,9 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         table = loadTable();
         long snapshotBeforeWrite = table.snapshotManager().latestSnapshotId();
         assertThat(snapshotBeforeWrite).isLessThan(19L);
-        // stamped with the id of the row id commit
-        assertThat(liveFiles(table).get(0).maxSequenceNumber()).isEqualTo(snapshotBeforeWrite - 1);
-        assertThat(liveFiles(table).get(0).minSequenceNumber()).isEqualTo(snapshotBeforeWrite - 1);
+        // stamped with the baseline of files from before data evolution
+        assertThat(liveFiles(table).get(0).maxSequenceNumber()).isEqualTo(1L);
+        assertThat(liveFiles(table).get(0).minSequenceNumber()).isEqualTo(1L);
 
         // rewrite column v over the converted file's row id range
         RowType writeType = table.rowType().project(Collections.singletonList("v"));
@@ -1046,6 +1044,85 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
+    public void testCopiedFilesWithHighSequenceNumbersGetTheBaselineSequence() throws Exception {
+        // Ten overwrites leave one live row in the source: first row id 9, sequence number 10.
+        // Copied into a table without row tracking, the file keeps both, under that table's schema.
+        Identifier source = createRowTrackingSource("src", row(0, "old0", "p1"));
+        FileStoreTable sourceTable = (FileStoreTable) catalog.getTable(source);
+        for (int i = 1; i < 10; i++) {
+            BatchWriteBuilder builder = sourceTable.newBatchWriteBuilder().withOverwrite();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                write.write(row(9, "old9", "p1"));
+                commit.commit(write.prepareCommit());
+            }
+        }
+        assertThat(liveFiles(sourceTable)).hasSize(1);
+        assertThat(liveFiles(sourceTable).get(0).firstRowId()).isEqualTo(9L);
+        assertThat(liveFiles(sourceTable).get(0).maxSequenceNumber()).isEqualTo(10L);
+        createTable(Collections.emptyMap());
+        commitFilesOf(source, true);
+
+        DataEvolutionEnabler.Result result = enabler().run(false);
+        assertThat(result.describe(TABLE)).startsWith("Success.");
+        FileStoreTable table = loadTable();
+        assertThat(table.snapshotManager().latestSnapshotId()).isLessThan(10L);
+        assertThat(liveFiles(table))
+                .allMatch(f -> f.minSequenceNumber() == 1L && f.maxSequenceNumber() == 1L);
+
+        // a column update committed afterwards has a lower snapshot id than the source had
+        overwriteColumnV(9, "NEW", 1);
+        assertThat(valuesById(loadTable())).containsExactly(entry(9, "NEW"));
+        // and the table counts as converted
+        assertThat(enabler().run(false).skipped).isTrue();
+    }
+
+    @Test
+    public void testRollbackToFenceBeforeCopiedFilesWereRepairedIsRefused() throws Exception {
+        // a file with first row id 9 and sequence number 10, see the test above
+        Identifier source = createRowTrackingSource("src", row(0, "old0", "p1"));
+        FileStoreTable sourceTable = (FileStoreTable) catalog.getTable(source);
+        for (int i = 1; i < 10; i++) {
+            BatchWriteBuilder builder = sourceTable.newBatchWriteBuilder().withOverwrite();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                write.write(row(9, "old9", "p1"));
+                commit.commit(write.prepareCommit());
+            }
+        }
+        FileStoreTable table = createTable(Collections.emptyMap());
+        writeRows(table, row(1, "a", "p1"));
+        AtomicBoolean copied = new AtomicBoolean();
+        new DataEvolutionEnabler(
+                        catalog,
+                        TABLE,
+                        () -> {},
+                        // after the row ids were committed, before the schema changes
+                        () -> {
+                            if (copied.compareAndSet(false, true)) {
+                                try {
+                                    commitFilesOf(source, false);
+                                } catch (Exception e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }
+                        })
+                .run(false);
+        // 2: row ids, 3: the copied file, 4: the fence, 5: the baseline of the copied file
+        table = loadTable();
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
+        assertThat(liveFiles(table))
+                .allMatch(f -> f.minSequenceNumber() == 1L && f.maxSequenceNumber() == 1L);
+
+        // the fence still holds the copied file with sequence number 10
+        assertThatThrownBy(() -> loadTable().rollbackTo(4))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("sequence number from before");
+        assertThat(loadTable().snapshotManager().latestSnapshotId()).isEqualTo(5L);
+        loadTable().rollbackTo(5);
+    }
+
+    @Test
     public void testOverlappingRowIdsOfCopiedFilesAreRefused() throws Exception {
         // the files of two row-tracking tables, both with row ids 0 and 1, in one table
         Identifier source = createRowTrackingSource();
@@ -1267,7 +1344,7 @@ public class DataEvolutionEnablerTest extends TableTestBase {
     }
 
     @Test
-    public void testRestoredAppendOfWriterBeforeConversionIsStampedWithItsSnapshot()
+    public void testRestoredAppendOfWriterBeforeConversionGetsTheBaselineSequence()
             throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
@@ -1305,6 +1382,10 @@ public class DataEvolutionEnablerTest extends TableTestBase {
         for (int i = 0; i < 20; i++) {
             assertThat(rowIds).containsEntry(i, (long) i);
         }
+        // like every file from before data evolution: the table needs no further conversion
+        assertThat(liveFiles(loadTable()))
+                .allMatch(f -> f.minSequenceNumber() == 1L && f.maxSequenceNumber() == 1L);
+        assertThat(enabler().run(true).skipped).isTrue();
 
         // a later column update of the rows of the second file must win
         overwriteColumnV(10, "new", 10);

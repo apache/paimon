@@ -350,6 +350,31 @@ class EnableDataEvolutionProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Procedure: rows copied with high sequence numbers take later updates") {
+    withTable("src", "dst") {
+      sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      // the live file of src ends up with sequence number 10, above the snapshots of dst below
+      (1 to 10).foreach(i => sql(s"INSERT OVERWRITE src VALUES (1, 'old$i')"))
+      sql("CREATE TABLE dst (id INT, v STRING)")
+      sql("CALL sys.copy(source_table => 'src', target_table => 'dst')").collect()
+      checkAnswer(sql("SELECT id, v FROM dst"), Row(1, "old10") :: Nil)
+
+      val result = sql("CALL sys.enable_data_evolution(table => 'dst')").collect()
+      assert(result(0).getString(0).startsWith("Success."), result(0).getString(0))
+
+      sql("UPDATE dst SET v = 'NEW' WHERE id = 1")
+      checkAnswer(sql("SELECT id, v FROM dst"), Row(1, "NEW") :: Nil)
+      sql("""
+            |MERGE INTO dst USING (SELECT _ROW_ID AS rid FROM dst WHERE id = 1) s
+            |ON dst._ROW_ID = s.rid
+            |WHEN MATCHED THEN UPDATE SET v = 'MERGED'
+            |""".stripMargin)
+      checkAnswer(sql("SELECT id, v FROM dst"), Row(1, "MERGED") :: Nil)
+      val again = sql("CALL sys.enable_data_evolution(table => 'dst')").collect()
+      assert(again(0).getString(0).startsWith("Skipped."), again(0).getString(0))
+    }
+  }
+
   test("Paimon Procedure: enable data evolution refuses overlapping row ids of copied files") {
     withTable("src", "src2", "dst") {
       sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
