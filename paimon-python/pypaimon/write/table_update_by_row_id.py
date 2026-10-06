@@ -39,6 +39,7 @@ from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.file_store_write import FileStoreWrite
 from pypaimon.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.row_utils import (
@@ -919,6 +920,7 @@ class TableUpdateByRowId:
 
         partition_tuple = tuple(partition.values)
         new_files = []
+        new_messages = []
         file_store_write = None
         blob_writers = []
         success = False
@@ -970,6 +972,9 @@ class TableUpdateByRowId:
             else:
                 if file_store_write is not None:
                     file_store_write.abort()
+                # prepare_commit hands files off to the caller. Reclaim them
+                # when the update fails before returning its commit messages.
+                _abort_commit_messages(self.table, new_messages)
                 for blob_writer in blob_writers:
                     blob_writer.abort()
 

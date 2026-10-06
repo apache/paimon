@@ -540,7 +540,8 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
         self.assertEqual(actual.column('payload').to_pylist(), blobs)
 
-    def test_blob_abort_deletes_uncommitted_files(self):
+    @pytest.mark.python_write
+    def test_blob_abort_preserves_prepared_files_until_committer_aborts(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('payload', pa.large_binary()),
@@ -569,6 +570,13 @@ class DataEvolutionFormatsTest(unittest.TestCase):
 
         writer.abort()
 
+        for file_meta in all_files:
+            self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.abort(commit_messages)
+        finally:
+            commit.close()
         for file_meta in all_files:
             self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),
