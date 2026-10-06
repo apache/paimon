@@ -106,44 +106,30 @@ Lookup uses memory and local disk caches:
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
 
-Set `'changelog-producer.event-metadata-fields'` to a comma-separated list of columns whose
-post-merge values should be stored as event metadata fields in lookup changelog records. Metadata
-fields are named by concatenating the configured prefix and column name (`__internal__<column>` by
-default). The same name is used as the Flink metadata key. For retractions (`-U`, `-D`), regular
-columns contain the before-image while metadata fields contain the event values; for forward records
-(`+I`, `+U`), they mirror the regular values. The post-merge values may differ from the raw incoming
-row when the merge engine aggregates values. External sinks that need event timestamps for conflict
-resolution can read these metadata fields.
+Set `'changelog-producer.event-metadata-fields'` to a comma-separated list of columns to store their
+post-merge values as event metadata fields in changelog records. This is supported only by the
+`lookup` producer; post-merge values may differ from the incoming row if the merge engine
+aggregates. Each field is named `<prefix><column>`, where the prefix is set by
+`'changelog-producer.metadata-field-prefix'` (default `__internal__`). Spark exposes the field as a
+column with that name; Flink SQL must declare a metadata column on the Paimon source with that name
+as the key. For `+I` and `+U`, metadata fields equal the regular columns. For `-U` and `-D`, regular
+columns contain the before-image while metadata fields contain the new event's values, so a sink
+can, for example, use the event timestamp of a retraction for conflict resolution. Changelog files
+written before the option was enabled return `NULL` for these fields.
 
-These fields are intended to be passed through to downstream sinks. Do not use them in filters or
-aggregations: those operations can remove or combine changelog records, including retractions, and
-leave downstream sinks with an incomplete changelog.
+Because a retraction no longer equals the row emitted earlier, operators that find the row to
+retract by comparing full rows cannot match it and silently keep the old row. Pass these fields
+through unchanged to a sink that applies deletes by primary key, and do not filter or aggregate on
+them. In Flink, a sink primary key that differs from the source primary key adds such an operator
+(`table.exec.sink.upsert-materialize` is `AUTO` by default): keep the keys equal, or set it to
+`NONE` if the sink applies upserts and deletes by its own key. Set
+`table.optimizer.non-deterministic-update.strategy` to `TRY_RESOLVE` to make Flink reject unsafe
+plans.
 
-Pass-through is only supported when no downstream operator matches a retraction against a previously
-emitted row, because a retraction carries the event value in metadata fields rather than the value
-that was emitted with the row. In Flink, this happens when the sink primary key differs from the
-source primary key: the planner inserts an upsert materializer (`table.exec.sink.upsert-materialize`
-is `AUTO` by default) that compares full rows, so it cannot match the retraction and the old sink
-row is never deleted. Either keep the sink primary key equal to the source primary key, or set
-`table.exec.sink.upsert-materialize` to `NONE` when the sink applies upserts and deletes by its own
-primary key. Setting `table.optimizer.non-deterministic-update.strategy` to `TRY_RESOLVE` makes
-Flink reject such plans instead of running them.
-
-Paimon readers such as Spark expose these generated fields as regular columns using the configured
-names. Flink SQL must declare the field as a metadata column on the Paimon source, for example
-`METADATA FROM '__internal__event_ts'` with the default prefix. The Flink column alias is not a
-physical Paimon column and is not automatically visible to Spark.
-
-This option is supported only by the `lookup` changelog producer. Set
-`'changelog-producer.metadata-field-prefix'` if the default prefix conflicts with an existing column
-name. Changelog files written before this option was enabled expose these metadata fields as `NULL`.
-
-Columns listed in `'changelog-producer.event-metadata-fields'` cannot be renamed or dropped, because
-the metadata field names derived from them are referenced by downstream jobs. Remove a column from
-the option before renaming or dropping it.
+Columns listed in the option cannot be renamed or dropped, because downstream jobs reference the
+metadata field names. Remove a column from the option first.
 
 ```sql
--- Source table with event metadata preservation
 CREATE TABLE my_table (
     id INT PRIMARY KEY NOT ENFORCED,
     data STRING,
@@ -155,12 +141,9 @@ CREATE TABLE my_table (
     'changelog-producer.event-metadata-fields' = 'event_ts'
 );
 
--- external_sink is defined by its datastore connector and has a writable event_ts input.
+-- external_sink is keyed on id and takes the event timestamp as a regular input column.
+INSERT INTO external_sink SELECT id, data, source_event_ts AS event_ts FROM my_table;
 ```
-
-The Paimon source key `__internal__event_ts` populates the source alias `source_event_ts`. Map that
-alias to the external datastore's writable `event_ts` input. Any writable metadata key on the sink
-is separate and must be advertised by that sink connector.
 
 ## Full Compaction
 
