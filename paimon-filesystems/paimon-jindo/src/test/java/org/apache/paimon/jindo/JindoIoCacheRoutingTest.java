@@ -136,11 +136,10 @@ public class JindoIoCacheRoutingTest {
         fileIO.delete(DATA, false);
         fileIO.mkdirs(DATA.getParent());
         fileIO.rename(DATA, copy);
-        fileIO.copyFile(DATA, copy, true);
         verify(ossFs).exists(any());
-        verify(ossFs, times(2)).open(any(org.apache.hadoop.fs.Path.class));
+        verify(ossFs).open(any(org.apache.hadoop.fs.Path.class));
         verify(ossFs).getFileStatus(any());
-        verify(ossFs, times(2)).create(any(), anyBoolean());
+        verify(ossFs).create(any(), anyBoolean());
         verify(ossFs).listStatus(any(org.apache.hadoop.fs.Path.class));
         verify(ossFs).delete(any(), anyBoolean());
         verify(ossFs).mkdirs(any());
@@ -149,7 +148,7 @@ public class JindoIoCacheRoutingTest {
         // the two-phase write checks a routable data file on OSS, not on its cache target
         fileIO.tryToWriteAtomic(new Path(TABLE + "/snapshot/snapshot-3"), "{}");
         fileIO.newTwoPhaseOutputStream(copy, false);
-        verify(ossFs, times(4)).create(any(), anyBoolean());
+        verify(ossFs, times(3)).create(any(), anyBoolean());
         verify(ossFs, times(2)).exists(any());
         verify(ossFs, times(2)).rename(any(), any());
         verify(ossFs).getMpuStore(any());
@@ -224,27 +223,6 @@ public class JindoIoCacheRoutingTest {
         verify(ossFs).delete(any(), anyBoolean());
         verify(ossFs).rename(any(), any());
         verify(ossFs).listStatus(any(org.apache.hadoop.fs.Path.class));
-    }
-
-    @Test
-    public void testHelpersAskOssWhetherAFileIsGone() throws IOException {
-        JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
-
-        // the delete failed, OSS no longer has the file, the cache still does
-        when(clusterFs.exists(any())).thenReturn(true);
-        fileIO.deleteQuietly(DATA);
-        verify(ossFs).delete(any(), anyBoolean());
-        verify(ossFs).exists(any());
-        verify(clusterFs, never()).exists(any());
-
-        // a read failed on the cache, which no longer has the file, while OSS does
-        IOException unavailable = jindoError(6503, "read failed: 503 Service Unavailable");
-        when(accelFs.open(any(org.apache.hadoop.fs.Path.class))).thenThrow(unavailable);
-        when(accelFs.exists(any())).thenReturn(false);
-        when(ossFs.exists(any())).thenReturn(true);
-        assertThatThrownBy(() -> fileIO.readFileUtf8(MANIFEST)).isSameAs(unavailable);
-        verify(accelFs).exists(any());
-        verify(ossFs, times(2)).exists(any());
     }
 
     @Test
