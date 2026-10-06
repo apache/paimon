@@ -259,7 +259,19 @@ class OssLegacyModeTest(unittest.TestCase):
         with self.assertRaises(LegacyOssDirectoryListingError) as ctx:
             file_io.list_status(TABLE_PATH)
         self.assertIn("pyarrow >= 16", str(ctx.exception))
+        self.assertIn("set fs.oss.impl=jindo", str(ctx.exception))
         file_io.filesystem.get_file_info.assert_not_called()
+
+    def test_cpp_legacy_list_status_preserves_native_backend_in_error(self):
+        options = Options({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'legacy'})
+        with mock.patch.object(OssFileIO, '_initialize_oss_fs', return_value=mock.Mock()):
+            file_io = OssFileIO(TABLE_PATH, options)
+        file_io._oss_bucket_in_endpoint = True
+
+        with self.assertRaises(LegacyOssDirectoryListingError) as ctx:
+            file_io.list_status(TABLE_PATH)
+        self.assertIn("set fs.oss.python.impl=jindo", str(ctx.exception))
+        self.assertNotIn("set fs.oss.impl=jindo", str(ctx.exception))
 
     def test_modern_list_status_uses_selector(self):
         file_io = self._new_file_io(legacy=False)

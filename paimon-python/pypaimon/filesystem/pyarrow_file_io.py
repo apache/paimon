@@ -414,10 +414,13 @@ class PyArrowFileIO(FileIO):
 
     def list_status(self, path: str):
         if self._legacy_oss_mode():
+            impl_key = (OssOptions.OSS_PYTHON_IMPL.key()
+                        if self.properties.get(OssOptions.OSS_IMPL) == "cpp"
+                        else OssOptions.OSS_IMPL.key())
             raise LegacyOssDirectoryListingError(
                 "Listing OSS directories is not supported with PyArrow < 16 "
                 "(it parses the first key segment as a bucket). Upgrade to "
-                "pyarrow >= 16, or install pyjindosdk and set fs.oss.impl=jindo.")
+                f"pyarrow >= 16, or install pyjindosdk and set {impl_key}=jindo.")
         path_str = self.to_filesystem_path(path)
         selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
         return self.filesystem.get_file_info(selector)
