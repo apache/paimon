@@ -40,7 +40,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
@@ -248,56 +247,6 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopSrc = path(src);
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
         return getFileSystem(hadoopSrc, false).rename(hadoopSrc, hadoopDst);
-    }
-
-    @Override
-    public void deleteQuietly(Path file) {
-        if (cacheRouting == null) {
-            FileIO.super.deleteQuietly(file);
-            return;
-        }
-        // a cache may still hold a file that is already gone, so ask OSS
-        try {
-            if (!delete(file, false) && existsOnOss(file)) {
-                LOG.warn("Failed to delete file " + file);
-            }
-        } catch (IOException e) {
-            LOG.warn("Exception occurs when deleting file " + file, e);
-        }
-    }
-
-    @Override
-    public String readFileUtf8(Path path) throws IOException {
-        try {
-            return FileIO.super.readFileUtf8(path);
-        } catch (FileNotFoundException e) {
-            // FileIO reports a failed read as missing when exists() says so; let OSS decide that
-            if (cacheRouting != null && e.getCause() instanceof IOException && existsOnOss(path)) {
-                throw (IOException) e.getCause();
-            }
-            throw e;
-        }
-    }
-
-    private boolean existsOnOss(Path path) throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = path(path);
-        return getFileSystem(hadoopPath, false).exists(hadoopPath);
-    }
-
-    @Override
-    public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
-        if (cacheRouting == null) {
-            FileIO.super.copyFile(sourcePath, targetPath, overwrite);
-            return;
-        }
-        // copies read the source from the OSS endpoint, not from a cache endpoint
-        org.apache.hadoop.fs.Path hadoopSrc = path(sourcePath);
-        org.apache.hadoop.fs.Path hadoopDst = path(targetPath);
-        try (FSDataInputStream in = getFileSystem(hadoopSrc, false).open(hadoopSrc);
-                FSDataOutputStream out =
-                        getFileSystem(hadoopDst, false).create(hadoopDst, overwrite)) {
-            IOUtils.copyBytes(in, out, 4096);
-        }
     }
 
     protected org.apache.hadoop.fs.Path path(Path path) {
