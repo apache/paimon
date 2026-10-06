@@ -85,7 +85,9 @@ public class CompactionMetrics {
         registerGenericCompactionMetrics();
     }
 
-    /** Retire compact timers when an internally owned per-bucket compaction executor is released. */
+    /**
+     * Retire compact timers when an internally owned per-bucket compaction executor is released.
+     */
     public void retireCompactTimersForBucket(BinaryRow partition, int bucket) {
         PartitionAndBucket key = new PartitionAndBucket(partition, bucket);
         ReporterImpl reporter = reporters.get(key);
