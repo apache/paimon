@@ -101,7 +101,7 @@ class IoCacheRoutingTest(unittest.TestCase):
         self.assertIsNotNone(IoCacheRouting.create(self._options(**{"io-cache.enabled": " TRUE "})))
         for overrides in ({"io-cache.enabled": "false"}, {"io-cache.enabled": "yes"},
                           {"io-cache.policy": "none"}, {"io-cache.policy": "read,none"},
-                          {"io-cache.policy": "write,exists"}, {"io-cache.targets": ""},
+                          {"io-cache.policy": "exists,prefetch"}, {"io-cache.targets": ""},
                           {"io-cache.targets": "Bad_Name,1x"},
                           {"dlf.oss-endpoint": "oss-cn-hangzhou.aliyuncs.com"}):
             with self.subTest(overrides=overrides):
@@ -110,12 +110,16 @@ class IoCacheRoutingTest(unittest.TestCase):
         del options["io-cache.enabled"]
         self.assertIsNone(IoCacheRouting.create(options))
 
-    def test_policy_routes_only_read_and_meta(self):
+    def test_policy_routes_read_meta_and_write(self):
         routing = IoCacheRouting.create(self._options(**{"io-cache.policy": " Meta , READ ,prefetch,write"}))
+        routed = (Op.READ, Op.META, Op.EXISTS, Op.WRITE, Op.TWO_PHASE_WRITE)
         for op in Op:
             with self.subTest(op=op):
-                expected = "default" if op in (Op.READ, Op.META, Op.EXISTS) else None
+                expected = "default" if op in routed else None
                 self.assertEqual(expected, routing.route(op, self.DATA))
+        write_only = IoCacheRouting.create(self._options(**{"io-cache.policy": "write"}))
+        self.assertEqual("default", write_only.route(Op.WRITE, self.DATA))
+        self.assertIsNone(write_only.route(Op.READ, self.DATA))
         read_only = IoCacheRouting.create(self._options(**{"io-cache.policy": "read"}))
         self.assertIsNone(read_only.route(Op.META, self.DATA))
         self.assertIsNone(read_only.route(Op.EXISTS, self.DATA))

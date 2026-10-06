@@ -254,20 +254,35 @@ class IoCacheRoutingFileIOTest(unittest.TestCase):
         self.assertEqual(b"{}", self._content(self.origin, TABLE + "/snapshot/snapshot-2"))
         self.assertEqual([], self.created)
 
-    def test_writes_use_origin(self):
+    def test_writes_use_origin_without_write_policy(self):
+        file_io = self._file_io(_routing(policy="read,meta"))
+        with file_io.new_output_stream(DATA) as out:
+            out.write(b"written")
+        file_io.write_file(MANIFEST, "3")
+        self.assertEqual(b"written", self._content(self.origin, DATA))
+        self.assertEqual(b"3", self._content(self.origin, MANIFEST))
+        self.assertEqual([], self.created)
+
+    def test_writes_follow_the_route_with_write_policy(self):
         table = pa.table({"a": [1, 2]})
         file_io = self._file_io(_routing(policy="read,meta,write"))
         with file_io.new_output_stream(DATA) as out:
             out.write(b"written")
         file_io.write_parquet(OTHER_DATA, table)
-        file_io.overwrite_file_utf8(MANIFEST, "3")
+        file_io.write_file(MANIFEST, "3")
+        file_io.write_file(SNAPSHOT, "{}")
+        self.assertEqual(b"written", self._content(self.cluster, DATA))
+        self.assertEqual(table, pq.ParquetFile(str(self.cluster._to_file(OTHER_DATA))).read())
+        self.assertEqual(b"3", self._content(self.accel, MANIFEST))
+        self.assertEqual(b"{}", self._content(self.origin, SNAPSHOT))
+        # write_file checks existence on origin, not on the target
+        self._put(self.origin, OTHER_DATA, b"origin")
+        # unknown names are written on origin
         with file_io.filesystem.open_output_stream(UNKNOWN) as out:
             out.write(b"streamed")
-        self.assertEqual(b"written", self._content(self.origin, DATA))
-        self.assertEqual(table, pq.ParquetFile(str(self.origin._to_file(OTHER_DATA))).read())
-        self.assertEqual(b"3", self._content(self.origin, MANIFEST))
         self.assertEqual(b"streamed", self._content(self.origin, UNKNOWN))
-        self.assertEqual([], self.created)
+        with self.assertRaises(FileExistsError):
+            file_io.write_file(OTHER_DATA, "again")
 
     def test_filesystem_reads_follow_the_route(self):
         for file_io, value in ((self.origin, 1), (self.cluster, 2)):

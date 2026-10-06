@@ -96,7 +96,7 @@ class IoCacheRoutingFileIO(FileIO):
         return self._call(Op.META, path, lambda io: io.get_file_size(path))
 
     def new_output_stream(self, path: str):
-        return self._origin.new_output_stream(path)
+        return self._call(Op.WRITE, path, lambda io: io.new_output_stream(path))
 
     def exists(self, path: str) -> bool:
         return self._call(Op.EXISTS, path, lambda io: io.exists(path))
@@ -128,12 +128,16 @@ class IoCacheRoutingFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self._origin.try_to_write_atomic(path, content)
 
-    # Helpers that write, delete or check right after a delete run on origin, probes included.
     def write_file(self, path: str, content: str, overwrite: bool = False):
-        return self._origin.write_file(path, content, overwrite)
+        # The existence check before a write runs on origin, so no cache sees the file before it exists.
+        if not overwrite and self._origin.exists(path):
+            raise FileExistsError(f"File {path} already exists and overwrite=False")
+        return self._call(Op.WRITE, path, lambda io: io.write_file(path, content, True))
 
     def overwrite_file_utf8(self, path: str, content: str):
-        return self._origin.overwrite_file_utf8(path, content)
+        return self._call(Op.WRITE, path, lambda io: io.overwrite_file_utf8(path, content))
+
+    # Helpers that delete, or check right after a delete, run on origin, probes included.
 
     def delete_quietly(self, path: str):
         return self._origin.delete_quietly(path)
@@ -159,27 +163,28 @@ class IoCacheRoutingFileIO(FileIO):
 
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
-        return self._origin.write_parquet(path, data, compression, zstd_level, **kwargs)
+        return self._call(Op.WRITE, path, lambda io: io.write_parquet(path, data, compression, zstd_level, **kwargs))
 
     def write_orc(self, path: str, data, compression: str = 'zstd',
                   zstd_level: int = 1, **kwargs):
-        return self._origin.write_orc(path, data, compression, zstd_level, **kwargs)
+        return self._call(Op.WRITE, path, lambda io: io.write_orc(path, data, compression, zstd_level, **kwargs))
 
     def write_avro(self, path: str, data, avro_schema=None,
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):
-        return self._origin.write_avro(path, data, avro_schema, compression, zstd_level, **kwargs)
+        return self._call(Op.WRITE, path, lambda io: io.write_avro(
+            path, data, avro_schema, compression, zstd_level, **kwargs))
 
     def write_lance(self, path: str, data, **kwargs):
-        return self._origin.write_lance(path, data, **kwargs)
+        return self._call(Op.WRITE, path, lambda io: io.write_lance(path, data, **kwargs))
 
     def write_blob(self, path: str, data, **kwargs):
-        return self._origin.write_blob(path, data, **kwargs)
+        return self._call(Op.WRITE, path, lambda io: io.write_blob(path, data, **kwargs))
 
     def write_vortex(self, path: str, data, **kwargs):
-        return self._origin.write_vortex(path, data, **kwargs)
+        return self._call(Op.WRITE, path, lambda io: io.write_vortex(path, data, **kwargs))
 
     def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
-        return self._origin.write_row(path, data, fields, zstd_level, **kwargs)
+        return self._call(Op.WRITE, path, lambda io: io.write_row(path, data, fields, zstd_level, **kwargs))
 
     def close(self):
         with self._targets_lock:
@@ -249,14 +254,16 @@ class _IoCacheRoutingHandler(FileSystemHandler):
             lambda io: io.filesystem.open_input_stream(io.to_filesystem_path(path), compression=None))
 
     def open_output_stream(self, path: str, metadata):
-        origin = self._routing_io._origin
-        return origin.filesystem.open_output_stream(
-            origin.to_filesystem_path(path), compression=None, metadata=metadata)
+        return self._routing_io._call(
+            Op.WRITE, path,
+            lambda io: io.filesystem.open_output_stream(
+                io.to_filesystem_path(path), compression=None, metadata=metadata))
 
     def open_append_stream(self, path: str, metadata):
-        origin = self._routing_io._origin
-        return origin.filesystem.open_append_stream(
-            origin.to_filesystem_path(path), compression=None, metadata=metadata)
+        return self._routing_io._call(
+            Op.WRITE, path,
+            lambda io: io.filesystem.open_append_stream(
+                io.to_filesystem_path(path), compression=None, metadata=metadata))
 
     def get_file_info_selector(self, selector) -> list:
         origin = self._routing_io._origin

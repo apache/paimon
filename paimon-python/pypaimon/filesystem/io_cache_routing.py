@@ -43,7 +43,7 @@ _ORIGIN_DROPPED_PREFIXES = ("fs.oss.dlf-cache.", "fs.jindocache.")
 
 
 class Op(Enum):
-    """FileIO operations; only READ, META and EXISTS can go to a target."""
+    """FileIO operations; only READ, META, EXISTS, WRITE and TWO_PHASE_WRITE can go to a target."""
     READ = "read"
     META = "meta"
     EXISTS = "exists"
@@ -63,11 +63,11 @@ def _flag(value) -> bool:
 
 
 def _parse_policy(value) -> FrozenSet[Op]:
-    # read and meta can use a target; write only applies to JindoCache, none turns it off
+    # read, meta and write can use a target; none turns it off
     tokens = {token.strip().lower() for token in str(value or "").split(",")}
     if "none" in tokens:
         return frozenset()
-    return frozenset(op for op in (Op.READ, Op.META) if op.value in tokens)
+    return frozenset(op for op in (Op.READ, Op.META, Op.WRITE) if op.value in tokens)
 
 
 def _parse_routes(value: str) -> List[Tuple[set, str]]:
@@ -192,9 +192,11 @@ class IoCacheRouting:
 
     def route(self, op: Op, path: str) -> Optional[str]:
         """Name of the target of one request, or None when it goes to origin."""
-        # An existence check is a file status lookup.
+        # An existence check is a file status lookup, a two-phase write is a write.
         if op is Op.EXISTS:
             op = Op.META
+        elif op is Op.TWO_PHASE_WRITE:
+            op = Op.WRITE
         # Only OSS paths can use cache targets.
         if op not in self._policy or not path.startswith("oss://"):
             return None
