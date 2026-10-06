@@ -147,6 +147,8 @@ def create_native_write_table(table):
         table.options.snapshot_ignore_empty_commit())
     options['row-tracking.partition-group-on-commit'] = _option_value_to_string(
         table.options.row_tracking_partition_group_on_commit())
+    options['data-evolution.row-sidecar.enabled'] = _option_value_to_string(
+        table.options.data_evolution_row_sidecar_enabled())
     schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
     if environment.supports_version_management:
         if not _rest_catalog_supported(table):

@@ -56,9 +56,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
             pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
         return None
     if (not native_write_available()
-            # Rust does not produce the optional random-access .row sidecars.
-            or (table.options.data_evolution_enabled()
-                and table.options.data_evolution_row_sidecar_enabled())
             or table.bucket_mode() not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC,
                                            BucketMode.BUCKET_UNAWARE,
                                            BucketMode.CROSS_PARTITION,

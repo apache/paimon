@@ -29,6 +29,7 @@ from pypaimon.read.reader.field_indices import (
     blob_field_indices, descriptor_field_indices, vector_field_indices)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.utils.arrow_utils import as_blob_data, is_blob_data
 
 
 def _struct_field(column, name):
@@ -72,6 +73,7 @@ class NestedLeafBatchReader(RecordBatchReader):
         if batch is None:
             return None
         arrays = []
+        fields = list(self._schema)
         for i, path in enumerate(self._paths):
             column = batch.column(path[0])
             for name in path[1:]:
@@ -84,7 +86,10 @@ class NestedLeafBatchReader(RecordBatchReader):
             if column.type != target_type:
                 column = cast_array_for_schema_evolution(column, target_type)
             arrays.append(column)
-        return pa.RecordBatch.from_arrays(arrays, schema=self._schema)
+            if len(path) == 1 and is_blob_data(batch.schema.field(path[0])):
+                fields[i] = as_blob_data(fields[i])
+        return pa.RecordBatch.from_arrays(
+            arrays, schema=pa.schema(fields, metadata=self._schema.metadata))
 
     def close(self) -> None:
         self._inner.close()

@@ -23,3 +23,31 @@ def zero_column_batch(num_rows: int, metadata=None) -> pa.RecordBatch:
     empty_struct = pa.Array.from_buffers(
         pa.struct([]), num_rows, [None], children=[])
     return pa.RecordBatch.from_struct_array(empty_struct).replace_schema_metadata(metadata)
+
+
+# Internal provenance: Arrow represents BlobData and BlobRef as the same bytes
+# type. Payloads may themselves parse as references, so inspecting their bytes
+# cannot distinguish them. Remove this marker before exposing output batches.
+_ROW_BLOB_DATA = b'paimon.row-sidecar.blob-data'
+
+
+def is_blob_data(field):
+    return _ROW_BLOB_DATA in (field.metadata or {})
+
+
+def as_blob_data(field):
+    metadata = dict(field.metadata or {})
+    metadata[_ROW_BLOB_DATA] = b'true'
+    return field.with_metadata(metadata)
+
+
+def clear_blob_data(batch):
+    if not any(is_blob_data(field) for field in batch.schema):
+        return batch
+    fields = []
+    for field in batch.schema:
+        metadata = dict(field.metadata or {})
+        metadata.pop(_ROW_BLOB_DATA, None)
+        fields.append(field.with_metadata(metadata or None))
+    return pa.RecordBatch.from_arrays(
+        batch.columns, schema=pa.schema(fields, metadata=batch.schema.metadata))

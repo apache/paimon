@@ -23,7 +23,7 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.utils.arrow_utils import zero_column_batch
+from pypaimon.utils.arrow_utils import as_blob_data, is_blob_data, zero_column_batch
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
@@ -170,6 +170,11 @@ class MergeAllBatchReader(RecordBatchReader):
             if batch.num_rows == 0:
                 continue
 
+            # Do not combine reference and materialized-payload batches: one
+            # schema marker cannot describe two different BLOB representations.
+            if batches and not batch.schema.equals(batches[0].schema, check_metadata=True):
+                self._remainder = batch
+                break
             take = min(batch.num_rows, self._batch_size - num_rows)
             piece = batch.slice(0, take)
             piece_usage = _batch_offset_usage(piece)
@@ -270,11 +275,14 @@ class DataEvolutionMergeReader(RecordBatchReader):
             return None
 
         columns = []
+        fields = list(self.schema)
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
             if batch_index >= 0 and batches[batch_index] is not None:
                 columns.append(batches[batch_index].column(field_index).slice(0, min_rows))
+                if is_blob_data(batches[batch_index].schema.field(field_index)):
+                    fields[i] = as_blob_data(fields[i])
             else:
                 columns.append(pa.nulls(min_rows, type=self.schema.field(i).type))
 
@@ -282,7 +290,8 @@ class DataEvolutionMergeReader(RecordBatchReader):
             if batches[i] is not None and batches[i].num_rows > min_rows:
                 self._buffers[i] = batches[i].slice(min_rows, batches[i].num_rows - min_rows)
 
-        return pa.RecordBatch.from_arrays(columns, schema=self.schema)
+        return pa.RecordBatch.from_arrays(
+            columns, schema=pa.schema(fields, metadata=self.schema.metadata))
 
     def close(self) -> None:
         try:
