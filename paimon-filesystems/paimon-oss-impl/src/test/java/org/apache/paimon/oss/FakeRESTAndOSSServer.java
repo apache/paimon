@@ -60,6 +60,13 @@ public class FakeRESTAndOSSServer implements AutoCloseable {
         tokens.add(new GetTableTokenResponse(ossToken(accessKeyId), expiresAtMillis));
     }
 
+    /** Like {@link #addToken}, but with an access key pair and no security token. */
+    public void addTokenWithoutSecurityToken(String accessKeyId, long expiresAtMillis) {
+        Map<String, String> token = ossToken(accessKeyId);
+        token.remove("fs.oss.securityToken");
+        tokens.add(new GetTableTokenResponse(token, expiresAtMillis));
+    }
+
     public Map<String, String> ossToken(String accessKeyId) {
         Map<String, String> token = new HashMap<>();
         token.put("fs.oss.endpoint", endpoint());

@@ -261,6 +261,7 @@ class RESTTokenFileIOTest {
         assertThat(options.get(RESTTokenRefresher.OBJECT)).isEqualTo("table$branch_b1");
         assertThat(options.get(RESTTokenRefresher.EXPIRES_AT_MILLIS))
                 .isEqualTo(String.valueOf(expiresAt));
+        assertThat(options.get(RESTTokenRefresher.TOKEN_KEYS)).isEqualTo("token");
     }
 
     @Test

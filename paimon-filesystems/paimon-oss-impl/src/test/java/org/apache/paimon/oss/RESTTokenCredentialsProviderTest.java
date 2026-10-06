@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.rest.RESTTokenRefresher;
 
 import com.aliyun.oss.OSSClient;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,6 +73,17 @@ public class RESTTokenCredentialsProviderTest {
     }
 
     @Test
+    public void testDropsTheSecurityTokenWhenTheReloadedTokenHasNone() {
+        server.addTokenWithoutSecurityToken(
+                "ak-2", System.currentTimeMillis() + Duration.ofHours(4).toMillis());
+        RESTTokenCredentialsProvider provider =
+                provider(tableOptions("ak-1", Duration.ofMinutes(-1)));
+
+        assertThat(provider.getCredentials().getAccessKeyId()).isEqualTo("ak-2");
+        assertThat(provider.getCredentials().getSecurityToken()).isNull();
+    }
+
+    @Test
     public void testOSSFileIOInstallsTheProviderOnlyForARESTTable() throws Exception {
         OSSFileIO restFileIO = new OSSFileIO();
         OSSFileIO plainFileIO = new OSSFileIO();
@@ -101,13 +114,14 @@ public class RESTTokenCredentialsProviderTest {
 
     /** Catalog options with a merged token, as RESTTokenFileIO hands them to its delegate. */
     private Options tableOptions(String accessKeyId, Duration lifetime) {
+        Map<String, String> token = server.ossToken(accessKeyId);
         Options options = server.catalogOptions();
-        server.ossToken(accessKeyId).forEach(options::set);
+        token.forEach(options::set);
         options.set("file-io.allow-cache", "false");
         RESTTokenRefresher.configure(
                 options,
                 Identifier.create("db", "table"),
-                System.currentTimeMillis() + lifetime.toMillis());
+                new RESTToken(token, System.currentTimeMillis() + lifetime.toMillis()));
         return options;
     }
 
