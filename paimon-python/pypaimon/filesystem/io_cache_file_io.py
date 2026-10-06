@@ -128,6 +128,28 @@ class IoCacheRoutingFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self._origin.try_to_write_atomic(path, content)
 
+    # Helpers that write, delete or check right after a delete run on origin, probes included.
+    def write_file(self, path: str, content: str, overwrite: bool = False):
+        return self._origin.write_file(path, content, overwrite)
+
+    def overwrite_file_utf8(self, path: str, content: str):
+        return self._origin.overwrite_file_utf8(path, content)
+
+    def delete_quietly(self, path: str):
+        return self._origin.delete_quietly(path)
+
+    def delete_files_quietly(self, files: List[str]):
+        return self._origin.delete_files_quietly(files)
+
+    def delete_directory_quietly(self, directory: str):
+        return self._origin.delete_directory_quietly(directory)
+
+    def check_or_mkdirs(self, path: str):
+        return self._origin.check_or_mkdirs(path)
+
+    def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
+        return self._origin.copy_files(source_directory, target_directory, overwrite)
+
     def create_blob_presigned_url(self, table_root, descriptor, validity) -> str:
         return self._origin.create_blob_presigned_url(table_root, descriptor, validity)
 

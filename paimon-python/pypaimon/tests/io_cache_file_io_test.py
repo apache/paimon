@@ -17,7 +17,9 @@
 
 """Tests for IoCacheRoutingFileIO and its pyarrow filesystem."""
 
+import contextlib
 import gzip
+import inspect
 import io
 import os
 import shutil
@@ -574,6 +576,41 @@ OP_CALLS = {
             ROUTING["table_root"], BlobDescriptor(p, 0, 1), timedelta(minutes=1)),
     },
 }
+
+# Inherited FileIO methods that only read through new_input_stream, or do no I/O.
+INHERITED_READS = {
+    "read_blobs_concurrent", "read_file_range", "read_file_utf8", "read_overwritten_file_utf8",
+    "read_ranges_coalesced", "read_ranges_coalesced_views",
+}
+NO_IO = {"get", "parse_location"}
+
+
+def test_every_file_io_method_is_classified():
+    """A FileIO method the routing FileIO neither overrides nor lists here could reach a cache."""
+    public = {name for name, value in inspect.getmembers(FileIO)
+              if not name.startswith("_") and callable(value)}
+    overridden = {name for name in public if name in IoCacheRoutingFileIO.__dict__}
+    assert public - overridden - INHERITED_READS - NO_IO == set()
+    assert not overridden & INHERITED_READS
+
+
+@pytest.mark.parametrize("call", [
+    lambda f: f.write_file(DATA, "x"),
+    lambda f: f.overwrite_file_utf8(DATA, "x"),
+    lambda f: f.delete_quietly(DATA),
+    lambda f: f.delete_files_quietly([DATA]),
+    lambda f: f.check_or_mkdirs(PARTITION),
+    lambda f: f.copy_files(PARTITION, PARTITION + "-copy"),
+])
+def test_write_and_delete_helpers_use_origin(call):
+    routing = _routing()
+    file_ios = {key: _RecordingFileIO() for key in ("origin", "accel", "cluster")}
+    # the recorder says every path exists, so the existence checks may raise
+    with contextlib.suppress(FileExistsError, ValueError):
+        call(IoCacheRoutingFileIO(routing, file_ios["origin"], file_ios.__getitem__))
+    assert file_ios["origin"].calls
+    assert not file_ios["accel"].calls and not file_ios["cluster"].calls
+
 
 ROUTED_CALLS = [
     (case, name, call)
