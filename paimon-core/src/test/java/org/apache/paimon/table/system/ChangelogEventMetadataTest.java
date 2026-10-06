@@ -27,6 +27,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,7 +53,7 @@ class ChangelogEventMetadataTest {
         CoreOptions coreOptions = new CoreOptions(options);
 
         RowType extended =
-                ChangelogEventMetadata.appendMetadataFields(baseRowType, valueType, coreOptions);
+                ChangelogEventMetadata.appendMetadataFields(baseRowType, valueType, 1, coreOptions);
 
         assertThat(extended.getFieldNames())
                 .containsExactly("rowkind", "id", "event_ts", "__internal__event_ts");
@@ -77,7 +78,7 @@ class ChangelogEventMetadataTest {
         CoreOptions coreOptions = new CoreOptions(options);
 
         RowType extended =
-                ChangelogEventMetadata.appendMetadataFields(valueType, valueType, coreOptions);
+                ChangelogEventMetadata.appendMetadataFields(valueType, valueType, 3, coreOptions);
 
         assertThat(extended.getField("__internal__event_ts").id()).isEqualTo(4);
         assertThat(RowType.currentHighestFieldId(extended.getFields())).isEqualTo(4);
@@ -107,19 +108,19 @@ class ChangelogEventMetadataTest {
 
         DataField originalPublicField =
                 ChangelogEventMetadata.extraValueFields(
-                                originalValueType, new CoreOptions(originalOptions))
+                                originalValueType, 1, new CoreOptions(originalOptions))
                         .get(0);
         DataField renamedPublicField =
                 ChangelogEventMetadata.extraValueFields(
-                                renamedValueType, new CoreOptions(renamedOptions))
+                                renamedValueType, 1, new CoreOptions(renamedOptions))
                         .get(0);
         DataField originalStorageField =
                 ChangelogEventMetadata.storageValueFields(
-                                originalValueType, new CoreOptions(originalOptions))
+                                originalValueType, 1, new CoreOptions(originalOptions))
                         .get(0);
         DataField renamedStorageField =
                 ChangelogEventMetadata.storageValueFields(
-                                renamedValueType, new CoreOptions(renamedOptions))
+                                renamedValueType, 1, new CoreOptions(renamedOptions))
                         .get(0);
 
         assertThat(originalPublicField.name()).isEqualTo("__event__event_ts");
@@ -128,5 +129,63 @@ class ChangelogEventMetadataTest {
         assertThat(originalStorageField.name()).isEqualTo("__event__field_id_1");
         assertThat(renamedStorageField.name()).isEqualTo(originalStorageField.name());
         assertThat(renamedStorageField.id()).isEqualTo(originalStorageField.id());
+    }
+
+    @Test
+    void testMetadataFieldIdsSkipDroppedFieldIds() {
+        // Field 3 was dropped, but historical schemas still contain it.
+        RowType valueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "data", DataTypes.INT()),
+                                new DataField(2, "event_ts", DataTypes.BIGINT())));
+        CoreOptions coreOptions = lookupOptions("event_ts");
+
+        DataField publicField =
+                ChangelogEventMetadata.extraValueFields(valueType, 3, coreOptions).get(0);
+        DataField storageField =
+                ChangelogEventMetadata.storageValueFields(valueType, 3, coreOptions).get(0);
+
+        assertThat(publicField.id()).isEqualTo(4);
+        assertThat(storageField.id()).isEqualTo(4);
+    }
+
+    @Test
+    void testStorageFieldsUseHistoricalSourceType() {
+        RowType valueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "event_ts", DataTypes.DECIMAL(20, 0)),
+                                new DataField(2, "added_ts", DataTypes.BIGINT())));
+        CoreOptions coreOptions = lookupOptions("event_ts,added_ts");
+        List<DataField> storageFields =
+                ChangelogEventMetadata.storageValueFields(valueType, 2, coreOptions);
+
+        // The historical schema has event_ts as BIGINT and does not contain added_ts yet.
+        List<DataField> dataValueFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "event_ts", DataTypes.BIGINT().notNull()));
+        List<DataField> historicalFields =
+                ChangelogEventMetadata.storageValueFieldsForDataSchema(
+                        storageFields,
+                        valueType,
+                        dataValueFields,
+                        coreOptions.changelogEventMetadataFields());
+
+        assertThat(historicalFields).hasSize(2);
+        assertThat(historicalFields.get(0).id()).isEqualTo(storageFields.get(0).id());
+        assertThat(historicalFields.get(0).name()).isEqualTo(storageFields.get(0).name());
+        assertThat(historicalFields.get(0).type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(historicalFields.get(1)).isEqualTo(storageFields.get(1));
+    }
+
+    private static CoreOptions lookupOptions(String metadataFields) {
+        Options options = new Options();
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        options.set(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS, metadataFields);
+        return new CoreOptions(options);
     }
 }

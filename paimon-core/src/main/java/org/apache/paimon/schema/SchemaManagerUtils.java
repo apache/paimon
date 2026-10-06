@@ -261,6 +261,8 @@ final class SchemaManagerUtils {
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
                 assertNotUpdatingPrimaryKeyIndexColumn(
                         oldTableSchema, rename.fieldNames(), "rename");
+                assertNotUpdatingChangelogMetadataSourceColumn(
+                        oldTableSchema, rename.fieldNames(), "rename");
                 assertNotRenamingBlobColumn(newFields, rename.fieldNames());
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
@@ -637,20 +639,6 @@ final class SchemaManagerUtils {
             newOptions.put(SEQUENCE_FIELD.key(), String.join(",", newSequenceFields));
         }
 
-        // changelog metadata source fields rename
-        String metadataFieldsStr = options.get(CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key());
-        if (!StringUtils.isNullOrWhitespaceOnly(metadataFieldsStr)) {
-            List<String> metadataFields =
-                    Arrays.stream(metadataFieldsStr.split(","))
-                            .map(String::trim)
-                            .collect(Collectors.toList());
-            List<String> newMetadataFields =
-                    applyNotNestedColumnRename(metadataFields, renameMappings);
-            newOptions.put(
-                    CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(),
-                    String.join(",", newMetadataFields));
-        }
-
         // case 2: the option key is composed of certain fixed prefixes, suffixes, and the field
         // name, while the option value doesn't contain field names.
         List<Function<String, String>> fieldNameToOptionKeys =
@@ -766,6 +754,34 @@ final class SchemaManagerUtils {
                     String.format("Cannot drop partition key or primary key: [%s]", columnToDrop));
         }
         assertNotUpdatingPrimaryKeyIndexColumn(schema, change.fieldNames(), "drop");
+        assertNotUpdatingChangelogMetadataSourceColumn(schema, change.fieldNames(), "drop");
+    }
+
+    /**
+     * Changelog event metadata names are derived from the source column name and are referenced by
+     * downstream jobs, for example as a Flink metadata key. Renaming or dropping the source column
+     * would silently change or remove that name, so it is rejected.
+     */
+    static void assertNotUpdatingChangelogMetadataSourceColumn(
+            TableSchema schema, String[] fieldNames, String operation) {
+        // event metadata source fields can't be nested columns
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        if (CoreOptions.fromMap(schema.options())
+                .changelogEventMetadataFields()
+                .contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot %s column [%s] because it is used by '%s'. Remove it "
+                                    + "from '%s' before you %s it.",
+                            operation,
+                            fieldName,
+                            CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(),
+                            CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(),
+                            operation));
+        }
     }
 
     static void assertNotUpdatingPartitionKeys(

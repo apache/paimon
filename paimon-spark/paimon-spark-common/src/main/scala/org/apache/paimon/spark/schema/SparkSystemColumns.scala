@@ -46,7 +46,7 @@ object SparkSystemColumns {
   def changelogMetadataFieldNames(table: FileStoreTable): Set[String] = {
     val options = CoreOptions.fromMap(table.options())
     ChangelogEventMetadata
-      .extraValueFields(table.schema().logicalRowType(), options)
+      .extraValueFields(table.schema().logicalRowType(), table.schema().highestFieldId(), options)
       .asScala
       .map(_.name())
       .toSet

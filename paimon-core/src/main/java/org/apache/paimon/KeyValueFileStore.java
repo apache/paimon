@@ -142,7 +142,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         if (options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP
                 && !options.changelogEventMetadataFields().isEmpty()) {
             List<org.apache.paimon.types.DataField> extraFields =
-                    ChangelogEventMetadata.storageValueFields(valueType, options);
+                    ChangelogEventMetadata.storageValueFields(
+                            valueType, schema.highestFieldId(), options);
             if (!extraFields.isEmpty()) {
                 builder.withChangelogExtraValueFields(extraFields);
             }

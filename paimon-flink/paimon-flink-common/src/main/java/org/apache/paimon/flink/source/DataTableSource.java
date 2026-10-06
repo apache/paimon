@@ -26,6 +26,7 @@ import org.apache.paimon.flink.dataevolution.DataEvolutionRowLevelModificationSc
 import org.apache.paimon.flink.source.aggregate.PushedAggregateResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
@@ -188,11 +189,11 @@ public class DataTableSource extends BaseDataTableSource
         // Event metadata from changelog-producer.event-metadata-fields
         List<String> preserveColumns = eventPreserveColumns();
         if (!preserveColumns.isEmpty() && table instanceof FileStoreTable) {
-            org.apache.paimon.types.RowType valueType =
-                    ((FileStoreTable) table).schema().logicalRowType();
+            TableSchema schema = ((FileStoreTable) table).schema();
             CoreOptions coreOptions = CoreOptions.fromMap(table.options());
             for (DataField field :
-                    ChangelogEventMetadata.extraValueFields(valueType, coreOptions)) {
+                    ChangelogEventMetadata.extraValueFields(
+                            schema.logicalRowType(), schema.highestFieldId(), coreOptions)) {
                 DataType flinkType =
                         TypeConversions.fromLogicalToDataType(
                                 LogicalTypeConversion.toLogicalType(field.type()));
@@ -223,10 +224,11 @@ public class DataTableSource extends BaseDataTableSource
         if (!(table instanceof FileStoreTable)) {
             return Collections.emptyList();
         }
-        org.apache.paimon.types.RowType valueType =
-                ((FileStoreTable) table).schema().logicalRowType();
+        TableSchema schema = ((FileStoreTable) table).schema();
         return ChangelogEventMetadata.extraValueFields(
-                        valueType, CoreOptions.fromMap(table.options()))
+                        schema.logicalRowType(),
+                        schema.highestFieldId(),
+                        CoreOptions.fromMap(table.options()))
                 .stream()
                 .map(DataField::name)
                 .collect(Collectors.toList());

@@ -282,9 +282,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         return new Builder(
                 formatDiscover,
                 outputRowType.getFields(),
-                schema -> {
-                    List<DataField> fields = new ArrayList<>(schema.fields());
-                    fields.addAll(changelogExtraValueFields);
+                dataSchema -> {
+                    List<DataField> fields = new ArrayList<>(dataSchema.fields());
+                    fields.addAll(
+                            ChangelogEventMetadata.storageValueFieldsForDataSchema(
+                                    changelogExtraValueFields,
+                                    schema.logicalRowType(),
+                                    dataSchema.fields(),
+                                    metadataPreserveColumns));
                     if (rowTrackingEnabled) {
                         // maybe file has no row id and sequence number, but in manifest entry
                         return rowTypeWithRowTracking(new RowType(fields), true, true).getFields();
@@ -464,7 +469,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private static List<DataField> createChangelogExtraValueFields(
             TableSchema schema, CoreOptions options) {
-        return ChangelogEventMetadata.storageValueFields(schema.logicalRowType(), options);
+        return ChangelogEventMetadata.storageValueFields(
+                schema.logicalRowType(), schema.highestFieldId(), options);
     }
 
     private FileRecordReader<InternalRow> applyMetadataFallbackAndOuterProjection(

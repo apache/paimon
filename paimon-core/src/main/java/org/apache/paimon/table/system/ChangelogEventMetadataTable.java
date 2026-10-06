@@ -63,7 +63,10 @@ public class ChangelogEventMetadataTable implements DataTable, ReadonlyTable {
 
     public static RowType computeExtendedRowType(FileStoreTable table, RowType baseRowType) {
         return ChangelogEventMetadata.appendMetadataFields(
-                baseRowType, table.schema().logicalRowType(), CoreOptions.fromMap(table.options()));
+                baseRowType,
+                table.schema().logicalRowType(),
+                table.schema().highestFieldId(),
+                CoreOptions.fromMap(table.options()));
     }
 
     @Override

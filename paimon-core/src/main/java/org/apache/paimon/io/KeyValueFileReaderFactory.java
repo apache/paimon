@@ -39,6 +39,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
@@ -433,12 +434,17 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     KeyValue.createKeyValueFields(finalReadKeyType.getFields(), readValueFields);
             List<DataField> extraFields = changelogExtraValueFields;
             Function<TableSchema, List<DataField>> fieldsExtractor =
-                    schema -> {
-                        List<DataField> dataKeyFields = extractor.keyFields(schema);
+                    dataSchema -> {
+                        List<DataField> dataKeyFields = extractor.keyFields(dataSchema);
                         List<DataField> dataValueFields =
-                                new ArrayList<>(extractor.valueFields(schema));
+                                new ArrayList<>(extractor.valueFields(dataSchema));
                         if (extraFields != null) {
-                            dataValueFields.addAll(extraFields);
+                            dataValueFields.addAll(
+                                    ChangelogEventMetadata.storageValueFieldsForDataSchema(
+                                            extraFields,
+                                            valueType,
+                                            extractor.valueFields(dataSchema),
+                                            options.changelogEventMetadataFields()));
                         }
                         return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
                     };
