@@ -28,6 +28,71 @@ from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 
 class TestTableCommit(unittest.TestCase):
 
+    @parameterized.expand([
+        (mode, stream, published)
+        for mode in ('append', 'fixed', 'dynamic')
+        for stream in (False, True)
+        for published in (False, True)
+    ])
+    def test_writer_abort_preserves_files_after_commit_exception(self, mode, stream, published):
+        import pyarrow as pa
+        from unittest.mock import patch
+        from pypaimon import CatalogFactory, Schema
+
+        with TemporaryDirectory(prefix='paimon-uncertain-commit-') as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', True)
+            options = {'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+                       'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'}
+            primary_keys = []
+            if mode != 'append':
+                primary_keys = ['id']
+                options.update({'bucket': '1' if mode == 'fixed' else '-1',
+                                'changelog-producer': 'input'})
+            data = pa.table({'id': pa.array([1, 2], pa.int64()), 'value': ['a', 'b']})
+            catalog.create_table('default.t', Schema.from_pyarrow_schema(
+                data.schema, options=options, primary_keys=primary_keys), False)
+            table = catalog.get_table('default.t')
+            builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(data)
+                messages = writer.prepare_commit(1) if stream else writer.prepare_commit()
+                paths = [file.physical_path() for message in messages
+                         for file in message.new_files + message.changelog_files]
+                if mode != 'append':
+                    self.assertTrue(any(message.changelog_files for message in messages))
+                if mode == 'dynamic':
+                    self.assertTrue(any(message.index_adds for message in messages))
+                    paths.extend(table.path_factory().bucket_index_path(
+                        tuple(entry.partition.values), entry.bucket, entry.index_file, table.file_io)
+                        for message in messages for entry in message.index_adds)
+                self.assertTrue(paths)
+                publish = commit.file_store_commit.commit
+
+                def fail_commit(*args, **kwargs):
+                    if published:
+                        publish(*args, **kwargs)
+                    raise OSError('Commit outcome is unknown')
+
+                with patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit):
+                    with self.assertRaisesRegex(OSError, 'Commit outcome is unknown'):
+                        commit.commit(messages, 1) if stream else commit.commit(messages)
+                # An unknown commit outcome must never trigger explicit commit abort.
+                writer.abort()
+                writer.close()
+                for path in paths:
+                    self.assertTrue(table.file_io.exists(path), 'Deleted prepared file: ' + path)
+                snapshot = table.snapshot_manager().get_latest_snapshot()
+                self.assertEqual(snapshot.id if snapshot else 0, int(published))
+                if published:
+                    read_builder = table.new_read_builder()
+                    actual = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+                    self.assertEqual(actual.sort_by('id').to_pylist(), data.to_pylist())
+            finally:
+                writer.close()
+                commit.close()
+
     def test_empty_append_snapshot_is_opt_in_and_can_be_tagged(self):
         import pyarrow as pa
         import pypaimon.multimodal as pmm

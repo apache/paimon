@@ -370,7 +370,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
     @pytest.mark.python_write
-    def test_predicate_update_aborts_groups_after_later_failure(self):
+    def test_predicate_update_preserves_groups_after_later_failure(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
         table = self._create_seeded_table()
@@ -401,9 +401,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 )
 
         self.assertEqual(2, calls)
-        self.assertEqual(before_files, self._list_table_files(table))
+        self.assertLess(before_files, self._list_table_files(table))
 
-    def test_callable_update_aborts_groups_after_later_failure(self):
+    @pytest.mark.python_write
+    def test_callable_update_preserves_groups_after_later_failure(self):
         table = self._create_seeded_table()
         before_files = self._list_table_files(table)
         calls = 0
@@ -424,7 +425,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             )
 
         self.assertEqual(2, calls)
-        self.assertEqual(before_files, self._list_table_files(table))
+        self.assertLess(before_files, self._list_table_files(table))
 
     def test_array_assignment_spans_file_groups(self):
         table = self._create_seeded_table()
@@ -1617,6 +1618,60 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             [[('a', None)], [('k2', 'dict_val')], [('b', '2')]],
             result4['meta'].to_pylist())
 
+    @pytest.mark.python_write
+    def test_update_by_row_id_preserves_files_after_prepare_commit_failure(self):
+        table_schema = pa.schema([
+            ('id', pa.int32()),
+            ('age', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        table = self._create_table(pa_schema=table_schema)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'age': [10, 20],
+            'picture': [b'blob-1', b'blob-2'],
+        }, schema=table_schema))
+
+        rb = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        row_ids = rb.new_read().to_arrow(
+            rb.new_scan().plan().splits()).sort_by('id')['_ROW_ID']
+        before_files = self._list_table_files(table)
+
+        prepared_files = []
+
+        def fail_after_prepare_commit(
+                new_files, first_row_id, column_names, blob_columns):
+            prepared_files.extend(new_files)
+            raise RuntimeError("forced failure after prepare_commit")
+
+        for columns in (['age'], ['picture'], ['age', 'picture']):
+            with self.subTest(columns=columns):
+                wb = self._make_write_builder(table)
+                tu = wb.new_update().with_update_type(columns)
+                with mock.patch.object(
+                        TableUpdateByRowId,
+                        '_assign_update_file_metadata',
+                        new=staticmethod(fail_after_prepare_commit)):
+                    with self.assertRaisesRegex(
+                            RuntimeError, "forced failure after prepare_commit"):
+                        self._apply_update(tu, pa.Table.from_pydict({
+                            '_ROW_ID': [row_ids[0].as_py()],
+                            'age': [99],
+                            'picture': [b'updated-blob'],
+                        }, schema=pa.schema([
+                            ('_ROW_ID', pa.int64()),
+                            ('age', pa.int32()),
+                            ('picture', pa.large_binary()),
+                        ])).select(['_ROW_ID'] + columns), self._next_commit_id())
+
+                self.assertLess(before_files, self._list_table_files(table))
+                self.assertTrue(prepared_files)
+                self.assertTrue(all(table.file_io.exists(file.physical_path())
+                                    for file in prepared_files))
+                self.assertEqual([10, 20], self._read_all(table)['age'].to_pylist())
+                self.assertEqual(
+                    [b'blob-1', b'blob-2'], self._read_all(table)['picture'].to_pylist())
+
 
 # ======================================================================
 # Mode-specific mixins (add the ``update_by_arrow_with_row_id`` primitive)
@@ -1668,7 +1723,8 @@ class _StreamModeMixin(StreamModeMixin):
 class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
     """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
 
-    def test_update_batches_reject_same_file_and_abort_staged_files(self):
+    @pytest.mark.python_write
+    def test_update_batches_reject_same_file_and_preserve_staged_files(self):
         table = self._create_seeded_table()
         before_files = self._list_table_files(table)
         update = (
@@ -1684,7 +1740,7 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
                 pa.Table.from_pydict({'_ROW_ID': [1], 'age': [31]}),
             ]))
 
-        self.assertEqual(before_files, self._list_table_files(table))
+        self.assertLess(before_files, self._list_table_files(table))
         self.assertEqual(
             [25, 30, 35, 40, 45],
             self._read_all(table)['age'].to_pylist(),
@@ -1806,50 +1862,6 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
 
         result = self._read_all(table).sort_by('id')
         self.assertEqual([100, 30, 35, 40, 45], result['age'].to_pylist())
-
-    def test_update_by_row_id_aborts_files_after_prepare_commit_failure(self):
-        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-
-        table_schema = pa.schema([
-            ('id', pa.int32()),
-            ('age', pa.int32()),
-            ('picture', pa.large_binary()),
-        ])
-        table = self._create_table(pa_schema=table_schema)
-        self._write_arrow(table, pa.Table.from_pydict({
-            'id': [1, 2],
-            'age': [10, 20],
-            'picture': [b'blob-1', b'blob-2'],
-        }, schema=table_schema))
-
-        rb = table.new_read_builder().with_projection(['id', '_ROW_ID'])
-        row_ids = rb.new_read().to_arrow(
-            rb.new_scan().plan().splits()).sort_by('id')['_ROW_ID']
-        before_files = self._list_table_files(table)
-
-        def fail_after_prepare_commit(
-                new_files, first_row_id, column_names, blob_columns):
-            raise RuntimeError("forced failure after prepare_commit")
-
-        wb = self._make_write_builder(table)
-        tu = wb.new_update().with_update_type(['age', 'picture'])
-        with mock.patch.object(
-                TableUpdateByRowId,
-                '_assign_update_file_metadata',
-                new=staticmethod(fail_after_prepare_commit)):
-            with self.assertRaisesRegex(
-                    RuntimeError, "forced failure after prepare_commit"):
-                self._apply_update(tu, pa.Table.from_pydict({
-                    '_ROW_ID': [row_ids[0].as_py()],
-                    'age': [99],
-                    'picture': [b'updated-blob'],
-                }, schema=pa.schema([
-                    ('_ROW_ID', pa.int64()),
-                    ('age', pa.int32()),
-                    ('picture', pa.large_binary()),
-                ])), self._next_commit_id())
-
-        self.assertEqual(before_files, self._list_table_files(table))
 
 
 class TableUpdateStreamTest(_StreamModeMixin, _TableUpdateTestBase, unittest.TestCase):

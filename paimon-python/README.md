@@ -248,13 +248,14 @@ BLOB table selects the Python writer before any native data is written. Switchin
 to row writes after native Arrow writes is rejected. Use `write.native.enabled=false` when
 mixing Arrow batches and Python `Blob` objects in one writer.
 
-An explicit native writer `abort()` also deletes prepared files that have not
-been passed to a PyPaimon committer. Calling `close()` instead releases those
-files to the caller without deleting them; use `commit.abort(messages)` to
-discard them after closing the writer. Once a commit attempt starts, writer
-abort preserves its files even if the attempt raises, because a snapshot may
-already reference them. Stream writers retain cleanup ownership only for
-messages that have not been submitted to a committer.
+A successful `prepare_commit()` transfers file ownership to the caller.
+Writer `abort()` and `close()` preserve those prepared files and may clean only
+outputs still owned by the writer. Explicit `commit.abort(messages)` deletes
+newly written data, changelog, sidecars and added indexes, matching Java's
+Paimon Table committer. Call it only when those messages are known to be
+uncommitted and will never be submitted. Never call it after a commit with an
+unknown outcome: publication may have succeeded before its response failed.
+Internal failure paths preserve prepared files instead of calling commit abort.
 
 Both native options are disabled by default.
 

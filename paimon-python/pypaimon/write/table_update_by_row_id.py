@@ -948,6 +948,7 @@ class TableUpdateByRowId:
                 for value in values:
                     blob_writer.write_blob(value, arrow_type)
                 new_files.extend(blob_writer.prepare_commit())
+                blob_writer._release_prepared_files()
 
             if new_files:
                 self._assign_update_file_metadata(
@@ -970,6 +971,8 @@ class TableUpdateByRowId:
             else:
                 if file_store_write is not None:
                     file_store_write.abort()
+                # Never delete files from CommitMessage on failure.
+                # A commit can succeed even when its response raises an exception.
                 for blob_writer in blob_writers:
                     blob_writer.abort()
 

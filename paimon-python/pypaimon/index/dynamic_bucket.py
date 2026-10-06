@@ -444,6 +444,7 @@ class DynamicBucketIndexMaintainer:
 
     def prepare_commit(self) -> Dict[Tuple[Tuple, int], DynamicBucketIndexChanges]:
         changes: Dict[Tuple[Tuple, int], DynamicBucketIndexChanges] = {}
+        prepared_states = {}
         for key, (hashes, old_entry, modified) in self._states.items():
             if not modified:
                 continue
@@ -460,7 +461,9 @@ class DynamicBucketIndexMaintainer:
                     )
                 ] if old_entry is not None else [],
             )
-            self._states[key] = (hashes, new_entry, False)
+            prepared_states[key] = (hashes, new_entry, False)
+        # A failed bucket must not make a retry forget earlier additions.
+        self._states.update(prepared_states)
         return changes
 
     def release_prepared(self) -> None:

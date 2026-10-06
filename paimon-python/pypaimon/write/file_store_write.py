@@ -322,6 +322,12 @@ class FileStoreWrite:
         return any(isinstance(f.type, VectorType) for f in self.table.table_schema.fields)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+        messages = self._prepare_commit_messages(commit_identifier)
+        self._release_prepared_files()
+        return messages
+
+    def _prepare_commit_messages(self, commit_identifier) -> List[CommitMessage]:
+        """Collect files while their parent is still preparing the complete increment."""
         self.commit_identifier = commit_identifier
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
@@ -336,15 +342,13 @@ class FileStoreWrite:
                     total_buckets=self._runtime_total_buckets.get(partition),
                 )
                 commit_messages.append(commit_message)
-        self._release_prepared_postpone_files()
         return commit_messages
 
-    def _release_prepared_postpone_files(self):
+    def _release_prepared_files(self):
         # Hand off only after every partition prepared successfully. Until
         # then, close/abort must still clean up files from earlier partitions.
         for writer in self.data_writers.values():
-            if isinstance(writer, PostponeDataWriter):
-                writer._release_prepared_files()
+            writer._release_prepared_files()
 
     def close(self):
         """Close all data writers and clean up resources."""
@@ -409,8 +413,8 @@ class PostponeFixedBucketFileStoreWrite(FileStoreWrite):
             return {}
         return super()._load_seq_number_stats(partition)
 
-    def prepare_commit(self, commit_identifier):
-        messages = super().prepare_commit(commit_identifier)
+    def _prepare_commit_messages(self, commit_identifier):
+        messages = super()._prepare_commit_messages(commit_identifier)
         for message in messages:
             message.check_from_snapshot = self._check_from_snapshot
         return messages
