@@ -2859,7 +2859,6 @@ class LeRobotValidationTest(unittest.TestCase):
             target_frame_values = {
                 55: 168, 56: 216, 61: 56, 62: 88, 63: 120,
             }
-            expected_frame_values = [168, 216, 56, 88, 120]
 
             info_dir = temp_dir / "meta"
             info_dir.mkdir()
@@ -2900,6 +2899,14 @@ class LeRobotValidationTest(unittest.TestCase):
                         container.mux(packet)
                 for packet in stream.encode():
                     container.mux(packet)
+            # MPEG4 is lossy: compare imported frames with the source video's
+            # decoded pixels rather than its uncompressed input images.
+            with av.open(str(video_path)) as container:
+                expected_frame_values = [
+                    float(frame.to_ndarray(format="rgb24").mean())
+                    for index, frame in enumerate(container.decode(video=0))
+                    if index in target_frame_values
+                ]
             camera_b_path = (
                 temp_dir / "videos/camera_b/chunk-000/file-000.mp4")
             camera_b_path.parent.mkdir(parents=True)
@@ -2999,7 +3006,7 @@ class LeRobotValidationTest(unittest.TestCase):
             np.testing.assert_allclose(
                 [row["decoded"][0] for row in decoded_rows],
                 expected_frame_values,
-                atol=5,
+                atol=1e-6,
             )
             np.testing.assert_allclose(
                 [row["decoded"][1] for row in decoded_rows],
@@ -3066,8 +3073,8 @@ class LeRobotValidationTest(unittest.TestCase):
                         float(middle["camera"][0].mean()) * 255,
                         float(middle["camera"][1].mean()) * 255,
                     ],
-                    [56, 88],
-                    atol=5,
+                    expected_frame_values[2:4],
+                    atol=1e-4,
                 )
                 self.assertEqual(
                     [False, False], middle["camera_is_pad"].tolist())

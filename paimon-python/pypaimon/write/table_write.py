@@ -316,12 +316,9 @@ class TableWrite:
                 abort()
 
     def _prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        commit_messages = self.file_store_write.prepare_commit(commit_identifier)
+        commit_messages = self.file_store_write._prepare_commit_messages(commit_identifier)
         prepare_indexes = getattr(self.row_key_extractor, "prepare_commit", None)
-        if prepare_indexes is None:
-            return commit_messages
-
-        index_changes = prepare_indexes()
+        index_changes = prepare_indexes() if prepare_indexes is not None else {}
         messages_by_bucket = {
             (tuple(message.partition), message.bucket): message
             for message in commit_messages
@@ -338,6 +335,10 @@ class TableWrite:
                 messages_by_bucket[(partition, bucket)] = message
             message.index_adds.extend(changes.additions)
             message.index_deletes.extend(changes.deletions)
+        # Hand off data, changelog and HASH indexes together. Until every
+        # preparation succeeds, retain the metadata for retry and abort.
+        self.file_store_write._release_prepared_files()
+        self._release_prepared_indexes()
         return commit_messages
 
     def _release_prepared_indexes(self) -> None:
@@ -403,6 +404,4 @@ class StreamTableWrite(TableWrite):
         super().__init__(table, commit_user, None)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        messages = self._prepare_commit(commit_identifier)
-        self._release_prepared_indexes()
-        return messages
+        return self._prepare_commit(commit_identifier)

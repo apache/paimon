@@ -513,6 +513,7 @@ class _StubSidecarWriter:
     def __init__(self, row_count: int, file_name: str, fail_times: int = 0,
                  delete_on_abort: bool = True):
         self.committed_files = []
+        self.committed_changelog_files = []
         self.pending_row_count = 0
         self.prepare_commit_calls = 0
         self.aborted = False

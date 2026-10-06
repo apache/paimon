@@ -34,7 +34,6 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.read.native_plan import native_plan, native_version_at_least
 from pypaimon.schema.data_types import AtomicType
-from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 
@@ -205,7 +204,7 @@ def test_floating_bucket_dv_does_not_search_python_directory(tmp_path, file_uri,
 
 
 @pytest.mark.parametrize('layout', ['bucket', 'bucket-external', 'global-external'])
-def test_abort_removes_uncommitted_dv_from_its_actual_directory(tmp_path, layout):
+def test_explicit_abort_removes_uncommitted_dv_from_its_actual_directory(tmp_path, layout):
     table = _table(tmp_path, layout, 'a/b')
     _delete(table, [0])
     builder = table.new_batch_write_builder()
@@ -213,7 +212,7 @@ def test_abort_removes_uncommitted_dv_from_its_actual_directory(tmp_path, layout
     uncommitted = [entry for message in messages for entry in message.index_adds]
     assert uncommitted
     files_before = set(tmp_path.rglob('index-*'))
-    _abort_commit_messages(table, messages)
+    builder.new_commit().abort(messages)
     files_after = set(tmp_path.rglob('index-*'))
     removed = {path.name for path in files_before - files_after}
     assert removed == {entry.index_file.file_name for entry in uncommitted}

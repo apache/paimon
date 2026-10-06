@@ -42,7 +42,6 @@ def _native_row_id_table(table):
             or table.options.file_format() != 'parquet'
             or table.options.data_evolution_row_sidecar_enabled(False)
             or table.options.with_vector_format()
-            or table.options.video_frame_fields()
             or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_write_available()):
@@ -139,7 +138,9 @@ def _native_update_columns_supported(table, columns):
 
 def create_native_upsert(table, commit_user, data, keys, columns):
     """Prepare one core upsert from full Arrow rows or named row values."""
-    if not _native_update_columns_supported(table, columns):
+    if table.options.video_frame_fields() or not _native_update_columns_supported(table, columns):
+        # An upsert can append unmatched rows; packed video writing is still
+        # provided by the Python writer.
         return None
     native_table = _native_row_id_table(table)
     if native_table is None:

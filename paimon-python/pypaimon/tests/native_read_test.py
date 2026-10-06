@@ -899,7 +899,7 @@ def test_native_avro_read_uses_native_path():
 def test_native_read_falls_back_for_unsupported_dedicated_file():
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
-    split = _Split('camera.video')
+    split = _Split('camera.unsupported')
     split._native_split = object()
 
     with patch('pypaimon.read.native_plan.native_read') as native:
@@ -908,10 +908,11 @@ def test_native_read_falls_back_for_unsupported_dedicated_file():
     native.assert_not_called()
 
 
-def test_native_read_supports_blob_file_and_forwards_parallelism():
+@pytest.mark.parametrize('file_name', ['picture.blob', 'camera.video'])
+def test_native_read_supports_blob_and_video_files_and_forwards_parallelism(file_name):
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
-    split = _Split('picture.blob')
+    split = _Split(file_name)
     split._native_split = object()
 
     with patch(

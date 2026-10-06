@@ -85,48 +85,6 @@ def _reject_compact_increment(messages: List[CommitMessage]):
                 'Committing a compact increment requires a separate COMPACT snapshot.')
 
 
-def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
-    """Delete files created by messages known to be uncommitted."""
-    for message in commit_messages:
-        for file in (list(message.new_files) + list(message.changelog_files)
-                     + list(message.compact_after)
-                     + list(message.compact_changelog_files)):
-            path = None
-            try:
-                bucket_path = None if file.physical_path() else table.path_factory().bucket_path(
-                    tuple(message.partition), message.bucket)
-                for path in file.collect_files(bucket_path):
-                    table.file_io.delete_quietly(path)
-            except Exception as error:
-                logger.warning(
-                    "Failed to clean up file %s during abort: %s",
-                    path,
-                    error,
-                )
-        for entry in message.index_adds + message.compact_index_adds:
-            file_name = None
-            try:
-                index_file = entry.index_file
-                file_name = index_file.file_name
-                if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
-                    path = table.path_factory().bucket_index_path(
-                        tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
-                else:
-                    path = (
-                        index_file.external_path
-                        or table.path_factory()
-                        .global_index_path_factory()
-                        .to_path(file_name)
-                    )
-                table.file_io.delete_quietly(path)
-            except Exception as error:
-                logger.warning(
-                    "Failed to clean up index file %s during abort: %s",
-                    file_name,
-                    error,
-                )
-
-
 class CommitResult:
     """Base class for commit results."""
 
@@ -1062,8 +1020,51 @@ class FileStoreCommit:
             self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
 
     def abort(self, commit_messages: List[CommitMessage]):
-        """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
-        _abort_commit_messages(self.table, commit_messages)
+        """Delete files for an explicitly abandoned, known-uncommitted write.
+
+        Mirrors Java FileStoreCommitImpl.abort: delete new data, changelog,
+        compaction outputs and added indexes, preserving deleted inputs.
+        Never call after a commit whose outcome is unknown. Internal error
+        paths must preserve prepared files instead of calling this method.
+        """
+        for message in commit_messages:
+            for file in (list(message.new_files) + list(message.changelog_files)
+                         + list(message.compact_after)
+                         + list(message.compact_changelog_files)):
+                path = None
+                try:
+                    bucket_path = None if file.physical_path() else self.table.path_factory().bucket_path(
+                        tuple(message.partition), message.bucket)
+                    for path in file.collect_files(bucket_path):
+                        self.table.file_io.delete_quietly(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to clean up file %s during abort: %s",
+                        path,
+                        error,
+                    )
+            for entry in message.index_adds + message.compact_index_adds:
+                file_name = None
+                try:
+                    index_file = entry.index_file
+                    file_name = index_file.file_name
+                    if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
+                        path = self.table.path_factory().bucket_index_path(
+                            tuple(entry.partition.values), entry.bucket, index_file, self.table.file_io)
+                    else:
+                        path = (
+                            index_file.external_path
+                            or self.table.path_factory()
+                            .global_index_path_factory()
+                            .to_path(file_name)
+                        )
+                    self.table.file_io.delete_quietly(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to clean up index file %s during abort: %s",
+                        file_name,
+                        error,
+                    )
 
     def close(self):
         """Close the FileStoreCommit and release resources."""

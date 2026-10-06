@@ -47,7 +47,6 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -216,8 +215,8 @@ class TableUpdate:
                 updater.update_columns(table, cols)
             return [] if updater is None else updater.commit_messages
         except Exception:
-            if updater is not None:
-                _abort_commit_messages(self.table, updater.commit_messages)
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
 
     def _upsert_by_arrow_with_key(
@@ -356,7 +355,8 @@ class TableUpdate:
                         update_table, list(assignments.keys())
                     )
         except Exception:
-            _abort_commit_messages(self.table, updater.commit_messages)
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
         return updater.commit_messages
 

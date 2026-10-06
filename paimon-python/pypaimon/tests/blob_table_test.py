@@ -1748,7 +1748,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[('bad', None)]], type=map_blob_type),
         }, schema=pa_schema)
         invalid_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "does not allow null values"):
+        with self.assertRaisesRegex(ValueError, "does not allow null values|non-nullable"):
             invalid_writer.write_arrow(invalid_data)
         invalid_writer.abort()
 
@@ -1821,7 +1821,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=array_blob_type),
         }, schema=pa_schema)
         invalid_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "does not allow null elements"):
+        with self.assertRaisesRegex(ValueError, "does not allow null elements|cannot contain nulls"):
             invalid_writer.write_arrow(invalid_data)
         invalid_writer.abort()
 

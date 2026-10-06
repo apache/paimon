@@ -185,7 +185,7 @@ def test_provided_plan_does_not_fill_missing_partitions_from_default(tmp_path):
 
 
 @pytest.mark.parametrize('prepared', [False, True])
-def test_abort_and_close_keep_commit_message_ownership(tmp_path, prepared):
+def test_abort_and_close_preserve_prepared_files(tmp_path, prepared):
     table = _table(tmp_path)
     builder = table.new_postpone_fixed_bucket_write_builder()
     writer = builder.new_write()
@@ -197,7 +197,10 @@ def test_abort_and_close_keep_commit_message_ownership(tmp_path, prepared):
         assert paths and all(table.file_io.exists(path) for path in paths)
     writer.abort()
     writer.close()
-    assert all(not table.file_io.exists(path) for path in paths)
+    if prepared:
+        assert all(table.file_io.exists(path) for path in paths)
+    else:
+        assert not list(tmp_path.rglob('*.parquet'))
     assert table.snapshot_manager().get_latest_snapshot() is None
 
 

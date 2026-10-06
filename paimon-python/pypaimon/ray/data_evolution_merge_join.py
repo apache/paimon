@@ -345,7 +345,6 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
 def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
-    from pypaimon.write.file_store_commit import _abort_commit_messages
     from pypaimon.write.row_id_file_index import RowIdFileIndex
 
     table_read = TableRead(
@@ -394,7 +393,8 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     try:
         messages = updater.update_columns(updates, context.update_cols)
     except Exception:
-        _abort_commit_messages(context.table, updater.commit_messages)
+        # Never delete files from CommitMessage on failure.
+        # A commit can succeed even when its response raises an exception.
         raise
     return messages, updates.num_rows, row_ids
 
@@ -466,8 +466,8 @@ def distributed_self_merge_update_apply(
             submit_next()
 
     if first_error is not None:
-        from pypaimon.write.file_store_commit import _abort_commit_messages
-        _abort_commit_messages(plan.table, messages)
+        # Never delete files from CommitMessage on failure.
+        # A commit can succeed even when its response raises an exception.
         raise first_error
     return messages, num_updated, row_ids
 

@@ -40,7 +40,6 @@ from pypaimon.write.file_store_commit import (
     FileStoreCommit,
     RollbackRetryResult,
     RewriteResult,
-    _abort_commit_messages,
     _reject_compact_increment,
     _row_id_check_from_messages,
 )
@@ -79,67 +78,53 @@ class TestRowIdCheckFromMessages(unittest.TestCase):
                 None, [CommitMessage((), 0, [], check_from_snapshot=-1)], 1)
 
 
-class TestAbortCommitMessages(unittest.TestCase):
+class TestExplicitCommitAbort(unittest.TestCase):
 
-    @staticmethod
-    def _file_meta(**kwargs):
-        return DataFileMeta(
-            file_name='data.parquet', file_size=1, row_count=1,
-            min_key=None, max_key=None, key_stats=None, value_stats=None,
-            min_sequence_number=0, max_sequence_number=0, schema_id=0,
-            level=0, extra_files=kwargs.pop('extra_files', []), **kwargs)
-
-    def test_reconstructs_local_path_after_wire_decode(self):
-        table = Mock()
-        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
-        file = self._file_meta()
-        message = CommitMessage((1,), 0, [file])
-        _abort_commit_messages(table, [message])
-        table.file_io.delete_quietly.assert_called_once_with(
-            '/table/p=1/bucket-0/data.parquet')
-
-    def test_reconstructs_aligned_sidecars_after_wire_decode(self):
-        table = Mock()
-        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
-        file = self._file_meta(extra_files=['data.parquet.index'])
-        _abort_commit_messages(table, [CommitMessage((1,), 0, [file])])
-        self.assertEqual(table.file_io.delete_quietly.call_args_list, [
-            unittest.mock.call('/table/p=1/bucket-0/data.parquet'),
-            unittest.mock.call('/table/p=1/bucket-0/data.parquet.index'),
-        ])
-
-    def test_deletes_literal_external_paths_and_preserves_metadata(self):
+    def test_abort_deletes_new_data_sidecars_changelog_compact_and_indexes_only(self):
         with TemporaryDirectory() as directory:
             parent = Path(directory) / 'pt=a%2Fb%25%3F%23'
             parent.mkdir()
-            paths = [parent / 'data.parquet', parent / 'data.parquet.index']
+            paths = [parent / name for name in (
+                'data.parquet', 'data.parquet.index', 'changelog.parquet',
+                'compact-before.parquet', 'compact-after.parquet',
+                'compact-changelog.parquet', 'index-file', 'old-index')]
             for path in paths:
-                path.touch()
-            external_path = 'file:' + paths[0].as_posix()
-            file = self._file_meta(external_path=external_path, extra_files=[paths[1].name])
-            table = Mock(file_io=LocalFileIO())
-            _abort_commit_messages(table, [CommitMessage(('a/b%?#',), 0, [file])])
-            self.assertFalse(any(path.exists() for path in paths))
-            self.assertEqual(file.external_path, external_path)
-            self.assertEqual(file.extra_files, [paths[1].name])
-            table.path_factory.assert_not_called()
+                path.write_bytes(b'keep')
 
-    def test_index_path_failure_does_not_escape_abort(self):
-        table = Mock()
-        table.path_factory.side_effect = RuntimeError("path lookup failed")
-        index_file = Mock(file_name="index-file", external_path=None)
-        message = Mock(
-            new_files=[],
-            changelog_files=[],
-            index_adds=[Mock(index_file=index_file)],
-            compact_after=[],
-            compact_changelog_files=[],
-            compact_index_adds=[],
-        )
+            def meta(path, **kwargs):
+                return DataFileMeta(
+                    file_name=path.name, file_size=4, row_count=1,
+                    min_key=None, max_key=None, key_stats=None, value_stats=None,
+                    min_sequence_number=0, max_sequence_number=0, schema_id=0,
+                    level=0, extra_files=kwargs.pop('extra_files', []),
+                    external_path='file:' + path.as_posix(), **kwargs)
 
-        with self.assertLogs(
-                'pypaimon.write.file_store_commit', level='WARNING'):
-            _abort_commit_messages(table, [message])
+            index_entry = Mock(index_file=Mock(index_type='BTREE', external_path=str(paths[-2])))
+            old_index = Mock(index_file=Mock(index_type='BTREE', external_path=str(paths[-1])))
+            message = CommitMessage(
+                ('a/b%?#',), 0, [meta(paths[0], extra_files=[paths[1].name])],
+                deleted_files=[meta(paths[3])], changelog_files=[meta(paths[2])],
+                compact_before=[meta(paths[3])], compact_after=[meta(paths[4])],
+                compact_changelog_files=[meta(paths[5])], index_adds=[index_entry],
+                index_deletes=[old_index], compact_index_adds=[index_entry],
+                compact_index_deletes=[old_index])
+            commit = FileStoreCommit.__new__(FileStoreCommit)
+            commit.table = Mock(file_io=LocalFileIO())
+            commit.abort([message])
+            commit.abort([message])
+            for i, path in enumerate(paths):
+                self.assertEqual(path.exists(), i in (3, len(paths) - 1), str(path))
+
+    def test_abort_continues_after_storage_cleanup_errors(self):
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.table = Mock()
+        commit.table.file_io.delete_quietly.side_effect = [OSError('cleanup failed'), None]
+        first = Mock()
+        first.collect_files.return_value = ['/first']
+        second = Mock()
+        second.collect_files.return_value = ['/second']
+        commit.abort([CommitMessage((), 0, [first, second])])
+        self.assertEqual(commit.table.file_io.delete_quietly.call_count, 2)
 
 
 class TestFileStoreCommitRowTracking(unittest.TestCase):

@@ -154,7 +154,7 @@ def test_cross_partition_rowkind_and_row_input(tmp_path):
 
 
 @pytest.mark.parametrize('committed', [False, True])
-def test_cross_partition_abort_preserves_committed_files(tmp_path, committed):
+def test_cross_partition_abort_preserves_prepared_and_committed_files(tmp_path, committed):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
@@ -167,7 +167,7 @@ def test_cross_partition_abort_preserves_committed_files(tmp_path, committed):
         if committed:
             commit.commit(messages)
         writer.abort()
-        assert all(table.file_io.exists(p) == committed for p in paths)
+        assert all(table.file_io.exists(p) for p in paths)
     finally:
         writer.close()
         commit.close()
