@@ -78,16 +78,16 @@ class TestRowIdCheckFromMessages(unittest.TestCase):
                 None, [CommitMessage((), 0, [], check_from_snapshot=-1)], 1)
 
 
-class TestCommitAbortPreservesFiles(unittest.TestCase):
+class TestExplicitCommitAbort(unittest.TestCase):
 
-    def test_abort_preserves_data_sidecars_changelog_compact_and_index_files(self):
+    def test_abort_deletes_new_data_sidecars_changelog_compact_and_indexes_only(self):
         with TemporaryDirectory() as directory:
             parent = Path(directory) / 'pt=a%2Fb%25%3F%23'
             parent.mkdir()
             paths = [parent / name for name in (
                 'data.parquet', 'data.parquet.index', 'changelog.parquet',
                 'compact-before.parquet', 'compact-after.parquet',
-                'compact-changelog.parquet', 'index-file')]
+                'compact-changelog.parquet', 'index-file', 'old-index')]
             for path in paths:
                 path.write_bytes(b'keep')
 
@@ -99,27 +99,32 @@ class TestCommitAbortPreservesFiles(unittest.TestCase):
                     level=0, extra_files=kwargs.pop('extra_files', []),
                     external_path='file:' + path.as_posix(), **kwargs)
 
-            index_entry = Mock(index_file=Mock(external_path=str(paths[-1])))
+            index_entry = Mock(index_file=Mock(index_type='BTREE', external_path=str(paths[-2])))
+            old_index = Mock(index_file=Mock(index_type='BTREE', external_path=str(paths[-1])))
             message = CommitMessage(
                 ('a/b%?#',), 0, [meta(paths[0], extra_files=[paths[1].name])],
                 deleted_files=[meta(paths[3])], changelog_files=[meta(paths[2])],
                 compact_before=[meta(paths[3])], compact_after=[meta(paths[4])],
                 compact_changelog_files=[meta(paths[5])], index_adds=[index_entry],
-                index_deletes=[index_entry], compact_index_adds=[index_entry])
+                index_deletes=[old_index], compact_index_adds=[index_entry],
+                compact_index_deletes=[old_index])
             commit = FileStoreCommit.__new__(FileStoreCommit)
             commit.table = Mock(file_io=LocalFileIO())
             commit.abort([message])
             commit.abort([message])
-            self.assertEqual([b'keep'] * len(paths), [path.read_bytes() for path in paths])
+            for i, path in enumerate(paths):
+                self.assertEqual(path.exists(), i in (3, len(paths) - 1), str(path))
 
-    def test_abort_does_not_inspect_or_delete_message_paths(self):
+    def test_abort_continues_after_storage_cleanup_errors(self):
         commit = FileStoreCommit.__new__(FileStoreCommit)
         commit.table = Mock()
-        commit.table.path_factory.side_effect = AssertionError('Unexpected path lookup')
-        commit.table.file_io.delete_quietly.side_effect = AssertionError('Unsafe deletion')
-        commit.abort([CommitMessage((), 0, [Mock()])])
-        commit.table.path_factory.assert_not_called()
-        commit.table.file_io.delete_quietly.assert_not_called()
+        commit.table.file_io.delete_quietly.side_effect = [OSError('cleanup failed'), None]
+        first = Mock()
+        first.collect_files.return_value = ['/first']
+        second = Mock()
+        second.collect_files.return_value = ['/second']
+        commit.abort([CommitMessage((), 0, [first, second])])
+        self.assertEqual(commit.table.file_io.delete_quietly.call_count, 2)
 
 
 class TestFileStoreCommitRowTracking(unittest.TestCase):

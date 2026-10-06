@@ -135,7 +135,7 @@ def test_native_external_escaped_partition_and_abort(tmp_path, strategy):
         files = [file for message in messages for file in message.new_files]
         assert files and all(table.file_io.exists(file.file_path) for file in files)
         commit.abort(messages)
-        assert all(table.file_io.exists(file.file_path) for file in files)
+        assert not any(table.file_io.exists(file.file_path) for file in files)
     finally:
         writer.close()
         commit.close()
@@ -177,7 +177,7 @@ def test_external_updates_upserts_deletes_history_and_abort(tmp_path, strategy, 
         commit.abort(messages)
     finally:
         commit.close()
-    assert all(table.file_io.exists(path) for path in staged)
+    assert not any(table.file_io.exists(path) for path in staged)
     assert _read(table, True, True, snapshot=1) == original.to_pylist()
     assert [row['value'] for row in _read(table, True, True)] == [30, 40]
 
@@ -203,7 +203,7 @@ def test_external_blob_writer_and_readers(tmp_path, strategy, native):
 
 
 @pytest.mark.parametrize('mode', ['append', 'pk', 'evolution'])
-def test_python_abort_preserves_native_external_sidecars(tmp_path, mode):
+def test_python_abort_removes_native_external_sidecars(tmp_path, mode):
     table = _table(tmp_path, mode, 'entropy-inject', True, extra={
         'commit.native.enabled': 'false', 'file-index.bloom-filter.columns': 'value',
         'file-index.bloom-filter.value.items': '10', 'file-index.in-manifest-threshold': '0 B'})
@@ -219,7 +219,7 @@ def test_python_abort_preserves_native_external_sidecars(tmp_path, mode):
                  for path in file.collect_files()]
         assert all(table.file_io.exists(path) for path in paths)
         commit.abort(messages)
-        assert all(table.file_io.exists(path) for path in paths)
+        assert not any(table.file_io.exists(path) for path in paths)
     finally:
         writer.close()
         commit.close()

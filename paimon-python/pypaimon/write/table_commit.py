@@ -137,9 +137,18 @@ class TableCommit:
             return None
 
     def abort(self, commit_messages: List[CommitMessage]):
-        """Preserve files for both Python and native committers."""
-        # Never delete files based on CommitMessage, including through the
-        # native committer: a failed response does not prove publication failed.
+        """Delete explicitly abandoned, known-uncommitted files.
+
+        Never call after a commit whose outcome is unknown. Publication may
+        have succeeded before its response failed. Internal failure paths
+        must preserve prepared files instead of calling this method.
+        """
+        prepared = self._prepare_native_commit(commit_messages)
+        if prepared is not None:
+            native, messages = prepared
+            native.abort(messages)
+            return
+        self.file_store_commit.abort(commit_messages)
 
     def close(self):
         try:

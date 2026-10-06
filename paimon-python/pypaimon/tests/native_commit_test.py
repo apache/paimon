@@ -313,7 +313,7 @@ def test_native_empty_commit_preserves_python_option(
 
 @requires_native
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_abort_preserves_prepared_files_in_native_environment(tmp_path, native_rest_catalog, overwrite):
+def test_native_abort_removes_uncommitted_files(tmp_path, native_rest_catalog, overwrite):
     table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_batch_write_builder()
     if overwrite:
@@ -325,14 +325,14 @@ def test_abort_preserves_prepared_files_in_native_environment(tmp_path, native_r
     try:
         with patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('Python fallback')):
             commit.abort(messages)
-        assert all(path.exists() for path in files)
+        assert not any(path.exists() for path in files)
         assert table.snapshot_manager().get_latest_snapshot() is None
     finally:
         commit.close()
 
 
 @requires_native
-def test_abort_preserves_python_partition_files(
+def test_python_file_in_legacy_partition_uses_python_abort(
         tmp_path, native_rest_catalog):
     table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_batch_write_builder()
@@ -346,8 +346,8 @@ def test_abort_preserves_python_partition_files(
         with patch.object(commit.file_store_commit, 'abort',
                           wraps=commit.file_store_commit.abort) as python_abort:
             commit.abort(messages)
-        python_abort.assert_not_called()
-        assert table.file_io.exists(file.file_path)
+        python_abort.assert_called_once_with(messages)
+        assert not table.file_io.exists(file.file_path)
     finally:
         commit.close()
 
@@ -372,8 +372,9 @@ def test_preflight_failure_uses_python(tmp_path, failure):
     commit.close()
 
 
+@pytest.mark.parametrize('method', ['commit', 'abort'])
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_native_commit_failure_never_falls_back_or_aborts(tmp_path, overwrite):
+def test_native_mutation_failure_never_falls_back_or_aborts(tmp_path, method, overwrite):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     if overwrite:
@@ -381,20 +382,21 @@ def test_native_commit_failure_never_falls_back_or_aborts(tmp_path, overwrite):
     messages = _prepare(builder, [{'id': 1, 'pt': 'a'}])
     commit = builder.new_commit()
     native = Mock()
-    native.commit.side_effect = OSError('outcome unknown')
+    getattr(native, method).side_effect = OSError('outcome unknown')
     with patch('pypaimon.write.native_commit.create_native_commit', return_value=native), \
             patch('pypaimon.write.native_commit.to_native_commit_messages', return_value=['wire']), \
             patch.object(commit.file_store_commit, 'commit') as fallback, \
             patch.object(commit.file_store_commit, 'overwrite') as fallback_overwrite, \
             patch.object(commit.file_store_commit, 'abort') as abort:
         with pytest.raises(OSError, match='outcome unknown'):
-            commit.commit(messages)
+            getattr(commit, method)(messages)
         fallback.assert_not_called()
         fallback_overwrite.assert_not_called()
         abort.assert_not_called()
-        native.abort.assert_not_called()
-        with pytest.raises(RuntimeError, match='one-time'):
-            commit.commit(messages)
+        if method == 'commit':
+            native.abort.assert_not_called()
+            with pytest.raises(RuntimeError, match='one-time'):
+                commit.commit(messages)
     assert list(tmp_path.rglob('data-*.parquet'))
     commit.close()
 

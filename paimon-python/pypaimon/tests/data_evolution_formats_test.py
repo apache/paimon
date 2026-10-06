@@ -541,7 +541,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.column('payload').to_pylist(), blobs)
 
     @pytest.mark.python_write
-    def test_blob_abort_preserves_prepared_files(self):
+    def test_blob_abort_preserves_prepared_files_until_committer_aborts(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('payload', pa.large_binary()),
@@ -578,9 +578,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         finally:
             commit.close()
         for file_meta in all_files:
-            self.assertTrue(
+            self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),
-                f"Abort deleted prepared file {file_meta.file_name}",
+                f"Expected abort to delete {file_meta.file_name}",
             )
 
     def test_blob_column_subset_evolution(self):
@@ -911,7 +911,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
     # ------------------------------------------------------------------
 
     @pytest.mark.python_write
-    def test_vector_abort_preserves_prepared_files(self):
+    def test_vector_abort_preserves_prepared_files_until_committer_aborts(self):
         pa_schema = pa.schema([
             ('id', pa.int64()),
             ('embed', pa.list_(pa.float32(), 3)),
@@ -954,9 +954,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         finally:
             commit.close()
         for file_meta in all_files:
-            self.assertTrue(
+            self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),
-                f"Abort deleted prepared file {file_meta.file_name}",
+                f"Expected abort to delete {file_meta.file_name}",
             )
 
     @pytest.mark.python_write
@@ -1004,9 +1004,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         finally:
             commit.close()
         for file_meta in all_files:
-            self.assertTrue(
+            self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),
-                f"Abort deleted prepared file {file_meta.file_name}",
+                f"Expected abort to delete {file_meta.file_name}",
             )
 
     @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")

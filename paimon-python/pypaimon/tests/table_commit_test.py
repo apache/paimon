@@ -78,7 +78,7 @@ class TestTableCommit(unittest.TestCase):
                 with patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit):
                     with self.assertRaisesRegex(OSError, 'Commit outcome is unknown'):
                         commit.commit(messages, 1) if stream else commit.commit(messages)
-                commit.abort(messages)
+                # An unknown commit outcome must never trigger explicit commit abort.
                 writer.abort()
                 writer.close()
                 for path in paths:

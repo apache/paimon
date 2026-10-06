@@ -696,7 +696,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
                     with mock.patch.object(TableUpdateByRowId, 'update_columns', fail_second_group):
                         with self.assertRaisesRegex(RuntimeError, 'second rewrite group failed'):
                             self._apply_commit(commit, messages, cid)
-                    commit.abort(messages)
+                    # Preserve messages for retry; do not explicitly discard them after a failed commit.
                 finally:
                     commit.close()
                 self.assertEqual(2, len(calls))

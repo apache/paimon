@@ -204,7 +204,7 @@ def test_floating_bucket_dv_does_not_search_python_directory(tmp_path, file_uri,
 
 
 @pytest.mark.parametrize('layout', ['bucket', 'bucket-external', 'global-external'])
-def test_abort_preserves_prepared_dv_in_its_actual_directory(tmp_path, layout):
+def test_explicit_abort_removes_uncommitted_dv_from_its_actual_directory(tmp_path, layout):
     table = _table(tmp_path, layout, 'a/b')
     _delete(table, [0])
     builder = table.new_batch_write_builder()
@@ -214,7 +214,8 @@ def test_abort_preserves_prepared_dv_in_its_actual_directory(tmp_path, layout):
     files_before = set(tmp_path.rglob('index-*'))
     builder.new_commit().abort(messages)
     files_after = set(tmp_path.rglob('index-*'))
-    assert files_after == files_before
+    removed = {path.name for path in files_before - files_after}
+    assert removed == {entry.index_file.file_name for entry in uncommitted}
     _read(table, 'python', 2, [1, 2, 3])
 
 

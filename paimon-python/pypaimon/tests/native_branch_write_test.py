@@ -375,7 +375,7 @@ def test_native_branch_blob_append_and_overwrite_leave_shared_payloads_readable(
 
 
 @pytest.mark.parametrize('rest', [False, True], ids=['filesystem', 'rest'])
-def test_native_branch_abort_preserves_prepared_output(tmp_path, native_rest_catalog, rest):
+def test_native_branch_abort_removes_only_unpublished_output(tmp_path, native_rest_catalog, rest):
     catalog, main = _table(tmp_path, native_rest_catalog, rest)
     seed = {'id': 1, 'value': 10, 'p': 'a'}
     _write(main, [seed])
@@ -394,7 +394,7 @@ def test_native_branch_abort_preserves_prepared_output(tmp_path, native_rest_cat
             commit.abort(messages)
     finally:
         commit.close()
-    assert all(branch.file_io.exists(path) for path in paths)
+    assert all(not branch.file_io.exists(path) for path in paths)
     assert branch.snapshot_manager().get_latest_snapshot().id == 1
     _assert_rows(main, [seed])
     _assert_rows(branch, [seed])

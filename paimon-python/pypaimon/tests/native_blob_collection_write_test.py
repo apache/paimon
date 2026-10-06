@@ -247,7 +247,7 @@ def test_collection_commit_exception_preserves_files(
             proxy.commit.assert_called_once()
             proxy.abort.assert_not_called()
 
-        commit.abort(messages)
+        # An unknown commit outcome must never trigger explicit commit abort.
         writer.abort()
         writer.close()
         assert _physical_files(tmp_path) == files
