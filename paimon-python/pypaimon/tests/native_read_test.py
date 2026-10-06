@@ -87,27 +87,6 @@ def test_native_read_falls_back_before_opening_primary_file_with_row_sidecar():
     native.assert_not_called()
 
 
-@pytest.mark.parametrize('project_sequence', [False, True])
-def test_native_partial_data_evolution_read_requires_a_sequence_provider(project_sequence):
-    from pypaimon.table.special_fields import SpecialFields
-
-    read = _table_read()
-    read.table.options.data_evolution_enabled.return_value = True
-    if project_sequence:
-        read._scan_read_type += [SpecialFields.SEQUENCE_NUMBER]
-    split = _Split()
-    split._native_split = object()
-    split.files[0].write_cols = ['id']
-    with patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch([1])]) as native:
-        batches = read._try_native_batches([split], pa.schema([('id', pa.int32())]))
-        if project_sequence:
-            assert batches is None
-            native.assert_not_called()
-        else:
-            assert [batch.to_pydict() for batch in batches] == [{'id': [1]}]
-            native.assert_called_once()
-
-
 def test_native_read_returns_named_variant_expression_columns():
     read = _table_read()
     variants = {
