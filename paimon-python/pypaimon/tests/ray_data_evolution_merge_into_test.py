@@ -3232,7 +3232,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
     def test_self_merge_filters_file_group_in_batches(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray import data_evolution_merge_join as join_module
-        from pypaimon.write.file_store_commit import _abort_commit_messages
 
         options = dict(self.de_options)
         options['read.batch-size'] = '2'
@@ -3316,9 +3315,10 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             self.assertEqual(count, 3)
             self.assertEqual(row_ids, [1, 3, 5])
         finally:
-            _abort_commit_messages(table, messages)
+            # Do not delete staged messages: another commit attempt may use them.
+            pass
 
-    def test_self_merge_update_aborts_other_groups_after_failure(self):
+    def test_self_merge_update_preserves_other_groups_after_failure(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray.data_evolution_merge_join import (
             distributed_self_merge_update_apply,
@@ -3371,7 +3371,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         after = set()
         for root, _, files in os.walk(self.warehouse):
             after.update(os.path.join(root, name) for name in files)
-        self.assertEqual(before, after)
+        self.assertLess(before, after)
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_callable_assignment(self):

@@ -150,7 +150,7 @@ def test_native_blob_cleanup_includes_completed_groups(tmp_path, external, actio
 
 @pytest.mark.parametrize('external', [False, True])
 @pytest.mark.parametrize('stream', [False, True])
-def test_native_blob_abort_removes_prepared_and_outstanding_files(tmp_path, external, stream):
+def test_native_blob_abort_preserves_prepared_and_removes_outstanding_files(tmp_path, external, stream):
     options = {'data-file.path-directory': 'data/nested'}
     if external:
         options['data-file.external-paths'] = (tmp_path / 'external').as_uri()
@@ -163,11 +163,13 @@ def test_native_blob_abort_removes_prepared_and_outstanding_files(tmp_path, exte
             writer.write_arrow(_data(identifier * 2))
             messages = writer.prepare_commit(identifier) if stream else writer.prepare_commit()
             assert messages
-        assert {path.suffix for path in _physical_files(tmp_path)} == {'.parquet', '.blob', '.index'}
+        prepared = _physical_files(tmp_path)
+        assert {path.suffix for path in prepared} == {'.parquet', '.blob', '.index'}
         writer.write_arrow(_data(6))
+        assert _physical_files(tmp_path) > prepared
         writer.abort()
         writer.abort()
-        assert not _physical_files(tmp_path)
+        assert _physical_files(tmp_path) == prepared
         assert table.snapshot_manager().get_latest_snapshot() is None
     finally:
         writer.close()
@@ -198,7 +200,7 @@ def test_native_blob_close_releases_prepared_files_to_committer(tmp_path, extern
 
 @pytest.mark.parametrize('external', [False, True])
 @pytest.mark.parametrize('commit_native_option', [False, True])
-def test_native_blob_stream_abort_preserves_submitted_files(tmp_path, external, commit_native_option):
+def test_native_blob_stream_abort_preserves_all_prepared_files(tmp_path, external, commit_native_option):
     options = {'commit.native.enabled': str(commit_native_option).lower()}
     if external:
         options['data-file.external-paths'] = (tmp_path / 'external').as_uri()
@@ -211,10 +213,12 @@ def test_native_blob_stream_abort_preserves_submitted_files(tmp_path, external, 
         submitted = _physical_files(tmp_path)
         writer.write_arrow(_data(2))
         assert writer.prepare_commit(2)
+        prepared = _physical_files(tmp_path)
+        assert prepared > submitted
         writer.write_arrow(_data(4))
         assert _physical_files(tmp_path) > submitted
         writer.abort()
-        assert _physical_files(tmp_path) == submitted
+        assert _physical_files(tmp_path) == prepared
         for planner in (False, True):
             for reader in (False, True):
                 assert _read(table, planner, reader) == _data().to_pylist()

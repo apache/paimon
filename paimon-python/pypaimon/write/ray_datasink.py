@@ -32,7 +32,6 @@ from ray.data._internal.execution.interfaces import TaskContext
 import pyarrow as pa
 
 from pypaimon.write.commit_callback import CommitCallback
-from pypaimon.write.file_store_commit import _abort_commit_messages
 
 if TYPE_CHECKING:
     from pypaimon.table.table import Table
@@ -195,7 +194,8 @@ class PaimonDatasink(_DatasinkBase):
                     )
             # prepare_commit has handed these files off, but a failed close
             # prevents this worker from returning them to the coordinator.
-            _abort_commit_messages(self.table, commit_messages_list)
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
 
     @staticmethod

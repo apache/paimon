@@ -27,7 +27,6 @@ from daft.datatype import DataType
 from daft.io.sink import DataSink, WriteResult
 from daft.recordbatch.micropartition import MicroPartition
 from daft.schema import Schema
-from pypaimon.write.file_store_commit import _abort_commit_messages
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -280,7 +279,8 @@ class PaimonDataSink(DataSink[list[Any]]):
                 table_write.abort()
             except Exception:
                 logger.warning("Failed to abort Daft Paimon table write.", exc_info=True)
-            _abort_commit_messages(self._table, commit_messages)
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
 
         yield WriteResult(
@@ -753,7 +753,8 @@ def make_group_write_udf(
                     "Failed to abort Daft Paimon group write.",
                     exc_info=True,
                 )
-            _abort_commit_messages(worker_table, commit_messages)
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
 
         return Series.from_arrow(

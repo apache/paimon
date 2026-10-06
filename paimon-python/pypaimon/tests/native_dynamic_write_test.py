@@ -172,8 +172,8 @@ def test_dynamic_abort_index_ownership(tmp_path, bucket_local, commit_first):
     if commit_first:
         builder.new_commit().commit(messages)
     writer.abort()
-    assert table.file_io.exists(path) == commit_first
-    assert all(table.file_io.exists(f.file_path) == commit_first
+    assert table.file_io.exists(path)
+    assert all(table.file_io.exists(f.file_path)
                for m in messages for f in m.new_files)
 
 

@@ -370,7 +370,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
     @pytest.mark.python_write
-    def test_predicate_update_aborts_groups_after_later_failure(self):
+    def test_predicate_update_preserves_groups_after_later_failure(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
         table = self._create_seeded_table()
@@ -401,9 +401,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 )
 
         self.assertEqual(2, calls)
-        self.assertEqual(before_files, self._list_table_files(table))
+        self.assertLess(before_files, self._list_table_files(table))
 
-    def test_callable_update_aborts_groups_after_later_failure(self):
+    @pytest.mark.python_write
+    def test_callable_update_preserves_groups_after_later_failure(self):
         table = self._create_seeded_table()
         before_files = self._list_table_files(table)
         calls = 0
@@ -424,7 +425,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             )
 
         self.assertEqual(2, calls)
-        self.assertEqual(before_files, self._list_table_files(table))
+        self.assertLess(before_files, self._list_table_files(table))
 
     def test_array_assignment_spans_file_groups(self):
         table = self._create_seeded_table()
@@ -1618,7 +1619,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result4['meta'].to_pylist())
 
     @pytest.mark.python_write
-    def test_update_by_row_id_aborts_files_after_prepare_commit_failure(self):
+    def test_update_by_row_id_preserves_files_after_prepare_commit_failure(self):
         table_schema = pa.schema([
             ('id', pa.int32()),
             ('age', pa.int32()),
@@ -1636,8 +1637,11 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             rb.new_scan().plan().splits()).sort_by('id')['_ROW_ID']
         before_files = self._list_table_files(table)
 
+        prepared_files = []
+
         def fail_after_prepare_commit(
                 new_files, first_row_id, column_names, blob_columns):
+            prepared_files.extend(new_files)
             raise RuntimeError("forced failure after prepare_commit")
 
         for columns in (['age'], ['picture'], ['age', 'picture']):
@@ -1660,7 +1664,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                             ('picture', pa.large_binary()),
                         ])).select(['_ROW_ID'] + columns), self._next_commit_id())
 
-                self.assertEqual(before_files, self._list_table_files(table))
+                self.assertLess(before_files, self._list_table_files(table))
+                self.assertTrue(prepared_files)
+                self.assertTrue(all(table.file_io.exists(file.physical_path())
+                                    for file in prepared_files))
                 self.assertEqual([10, 20], self._read_all(table)['age'].to_pylist())
                 self.assertEqual(
                     [b'blob-1', b'blob-2'], self._read_all(table)['picture'].to_pylist())
@@ -1716,7 +1723,8 @@ class _StreamModeMixin(StreamModeMixin):
 class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
     """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
 
-    def test_update_batches_reject_same_file_and_abort_staged_files(self):
+    @pytest.mark.python_write
+    def test_update_batches_reject_same_file_and_preserve_staged_files(self):
         table = self._create_seeded_table()
         before_files = self._list_table_files(table)
         update = (
@@ -1732,7 +1740,7 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
                 pa.Table.from_pydict({'_ROW_ID': [1], 'age': [31]}),
             ]))
 
-        self.assertEqual(before_files, self._list_table_files(table))
+        self.assertLess(before_files, self._list_table_files(table))
         self.assertEqual(
             [25, 30, 35, 40, 45],
             self._read_all(table)['age'].to_pylist(),

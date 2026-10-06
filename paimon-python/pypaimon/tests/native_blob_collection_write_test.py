@@ -193,6 +193,78 @@ def test_stream_collection_failure_keeps_already_committed_groups(tmp_path, nati
         commit.close()
 
 
+@pytest.mark.parametrize('native_write', [False, True])
+@pytest.mark.parametrize('native_commit', [False, True])
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('published', [False, True])
+def test_collection_commit_exception_preserves_files(
+        tmp_path, native_rest_catalog, native_write, native_commit, stream, published):
+    from unittest.mock import Mock, patch
+
+    table = _table(tmp_path, native_write, external=True, catalog=native_rest_catalog).copy(
+        {'commit.native.enabled': str(native_commit).lower()})
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    expected = []
+    try:
+        assert isinstance(writer, NativeTableWrite) == native_write
+        if stream:
+            data, rows = _data(table, tmp_path, True, 1)
+            writer.write_arrow(data)
+            commit.commit(writer.prepare_commit(1), 1)
+            expected.extend(rows)
+
+        data, rows = _data(table, tmp_path, True, 4)
+        writer.write_arrow(data)
+        messages = writer.prepare_commit(2) if stream else writer.prepare_commit()
+        files = _physical_files(tmp_path)
+        assert {path.suffix for path in files} >= {'.parquet', '.blob'}
+        if native_commit:
+            prepared = commit._prepare_native_commit(messages)
+            assert prepared is not None
+            native, native_messages = prepared
+            proxy = Mock(wraps=native)
+            publish = native.commit
+        else:
+            publish = commit.file_store_commit.commit
+
+        def fail_commit(*args, **kwargs):
+            if published:
+                publish(*args, **kwargs)
+            raise OSError('Commit outcome is unknown')
+
+        if native_commit:
+            proxy.commit.side_effect = fail_commit
+            failing_commit = patch.object(
+                commit, '_prepare_native_commit', return_value=(proxy, native_messages))
+        else:
+            failing_commit = patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit)
+        with failing_commit, \
+                patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('Unsafe abort')):
+            with pytest.raises(OSError, match='Commit outcome is unknown'):
+                commit.commit(messages, 2) if stream else commit.commit(messages)
+        if native_commit:
+            proxy.commit.assert_called_once()
+            proxy.abort.assert_not_called()
+
+        commit.abort(messages)
+        writer.abort()
+        writer.close()
+        assert _physical_files(tmp_path) == files
+        assert (tmp_path / 'payload').exists()
+        if published:
+            expected.extend(rows)
+        latest = table.snapshot_manager().get_latest_snapshot()
+        assert (latest.id if latest is not None else 0) == int(stream) + int(published)
+        for native_read in (False, True):
+            read_builder = table.copy({'read.native.enabled': str(native_read).lower()}).new_read_builder()
+            actual = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+            assert actual.sort_by('id').to_pylist() == expected
+    finally:
+        writer.close()
+        commit.close()
+
+
 @pytest.mark.parametrize('projection', [
     ['id', "attrs['first']", "attrs['null']", "attrs['missing']"],
     {'payload': "attrs['first']", 'array': 'items'},

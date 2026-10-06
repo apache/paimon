@@ -405,7 +405,7 @@ def test_write_paimon_pk_table(pk_table):
 
 @pytest.mark.python_write
 @pytest.mark.parametrize('grouped', [False, True])
-def test_dedicated_close_failure_cleans_prepared_files(local_paimon_catalog, grouped):
+def test_dedicated_close_failure_preserves_prepared_files(local_paimon_catalog, grouped):
     from unittest.mock import patch
     from pypaimon.daft.daft_datasink import make_group_write_udf
     from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
@@ -437,8 +437,9 @@ def test_dedicated_close_failure_cleans_prepared_files(local_paimon_catalog, gro
             else:
                 list(PaimonDataSink(table).write(iter([MicroPartition.from_arrow(data)])))
     assert len(calls) == 2
-    assert not [name for _, _, names in os.walk(table.table_path) for name in names
-                if name.endswith(('.parquet', '.blob'))]
+    assert {os.path.splitext(name)[1]
+            for _, _, names in os.walk(table.table_path) for name in names
+            if name.endswith(('.parquet', '.blob'))} == {'.parquet', '.blob'}
     assert table.snapshot_manager().get_latest_snapshot() is None
 
 

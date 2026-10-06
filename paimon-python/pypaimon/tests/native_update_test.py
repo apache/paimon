@@ -373,8 +373,9 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
                   .update_by_arrow_batches_with_row_id(interleaved_tables()))
     assert staged and all(message.check_from_snapshot == read_snapshot_id
                           for message in staged)
-    from pypaimon.write.file_store_commit import _abort_commit_messages
-    _abort_commit_messages(table, staged)
+    # Keep staged files: the outcome of a concurrent commit can be unknown.
+    assert all(table.file_io.exists(file.physical_path())
+               for message in staged for file in message.new_files)
 
 
 def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):

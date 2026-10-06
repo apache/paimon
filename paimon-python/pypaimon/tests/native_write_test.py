@@ -131,7 +131,7 @@ def test_batch_native_write_commits_through_both_committers(
 
 @requires_native
 @pytest.mark.parametrize('directory', [None, 'relative', 'absolute', 'uri'])
-def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, directory):
+def test_escaped_partition_file_path_is_preserved_on_abort(tmp_path, native_rest_catalog, directory):
     catalog = native_rest_catalog
     options = {'file.format': 'parquet', 'write.native.enabled': 'true',
                'commit.native.enabled': 'true'}
@@ -159,7 +159,7 @@ def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, di
             with patch.object(commit.file_store_commit, 'abort',
                               side_effect=AssertionError('Python fallback')):
                 commit.abort(messages)
-            assert not table.file_io.exists(file.file_path)
+            assert table.file_io.exists(file.file_path)
         finally:
             commit.close()
     finally:

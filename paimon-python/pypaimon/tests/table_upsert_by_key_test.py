@@ -646,6 +646,75 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         self.assertEqual(('Dave', 40, 'Houston'), rows[4])
         self.assertTrue(all(os.path.exists(path) for path in stale_paths))
 
+    @pytest.mark.python_write
+    @pytest.mark.python_commit
+    def test_failed_commit_rewrite_preserves_prepared_groups_and_can_retry(self):
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        for fail_after_prepare in (False, True):
+            with self.subTest(fail_after_prepare=fail_after_prepare):
+                table = self._create_table()
+                original_data = pa.Table.from_pydict({
+                    'id': [1, 2, 3, 4],
+                    'name': ['Alice', 'Bob', 'Carol', 'Dave'],
+                    'age': [25, 30, 35, 40],
+                    'city': ['NYC', 'LA', 'Chicago', 'Houston'],
+                }, schema=self.pa_schema)
+                self._write_arrow(table, original_data.slice(0, 2))
+                self._write_arrow(table, original_data.slice(2, 2))
+                wb = self._make_write_builder(table)
+                cid = self._next_commit_id()
+                messages = []
+                for columns, data in [
+                    (['age'], {'id': [2], 'name': ['ignored'],
+                               'age': [31], 'city': ['ignored']}),
+                    (['city'], {'id': [3], 'name': ['ignored'],
+                                'age': [0], 'city': ['Chicago2']}),
+                ]:
+                    update = wb.new_update().with_update_type(columns)
+                    messages.extend(self._apply_upsert(
+                        update, pa.Table.from_pydict(data, schema=self.pa_schema), ['id'], cid))
+                staged_paths = [file.file_path for message in messages for file in message.new_files]
+                self._compact_all_data_files(table)
+                snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+                prepared_paths = []
+                calls = []
+                original_update = TableUpdateByRowId.update_columns
+
+                def fail_second_group(updater, data, columns):
+                    calls.append(columns)
+                    if len(calls) == 2 and not fail_after_prepare:
+                        raise RuntimeError('second rewrite group failed')
+                    result = original_update(updater, data, columns)
+                    prepared_paths.extend(file.file_path for message in result for file in message.new_files)
+                    if len(calls) == 2:
+                        raise RuntimeError('second rewrite group failed')
+                    return result
+
+                commit = wb.new_commit()
+                try:
+                    with mock.patch.object(TableUpdateByRowId, 'update_columns', fail_second_group):
+                        with self.assertRaisesRegex(RuntimeError, 'second rewrite group failed'):
+                            self._apply_commit(commit, messages, cid)
+                    commit.abort(messages)
+                finally:
+                    commit.close()
+                self.assertEqual(2, len(calls))
+                self.assertEqual(2 if fail_after_prepare else 1, len(prepared_paths))
+                self.assertTrue(all(os.path.exists(path) for path in staged_paths + prepared_paths))
+                self.assertEqual(snapshot_id, table.snapshot_manager().get_latest_snapshot().id)
+                self.assertTrue(original_data.equals(self._read_all(table).sort_by('id')))
+
+                commit = wb.new_commit()
+                try:
+                    self._apply_commit(commit, messages, cid)
+                finally:
+                    commit.close()
+                rows = {row['id']: row for row in self._read_all(table).to_pylist()}
+                self.assertEqual(31, rows[2]['age'])
+                self.assertEqual('Chicago2', rows[3]['city'])
+                self.assertTrue(all(os.path.exists(path) for path in staged_paths + prepared_paths))
+
     def test_commit_rewrite_uses_checked_base_entries(self):
         table = self._create_table()
         self._write_arrow(table, pa.Table.from_pydict({

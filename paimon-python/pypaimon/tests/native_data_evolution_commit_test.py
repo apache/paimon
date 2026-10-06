@@ -248,7 +248,7 @@ def test_stream_abort_preserves_published_row_ids(native_rest_catalog):
             commit.abort(pending)
     finally:
         commit.close()
-    assert all(not table.file_io.exists(path) for path in pending_paths)
+    assert all(table.file_io.exists(path) for path in pending_paths)
     assert _read(table, True, metadata=True)['_ROW_ID'] == [0, 1]
     _commit(builder, _prepare(builder, [4], identifier=9), 9)
     assert table.snapshot_manager().get_latest_snapshot().next_row_id == 3

@@ -402,7 +402,7 @@ class DynamicBucketTest(unittest.TestCase):
             ):
                 table.new_batch_write_builder().new_write()
 
-    def test_batch_writer_abort_after_prepare_deletes_hash_index(self):
+    def test_batch_writer_abort_after_prepare_preserves_hash_index(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'abort_prepared')
             writer = table.new_batch_write_builder().new_write()
@@ -418,7 +418,52 @@ class DynamicBucketTest(unittest.TestCase):
 
             writer.abort()
 
-            self.assertFalse(table.file_io.exists(index_path))
+            self.assertTrue(table.file_io.exists(index_path))
+
+    @pytest.mark.python_write
+    def test_failed_hash_index_prepare_retries_the_complete_increment(self):
+        for failed_call in (1, 2):
+            with self.subTest(failed_call=failed_call), tempfile.TemporaryDirectory() as root:
+                table = self._create_table(root, 'retry_prepare', target_row_num=1).copy({
+                    'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+                    'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
+                    'changelog-producer': 'input'})
+                builder = table.new_stream_write_builder()
+                writer, commit = builder.new_write(), builder.new_commit()
+                data = pa.table({'id': [1, 2, 3], 'value': ['v-1', 'v-2', 'v-3']})
+                try:
+                    writer.write_arrow(data)
+                    maintainer = writer.row_key_extractor._index_maintainer
+                    bucket_count = len(maintainer._states)
+                    self.assertGreaterEqual(bucket_count, 2)
+                    write_index = maintainer._write_index
+                    calls = 0
+
+                    def fail_index(*args):
+                        nonlocal calls
+                        calls += 1
+                        if calls == failed_call:
+                            raise OSError('HASH index prepare failed')
+                        return write_index(*args)
+
+                    with patch.object(maintainer, '_write_index', side_effect=fail_index):
+                        with self.assertRaisesRegex(OSError, 'HASH index prepare failed'):
+                            writer.prepare_commit(1)
+                    self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+                    messages = writer.prepare_commit(1)
+                    self.assertEqual(3, sum(file.row_count for message in messages
+                                            for file in message.new_files))
+                    self.assertEqual(3, sum(file.row_count for message in messages
+                                            for file in message.changelog_files))
+                    self.assertEqual(bucket_count, sum(len(message.index_adds) for message in messages))
+                    self.assertEqual([], writer.prepare_commit(2))
+                    commit.commit(messages, 1)
+                    writer.abort()
+                    self.assertEqual(data.to_pydict(), self._read_arrow(table).sort_by('id').to_pydict())
+                    self.assertEqual(bucket_count, len(self._hash_indexes(table)))
+                finally:
+                    writer.close()
+                    commit.close()
 
     @pytest.mark.python_write
     def test_stream_writer_releases_prepared_hash_index_ownership(self):
