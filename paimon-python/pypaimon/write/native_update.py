@@ -40,7 +40,6 @@ def _native_row_id_table(table):
             or not table.options.row_tracking_enabled()
             or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
-            or table.options.data_evolution_row_sidecar_enabled(False)
             or table.options.with_vector_format()
             or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)

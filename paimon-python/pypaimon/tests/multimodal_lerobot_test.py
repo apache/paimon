@@ -1595,8 +1595,8 @@ class LeRobotValidationTest(unittest.TestCase):
                 return_value=loaded), patch(
                 "pypaimon.multimodal.lerobot.dataset._target_schema",
                 return_value=pa.schema([])), patch(
-                "pypaimon.multimodal.lerobot.dataset.sys.version_info",
-                (3, 10)):
+                "pypaimon.multimodal.lerobot.dataset.sys",
+                SimpleNamespace(version_info=(3, 10), modules=sys.modules)):
             for invalid in (0, 1, None, "true"):
                 with self.subTest(return_uint8=invalid):
                     with self.assertRaisesRegex(
