@@ -21,6 +21,7 @@ import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, Iterator, List, Optional
+from urllib.parse import urlparse
 
 import pandas
 import pyarrow
@@ -95,6 +96,12 @@ class _ClosableArrowBatchReader:
                 close()
 
 
+def _supports_cancellable_arrow_reader():
+    reader_type = pyarrow.ipc.RecordBatchReader
+    return (hasattr(reader_type, "from_stream")
+            and hasattr(reader_type, "close"))
+
+
 class _RemainingRows:
     """Thread-safe remaining-rows counter for parallel reads.
 
@@ -141,6 +148,9 @@ class TableRead:
     # split workers (P) each allow blob_parallelism (B) in-flight reads, so
     # peak connections ~= P*B. Shrink per-reader B to keep the product bounded.
     _MAX_TOTAL_BLOB_WORKERS = 64
+    # Keep the automatic window modest; explicit parallelism can exceed it.
+    _PIPELINE_REMOTE_MIN_WORKERS = 4
+    _PIPELINE_MAX_AUTO_WORKERS = 4
 
     def __init__(
         self,
@@ -245,19 +255,19 @@ class TableRead:
             splits: List[Split],
             blob_parallelism: Optional[int] = None,
             parallelism: Optional[int] = None) -> pyarrow.ipc.RecordBatchReader:
-        """Lazily read batches using bounded native split concurrency.
+        """Lazily read batches using bounded split concurrency.
 
         ``parallelism`` follows :meth:`to_arrow`: an explicit value overrides
-        ``read.parallelism``, otherwise the reader auto-scales to the available
-        splits and CPUs. Native workers buffer at most one batch each; batches
-        from different split groups are emitted as they become ready because
-        table reads do not guarantee row order. Python fallback reads remain
-        serial.
+        ``read.parallelism``; otherwise native reads use the CPU/split cap,
+        while Python reads use split cost and storage locality to choose a
+        small active window. Python split batches are emitted in split order.
         """
         # Cleanup ownership follows the uncapped concurrency decision. LIMIT
         # may reduce the actual native worker count to one, but the returned
         # PyArrow reader still does not close its suspended batch iterator.
-        effective = self._resolve_parallelism(parallelism, len(splits))
+        effective = (self._resolve_parallelism(parallelism, len(splits))
+                     if self.limit is not None
+                     else self._effective_parallelism(parallelism, len(splits)))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
         if self._should_run_parallel(splits, effective):
@@ -277,7 +287,9 @@ class TableRead:
         """
         # Keep the explicit iterator cleanup chain even when LIMIT caps the
         # native worker count inside _new_arrow_batch_reader to one.
-        effective = self._resolve_parallelism(parallelism, len(splits))
+        effective = (self._resolve_parallelism(parallelism, len(splits))
+                     if self.limit is not None
+                     else self._effective_parallelism(parallelism, len(splits)))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
         if self._should_run_parallel(splits, effective):
@@ -295,27 +307,157 @@ class TableRead:
         schema = self._output_arrow_schema()
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
-        effective = self._effective_parallelism(parallelism, len(splits))
+        native_effective = self._effective_parallelism(parallelism, len(splits))
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-        if self._should_run_parallel(splits, effective):
-            effective_bp = self._cap_blob_parallelism(
-                min(effective, len(splits)), effective_bp)
+        native_bp = effective_bp
+        if self._should_run_parallel(splits, native_effective):
+            native_bp = self._cap_blob_parallelism(
+                min(native_effective, len(splits)), native_bp)
         native_batches = self._try_native_batches(
             splits,
             schema,
-            parallelism=effective,
-            blob_parallelism=effective_bp,
+            parallelism=native_effective,
+            blob_parallelism=native_bp,
             streaming=True,
         )
         if native_batches is not None:
             batch_iterator = iter(native_batches)
         else:
             self._check_python_merge_supported()
-            batch_iterator = self._arrow_batch_generator(
-                splits, schema, effective_bp)
+            effective = self._read_workers(splits, parallelism)
+            if self.limit is not None and self.limit <= 0:
+                batch_iterator = iter(())
+                reader = pyarrow.ipc.RecordBatchReader.from_batches(
+                    schema, batch_iterator)
+                return reader, batch_iterator
+            workers = (effective if self.limit is None
+                       and _supports_cancellable_arrow_reader() else 1)
+            if self._should_run_parallel(splits, workers):
+                python_bp = self._cap_blob_parallelism(workers, effective_bp)
+                batch_iterator = self._pipelined_arrow_batch_generator(
+                    splits, schema, python_bp, workers)
+            else:
+                batch_iterator = self._arrow_batch_generator(
+                    splits, schema, effective_bp)
         reader_type = pyarrow.ipc.RecordBatchReader
         reader = reader_type.from_batches(schema, batch_iterator)
         return reader, batch_iterator
+
+    def _pipelined_arrow_batch_generator(
+        self,
+        splits: List[Split],
+        schema: pyarrow.Schema,
+        blob_parallelism: int,
+        workers: int,
+    ) -> Iterator[pyarrow.RecordBatch]:
+        cancel = threading.Event()
+        workers = min(workers, len(splits))
+        if workers < 2:
+            yield from self._arrow_batch_generator(
+                splits, schema, blob_parallelism)
+            return
+        end = object()
+        stop = object()
+        results = queue.Queue()
+        batch_slots = {}
+        task_queue = queue.Queue()
+
+        def read_split(index, split):
+            batches = None
+            error = None
+            try:
+                batch_slot = batch_slots[index]
+                batches = self._arrow_batch_generator(
+                    [split], schema, blob_parallelism,
+                    parallel_split_read=True)
+                while not cancel.is_set():
+                    batch_slot.acquire()
+                    if cancel.is_set():
+                        batch_slot.release()
+                        break
+                    try:
+                        batch = next(batches)
+                    except StopIteration:
+                        batch_slot.release()
+                        break
+                    except BaseException:
+                        batch_slot.release()
+                        raise
+                    if cancel.is_set():
+                        batch_slot.release()
+                        return
+                    results.put((index, batch))
+            except BaseException as exception:
+                error = exception
+            finally:
+                try:
+                    if batches is not None:
+                        batches.close()
+                except BaseException as exception:
+                    if error is None:
+                        error = exception
+                if error is not None and not cancel.is_set():
+                    cancel.set()
+                    results.put((-1, error))
+                elif not cancel.is_set():
+                    results.put((index, end))
+
+        def worker():
+            while True:
+                task = task_queue.get()
+                if task is stop:
+                    return
+                read_split(*task)
+                if cancel.is_set():
+                    return
+
+        threads = []
+        try:
+            for _ in range(workers):
+                thread = threading.Thread(target=worker, daemon=True)
+                thread.start()
+                threads.append(thread)
+
+            next_split = 0
+
+            def submit_next():
+                nonlocal next_split
+                if next_split < len(splits):
+                    index = next_split
+                    batch_slots[index] = threading.Semaphore(1)
+                    task_queue.put((index, splits[index]))
+                    next_split += 1
+
+            for _ in range(workers):
+                submit_next()
+
+            pending = {}
+            for index in range(len(splits)):
+                batch_slot = batch_slots[index]
+                while True:
+                    if index in pending:
+                        item = pending.pop(index)
+                    else:
+                        item_index, item = results.get()
+                        if item_index < 0:
+                            raise item
+                        if item_index != index:
+                            pending[item_index] = item
+                            continue
+                    if item is end:
+                        break
+                    try:
+                        yield item
+                    finally:
+                        batch_slot.release()
+                del batch_slots[index]
+                submit_next()
+        finally:
+            cancel.set()
+            for batch_slot in batch_slots.values():
+                batch_slot.release()
+            for _ in threads:
+                task_queue.put(stop)
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:
@@ -368,10 +510,10 @@ class TableRead:
             splits: scan-plan splits returned from a ``TableScan``.
             parallelism: optional runtime override of the
                 ``read.parallelism`` table option. ``None`` (default) falls
-                back to the table option; when that is also unset the read
-                auto-scales to ``min(number of splits, CPU count)``. ``1``
-                keeps reads serial; ``>= 2`` caps the thread pool that reads
-                byte-balanced contiguous split groups concurrently and
+                back to the table option; when that is also unset, native
+                reads use the CPU/split cap, while Python reads also consider
+                split cost and storage locality. ``1`` keeps
+                reads serial; ``>= 2`` caps the active split window and
                 assembles the final table in input order. An unfiltered row
                 limit caps this further to avoid speculative work. Must be
                 ``>= 1``. Note that with ``>= 2`` (or auto)
@@ -389,27 +531,38 @@ class TableRead:
                 shrunk to stay within it.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-        effective = self._effective_parallelism(parallelism, len(splits))
+        native_effective = self._effective_parallelism(parallelism, len(splits))
         schema = self._output_arrow_schema()
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
-        native_parallel = self._should_run_parallel(splits, effective)
+        native_parallel = self._should_run_parallel(splits, native_effective)
         native_bp = effective_bp
         if native_parallel:
             native_bp = self._cap_blob_parallelism(
-                min(effective, len(splits)), effective_bp)
+                min(native_effective, len(splits)), effective_bp)
         native_batches = self._try_native_batches(
             splits,
             schema,
-            parallelism=effective,
+            parallelism=native_effective,
             blob_parallelism=native_bp,
         )
         if native_batches is not None:
             return self._batches_to_arrow(native_batches, schema)
 
         self._check_python_merge_supported()
+        effective = self._read_workers(splits, parallelism)
         if self._should_run_parallel(splits, effective):
+            if self.limit is None:
+                batches = self._pipelined_arrow_batch_generator(
+                    splits, schema,
+                    self._cap_blob_parallelism(effective, effective_bp),
+                    effective)
+                try:
+                    return self._batches_to_arrow(
+                        batches, schema, allow_type_cast=True)
+                finally:
+                    batches.close()
             return self._to_arrow_parallel(splits, schema, effective, effective_bp)
 
         batch_iterator = self._arrow_batch_generator(
@@ -867,7 +1020,8 @@ class TableRead:
         return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
-                               blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
+                               blob_parallelism: int = 1,
+                               parallel_split_read: bool = False) -> Iterator[pyarrow.RecordBatch]:
         self._begin_auth_read(splits)
         chunk_size = 65536
         # ``remaining`` tracks how many rows we are still allowed to emit
@@ -878,7 +1032,8 @@ class TableRead:
             if remaining is not None and remaining <= 0:
                 break
             reader = self.__create_reader_for_split(
-                split, blob_parallelism, limit=remaining)
+                split, blob_parallelism, limit=remaining,
+                parallel_split_read=parallel_split_read)
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
@@ -939,10 +1094,10 @@ class TableRead:
         """Pick the effective parallelism and reject illegal values.
 
         Priority: explicit ``parallelism`` argument > ``read.parallelism``
-        table option > auto. When neither the argument nor the option is set
-        the read auto-scales to ``min(num_splits, CPU count)``. A value >= 1
-        caps the thread pool; ``1`` forces serial reads. The validation
-        message names whichever source produced the offending value.
+        table option > auto. This is the CPU/split cap; ``_pipeline_workers``
+        also considers split cost and locality for the automatic choice.
+        A value >= 1 caps the thread pool; ``1`` forces serial reads. The
+        validation message names whichever source produced the offending value.
         """
         if runtime is not None:
             value, source = runtime, "parallelism"
@@ -963,6 +1118,11 @@ class TableRead:
         if self.limit is None or (self.limit > 0 and self.predicate is not None):
             return effective
         return min(effective, max(1, self.limit))
+
+    def _read_workers(self, splits: List[Split], runtime: Optional[int]) -> int:
+        effective = self._effective_parallelism(runtime, len(splits))
+        configured = runtime is not None or self._read_parallelism is not None
+        return self._pipeline_workers(splits, effective, configured)
 
     @staticmethod
     def _resolve_blob_parallelism(runtime: Optional[int]) -> int:
@@ -1028,6 +1188,91 @@ class TableRead:
             for field in getattr(self, '_scan_read_type', self._adapter_read_type)
         }
         return inline_fields & read_names
+
+    def _pipeline_workers(
+        self,
+        splits: List[Split],
+        effective: int,
+        configured: bool,
+    ) -> int:
+        maximum = min(effective, len(splits))
+        if configured or maximum < 2:
+            return maximum
+        maximum = min(maximum, self._PIPELINE_MAX_AUTO_WORKERS)
+
+        options = self.table.options
+        target_size = max(1, options.source_split_target_size())
+        open_cost = max(0, options.source_split_open_file_cost())
+        total_bytes = sum(
+            self._estimated_split_work(split, 0) for split in splits)
+        total_work = sum(
+            self._estimated_split_work(split, open_cost) for split in splits)
+        local = self._pipeline_reads_are_local(splits)
+        if local and total_bytes < target_size:
+            return 1
+        if total_work <= 0:
+            return (1 if local else
+                    min(maximum, self._PIPELINE_REMOTE_MIN_WORKERS))
+
+        workers = max(1, (total_work + target_size - 1) // target_size)
+        if not local:
+            workers = max(
+                workers, min(maximum, self._PIPELINE_REMOTE_MIN_WORKERS))
+        return min(maximum, workers)
+
+    @staticmethod
+    def _estimated_split_work(split: Split, open_cost: int) -> int:
+        try:
+            files = split.files
+            if files is not None:
+                return sum(max(max(0, int(f.file_size)), open_cost)
+                           for f in files)
+            return max(0, int(getattr(split, 'file_size', 0) or 0))
+        except (AttributeError, TypeError, ValueError):
+            return 0
+
+    def _pipeline_reads_are_local(self, splits: List[Split]) -> bool:
+        runtime_locality = self._runtime_file_io_is_local()
+        if runtime_locality is not None:
+            return runtime_locality
+
+        data_paths = []
+        missing_path = False
+        for split in splits:
+            files = getattr(split, "files", None)
+            if files is None:
+                missing_path = True
+                continue
+            for data_file in files:
+                path = (
+                    getattr(data_file, "external_path", None)
+                    or getattr(data_file, "file_path", None)
+                )
+                if path:
+                    data_paths.append(str(path))
+                else:
+                    missing_path = True
+
+        if not data_paths or missing_path:
+            data_paths.append(str(getattr(self.table, "table_path", "") or ""))
+        return all(self._is_local_data_path(path) for path in data_paths)
+
+    def _runtime_file_io_is_local(self) -> Optional[bool]:
+        from pypaimon.filesystem.caching_file_io import CachingFileIO
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        file_io = getattr(self.table, "file_io", None)
+        while isinstance(file_io, CachingFileIO):
+            file_io = getattr(file_io, "_delegate", None)
+        if isinstance(file_io, LocalFileIO):
+            return True
+        return None
+
+    @staticmethod
+    def _is_local_data_path(path: str) -> bool:
+        if len(path) >= 2 and path[0].isalpha() and path[1] == ":":
+            return True
+        return urlparse(path).scheme.lower() in ("", "file")
 
     def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
         """Return whether split metadata proves that LIMIT cannot drop rows."""
@@ -1491,7 +1736,8 @@ class TableRead:
                            push_down_limit: bool = True,
                            post_merge_filter=None,
                            eager_blob_fields=None,
-                           post_filter_after_inline: bool = False) -> SplitRead:
+                           post_filter_after_inline: bool = False,
+                           parallel_split_read: bool = False) -> SplitRead:
         sr = self._build_split_read(
             split,
             read_type,
@@ -1503,6 +1749,7 @@ class TableRead:
         )
         sr._blob_parallelism = blob_parallelism
         sr._parquet_row_group_cache = self._parquet_row_group_cache
+        sr._parallel_split_read = parallel_split_read
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,
@@ -1797,7 +2044,8 @@ class TableRead:
             self._python_merge_validation_pending = False
 
     def __create_reader_for_split(self, split, blob_parallelism=1,
-                                  limit: Optional[int] = None):
+                                  limit: Optional[int] = None,
+                                  parallel_split_read: bool = False):
         # Raw-convertible splits skip MergeFileSplitRead, so validate before
         # dispatch, including when native setup failed or bindings are absent.
         self._check_python_merge_supported()
@@ -1808,18 +2056,22 @@ class TableRead:
 
         if auth_result is not None:
             return self.__authed_reader(
-                split, auth_result, blob_parallelism, limit)
+                split, auth_result, blob_parallelism, limit,
+                parallel_split_read)
         if limit is None:
             return self._create_split_read(
-                split, blob_parallelism=blob_parallelism).create_reader()
+                split, blob_parallelism=blob_parallelism,
+                parallel_split_read=parallel_split_read).create_reader()
         return self._create_split_read(
             split,
             blob_parallelism=blob_parallelism,
             limit=limit,
+            parallel_split_read=parallel_split_read,
         ).create_reader()
 
     def __authed_reader(self, split, auth_result, blob_parallelism=1,
-                        limit: Optional[int] = None):
+                        limit: Optional[int] = None,
+                        parallel_split_read: bool = False):
         if self._has_map_key_projection():
             raise NotImplementedError(
                 "MAP-key projection with query authorization is not supported")
@@ -1866,6 +2118,7 @@ class TableRead:
             post_merge_filter=filter_fn if embed_filter else None,
             eager_blob_fields=auth_fields if embed_filter else None,
             post_filter_after_inline=post_filter_after_inline,
+            parallel_split_read=parallel_split_read,
         )
         reader = split_read.create_reader()
 

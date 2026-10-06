@@ -63,6 +63,14 @@ def _table_read(limit=None):
     return read
 
 
+def _auto_table_read():
+    read = _table_read()
+    read._read_parallelism = None
+    read.table.options.source_split_target_size.return_value = 1024
+    read.table.options.source_split_open_file_cost.return_value = 0
+    return read
+
+
 def _blob_table_read(limit=None):
     read = _table_read(limit)
     read.read_type = [DataField(0, 'payload', AtomicType('BLOB'))]
@@ -376,6 +384,36 @@ def test_native_read_uses_effective_parallelism_from_table_option():
     assert len(worker_names) == 2
 
 
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('target_size, python_workers', [(1024, 1), (1, 4)])
+def test_native_auto_parallelism_is_not_capped_by_python_pipeline(
+        streaming, target_size, python_workers):
+    read = _auto_table_read()
+    read.table.options.source_split_target_size.return_value = target_size
+    splits = [_Split() for _ in range(8)]
+    for index, split in enumerate(splits):
+        split._native_split = index
+
+    groups = []
+
+    def read_group(rust_splits):
+        groups.append(rust_splits)
+        return [_id_batch(rust_splits)]
+
+    with patch('pypaimon.read.table_read.os.cpu_count', return_value=8), patch(
+            'pypaimon.read.native_plan._prepare_native_read',
+            return_value=read_group) as prepare:
+        assert read._read_workers(splits, None) == python_workers
+        if streaming:
+            result = read.to_arrow_batch_reader(splits).read_all()
+        else:
+            result = read.to_arrow(splits)
+
+    assert result.column('id').to_pylist() == list(range(8))
+    prepare.assert_called_once()
+    assert sorted(groups) == [[index] for index in range(8)]
+
+
 def test_parallel_native_read_prepares_rust_reader_once():
     read = _table_read()
     splits = [_Split() for _ in range(4)]
@@ -469,6 +507,38 @@ def test_native_batch_reader_close_closes_batch_iterator():
         batch_reader.close()
 
     assert reader.closed
+    assert iterator_closed.wait(timeout=1)
+
+
+def test_native_auto_batch_reader_close_closes_parallel_iterator():
+    read = _auto_table_read()
+    iterator_closed = threading.Event()
+
+    def batches():
+        try:
+            yield _id_batch([1])
+            yield _id_batch([2])
+        finally:
+            iterator_closed.set()
+
+    batch_iterator = batches()
+
+    class Reader:
+        def read_next_batch(self):
+            return next(batch_iterator)
+
+        def close(self):
+            pass
+
+    splits = [_Split() for _ in range(8)]
+    with patch('pypaimon.read.table_read.os.cpu_count', return_value=8), patch.object(
+            read, '_new_arrow_batch_reader',
+            return_value=(Reader(), batch_iterator)):
+        assert read._read_workers(splits, None) == 1
+        batch_reader = read.to_arrow_batch_reader(splits)
+        batch_reader.read_next_batch()
+        batch_reader.close()
+
     assert iterator_closed.wait(timeout=1)
 
 

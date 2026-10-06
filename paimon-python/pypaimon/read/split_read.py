@@ -463,7 +463,9 @@ class SplitRead(ABC):
                 predicate_field_names=predicate_fields,
                 row_ranges=parquet_row_ranges,
                 row_group_cache=self._parquet_row_group_cache,
-                file_size=file.file_size)
+                file_size=file.file_size,
+                parallel_split_read=getattr(
+                    self, '_parallel_split_read', False))
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             if has_nested:
                 raise NotImplementedError(
@@ -994,6 +996,8 @@ class RawFileSplitRead(SplitRead):
         # self.split is already unwrapped from IndexedSplit. Keep its physical
         # selection so LIMIT preloads the same views as the main reader.
         prescan_read._physical_row_ranges = self._physical_row_ranges
+        prescan_read._parallel_split_read = getattr(
+            self, '_parallel_split_read', False)
         return prescan_read.create_reader()
 
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
@@ -1275,6 +1279,8 @@ class MergeFileSplitRead(SplitRead):
             _blob_view_prescan=True,
         )
         prescan_read.row_ranges = self.row_ranges
+        prescan_read._parallel_split_read = getattr(
+            self, '_parallel_split_read', False)
         reader = prescan_read.create_reader()
         if isinstance(reader, RecordBatchReader):
             return reader
@@ -1552,6 +1558,8 @@ class DataEvolutionSplitRead(SplitRead):
             limit=self._blob_view_prescan_limit(),
         )
         prescan_read.row_ranges = self.row_ranges
+        prescan_read._parallel_split_read = getattr(
+            self, '_parallel_split_read', False)
         return prescan_read._create_raw_reader()
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:

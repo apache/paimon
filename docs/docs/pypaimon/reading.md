@@ -122,6 +122,10 @@ for batch in table_read.to_arrow_batch_reader(splits):
 # f1: ["a","b","c"]
 ```
 
+The Python Arrow reader pipelines splits in order, adapting parallelism to
+split cost and storage. Set `parallelism` or `read.parallelism` to override.
+Older PyArrow versions use serial streaming reads.
+
 ### Read Python Iterator
 
 You can read the data row by row into a native Python iterator.

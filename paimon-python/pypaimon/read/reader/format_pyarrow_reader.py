@@ -373,7 +373,8 @@ class FormatPyArrowReader(RecordBatchReader):
                  row_indices: Optional[List[int]] = None,
                  row_ranges: Optional[List[Tuple[int, int]]] = None,
                  row_group_cache: Optional[_DecodedRowGroupCache] = None,
-                 file_size: Optional[int] = None):
+                 file_size: Optional[int] = None,
+                 parallel_split_read: bool = False):
         from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
         if isinstance(file_io, ResolvingFileIO):
             file_io = file_io._get_fileio(file_path)
@@ -436,6 +437,7 @@ class FormatPyArrowReader(RecordBatchReader):
                     self._range_slicer = _RowRunSlicer(
                         selected_infos, runs)
         self._file_format = file_format
+        self._parallel_split_read = parallel_split_read
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
 
@@ -594,10 +596,21 @@ class FormatPyArrowReader(RecordBatchReader):
         elif self._orc_file is not None:
             self._raw_batches = self._iter_orc_batches()
         else:
+            scan_options = {}
+            if parallel_split_read:
+                # The outer split window owns concurrency and batch readahead.
+                scan_options['use_threads'] = False
+                if not _pyarrow_lt_7():
+                    scan_options['batch_readahead'] = 1
+                    scan_options['fragment_readahead'] = 1
+                if file_format == 'parquet':
+                    scan_options['fragment_scan_options'] = (
+                        ds.ParquetFragmentScanOptions(pre_buffer=False))
             reader = self.dataset.scanner(
                 columns=self._scan_columns,
                 filter=self._scan_filter,
                 batch_size=self._scan_batch_size,
+                **scan_options,
             ).to_reader()
             raw_batches = self._iter_reader_batches(reader)
             if self._select_nested_after_scan:
@@ -701,6 +714,7 @@ class FormatPyArrowReader(RecordBatchReader):
             row_groups=[row_group],
             columns=columns,
             batch_size=self._scan_batch_size,
+            use_threads=not self._parallel_split_read,
         )
 
     def _iter_orc_batches(self):
