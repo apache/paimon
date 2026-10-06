@@ -33,6 +33,7 @@ from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 from pypaimon.write.writer.data_vector_writer import DataVectorWriter
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
+from pypaimon.write.writer.postpone_data_writer import PostponeDataWriter
 from pypaimon.table.bucket_mode import BucketMode
 
 
@@ -162,19 +163,25 @@ class FileStoreWrite:
                 f"target-file-row-num should be at most {max_value}")
         if row_limit != max_value:
             row_rolling_supported = (
-                self.table.options.data_evolution_enabled()
-                and not self.table.is_primary_key_table)
+                (self.table.options.data_evolution_enabled()
+                 and not self.table.is_primary_key_table)
+                or bucket == BucketMode.POSTPONE_BUCKET.value)
             if not row_rolling_supported:
                 raise NotImplementedError(
                     "target-file-row-num is set on this table but pypaimon supports row-count "
-                    "based file rolling only for data-evolution append tables (no primary key); "
+                    "based file rolling only for data-evolution append and postpone tables; "
                     "unset it or write with Java/Flink/Spark.")
 
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
 
-        # Check if table has blob columns
+        # Dedicated Blob files are an append-table layout. PK tables require
+        # managed packs and references attached to their key-value Parquet files.
         if self._has_blob_columns():
+            if self.table.is_primary_key_table:
+                raise NotImplementedError(
+                    'Primary-key Blob writes require the native writer; '
+                    'enable write.native.enabled and write Arrow batches')
             return DedicatedFormatWriter(
                 table=self.table,
                 partition=partition,
@@ -196,11 +203,13 @@ class FileStoreWrite:
                 write_cols=self.write_cols,
             )
         elif self.table.is_primary_key_table:
-            return KeyValueDataWriter(
+            writer_type = (PostponeDataWriter if bucket == BucketMode.POSTPONE_BUCKET.value
+                           else KeyValueDataWriter)
+            return writer_type(
                 table=self.table,
                 partition=partition,
                 bucket=bucket,
-                max_seq_number=max_seq_number(),
+                max_seq_number=(0 if bucket == BucketMode.POSTPONE_BUCKET.value else max_seq_number()),
                 options=options,
                 merge_function=self._build_pk_merge_function(),
                 changelog_producer=self.changelog_producer)
@@ -256,8 +265,6 @@ class FileStoreWrite:
         from pypaimon.common.merge_engine_dispatch import (
             build_merge_function, partial_update_unsupported_options)
         from pypaimon.common.options.core_options import MergeEngine
-        from pypaimon.read.reader.deduplicate_merge_function import \
-            DeduplicateMergeFunction
 
         engine = self.options.merge_engine()
         raw_options = self.options.options.to_map()
@@ -286,25 +293,15 @@ class FileStoreWrite:
                     f.name for f in self.table.table_schema.fields],
             )
 
-        # Catch the dispatch's "wholly unsupported engine" raise only
-        # for the engines we know are out of scope today; any other
-        # NotImplementedError is a bug we want to surface, not swallow.
         if engine == MergeEngine.AGGREGATE:
-            # Surface the silent semantic mismatch in logs: the file
-            # will be PK-unique (better than the pre-PR multi-row
-            # corruption), but any reader that honours the declared
-            # engine will see wrong values. Users sharing tables
-            # across writers especially need to see this.
-            logger.warning(
-                "merge-engine '%s' is not implemented on the pypaimon "
-                "write path; falling back to deduplicate so the flushed "
-                "file stays PK-unique. The file contents reflect "
-                "deduplicate semantics (latest writer wins), not %s "
-                "semantics. Any reader that interprets the file under "
-                "the declared engine will return incorrect results. "
-                "Avoid the pypaimon writer for tables on this engine.",
-                engine.value, engine.value)
-            return DeduplicateMergeFunction()
+            from pypaimon.read.reader.aggregation_merge_function import (
+                AggregateMergeFunction, build_field_aggregators)
+            fields = self.table.table_schema.fields
+            return AggregateMergeFunction(
+                key_arity=len(self.table.trimmed_primary_keys),
+                value_arity=len(fields),
+                field_aggregators=build_field_aggregators(
+                    fields, self.table.primary_keys, self.options))
 
         all_value_fields = self.table.table_schema.fields
         return build_merge_function(
@@ -325,6 +322,12 @@ class FileStoreWrite:
         return any(isinstance(f.type, VectorType) for f in self.table.table_schema.fields)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+        messages = self._prepare_commit_messages(commit_identifier)
+        self._release_prepared_files()
+        return messages
+
+    def _prepare_commit_messages(self, commit_identifier) -> List[CommitMessage]:
+        """Collect files while their parent is still preparing the complete increment."""
         self.commit_identifier = commit_identifier
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
@@ -340,6 +343,12 @@ class FileStoreWrite:
                 )
                 commit_messages.append(commit_message)
         return commit_messages
+
+    def _release_prepared_files(self):
+        # Hand off only after every partition prepared successfully. Until
+        # then, close/abort must still clean up files from earlier partitions.
+        for writer in self.data_writers.values():
+            writer._release_prepared_files()
 
     def close(self):
         """Close all data writers and clean up resources."""
@@ -365,8 +374,11 @@ class FileStoreWrite:
             self.max_seq_numbers[partition] = buckets
         return buckets
 
+    def _sequence_read_table(self):
+        return self.table
+
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
-        read_builder = self.table.new_read_builder()
+        read_builder = self._sequence_read_table().new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
         for key, value in zip(self.table.partition_keys, partition):
@@ -387,6 +399,25 @@ class FileStoreWrite:
 
 class PostponeFixedBucketFileStoreWrite(FileStoreWrite):
     """File store write with runtime bucket counts for postpone tables."""
+
+    def __init__(self, table, commit_user):
+        super().__init__(table, commit_user)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self._check_from_snapshot = snapshot.id if snapshot is not None else 0
+
+    def _sequence_read_table(self):
+        return self.table.copy({'scan.snapshot-id': str(self._check_from_snapshot)})
+
+    def _load_seq_number_stats(self, partition):
+        if self._check_from_snapshot == 0:
+            return {}
+        return super()._load_seq_number_stats(partition)
+
+    def _prepare_commit_messages(self, commit_identifier):
+        messages = super()._prepare_commit_messages(commit_identifier)
+        for message in messages:
+            message.check_from_snapshot = self._check_from_snapshot
+        return messages
 
     def _configure_data_file_prefix(self, commit_user):
         pass

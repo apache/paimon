@@ -162,23 +162,31 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         try {
             return opener.open();
         } catch (IOException | RuntimeException e) {
-            if (writeNullOnMissingFile && HttpClientUtils.isNotFoundError(e)) {
-                LOG.warn(
-                        "Failed to open blob from {} (HTTP 404), writing NULL for BLOB field {}.",
-                        blobUri(blob),
-                        blobFieldName,
-                        e);
-                blobFetchMetricReporter.recordMissingFileNullWritten(true);
+            if (handleFetchFailure(e, blob)) {
                 return null;
             }
-            if (shouldWriteNullOnFetchFailure(e)) {
-                logWriteNullOnFetchFailure(e, blob);
-                blobFetchMetricReporter.recordFetchFailureNullWritten(e);
-                return null;
-            }
-            blobFetchMetricReporter.recordFetchFailure(e);
             throw e;
         }
+    }
+
+    /** Applies the configured fallback and metrics before any destination bytes are written. */
+    protected final boolean handleFetchFailure(Throwable e, Blob blob) {
+        if (writeNullOnMissingFile && HttpClientUtils.isNotFoundError(e)) {
+            LOG.warn(
+                    "Failed to open blob from {} (HTTP 404), writing NULL for BLOB field {}.",
+                    blobUri(blob),
+                    blobFieldName,
+                    e);
+            blobFetchMetricReporter.recordMissingFileNullWritten(true);
+            return true;
+        }
+        if (shouldWriteNullOnFetchFailure(e)) {
+            logWriteNullOnFetchFailure(e, blob);
+            blobFetchMetricReporter.recordFetchFailureNullWritten(e);
+            return true;
+        }
+        blobFetchMetricReporter.recordFetchFailure(e);
+        return false;
     }
 
     protected final BlobDescriptor writeBlobData(BlobCopySource source) throws IOException {

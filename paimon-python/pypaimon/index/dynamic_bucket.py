@@ -20,6 +20,7 @@
 
 import random
 import struct
+import uuid
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
@@ -83,12 +84,9 @@ def validate_bucket_id(bucket: int) -> None:
 
 def _iter_hashes(table, entry: IndexManifestEntry) -> Iterator[int]:
     meta = entry.index_file
-    path = meta.external_path
-    if path is None:
-        # Files without an external path always live in the table's index
-        # directory, even if global-index.external-path was configured later.
-        index_path = table.path_factory().global_index_path_factory().index_path()
-        path = f"{index_path}/{meta.file_name}"
+    path = table.path_factory().bucket_index_path(
+        tuple(entry.partition.values), entry.bucket, meta, table.file_io
+    )
     with table.file_io.new_input_stream(path) as stream:
         remainder = b""
         while True:
@@ -446,6 +444,7 @@ class DynamicBucketIndexMaintainer:
 
     def prepare_commit(self) -> Dict[Tuple[Tuple, int], DynamicBucketIndexChanges]:
         changes: Dict[Tuple[Tuple, int], DynamicBucketIndexChanges] = {}
+        prepared_states = {}
         for key, (hashes, old_entry, modified) in self._states.items():
             if not modified:
                 continue
@@ -462,7 +461,9 @@ class DynamicBucketIndexMaintainer:
                     )
                 ] if old_entry is not None else [],
             )
-            self._states[key] = (hashes, new_entry, False)
+            prepared_states[key] = (hashes, new_entry, False)
+        # A failed bucket must not make a retry forget earlier additions.
+        self._states.update(prepared_states)
         return changes
 
     def release_prepared(self) -> None:
@@ -507,9 +508,11 @@ class DynamicBucketIndexMaintainer:
     def _write_index(
         self, partition: Tuple, bucket: int, hashes: Set[int]
     ) -> IndexManifestEntry:
-        path_factory = self.table.path_factory().global_index_path_factory()
-        self.table.file_io.check_or_mkdirs(path_factory.global_index_root_path())
-        path = path_factory.new_path()
+        file_name = f"index-{uuid.uuid4()}-0"
+        path, external = self.table.path_factory().new_bucket_index_path(
+            partition, bucket, file_name
+        )
+        self.table.file_io.check_or_mkdirs(path.rsplit("/", 1)[0])
         payload = b"".join(struct.pack(">i", value) for value in sorted(hashes))
         try:
             with self.table.file_io.new_output_stream(path) as stream:
@@ -524,7 +527,7 @@ class DynamicBucketIndexMaintainer:
             file_name=path.rsplit("/", 1)[-1],
             file_size=self.table.file_io.get_file_size(path),
             row_count=len(hashes),
-            external_path=path if path_factory.is_external_path() else None,
+            external_path=path if external else None,
         )
         return IndexManifestEntry(
             kind=_ADD,

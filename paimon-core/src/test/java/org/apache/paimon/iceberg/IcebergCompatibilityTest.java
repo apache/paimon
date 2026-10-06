@@ -1944,6 +1944,38 @@ public class IcebergCompatibilityTest {
                 .containsExactly("k", "v", "branch_only");
     }
 
+    @Test
+    public void testSiblingTagsOnOneSnapshotAllBecomeRefs() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // create the tags without the Iceberg tag callback, so v1 metadata carries no refs and
+        // only the next commit's rebuild from the tag list can produce them
+        Snapshot snapshot = table.snapshotManager().snapshot(1);
+        table.tagManager().createTag(snapshot, "first", null, Collections.emptyList(), false);
+        table.tagManager().createTag(snapshot, "second", null, Collections.emptyList(), false);
+
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        Map<String, IcebergRef> refs = getIcebergRefsFromSnapshot(table, latestSnapshotId);
+        assertThat(refs).containsOnlyKeys("first", "second");
+        assertThat(refs.get("first").snapshotId()).isEqualTo(1);
+        assertThat(refs.get("second").snapshotId()).isEqualTo(1);
+    }
+
     /*
     Create snapshots
     Create tags

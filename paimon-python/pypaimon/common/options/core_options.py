@@ -264,6 +264,16 @@ class CoreOptions:
         )
     )
 
+    POSTPONE_DEFAULT_BUCKET_NUM: ConfigOption[int] = (
+        ConfigOptions.key("postpone.default-bucket-num")
+        .int_type()
+        .no_default_value()
+        .with_description(
+            "Exact bucket count for new postpone partitions and overwrite writes. "
+            "Takes precedence over automatic bucket estimation."
+        )
+    )
+
     POSTPONE_TARGET_ROW_NUM_PER_BUCKET: ConfigOption[int] = (
         ConfigOptions.key("postpone.target-row-num-per-bucket")
         .long_type()
@@ -1189,18 +1199,6 @@ class CoreOptions:
         )
     )
 
-    VARIANT_SHREDDING_ENABLED: ConfigOption[bool] = (
-        ConfigOptions.key("variant.shredding.enabled")
-        .boolean_type()
-        .default_value(True)
-        .with_description(
-            "Whether to enable VARIANT shredding. When True (default), writes apply the "
-            "shredding schema configured via 'variant.shreddingSchema', and reads "
-            "automatically reassemble shredded columns back to the standard "
-            "struct<value, metadata> form. Set to False to bypass both behaviours."
-        )
-    )
-
     VARIANT_SHREDDING_SCHEMA: ConfigOption[str] = (
         ConfigOptions.key("variant.shreddingSchema")
         .string_type()
@@ -1308,6 +1306,12 @@ class CoreOptions:
             default,
         )
 
+    def postpone_default_bucket_num(self):
+        value = self.options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)
+        if value is not None and not 0 < value <= 2147483647:
+            raise ValueError('postpone.default-bucket-num must be a positive 32-bit integer')
+        return value
+
     def postpone_target_row_num_per_bucket(self, default=None):
         return self.options.get(
             CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET, default
@@ -1382,9 +1386,6 @@ class CoreOptions:
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
-    def variant_shredding_enabled(self) -> bool:
-        return self.options.get(CoreOptions.VARIANT_SHREDDING_ENABLED, True)
-
     def variant_shredding_schema(self) -> Optional[str]:
         val = self.options.get(CoreOptions.VARIANT_SHREDDING_SCHEMA)
         if val is None:
@@ -1393,15 +1394,11 @@ class CoreOptions:
         return val
 
     def blob_descriptor_fields(self, default=None):
-        # Do not treat blob.stored-descriptor-fields as a layout switch.
-        # Python master ignored that key and wrote dedicated .blob payloads;
-        # a global fallback would mis-parse those files during a rolling
-        # upgrade. The cost is that Java tables which only set the fallback
-        # key store inline descriptors, and Python returns those bytes
-        # instead of fetching payload. Migrate explicitly to
-        # blob-descriptor-field (column directives already copy the legacy
-        # key onto the canonical option).
-        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        # Java's fallback key applies only when the canonical key is absent.
+        if self.options.contains_key(CoreOptions.BLOB_DESCRIPTOR_FIELD.key()):
+            value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        else:
+            value = self.options.to_map().get('blob.stored-descriptor-fields', default)
         return CoreOptions._parse_field_set(value)
 
     def blob_view_fields(self, default=None):

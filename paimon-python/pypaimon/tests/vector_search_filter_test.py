@@ -1051,6 +1051,43 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual([Range(0, 9)], raw[0].row_ranges)
         self.assertEqual([], raw[0].scalar_index_files)
 
+    def test_composite_btree_does_not_cover_scalar_filter(self):
+        from pypaimon.table.source.vector_search_split import (
+            IndexVectorSearchSplit,
+            RawVectorSearchSplit,
+        )
+
+        self.table.fields.append(_field(2, "other"))
+        self.entries[2].index_file.global_index_meta.row_range_end = 4
+        composite = _entry(
+            None, field_id=0, index_type="btree", file_name="composite.index",
+            row_range_start=0, row_range_end=9)
+        composite.index_file.global_index_meta.extra_field_ids = [2]
+        self.entries.append(composite)
+        predicate = Predicate(method="equal", index=0, field="id", literals=[7])
+
+        for mode in ("fast", "full", "detail"):
+            with self.subTest(mode=mode):
+                self.table.options = CoreOptions(Options({
+                    "scalar-index.search-mode": mode,
+                    "vector-index.search-mode": "fast",
+                }))
+                self.table.data_ranges_for_data_evolution_global_index_coverage = (
+                    lambda snapshot, partition_filter: [Range(0, 9)])
+                splits = self._builder(predicate).new_vector_search_scan().scan().splits()
+                indexed = [s for s in splits if isinstance(s, IndexVectorSearchSplit)]
+                raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
+                self.assertEqual(2, len(indexed))
+                attached = [f.file_name for s in indexed for f in s.scalar_index_files]
+                self.assertEqual(["id-btree-0.index"], attached)
+                if mode == "fast":
+                    self.assertEqual([], raw)
+                else:
+                    self.assertEqual(1, len(raw))
+                    self.assertEqual([Range(5, 9)], raw[0].row_ranges)
+                    self.assertNotIn("composite.index",
+                                     [f.file_name for f in raw[0].scalar_index_files])
+
     def test_read_threads_prefilter_bitmap_as_include_row_ids(self):
         """preFilter bitmap from scanner.scan(filter) must reach each split's
         VectorSearch, offset-rebased to local coords by OffsetGlobalIndexReader.
@@ -1766,7 +1803,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(1, len(raw))
         self.assertEqual("ivf-flat", raw[0].index_type)
 
-    def test_scan_attaches_scalar_index_when_filter_hits_extra_field(self):
+    def test_scan_excludes_composite_btree_when_filter_hits_extra_field(self):
         id_name_index = _entry(None, field_id=2, index_type="btree",
                                file_name="name-id.index",
                                row_range_start=0,
@@ -1797,8 +1834,7 @@ class VectorSearchFilterTest(unittest.TestCase):
             .splits()
         )
 
-        self.assertEqual(["name-id.index"],
-                         [f.file_name for f in splits[0].scalar_index_files])
+        self.assertEqual([], splits[0].scalar_index_files)
 
 
 class VectorSearchMultiShardScalarTest(unittest.TestCase):
@@ -1886,7 +1922,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         # Must not be empty despite shard_a being empty (no short-circuit).
         self.assertEqual([7], hits)
 
-    def test_primary_and_extra_field_indexes_share_coverage(self):
+    def test_composite_btree_does_not_extend_primary_coverage(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
@@ -1948,9 +1984,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             finally:
                 scanner.close()
 
-        result = evaluation.result.or_(fallback)
-        self.assertTrue(fallback.results().is_empty())
-        self.assertEqual([1, 7], sorted(result.results()))
+        self.assertEqual([Range(5, 9)], fallback.results().to_range_list())
+        self.assertEqual([1], sorted(evaluation.result.results()))
 
     def test_unsupported_extra_field_index_does_not_poison_primary(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
@@ -2024,11 +2059,12 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        short = _entry(None, field_id=0, index_type="btree",
+        # Mocked non-BTree readers retain coverage of generic extra-field padding.
+        short = _entry(None, field_id=0, index_type="bitmap",
                        file_name="a-c.index",
                        row_range_start=0, row_range_end=4).index_file
         short.global_index_meta.extra_field_ids = [2]
-        long = _entry(None, field_id=1, index_type="btree",
+        long = _entry(None, field_id=1, index_type="bitmap",
                       file_name="b-c.index",
                       row_range_start=0, row_range_end=9).index_file
         long.global_index_meta.extra_field_ids = [2]
@@ -2087,15 +2123,16 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        a_early = _entry(None, field_id=0, index_type="btree",
+        # Reader stubs test padding independently of composite BTree support.
+        a_early = _entry(None, field_id=0, index_type="bitmap",
                          file_name="a-c-early.index",
                          row_range_start=2, row_range_end=3).index_file
         a_early.global_index_meta.extra_field_ids = [2]
-        a_late = _entry(None, field_id=0, index_type="btree",
+        a_late = _entry(None, field_id=0, index_type="bitmap",
                         file_name="a-c-late.index",
                         row_range_start=7, row_range_end=9).index_file
         a_late.global_index_meta.extra_field_ids = [2]
-        b_full = _entry(None, field_id=1, index_type="btree",
+        b_full = _entry(None, field_id=1, index_type="bitmap",
                         file_name="b-c-full.index",
                         row_range_start=0, row_range_end=9).index_file
         b_full.global_index_meta.extra_field_ids = [2]
@@ -2155,11 +2192,11 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b", "STRING")
         c_field = _field(2, "c", "STRING")
 
-        short = _entry(None, field_id=0, index_type="btree",
+        short = _entry(None, field_id=0, index_type="bitmap",
                        file_name="a-c.index",
                        row_range_start=0, row_range_end=4).index_file
         short.global_index_meta.extra_field_ids = [2]
-        long = _entry(None, field_id=1, index_type="btree",
+        long = _entry(None, field_id=1, index_type="bitmap",
                       file_name="b-c.index",
                       row_range_start=0, row_range_end=9).index_file
         long.global_index_meta.extra_field_ids = [2]
@@ -2337,7 +2374,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         self.assertEqual([Range(5, 9)], result.results().to_range_list())
 
-    def test_scanner_create_selects_extra_field_indexes(self):
+    def test_scanner_create_excludes_composite_btree_extra_fields(self):
         from pypaimon.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
         )
@@ -2358,35 +2395,15 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         )
         _patch_snapshot(self, table._entries)
 
-        class _StubBTreeReader:
-            def __init__(self_inner, key_serializer, file_io, index_path,
-                         io_meta):
-                pass
-
-            def visit_equal(self_inner, literal):
-                return GlobalIndexResult.create_empty()
-
-            def close(self_inner):
-                pass
-
         with mock.patch(
-                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
-                _StubBTreeReader):
-            with mock.patch(
-                    "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
-                    return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
-                scanner = DataEvolutionGlobalIndexScanner.create(
-                    table,
-                    predicate=Predicate(method="equal", index=1, field="id",
-                                        literals=[3]),
-                )
-                try:
-                    self.assertIsNotNone(scanner)
-                    readers = scanner._evaluator._readers_function(id_field)
-                    self.assertTrue(readers)
-                finally:
-                    if scanner is not None:
-                        scanner.close()
+                "pypaimon.globalindex.data_evolution_global_index_scanner."
+                "_create_inner_readers") as create_readers:
+            scanner = DataEvolutionGlobalIndexScanner.create(
+                table,
+                predicate=Predicate(method="equal", index=1, field="id", literals=[3]),
+            )
+            self.assertIsNone(scanner)
+            create_readers.assert_not_called()
 
 
 class VectorSearchPartitionedFilterTest(unittest.TestCase):

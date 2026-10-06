@@ -345,7 +345,6 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
 def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
-    from pypaimon.write.file_store_commit import _abort_commit_messages
     from pypaimon.write.row_id_file_index import RowIdFileIndex
 
     table_read = TableRead(
@@ -394,7 +393,8 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     try:
         messages = updater.update_columns(updates, context.update_cols)
     except Exception:
-        _abort_commit_messages(context.table, updater.commit_messages)
+        # Never delete files from CommitMessage on failure.
+        # A commit can succeed even when its response raises an exception.
         raise
     return messages, updates.num_rows, row_ids
 
@@ -466,8 +466,8 @@ def distributed_self_merge_update_apply(
             submit_next()
 
     if first_error is not None:
-        from pypaimon.write.file_store_commit import _abort_commit_messages
-        _abort_commit_messages(plan.table, messages)
+        # Never delete files from CommitMessage on failure.
+        # A commit can succeed even when its response raises an exception.
         raise first_error
     return messages, num_updated, row_ids
 
@@ -689,6 +689,7 @@ def distributed_update_apply(
     estimated_size_bytes: Optional[int] = None,
     estimated_num_rows: Optional[int] = None,
     data_context=None,
+    materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -728,6 +729,9 @@ def distributed_update_apply(
         len(sorted_first_row_ids),
         data_context=data_context,
     )
+    if materialize_before_routing:
+        # Keep the matched join and file-routing shuffle in separate Ray jobs.
+        update_ds = update_ds.materialize()
 
     # Pin commit-time conflict check to the snapshot the join was built on,
     # so concurrent commits between read and planner are detected.
@@ -1009,6 +1013,7 @@ def distributed_delete_apply(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
     import base64
     import numpy as np
@@ -1031,6 +1036,10 @@ def distributed_delete_apply(
     anchor_info = planner._snapshot_anchor_ranges()
     if not anchor_info.anchors:
         return [], 0, []
+
+    if materialize_before_routing:
+        # Keep the matched join and file-routing shuffle in separate Ray jobs.
+        delete_ds = delete_ds.materialize()
 
     precomputed_info_ref = ray.put(anchor_info)
 

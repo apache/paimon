@@ -366,15 +366,8 @@ def test_external_data_paths_fall_back_before_native_write(tmp_path):
     writer.close()
 
 
-@pytest.mark.parametrize('options', [
-    {'bucket': '-1'},
-    {'changelog-file.format': 'orc'},
-])
-def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(
-        tmp_path, options):
-    table = (_table(tmp_path, primary_key=True, table_options=options)
-             if 'bucket' in options else
-             _table(tmp_path, primary_key=True).copy(options))
+def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(tmp_path):
+    table = _table(tmp_path, primary_key=True).copy({'changelog-file.format': 'orc'})
     with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
             patch('pypaimon.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):

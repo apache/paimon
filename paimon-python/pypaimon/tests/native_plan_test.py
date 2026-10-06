@@ -21,6 +21,7 @@ import unittest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+import pyarrow
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
 from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
@@ -33,6 +34,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.read.native_plan import (
     _catalog_options,
+    _configure_native_read_builder,
     _native_read_builder,
     _predicate_to_native,
     _resolved_schema_json,
@@ -43,10 +45,16 @@ from pypaimon.read.native_plan import (
 )
 from pypaimon.read.plan import Plan
 from pypaimon.read.table_scan import TableScan
+from pypaimon.read.variant_read_type import with_variant_extractions
 from pypaimon.schema.data_types import AtomicType, DataField, MapType, MultisetType, RowType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.utils.range import Range
+
+
+def _variant_read_type_json(read_type, options):
+    return json.dumps(RowType(True, with_variant_extractions(
+        read_type, options)).to_dict())
 
 
 def _scan(native_enabled, file_scanner):
@@ -91,6 +99,90 @@ def _scan(native_enabled, file_scanner):
 
 
 class NativePlanTest(unittest.TestCase):
+
+    def test_variant_read_type_matches_java_interop_fixture(self):
+        actual = _variant_read_type_json(
+            [DataField(7, 'payload', AtomicType('VARIANT'))],
+            {'payload': {
+                'paths': ['$.x'],
+                'target_type': pyarrow.float32(),
+                'fail_on_error': False,
+            }})
+        # Parsed by Java VariantMetadataUtilsTest.testReadTypeJsonInteropWithRustAndPython.
+        java_fixture = (
+            '{"type":"ROW","fields":[{"id":7,"name":"payload",'
+            '"type":{"type":"ROW","fields":[{"id":0,"name":"0",'
+            '"type":"FLOAT","description":'
+            '"__VARIANT_METADATA$.x;false;UTC"}],"nullable":true}}],'
+            '"nullable":true}'
+        )
+        self.assertEqual(json.loads(actual), json.loads(java_fixture))
+
+        strict = _variant_read_type_json(
+            [DataField(7, 'payload', AtomicType('VARIANT'))],
+            {'payload': {
+                'paths': ['$.x'],
+                'target_type': pyarrow.float32(),
+                'fail_on_error': True,
+            }})
+        self.assertEqual(
+            json.loads(strict)['fields'][0]['type']['fields'][0]['description'],
+            '__VARIANT_METADATA$.x;true;UTC')
+
+        mixed = _variant_read_type_json(
+            [DataField(7, 'payload', AtomicType('VARIANT'))],
+            {'payload': {
+                'paths': ['$.x', '$.y'],
+                'target_type': pyarrow.float32(),
+                'fail_on_error': [False, True],
+            }})
+        children = json.loads(mixed)['fields'][0]['type']['fields']
+        self.assertEqual(
+            [child['description'] for child in children],
+            ['__VARIANT_METADATA$.x;false;UTC',
+             '__VARIANT_METADATA$.y;true;UTC'])
+
+    def test_variant_read_type_rejects_semicolon_path(self):
+        with self.assertRaisesRegex(ValueError, "must not contain ';'"):
+            _variant_read_type_json(
+                [DataField(7, 'payload', AtomicType('VARIANT'))],
+                {'payload': {
+                    'paths': ["$['a;b']"],
+                    'target_type': pyarrow.float32(),
+                    'fail_on_error': False,
+                }})
+
+    def test_native_builder_receives_variant_read_type(self):
+        builder = Mock()
+        builder.with_read_type.return_value = builder
+        variant_fields = {
+            'payload': {
+                'paths': ['$.ratio'],
+                'target_type': pyarrow.float32(),
+                'fail_on_error': False,
+            }
+        }
+        read_type = [
+            DataField(1, 'id', AtomicType('INT')),
+            DataField(2, 'payload', AtomicType('VARIANT')),
+        ]
+
+        result = _configure_native_read_builder(
+            builder,
+            predicate=None,
+            limit=None,
+            projection=['id', 'payload'],
+            read_type=with_variant_extractions(read_type, variant_fields),
+        )
+
+        self.assertIs(result, builder)
+        fields = json.loads(builder.with_read_type.call_args.args[0])['fields']
+        self.assertEqual([field['name'] for field in fields], ['id', 'payload'])
+        self.assertEqual(fields[1]['id'], 2)
+        self.assertEqual(fields[1]['type']['fields'][0]['type'], 'FLOAT')
+        self.assertEqual(fields[1]['type']['fields'][0]['description'],
+                         '__VARIANT_METADATA$.ratio;false;UTC')
+        builder.with_projection.assert_not_called()
 
     def setUp(self):
         # Make the real capability probe see a split-API-capable pypaimon-rust so
@@ -495,6 +587,21 @@ class NativePlanTest(unittest.TestCase):
                    side_effect=RuntimeError('unsupported scheme viewfs://')):
             self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
+
+    def test_plan_propagates_native_fork_safety_error(self):
+        class ForkSafetyError(RuntimeError):
+            pass
+
+        module = ModuleType('pypaimon_rust')
+        module.ForkSafetyError = ForkSafetyError
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        with patch.dict(sys.modules, {'pypaimon_rust': module}), patch(
+                'pypaimon.read.native_plan.native_plan',
+                side_effect=ForkSafetyError('cannot reuse Jindo after fork')):
+            with self.assertRaises(ForkSafetyError):
+                scan.plan()
+        fs.scan.assert_not_called()
 
     def test_plan_uses_resolved_schema_for_jdbc_catalog_loader(self):
         fs = Mock(partition_key_predicate=None)

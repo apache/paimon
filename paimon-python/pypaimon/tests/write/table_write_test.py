@@ -227,6 +227,7 @@ class TableWriteTest(unittest.TestCase):
     @staticmethod
     def _mock_table_write(partitions, buckets):
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
         table_write.file_store_write = Mock()
@@ -301,6 +302,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -325,6 +327,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -611,7 +614,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(0)
+        cm = table_write.prepare_commit(0)
         # write 2
         data2 = {
             'user_id': [5, 6, 7, 8],
@@ -621,7 +624,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(1)
+        cm.extend(table_write.prepare_commit(1))
         # write 3
         data3 = {
             'user_id': [9, 10],
@@ -631,7 +634,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data3, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        cm = table_write.prepare_commit(2)
+        cm.extend(table_write.prepare_commit(2))
         # commit
         table_commit.commit(cm, 2)
         table_write.close()
@@ -737,7 +740,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(0)
+        cm = table_write.prepare_commit(0)
         # write 2
         data2 = {
             'user_id': [5, 6, 7, 8],
@@ -747,7 +750,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(1)
+        cm.extend(table_write.prepare_commit(1))
         # write 3
         data3 = {
             'user_id': [9, 10],
@@ -757,7 +760,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data3, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        cm = table_write.prepare_commit(2)
+        cm.extend(table_write.prepare_commit(2))
         # commit
         table_commit.commit(cm, 2)
         table_write.close()
@@ -862,16 +865,12 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1'],
         }, schema=self.pk_pa_schema)
 
-        self._commit_arrow(table, expected)
-
-        self.assertEqual(
-            1,
-            len(glob.glob(
-                self.warehouse
-                + "/default.db/test_postpone_default_builder/user_id=1/"
-                + "bucket-postpone/*.avro"
-            )),
-        )
+        messages = self._commit_arrow(table, expected)
+        self.assertEqual({-2}, {message.bucket for message in messages})
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual(1, len(files))
+        self.assertIn('/bucket-postpone/', files[0].file_path)
+        self.assertTrue(table.file_io.exists(files[0].file_path))
         splits = table.new_read_builder().new_scan().plan().splits()
         self.assertTrue(not table.new_read_builder().new_read().to_arrow(splits))
 
@@ -1752,7 +1751,8 @@ class TableWriteTest(unittest.TestCase):
 
         # Verify file name format: {table_prefix}-u-{commit_user}-s-{random_number}-w--{uuid}-0.{format}
         # Expected pattern: data--u-{user}-s-{random}-w--{uuid}-0.{format}
-        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.avro$'
+        # Native postpone writes use Parquet; the Python writer may select Avro.
+        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.(avro|parquet)$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
