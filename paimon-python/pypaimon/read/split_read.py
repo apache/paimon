@@ -50,6 +50,7 @@ from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 
 from pypaimon.read.reader.auth_masking_reader import AuthFilterReader
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
+from pypaimon.read.reader.file_read_recovery import FileReadRecovery
 from pypaimon.read.reader.deferred_blob_resolve_reader import \
     DeferredBlobResolveReader
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
@@ -463,15 +464,18 @@ class SplitRead(ABC):
             predicate_fields = (
                 predicate_field_names(self.push_down_predicate)
                 if self.push_down_predicate else set())
-            format_reader = FormatPyArrowReader(
-                self.table.file_io, file_format, file_path,
-                ordered_read_fields, read_arrow_predicate, batch_size=batch_size,
-                options=self.table.options,
-                nested_name_paths=ordered_nested_paths,
-                predicate_field_names=predicate_fields,
-                row_ranges=parquet_row_ranges,
-                row_group_cache=self._parquet_row_group_cache,
-                file_size=file.file_size)
+            recovery = FileReadRecovery(self.table.file_io, file_path, self.table.options)
+            format_reader = recovery.create_reader(
+                lambda: FormatPyArrowReader(
+                    self.table.file_io, file_format, file_path,
+                    ordered_read_fields, read_arrow_predicate, batch_size=batch_size,
+                    options=self.table.options,
+                    nested_name_paths=ordered_nested_paths,
+                    predicate_field_names=predicate_fields,
+                    row_ranges=parquet_row_ranges,
+                    row_group_cache=self._parquet_row_group_cache,
+                    file_size=file.file_size))
+
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             if has_nested:
                 raise NotImplementedError(
@@ -486,11 +490,14 @@ class SplitRead(ABC):
                     file_schema.fields)
             else:
                 row_full_fields = file_schema.data_file_fields(None)
-            format_reader = FormatRowReader(
-                self.table.file_io, file_path, read_file_fields,
-                row_full_fields,
-                read_arrow_predicate, batch_size=batch_size,
-                row_indices=row_indices)
+            recovery = FileReadRecovery(self.table.file_io, file_path, self.table.options)
+            format_reader = recovery.create_reader(
+                lambda: FormatRowReader(
+                    self.table.file_io, file_path, read_file_fields,
+                    row_full_fields,
+                    read_arrow_predicate, batch_size=batch_size,
+                    row_indices=row_indices))
+
         elif file_format in ('json', 'csv'):
             raise NotImplementedError(
                 f"Reading '{file_format}' format is not yet supported in Python SDK. "

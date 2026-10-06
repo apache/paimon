@@ -303,7 +303,10 @@ class FormatRowReader(RecordBatchReader):
 
         decompressor = zstd.ZstdDecompressor()
         uncompressed_size = self._block_uncompressed_sizes[block_idx]
-        return decompressor.decompress(compressed_data, max_output_size=uncompressed_size)
+        try:
+            return decompressor.decompress(compressed_data, max_output_size=uncompressed_size)
+        except zstd.ZstdError as error:
+            raise IOError("Invalid compressed ROW block %d" % block_idx) from error
 
     def _build_table(self, columns: List[List], row_count: int) -> pa.Table:
         pydict = {

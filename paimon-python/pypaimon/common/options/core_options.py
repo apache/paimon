@@ -702,6 +702,20 @@ class CoreOptions:
                           "operations use Python before any native commit is attempted.")
     )
 
+    SCAN_IGNORE_LOST_FILE: ConfigOption[bool] = (
+        ConfigOptions.key("scan.ignore-lost-files")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Ignore files lost before a data-file reader is created.")
+    )
+
+    SCAN_IGNORE_CORRUPT_FILE: ConfigOption[bool] = (
+        ConfigOptions.key("scan.ignore-corrupt-files")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Ignore file I/O and decoding failures while reading data files.")
+    )
+
     WRITE_NATIVE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("write.native.enabled")
         .boolean_type()
@@ -1328,6 +1342,12 @@ class CoreOptions:
             CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET, default
         ).get_bytes()
 
+    def scan_ignore_lost_file(self, default=None):
+        return self.options.get(CoreOptions.SCAN_IGNORE_LOST_FILE, default)
+
+    def scan_ignore_corrupt_file(self, default=None):
+        return self.options.get(CoreOptions.SCAN_IGNORE_CORRUPT_FILE, default)
+
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
 
@@ -1925,7 +1945,10 @@ class CoreOptions:
         return self.options.get(CoreOptions.LOCAL_CACHE_WHITELIST)
 
     def read_batch_size(self, default=None) -> int:
-        return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+        size = self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+        if size <= 0:
+            raise ValueError('read.batch-size must be positive')
+        return size
 
     def parquet_column_index_enabled(self) -> bool:
         return self.options.get(CoreOptions.PARQUET_COLUMN_INDEX_ENABLED)

@@ -261,9 +261,11 @@ class DataEvolutionMergeReader(RecordBatchReader):
                 else:
                     batch = reader.read_arrow_batch()
                     if batch is None:
-                        batches[i] = None
-                    else:
-                        batches[i] = batch
+                        # Java DataEvolutionFileReader stops the group when an
+                        # active column reader ends; missing files must not turn
+                        # committed values into fabricated NULL columns.
+                        return None
+                    batches[i] = batch
             else:
                 batches[i] = None
 

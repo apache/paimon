@@ -498,6 +498,8 @@ class TableRead:
                 "the table file format is not supported")
         if not splits:
             return []
+        # Validate before native setup/fallback and before any per-file recovery.
+        self.table.options.read_batch_size()
         sequence_fields = self.table.options.sequence_field()
         if self.table.is_primary_key_table and sequence_fields:
             sequence_schema = PyarrowFieldParser.from_paimon_schema(
