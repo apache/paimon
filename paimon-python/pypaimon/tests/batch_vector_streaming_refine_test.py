@@ -224,7 +224,7 @@ def test_parallel_split_streams_are_bounded_and_closed(invalid):
         def _resolve_parallelism(self, runtime, count):
             return 2
 
-        def _new_arrow_batch_reader(self, splits):
+        def _new_arrow_batch_reader(self, splits, parallelism=None):
             owner = splits[0]
             with lock:
                 active.add(owner)

@@ -130,8 +130,8 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         module = 'pypaimon.table.source.vector_search_read'
         from pypaimon.table.source.vector_search_read import _compute_scores
 
-        def batches(table_read, splits):
-            arrow, generator = original(table_read, splits)
+        def batches(table_read, splits, **kwargs):
+            arrow, generator = original(table_read, splits, **kwargs)
             generators.append(generator)
             return arrow, generator
 
@@ -223,8 +223,8 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                         state = {'active': 0, 'peak': 0, 'closed': 0}
                         seen = []
 
-                        def tracked(table_read, splits, *args):
-                            source = original(table_read, splits, *args)
+                        def tracked(table_read, splits, *args, **kwargs):
+                            source = original(table_read, splits, *args, **kwargs)
                             with lock:
                                 state['active'] += 1
                                 state['peak'] = max(state['peak'], state['active'])
@@ -263,8 +263,8 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                 started = []
                 closed = []
 
-                def tracked(table_read, *args):
-                    source = original(table_read, *args)
+                def tracked(table_read, *args, **kwargs):
+                    source = original(table_read, *args, **kwargs)
                     with lock:
                         worker = len(started)
                         started.append(worker)
@@ -286,7 +286,8 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                     with self.assertRaisesRegex(exception, message):
                         (table.new_batch_vector_search_builder().with_vector_column('embedding')
                          .with_query_vectors([query]).with_limit(2).execute_batch_local())
-                self.assertEqual([0, 1], sorted(closed))
+                self.assertGreaterEqual(len(started), 2)
+                self.assertEqual(sorted(started), sorted(closed))
 
 
 if __name__ == '__main__':

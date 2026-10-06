@@ -223,7 +223,7 @@ class PipelinedBatchGeneratorTest(unittest.TestCase):
         self.read.limit = None
         self.read._read_parallelism = None
         self.read.read_type = []
-        self.read.expression_projection = None
+        self.read.output_projection = None
         self.read.include_row_kind = False
         self.schema = pa.schema([('value', pa.int64())])
 

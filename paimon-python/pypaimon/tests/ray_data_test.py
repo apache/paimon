@@ -147,7 +147,7 @@ class RayDataTest(unittest.TestCase):
         provider.nested_name_paths.return_value = None
         provider.splits.return_value = splits
         provider.limit.return_value = None
-        provider.expression_projection.return_value = None
+        provider.output_projection.return_value = None
         provider.include_row_kind.return_value = False
 
         worker_read = mock.Mock()

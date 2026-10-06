@@ -216,7 +216,7 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
                 "_ROW_ID": pa.array(row_ids, type=pa.int64()),
             })
 
-        def _new_arrow_batch_reader(self, splits):
+        def _new_arrow_batch_reader(self, splits, parallelism=None):
             table = self.to_arrow(splits)
             batches = (batch for batch in table.to_batches(max_chunksize=2))
             return pa.RecordBatchReader.from_batches(table.schema, batches), batches

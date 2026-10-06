@@ -605,7 +605,9 @@ class AbstractVectorSearchReadImpl:
         from pypaimon.read.table_read import _ClosableArrowBatchReader
 
         heaps = [[] for _ in query_vectors]
-        reader, batches = table_read._new_arrow_batch_reader(splits)
+        # The caller already parallelizes these split groups. Do not create
+        # another split worker pool for each group.
+        reader, batches = table_read._new_arrow_batch_reader(splits, parallelism=1)
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
             for batch in batch_reader:
                 row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
@@ -775,7 +777,8 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
     def _score_raw_splits(self, table_read, splits, metric):
         from pypaimon.read.table_read import _ClosableArrowBatchReader
 
-        reader, batches = table_read._new_arrow_batch_reader(splits)
+        # The caller already parallelizes these split groups.
+        reader, batches = table_read._new_arrow_batch_reader(splits, parallelism=1)
         # Close the underlying iterator as well if scoring fails mid-batch.
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
             return self._score_raw_batch_queries(batch_reader, metric)

@@ -356,6 +356,7 @@ class TableRead:
             yield from self._arrow_batch_generator(
                 splits, schema, blob_parallelism)
             return
+        self._begin_auth_read(splits)
         end = object()
         stop = object()
         results = queue.Queue()
@@ -1022,7 +1023,8 @@ class TableRead:
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1,
                                parallel_split_read: bool = False) -> Iterator[pyarrow.RecordBatch]:
-        self._begin_auth_read(splits)
+        if not parallel_split_read:
+            self._begin_auth_read(splits)
         chunk_size = 65536
         # ``remaining`` tracks how many rows we are still allowed to emit
         # across all splits. ``None`` means unlimited.
