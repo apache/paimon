@@ -192,6 +192,26 @@ public class FileSystemWriteRestoreTest {
     }
 
     @Test
+    public void testEmptyBucketUsesDefaultBucketCountForExistingPartition() throws Exception {
+        // A partition at the table default is not an override in the routing mapping. Restore
+        // must nevertheless retain it so that an empty bucket is validated against the current
+        // layout rather than an absent mapping entry.
+        FileStoreTable table = createPartitionedPkTable(4, false);
+        commitOneRow(table, /* pt */ 1, /* k */ 1);
+        commitOneRow(table, /* pt */ 1, /* k */ 2);
+
+        int emptyBucket = findEmptyBucket(table, 1, /* totalBuckets */ 4);
+
+        table = withBucket(table, 4, true);
+
+        RestoreFiles restored =
+                newWriteRestore(table).restoreFiles(binaryRow(1), emptyBucket, false, false, false);
+
+        assertThat(restored.totalBuckets()).isEqualTo(4);
+        assertThat(restored.dataFiles()).isNullOrEmpty();
+    }
+
+    @Test
     public void testEmptyBucketInUnseenPartitionDoesNotReportTableDefault() throws Exception {
         // For an entirely unseen partition (no files anywhere), no per-partition override exists.
         // Return null so the writer falls back to its expected table-level bucket count. In

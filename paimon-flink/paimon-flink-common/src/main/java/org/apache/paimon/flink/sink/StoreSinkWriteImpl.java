@@ -156,10 +156,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withMemoryPoolFactory(memoryPoolFactory);
 
-        if (partitionBucketMapping != null) {
-            tableWrite.withPartitionBucketMapping(partitionBucketMapping);
-        }
-
         if (metricGroup != null) {
             tableWrite.withMetricRegistry(new FlinkMetricRegistry(metricGroup));
         }

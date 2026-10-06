@@ -123,12 +123,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         return this;
     }
 
-    public TableWriteImpl<T> withPartitionBucketMapping(
-            PartitionBucketMapping partitionBucketMapping) {
-        write.withPartitionBucketMapping(partitionBucketMapping);
-        return this;
-    }
-
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);

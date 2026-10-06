@@ -40,7 +40,6 @@ import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -150,15 +149,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public FileStoreWrite<T> withWriteRestore(WriteRestore writeRestore) {
         this.restore = writeRestore;
-        return this;
-    }
-
-    @Override
-    public FileStoreWrite<T> withPartitionBucketMapping(
-            PartitionBucketMapping partitionBucketMapping) {
-        if (restore instanceof FileSystemWriteRestore) {
-            ((FileSystemWriteRestore) restore).withPartitionBucketMapping(partitionBucketMapping);
-        }
         return this;
     }
 

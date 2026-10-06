@@ -41,6 +41,7 @@ public class FileSystemWriteRestore implements WriteRestore {
     private final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
     private final IndexFileHandler indexFileHandler;
+    @Nullable private Long partitionBucketMappingSnapshotId;
     @Nullable private PartitionBucketMapping partitionBucketMapping;
     private final @Nullable Long snapshotId;
 
@@ -77,19 +78,20 @@ public class FileSystemWriteRestore implements WriteRestore {
                 this.scan.dropStats();
             }
         }
-        this.partitionBucketMapping =
-                options.bucketPerPartitionCountEnabled()
-                        ? null
-                        : PartitionBucketMapping.defaultBuckets(options.bucket());
+        this.partitionBucketMapping = null;
     }
 
-    public void withPartitionBucketMapping(PartitionBucketMapping partitionBucketMapping) {
-        this.partitionBucketMapping = partitionBucketMapping;
-    }
-
-    private PartitionBucketMapping partitionBucketMapping() {
-        if (partitionBucketMapping == null) {
-            partitionBucketMapping = PartitionBucketMapping.loadFromScan(scan, options.bucket());
+    private PartitionBucketMapping partitionBucketMapping(Snapshot snapshot) {
+        if (!options.bucketPerPartitionCountEnabled()) {
+            return PartitionBucketMapping.defaultBuckets(options.bucket());
+        }
+        if (partitionBucketMapping == null
+                || partitionBucketMappingSnapshotId == null
+                || partitionBucketMappingSnapshotId != snapshot.id()) {
+            partitionBucketMapping =
+                    PartitionBucketMapping.loadFromScan(
+                            scan.withSnapshot(snapshot), options.bucket(), true);
+            partitionBucketMappingSnapshotId = snapshot.id();
         }
         return partitionBucketMapping;
     }
@@ -119,8 +121,10 @@ public class FileSystemWriteRestore implements WriteRestore {
             return RestoreFiles.empty();
         }
 
-        // load the mapping before narrowing the mutable scan to a single bucket
-        PartitionBucketMapping bucketMapping = partitionBucketMapping();
+        // Load the layout from the snapshot being restored before narrowing the mutable scan to a
+        // single bucket. Do not use the job's routing mapping here: it may be stale after a
+        // partition rescale.
+        PartitionBucketMapping bucketMapping = partitionBucketMapping(snapshot);
         List<ManifestEntry> entries =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
         List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);

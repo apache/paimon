@@ -48,8 +48,9 @@ public interface WriteRestore {
      *   <li>Non-empty bucket: use the value stamped on the existing data files so that
      *       committer-side bucket-count mismatch detection (e.g. rescale-without-overwrite) still
      *       fires.
-     *   <li>Empty bucket on a partitioned table: look up the per-partition override in {@code
-     *       mapping}; returns {@code null} if the partition uses the table default.
+     *   <li>Empty bucket on a partitioned table: look up the partition count in the restore
+     *       mapping. Restore mappings retain default-count partitions, while an unseen partition
+     *       still returns {@code null}.
      *   <li>Empty bucket on an unpartitioned table: returns {@code null} so the write path falls
      *       back to {@code numBuckets} and the committer-side check still fires.
      * </ul>

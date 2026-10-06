@@ -112,6 +112,18 @@ public class PartitionBucketMapping implements Serializable {
      * #defaultBuckets(int)} instead when the scan should be skipped.
      */
     public static PartitionBucketMapping loadFromScan(FileStoreScan scan, int defaultBuckets) {
+        return loadFromScan(scan, defaultBuckets, false);
+    }
+
+    /**
+     * Loads a partition-to-bucket mapping from a manifest scan.
+     *
+     * <p>When {@code includeDefaultBucketCount} is true, the mapping also retains partitions whose
+     * bucket count equals {@code defaultBuckets}. This is useful for restore paths, where an empty
+     * bucket must distinguish an existing default-count partition from an unseen partition.
+     */
+    public static PartitionBucketMapping loadFromScan(
+            FileStoreScan scan, int defaultBuckets, boolean includeDefaultBucketCount) {
         if (scan == null) {
             return defaultBuckets(defaultBuckets);
         }
@@ -122,7 +134,7 @@ public class PartitionBucketMapping implements Serializable {
             // Only store partitions whose bucket count differs from the default.
             // This keeps the map empty for partitions that have never been rescaled,
             // avoiding per-partition BinaryRow copies and Integer allocations entirely.
-            if (totalBuckets > 0 && totalBuckets != defaultBuckets) {
+            if (totalBuckets > 0 && (includeDefaultBucketCount || totalBuckets != defaultBuckets)) {
                 partitionBucketMap.put(entry.partition().copy(), totalBuckets);
             }
         }
