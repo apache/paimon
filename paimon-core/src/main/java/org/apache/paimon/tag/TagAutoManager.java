@@ -21,6 +21,7 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -54,7 +55,8 @@ public class TagAutoManager {
             SnapshotManager snapshotManager,
             TagManager tagManager,
             TagDeletion tagDeletion,
-            List<TagCallback> callbacks) {
+            List<TagCallback> callbacks,
+            BranchManager branchManager) {
 
         TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(options);
 
@@ -64,7 +66,8 @@ public class TagAutoManager {
                         : TagAutoCreation.create(
                                 options, snapshotManager, tagManager, tagDeletion, callbacks),
                 options.tagTimeExpireEnabled()
-                        ? TagTimeExpire.create(snapshotManager, tagManager, tagDeletion, callbacks)
+                        ? TagTimeExpire.create(
+                                snapshotManager, tagManager, tagDeletion, callbacks, branchManager)
                         : null);
     }
 
