@@ -56,6 +56,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
     private final boolean isStreamingMode;
+    private final boolean perPartitionBucketCountsEnabled;
     private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
     private final TableWriteFactory tableWriteFactory;
@@ -107,11 +108,44 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.ignorePreviousFiles = ignorePreviousFiles;
         this.waitCompaction = waitCompaction;
         this.isStreamingMode = isStreamingMode;
+        this.perPartitionBucketCountsEnabled =
+                table.coreOptions().bucketPerPartitionCountEnabled()
+                        && !table.partitionKeys().isEmpty();
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
         this.partitionBucketMapping = partitionBucketMapping;
         this.tableWriteFactory = tableWriteFactory;
         this.write = newTableWrite(table);
+    }
+
+    /**
+     * Returns whether a checkpointed maintenance bucket still belongs to the current partition
+     * layout.
+     *
+     * <p>This method is only for restoring maintenance state. Normal row writes must continue to
+     * use the strict bucket-count validation in {@link TableWriteImpl}.
+     */
+    protected boolean isRestoredStateBucketInCurrentLayout(BinaryRow partition, int bucket) {
+        if (!perPartitionBucketCountsEnabled) {
+            return true;
+        }
+
+        if (partitionBucketMapping == null) {
+            throw new IllegalStateException(
+                    "Partition bucket mapping is required to restore per-partition bucket state.");
+        }
+
+        int totalBuckets = partitionBucketMapping.resolveNumBuckets(partition);
+        if (bucket < totalBuckets) {
+            return true;
+        }
+
+        LOG.info(
+                "Ignore retired maintenance bucket {} for partition {}; current bucket count is {}.",
+                bucket,
+                partition,
+                totalBuckets);
+        return false;
     }
 
     private TableWriteImpl<?> newTableWrite(FileStoreTable table) {

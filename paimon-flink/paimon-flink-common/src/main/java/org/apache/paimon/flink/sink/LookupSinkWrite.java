@@ -94,6 +94,10 @@ public class LookupSinkWrite extends StoreSinkWriteImpl {
                 state.get(tableName, ACTIVE_BUCKETS_STATE_NAME);
         if (activeBucketsStateValues != null) {
             for (StoreSinkWriteState.StateValue stateValue : activeBucketsStateValues) {
+                if (!isRestoredStateBucketInCurrentLayout(
+                        stateValue.partition(), stateValue.bucket())) {
+                    continue;
+                }
                 try {
                     write.compact(stateValue.partition(), stateValue.bucket(), false);
                 } catch (Exception e) {

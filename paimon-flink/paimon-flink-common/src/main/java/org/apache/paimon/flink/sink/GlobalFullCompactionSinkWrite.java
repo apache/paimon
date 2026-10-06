@@ -129,6 +129,10 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                 state.get(tableName, WRITTEN_BUCKETS_STATE_NAME);
         if (writtenBucketStateValues != null) {
             for (StoreSinkWriteState.StateValue stateValue : writtenBucketStateValues) {
+                if (!isRestoredStateBucketInCurrentLayout(
+                        stateValue.partition(), stateValue.bucket())) {
+                    continue;
+                }
                 writtenBuckets
                         .computeIfAbsent(bytesToLong(stateValue.value()), k -> new HashSet<>())
                         .add(Tuple2.of(stateValue.partition(), stateValue.bucket()));
