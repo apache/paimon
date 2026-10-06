@@ -61,6 +61,7 @@ from pypaimon.schema.data_types import (
     RowType,
 )
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.arrow_utils import zero_column_batch as _zero_column_batch
 
 
 _DEFAULT_FILE_FORMAT_METADATA_CACHE_MAX_SIZE = 50 * 1024 * 1024
@@ -969,13 +970,6 @@ def _path_exists_in_arrow_schema(schema: pa.Schema, path: List[str]) -> bool:
             return False
         current_type = current_type[idx].type
     return True
-
-
-def _zero_column_batch(num_rows: int) -> RecordBatch:
-    """Build a zero-column batch without losing its logical row count."""
-    empty_struct = pa.Array.from_buffers(
-        pa.struct([]), num_rows, [None], children=[])
-    return pa.RecordBatch.from_struct_array(empty_struct)
 
 
 def _to_runs(row_indices: List[int]) -> List[Tuple[int, int]]:

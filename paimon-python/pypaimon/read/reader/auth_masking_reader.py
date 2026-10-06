@@ -29,6 +29,7 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.utils.arrow_utils import zero_column_batch
 
 
 class RecordReaderToBatchAdapter(RecordBatchReader):
@@ -81,7 +82,8 @@ class RecordReaderToBatchAdapter(RecordBatchReader):
             name: list(col)
             for name, col in zip(self._schema.names, columns_data)
         }
-        batch = pa.RecordBatch.from_pydict(pydict, schema=self._schema)
+        batch = (pa.RecordBatch.from_pydict(pydict, schema=self._schema) if self._schema
+                 else zero_column_batch(len(row_tuples), self._schema.metadata))
         if row_kinds:
             row_kind_array = pa.array(row_kinds, type=pa.string())
             row_kind_field = pa.field("_row_kind", pa.string())
