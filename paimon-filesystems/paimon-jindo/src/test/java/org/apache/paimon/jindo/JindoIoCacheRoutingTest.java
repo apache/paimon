@@ -197,6 +197,36 @@ public class JindoIoCacheRoutingTest {
     }
 
     @Test
+    public void testWritesFollowTheRouteWithWritePolicy() throws IOException {
+        Options options = cacheTargetOptions();
+        options.set("io-cache.policy", "meta,read,write");
+        JindoFileIO fileIO = configuredFileIO(options);
+        Path next = new Path(TABLE + "/dt=1/bucket-0/data-" + UUID + "-2.orc");
+
+        fileIO.newOutputStream(DATA, false);
+        fileIO.newOutputStream(MANIFEST, false);
+        fileIO.newOutputStream(SNAPSHOT, false);
+        fileIO.newTwoPhaseOutputStream(next, false);
+        assertThat(fileIO.hadoopOptions(DATA, "write").get("fs.oss.endpoint"))
+                .isEqualTo(CLUSTER_HOST);
+        verify(clusterFs).create(any(), anyBoolean());
+        verify(accelFs).create(any(), anyBoolean());
+        verify(clusterFs).getMpuStore(any());
+        // the snapshot, the existence check before the two-phase write and the temp file of its
+        // rename fallback (no multipart upload here) stay on OSS
+        verify(ossFs, times(2)).create(any(), anyBoolean());
+        verify(ossFs).exists(any());
+        verify(clusterFs, never()).exists(any());
+
+        fileIO.delete(DATA, false);
+        fileIO.rename(DATA, next);
+        fileIO.listStatus(DATA.getParent());
+        verify(ossFs).delete(any(), anyBoolean());
+        verify(ossFs).rename(any(), any());
+        verify(ossFs).listStatus(any(org.apache.hadoop.fs.Path.class));
+    }
+
+    @Test
     public void testHelpersAskOssWhetherAFileIsGone() throws IOException {
         JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
 
@@ -258,7 +288,7 @@ public class JindoIoCacheRoutingTest {
         Options notEnabled = cacheTargetOptions();
         notEnabled.remove("io-cache.enabled");
         Options noPolicy = cacheTargetOptions();
-        noPolicy.set("io-cache.policy", "write");
+        noPolicy.set("io-cache.policy", "prefetch");
 
         for (Options options : new Options[] {override, notEnabled, noPolicy}) {
             JindoFileIO fileIO = new JindoFileIO();

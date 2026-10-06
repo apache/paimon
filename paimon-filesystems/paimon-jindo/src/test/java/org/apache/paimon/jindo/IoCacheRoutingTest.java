@@ -165,7 +165,9 @@ public class IoCacheRoutingTest {
 
         Options writeOnly = singleTargetOptions();
         writeOnly.set("io-cache.policy", "write");
-        assertThat(IoCacheRouting.create(writeOnly)).isNull();
+        IoCacheRouting writes = IoCacheRouting.create(writeOnly);
+        assertThat(writes.writeCacheEnabled()).isTrue();
+        assertThat(writes.readCacheEnabled() || writes.metaCacheEnabled()).isFalse();
 
         Options none = singleTargetOptions();
         none.remove("io-cache.endpoint");
@@ -227,10 +229,13 @@ public class IoCacheRoutingTest {
         return FileType.valueOf(type.toUpperCase(Locale.ROOT).replace('-', '_'));
     }
 
-    // exists is a status lookup, atomic and two-phase writes are writes; others go to OSS
+    // exists is a status lookup; an atomic write stages a temp file and renames it on OSS
     private static String opType(String op) {
         if ("exists".equals(op)) {
             return "meta";
+        }
+        if ("atomic-write".equals(op)) {
+            return "rename";
         }
         return op.endsWith("-write") ? "write" : op;
     }
