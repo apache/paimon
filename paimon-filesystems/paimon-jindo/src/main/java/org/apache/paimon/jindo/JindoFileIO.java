@@ -247,7 +247,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         if (!overwrite && exists) {
             throw new IOException("File " + path + " already exists.");
         }
-        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath, false);
+        boolean viaTarget = cacheRouting != null && writeCacheEnabled && shouldCache(path);
+        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath, viaTarget);
         JindoHadoopSystem fs = pair.getKey();
         JindoMpuStore mpuStore = fs.getMpuStore(hadoopPath);
         if (mpuStore == null) {

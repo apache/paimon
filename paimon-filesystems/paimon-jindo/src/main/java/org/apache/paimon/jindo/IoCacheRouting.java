@@ -50,7 +50,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 /**
  * Selects cache targets for immutable Paimon files using {@code io-cache.targets}, {@code
  * io-cache.routes} and {@code io-cache.whitelist}. The endpoint mode also carries the normalized
- * {@code io-cache.policy} read and metadata switches.
+ * {@code io-cache.policy} read, metadata and write switches.
  */
 final class IoCacheRouting implements Serializable {
 
@@ -58,6 +58,7 @@ final class IoCacheRouting implements Serializable {
 
     private static final String META_CACHE_ENABLED_TAG = "meta";
     private static final String READ_CACHE_ENABLED_TAG = "read";
+    private static final String WRITE_CACHE_ENABLED_TAG = "write";
     private static final String DISABLE_CACHE_TAG = "none";
 
     private static final Pattern TARGET_NAME = Pattern.compile("[a-z][a-z0-9-]*");
@@ -76,6 +77,7 @@ final class IoCacheRouting implements Serializable {
     private final List<String> dataFilePrefixes;
     private final boolean metaCacheEnabled;
     private final boolean readCacheEnabled;
+    private final boolean writeCacheEnabled;
 
     private IoCacheRouting(
             @Nullable String ossEndpoint,
@@ -83,13 +85,15 @@ final class IoCacheRouting implements Serializable {
             Map<FileType, CacheTarget> targetByType,
             List<String> dataFilePrefixes,
             boolean metaCacheEnabled,
-            boolean readCacheEnabled) {
+            boolean readCacheEnabled,
+            boolean writeCacheEnabled) {
         this.ossEndpoint = ossEndpoint;
         this.targets = targets;
         this.targetByType = targetByType;
         this.dataFilePrefixes = dataFilePrefixes;
         this.metaCacheEnabled = metaCacheEnabled;
         this.readCacheEnabled = readCacheEnabled;
+        this.writeCacheEnabled = writeCacheEnabled;
     }
 
     /** Creates endpoint routing from the options, or null when routing is not enabled. */
@@ -101,7 +105,8 @@ final class IoCacheRouting implements Serializable {
         Set<String> policy = parsePolicy(options.get(IO_CACHE_POLICY));
         boolean metaCache = policy.contains(META_CACHE_ENABLED_TAG);
         boolean readCache = policy.contains(READ_CACHE_ENABLED_TAG);
-        if (policy.contains(DISABLE_CACHE_TAG) || !(metaCache || readCache)) {
+        boolean writeCache = policy.contains(WRITE_CACHE_ENABLED_TAG);
+        if (policy.contains(DISABLE_CACHE_TAG) || !(metaCache || readCache || writeCache)) {
             return null;
         }
         // a client-side dlf.oss-endpoint replaces every endpoint the token vends
@@ -144,7 +149,8 @@ final class IoCacheRouting implements Serializable {
                 targetByType,
                 dataFilePrefixes(options),
                 metaCache,
-                readCache);
+                readCache,
+                writeCache);
     }
 
     private static Set<String> parsePolicy(@Nullable String value) {
@@ -161,6 +167,10 @@ final class IoCacheRouting implements Serializable {
 
     boolean readCacheEnabled() {
         return readCacheEnabled;
+    }
+
+    boolean writeCacheEnabled() {
+        return writeCacheEnabled;
     }
 
     /** The OSS endpoint used by requests that do not use a cache target. */

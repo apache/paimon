@@ -118,13 +118,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
                         options.get(IO_CACHE_POLICY));
                 return;
             }
-            // Writes always go to the OSS endpoint, so writeCacheEnabled stays false.
             metaCacheEnabled = cacheRouting.metaCacheEnabled();
             readCacheEnabled = cacheRouting.readCacheEnabled();
+            writeCacheEnabled = cacheRouting.writeCacheEnabled();
             LOG.info(
-                    "Cache endpoints enabled: meta cache enabled {}, read cache enabled {}, {}",
+                    "Cache endpoints enabled: meta {}, read {}, write {}, {}",
                     metaCacheEnabled,
                     readCacheEnabled,
+                    writeCacheEnabled,
                     cacheRouting);
         } else {
             // Keep legacy JindoCache policy matching unchanged; endpoint routing uses exact tokens.
