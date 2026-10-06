@@ -102,15 +102,13 @@ public class FormatTableCommit implements BatchTableCommit {
     private final boolean dynamicPartitionOverwrite;
     private final int cleanupThreadNum;
     private final int publishThreadNum;
-    @Nullable private String fileFormat;
+    @Nullable private final String fileFormat;
 
-    FormatTableCommit withFileFormat(String fileFormat) {
-        this.fileFormat =
-                FormatTablePartitionOptions.fileFormatOverride(
-                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), fileFormat));
-        return this;
-    }
-
+    /**
+     * Creates a legacy committer whose write format is unknown. Appends and overwrites reject
+     * partitions with an explicit {@code file.format}, including values stored by earlier
+     * overwrites. Use {@code FormatTable.newBatchWriteBuilder()} to supply the write format.
+     */
     public FormatTableCommit(
             String location,
             List<String> partitionKeys,
@@ -138,7 +136,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 partitionManager,
                 dynamicPartitionOverwrite,
                 1,
-                1);
+                1,
+                null);
     }
 
     FormatTableCommit(
@@ -155,7 +154,8 @@ public class FormatTableCommit implements BatchTableCommit {
             @Nullable FormatTablePartitionManager partitionManager,
             boolean dynamicPartitionOverwrite,
             int cleanupThreadNum,
-            int publishThreadNum) {
+            int publishThreadNum,
+            @Nullable String fileFormat) {
         if (cleanupThreadNum < 1 || cleanupThreadNum > MAX_COMMIT_THREAD_NUM) {
             throw new IllegalArgumentException(
                     String.format(
@@ -182,6 +182,12 @@ public class FormatTableCommit implements BatchTableCommit {
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.cleanupThreadNum = cleanupThreadNum;
         this.publishThreadNum = publishThreadNum;
+        this.fileFormat =
+                fileFormat == null
+                        ? null
+                        : FormatTablePartitionOptions.fileFormatOverride(
+                                Collections.singletonMap(
+                                        CoreOptions.FILE_FORMAT.key(), fileFormat));
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -427,13 +433,23 @@ public class FormatTableCommit implements BatchTableCommit {
 
         try {
             List<Partition> targetPartitions = loadCommitTargetPartitions(writtenPartitionSpecs);
-            if (!overwrite) {
+            if (!overwrite || fileFormat == null) {
                 for (Partition partition : targetPartitions) {
-                    if (FormatTablePartitionPathResolver.customLocation(partition) != null) {
+                    if (!overwrite
+                            && FormatTablePartitionPathResolver.customLocation(partition) != null) {
                         throw unsupportedCustomLocation("Writing", partition);
                     }
                     String partitionFormat =
                             FormatTablePartitionOptions.fileFormatOverride(partition.options());
+                    if (partitionFormat != null && fileFormat == null) {
+                        throw new UnsupportedOperationException(
+                                "Cannot write to partition "
+                                        + partition.spec()
+                                        + " of Format Table "
+                                        + tableIdentifier
+                                        + " with an explicit file.format because the write format is"
+                                        + " unknown. Use FormatTable.newBatchWriteBuilder().");
+                    }
                     if (partitionFormat != null && !partitionFormat.equals(fileFormat)) {
                         throw new UnsupportedOperationException(
                                 "Cannot append files in format "
@@ -461,14 +477,21 @@ public class FormatTableCommit implements BatchTableCommit {
             Set<Map<String, String>> writtenPartitionSpecs) {
         if (overwrite) {
             if (staticPartitions == null || staticPartitions.isEmpty()) {
-                return replacesOnlyWrittenPartitions()
-                        ? Collections.emptyList()
-                        : loadPartitionRegistry();
+                if (!replacesOnlyWrittenPartitions()) {
+                    return loadPartitionRegistry();
+                }
+            } else {
+                LinkedHashMap<String, String> staticSpec = orderedPartitionPrefix(staticPartitions);
+                if (staticSpec.size() < partitionKeys.size()) {
+                    return loadPartitionsByPrefix(staticSpec);
+                }
+                if (fileFormat == null) {
+                    return loadPartitionsByNames(Collections.singleton(staticSpec));
+                }
             }
-            LinkedHashMap<String, String> staticSpec = orderedPartitionPrefix(staticPartitions);
-            return staticSpec.size() == partitionKeys.size()
-                    ? Collections.emptyList()
-                    : loadPartitionsByPrefix(staticSpec);
+            if (fileFormat != null) {
+                return Collections.emptyList();
+            }
         }
 
         return writtenPartitionSpecs.isEmpty()

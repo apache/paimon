@@ -143,20 +143,11 @@ abstract class SplitEnumerator {
 
     List<Split> createSplits(FileIO fileIO, Path path, @Nullable BinaryRow partition)
             throws IOException {
-        return createSplits(fileIO, path, partition, false);
-    }
-
-    List<Split> createSplits(
-            FileIO fileIO,
-            Path path,
-            @Nullable BinaryRow partition,
-            boolean useCatalogContextFileIO)
-            throws IOException {
         return createSplits(
                 fileIO,
                 path,
                 partition,
-                useCatalogContextFileIO,
+                false,
                 FormatTablePartitionOptions.fileFormat(table.options(), null));
     }
 
