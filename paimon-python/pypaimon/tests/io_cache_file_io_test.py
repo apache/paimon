@@ -46,7 +46,6 @@ from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import BlobDescriptor
-from pypaimon.tests.io_cache_routing_test import ROUTING
 from pypaimon.utils.file_type import FileType
 
 TABLE = "oss://bkt/db1.db/t1"
@@ -485,7 +484,7 @@ class _RecordingHandler(FileSystemHandler):
 
 
 class _RecordingFileIO(FileIO):
-    """Records every call; the vector test only checks which FileIO was called."""
+    """Records every call; the routing tests only check which FileIO was called."""
 
     def __init__(self):
         self.calls = []
@@ -588,7 +587,7 @@ OP_CALLS = {
     "two-phase-write": {},
     "presign": {
         "create_blob_presigned_url": lambda f, p: f.create_blob_presigned_url(
-            ROUTING["table_root"], BlobDescriptor(p, 0, 1), timedelta(minutes=1)),
+            TABLE, BlobDescriptor(p, 0, 1), timedelta(minutes=1)),
     },
 }
 
@@ -627,25 +626,20 @@ def test_write_and_delete_helpers_use_origin(call):
     assert not file_ios["accel"].calls and not file_ios["cluster"].calls
 
 
-ROUTED_CALLS = [
-    (case, name, call)
-    for case in ROUTING["cases"]
-    if IoCacheRouting.create(case["options"]) is not None
-    for name, call in OP_CALLS[case["op"]].items()
-]
+FILE_IO_CALLS = [(op, name, call) for op, calls in OP_CALLS.items() for name, call in calls.items()]
 
 
-@pytest.mark.parametrize("case,name,call", ROUTED_CALLS,
-                         ids=["{} / {}".format(case["name"], name) for case, name, _ in ROUTED_CALLS])
-def test_routing_vector_through_file_io(case, name, call):
-    routing = IoCacheRouting.create(case["options"])
-    endpoints = dict(routing.targets(), origin=routing.origin_endpoint())
-    assert len(set(endpoints.values())) == len(endpoints)
-    file_ios = {key: _RecordingFileIO() for key in endpoints}
-    file_io = IoCacheRoutingFileIO(routing, file_ios["origin"], file_ios.__getitem__)
-    call(file_io, case["path"])
-    called = {key for key, recorder in file_ios.items() if recorder.calls}
-    assert called == {key for key, endpoint in endpoints.items() if endpoint == case["expect"]}
+@pytest.mark.parametrize("op,name,call", FILE_IO_CALLS,
+                         ids=["{} / {}".format(op, name) for op, name, _ in FILE_IO_CALLS])
+@pytest.mark.parametrize("policy", ["meta,read", "meta,read,write"])
+def test_each_file_io_call_reaches_its_endpoint(policy, op, name, call):
+    routed = {"read", "meta", "exists"} | ({"write", "two-phase-write"} if "write" in policy else set())
+    routing = _routing(policy=policy)
+    for path, target in ((DATA, "cluster"), (MANIFEST, "accel"), (SNAPSHOT, "origin"), (UNKNOWN, "origin")):
+        file_ios = {key: _RecordingFileIO() for key in ("origin", "accel", "cluster")}
+        call(IoCacheRoutingFileIO(routing, file_ios["origin"], file_ios.__getitem__), path)
+        called = {key for key, recorder in file_ios.items() if recorder.calls}
+        assert called == {target if op in routed else "origin"}, path
 
 
 if __name__ == "__main__":
