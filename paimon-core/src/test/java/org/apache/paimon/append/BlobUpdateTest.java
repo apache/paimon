@@ -175,7 +175,13 @@ public class BlobUpdateTest extends TableTestBase {
         TableScan.Plan plan = readBuilder.newScan().plan();
         assertThat(plan.splits().size()).isEqualTo(1);
         DataSplit dataSplit = ((IndexedSplit) plan.splits().get(0)).dataSplit();
-        assertThat(dataSplit.dataFiles().size()).isEqualTo(3);
+        // The three blob files that intersect the pushed-down rows, plus the normal anchor.
+        assertThat(dataSplit.dataFiles().size()).isEqualTo(4);
+        assertThat(
+                        dataSplit.dataFiles().stream()
+                                .filter(file -> !BlobFileFormat.isBlobFile(file.fileName()))
+                                .count())
+                .isEqualTo(1L);
         RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
 
         List<byte[]> actual = new ArrayList<>();
@@ -245,6 +251,20 @@ public class BlobUpdateTest extends TableTestBase {
         for (int i = 5; i < 10; i++) {
             assertThat(actual.get(i)).isNull();
         }
+
+        // Row-range pushdown across the end of the blob file: rows [5, 6] are still NULL.
+        readBuilder.withRowRanges(Collections.singletonList(new Range(3L, 6L)));
+        List<byte[]> ranged = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(
+                        row -> ranged.add(row.isNullAt(0) ? null : row.getBlob(0).toData()));
+        assertThat(ranged.size()).isEqualTo(4);
+        assertThat(ranged.get(0)).isEqualTo(blobs.get(3));
+        assertThat(ranged.get(1)).isEqualTo(blobs.get(4));
+        assertThat(ranged.get(2)).isNull();
+        assertThat(ranged.get(3)).isNull();
     }
 
     private void reassignFirstRowId(List<CommitMessage> commitables, long firstRowId) {

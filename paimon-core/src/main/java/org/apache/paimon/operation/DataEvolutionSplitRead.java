@@ -306,7 +306,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                 schemaFetcher
                                         .apply(file.schemaId())
                                         .dataFileSchema(file.writeCols())
-                                        .logicalRowType());
+                                        .logicalRowType(),
+                        rowRanges);
         if (vectorRanges != null) {
             List<FieldBunch> nonVectorBunches =
                     splitFieldBunches(

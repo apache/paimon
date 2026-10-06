@@ -45,12 +45,16 @@ import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 /** Plans ranges with fixed vector field providers before positional column merging. */
 class DataEvolutionVectorReadPlanner {
 
-    /** Returns null when the existing sequential column-group readers suffice. */
+    /**
+     * Returns null when the existing sequential column-group readers suffice. {@code rowRanges} are
+     * the pushed-down row ranges, or null when every row is read.
+     */
     @Nullable
     static List<ReadRange> plan(
             List<DataFileMeta> files,
             RowType readType,
-            Function<DataFileMeta, RowType> fileToRowType) {
+            Function<DataFileMeta, RowType> fileToRowType,
+            @Nullable List<Range> rowRanges) {
         Set<Integer> readIds =
                 readType.getFields().stream().map(DataField::id).collect(Collectors.toSet());
         boolean vectorOnly = files.stream().allMatch(file -> isVectorStoreFile(file.fileName()));
@@ -97,20 +101,25 @@ class DataEvolutionVectorReadPlanner {
             logicalRange = new Range(firstRowId, lastRowId);
         }
 
-        // A projected vector store that covers only a sub-range of the group cannot use the
-        // sequential path: its bunch has fewer rows than the anchor, so the union reader rejects
-        // the mismatched row count. Plan explicit ranges so the uncovered rows are NULL-filled.
+        // The sequential path reads each vector column as one VectorFileBunch, which must yield
+        // exactly the group's rows. Otherwise plan explicit ranges, which NULL-fill uncovered rows
+        // and take every row from its latest file. Rolled files that tile the group stay
+        // sequential.
         boolean partialVector = false;
-        for (Candidate candidate : candidates) {
-            Range range = candidate.file.nonNullRowIdRange();
-            if (range.from > logicalRange.from || range.to < logicalRange.to) {
+        for (int fieldId : vectorReadIds) {
+            List<DataFileMeta> fieldFiles = new ArrayList<>();
+            for (Candidate candidate : candidates) {
+                if (candidate.fieldIds.contains(fieldId)) {
+                    fieldFiles.add(candidate.file);
+                }
+            }
+            if (!readsSequentially(fieldFiles, logicalRange, rowRanges)) {
                 partialVector = true;
                 break;
             }
         }
 
-        // Keep the sequential path for disjoint column groups that each span the whole range,
-        // including rolled vector files.
+        // Keep the sequential path for disjoint column groups that each span the whole range.
         if (!overlappingGroups && !partialVector) {
             return null;
         }
@@ -171,6 +180,71 @@ class DataEvolutionVectorReadPlanner {
             start = end;
         }
         return result;
+    }
+
+    /**
+     * Whether a VectorFileBunch built from {@code files} yields exactly the rows of {@code target},
+     * each from its latest file. The bunch takes files in first-row-id order, newest first, and
+     * skips a file older than the one kept just before it, without comparing it to later kept
+     * files. With row ranges pushed down, the bunch accepts gaps and every reader reads only the
+     * selected rows, so a gap matters only if it contains a selected row.
+     */
+    private static boolean readsSequentially(
+            List<DataFileMeta> files, Range target, @Nullable List<Range> rowRanges) {
+        files.sort(
+                Comparator.comparingLong(DataFileMeta::nonNullFirstRowId)
+                        .thenComparing(
+                                Comparator.comparingLong(DataFileMeta::maxSequenceNumber)
+                                        .reversed()));
+        List<DataFileMeta> kept = new ArrayList<>();
+        List<DataFileMeta> skipped = new ArrayList<>();
+        long cursor = target.from;
+        long latestSequence = Long.MIN_VALUE;
+        for (DataFileMeta file : files) {
+            Range range = file.nonNullRowIdRange();
+            if (range.from < cursor) {
+                if (file.maxSequenceNumber() < latestSequence) {
+                    skipped.add(file);
+                    continue;
+                }
+                return false;
+            }
+            if (range.from > cursor && selects(cursor, range.from - 1, rowRanges)) {
+                return false;
+            }
+            kept.add(file);
+            cursor = range.to + 1;
+            latestSequence = file.maxSequenceNumber();
+        }
+        if (cursor > target.to + 1 || selects(cursor, target.to, rowRanges)) {
+            return false;
+        }
+        for (DataFileMeta older : skipped) {
+            Range olderRange = older.nonNullRowIdRange();
+            for (DataFileMeta file : kept) {
+                Range range = file.nonNullRowIdRange();
+                if (Range.intersect(olderRange.from, olderRange.to, range.from, range.to)
+                        && file.maxSequenceNumber() <= older.maxSequenceNumber()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean selects(long from, long to, @Nullable List<Range> rowRanges) {
+        if (from > to) {
+            return false;
+        }
+        if (rowRanges == null) {
+            return true;
+        }
+        for (Range range : rowRanges) {
+            if (Range.intersect(from, to, range.from, range.to)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static class ReadRange {

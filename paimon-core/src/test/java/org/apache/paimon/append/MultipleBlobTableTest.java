@@ -32,7 +32,15 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -196,6 +204,134 @@ public class MultipleBlobTableTest extends TableTestBase {
                 BinaryString.fromBytes(randomBytes()),
                 new BlobData(blobBytes1),
                 new BlobData(blobBytes2));
+    }
+
+    @Test
+    public void testStreamScanReadsBlobOnlyDelta() throws Exception {
+        createTableDefault();
+        RowType rowType = getTableDefault().rowType();
+
+        // normal file writes f0/f1 over row ids [0, 1]
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(rowType.project(Arrays.asList("f0", "f1")));
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(0, BinaryString.fromString("a")));
+            write.write(GenericRow.of(1, BinaryString.fromString("b")));
+            commit.commit(write.prepareCommit());
+        }
+
+        FileStoreTable table = getTableDefault();
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withReadType(rowType.project(Arrays.asList("f2", "f3")));
+        StreamTableScan streamScan = readBuilder.newStreamScan();
+        assertThat(readBlobs(readBuilder, streamScan.plan()).size()).isEqualTo(2);
+
+        // One commit updates both blob columns over [0, 1], so its delta holds only two .blob
+        // files; their normal file is in the previous snapshot.
+        builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(rowType.project(Arrays.asList("f2", "f3")));
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(new BlobData(blobBytes1), new BlobData(blobBytes2)));
+            write.write(GenericRow.of(new BlobData(blobBytes2), new BlobData(blobBytes1)));
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages, 0L);
+            commit.commit(messages);
+        }
+
+        TableScan.Plan deltaPlan = streamScan.plan();
+        assertThat(
+                        deltaPlan.splits().stream()
+                                .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                                .allMatch(file -> isBlobFile(file.fileName())))
+                .isTrue();
+        List<byte[][]> delta = readBlobs(readBuilder, deltaPlan);
+        assertThat(delta.size()).isEqualTo(2);
+        assertThat(delta.get(0)[0]).isEqualTo(blobBytes1);
+        assertThat(delta.get(0)[1]).isEqualTo(blobBytes2);
+        assertThat(delta.get(1)[0]).isEqualTo(blobBytes2);
+        assertThat(delta.get(1)[1]).isEqualTo(blobBytes1);
+    }
+
+    @Test
+    public void testProjectTwoBlobColumnsCoveringDifferentSubRanges() throws Exception {
+        // normal [0, 9], f2 over [0, 6] and f3 over [3, 9]: together the blob files cover the
+        // group, but each blob column covers only part of it.
+        createTableDefault();
+        RowType rowType = getTableDefault().rowType();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(rowType.project(Arrays.asList("f0", "f1")));
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < 10; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString("row-" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        writeBlobColumn("f2", blobBytes1, 7, 0L);
+        writeBlobColumn("f3", blobBytes2, 7, 3L);
+
+        ReadBuilder readBuilder =
+                getTableDefault()
+                        .newReadBuilder()
+                        .withReadType(rowType.project(Arrays.asList("f2", "f3")));
+        List<byte[][]> rows = readBlobs(readBuilder, readBuilder.newScan().plan());
+        assertThat(rows.size()).isEqualTo(10);
+        for (int i = 0; i < 10; i++) {
+            assertThat(rows.get(i)[0]).isEqualTo(i <= 6 ? blobBytes1 : null);
+            assertThat(rows.get(i)[1]).isEqualTo(i >= 3 ? blobBytes2 : null);
+        }
+    }
+
+    private void writeBlobColumn(String column, byte[] bytes, int count, long firstRowId)
+            throws Exception {
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(
+                                        table.rowType()
+                                                .project(Collections.singletonList(column)));
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(new BlobData(bytes)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
+    private static List<byte[][]> readBlobs(ReadBuilder readBuilder, TableScan.Plan plan)
+            throws Exception {
+        List<byte[][]> rows = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(plan)
+                .forEachRemaining(
+                        row ->
+                                rows.add(
+                                        new byte[][] {
+                                            row.isNullAt(0) ? null : row.getBlob(0).toData(),
+                                            row.isNullAt(1) ? null : row.getBlob(1).toData()
+                                        }));
+        return rows;
+    }
+
+    private static void assignFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        for (CommitMessage message : messages) {
+            List<DataFileMeta> newFiles =
+                    ((CommitMessageImpl) message).newFilesIncrement().newFiles();
+            List<DataFileMeta> written = new ArrayList<>(newFiles);
+            newFiles.clear();
+            for (DataFileMeta file : written) {
+                newFiles.add(file.assignFirstRowId(firstRowId));
+            }
+        }
     }
 
     @Test
