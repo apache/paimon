@@ -252,7 +252,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                         first_descriptor.uri,
                         first_descriptor.offset,
                         first_descriptor.length,
-                        frame,
+                        frame, -1, 0,
                     ).serialize()
                     for frame in range(3)
                 ] + [
@@ -260,7 +260,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                         second_descriptor.uri,
                         second_descriptor.offset,
                         second_descriptor.length,
-                        frame,
+                        frame, -1, 0,
                     ).serialize()
                     for frame in range(2)
                 ],
@@ -288,12 +288,12 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                 'id': list(range(5)),
                 'payload': [
                     VideoFrameDescriptor(
-                        first.uri, first.offset, first.length, frame
+                        first.uri, first.offset, first.length, frame, -1, 0
                     ).serialize()
                     for frame in range(3)
                 ] + [
                     VideoFrameDescriptor(
-                        second.uri, second.offset, second.length, frame
+                        second.uri, second.offset, second.length, frame, -1, 0
                     ).serialize()
                     for frame in range(2)
                 ],
@@ -348,7 +348,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                         descriptors[0 if row < 3 else 2].uri,
                         0,
                         descriptors[0 if row < 3 else 2].length,
-                        row if row < 3 else row - 3,
+                        row if row < 3 else row - 3, -1, 0,
                     ).serialize()
                     for row in range(5)
                 ],
@@ -357,7 +357,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                         descriptors[1 if row < 3 else 3].uri,
                         0,
                         descriptors[1 if row < 3 else 3].length,
-                        row if row < 3 else row - 3,
+                        row if row < 3 else row - 3, -1, 0,
                     ).serialize()
                     for row in range(5)
                 ],
@@ -413,13 +413,13 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                 'id': list(range(4)),
                 'camera_a': [
                     VideoFrameDescriptor(
-                        camera_a.uri, 0, camera_a.length, frame
+                        camera_a.uri, 0, camera_a.length, frame, -1, 0
                     ).serialize()
                     for frame in range(4)
                 ],
                 'camera_b': [
                     VideoFrameDescriptor(
-                        descriptor.uri, 0, descriptor.length, frame % 2
+                        descriptor.uri, 0, descriptor.length, frame % 2, -1, 0
                     ).serialize()
                     for frame, descriptor in enumerate(
                         [camera_b_0, camera_b_0, camera_b_1, camera_b_1]
@@ -464,7 +464,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                         descriptor.uri,
                         descriptor.offset,
                         descriptor.length,
-                        frame,
+                        frame, -1, 0,
                     ).serialize()
                     for frame in range(6)
                 ],
@@ -513,13 +513,13 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                 'id': list(range(4)),
                 'camera_a': [
                     VideoFrameDescriptor(
-                        camera_a.uri, 0, camera_a.length, frame
+                        camera_a.uri, 0, camera_a.length, frame, -1, 0
                     ).serialize()
                     for frame in range(4)
                 ],
                 'camera_b': [
                     VideoFrameDescriptor(
-                        camera_b.uri, 0, camera_b.length, frame
+                        camera_b.uri, 0, camera_b.length, frame, -1, 0
                     ).serialize()
                     for frame in range(4)
                 ],
@@ -567,7 +567,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                         descriptor.uri,
                         descriptor.offset,
                         descriptor.length,
-                        frame,
+                        frame, -1, 0,
                     ).serialize()
                     for frame in range(4)
                 ],

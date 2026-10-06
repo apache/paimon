@@ -41,6 +41,9 @@ def descriptor_field_names_for_table(table) -> Set[str]:
     from pypaimon.common.options.core_options import CoreOptions
 
     names = set(CoreOptions.blob_descriptor_fields(table.options))
+    # Video readers return lazy frame references even in payload mode. Keep
+    # their frame/index locators through row filters and result projection.
+    names |= CoreOptions.video_frame_fields(table.options)
     if CoreOptions.blob_as_descriptor(table.options):
         names |= CoreOptions.blob_view_fields(table.options)
     return names

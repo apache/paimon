@@ -37,6 +37,23 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import (
     deserialize_split_v1, serialize_split_v1)
+from pypaimon.schema.data_types import DataField, RowType
+
+
+def _raise_if_native_fork_safety_error(error):
+    """Propagate native fork errors instead of using inherited SDK state."""
+    try:
+        from pypaimon_rust import ForkSafetyError
+    except ImportError:
+        return
+
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ForkSafetyError):
+            raise current
+        current = current.__cause__ or current.__context__
 
 
 def native_runtime_available() -> bool:
@@ -349,11 +366,12 @@ def _native_read_builder(table):
 
 
 def _configure_native_read_builder(builder, predicate, limit, projection,
-                                   nested_projection=None,
+                                   read_type: Optional[List[DataField]] = None,
                                    include_row_kind=False):
-    if nested_projection is not None:
-        builder = builder.with_nested_projection(nested_projection)
-    elif projection is not None:
+    if read_type is not None:
+        builder = builder.with_read_type(
+            json.dumps(RowType(True, read_type).to_dict()))
+    if projection is not None and read_type is None:
         builder = builder.with_projection(projection)
     if predicate is not None:
         builder = builder.with_filter(_predicate_to_native(predicate))
@@ -368,15 +386,21 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
                          limit: Optional[int] = None,
                          projection: Optional[List[str]] = None,
                          blob_parallelism: Optional[int] = None,
-                         nested_projection: Optional[List[List[str]]] = None,
+                         read_type: Optional[List[DataField]] = None,
                          include_row_kind: bool = False):
     """Create one Rust reader reusable across split groups."""
     if not native_reader_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust native reader API")
+    if read_type is None:
+        from pypaimon.read.read_builder import ReadBuilder
+        resolved = ReadBuilder(table)
+        if projection is not None:
+            resolved.with_projection(projection)
+        read_type = resolved.read_type()
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, limit, projection,
-        nested_projection=nested_projection,
+        read_type=read_type,
         include_row_kind=include_row_kind)
     if blob_parallelism is not None:
         builder = builder.with_blob_parallelism(blob_parallelism)
@@ -389,12 +413,17 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
                 limit: Optional[int] = None,
                 projection: Optional[List[str]] = None,
                 blob_parallelism: Optional[int] = None,
-                nested_projection: Optional[List[List[str]]] = None,
+                read_type: Optional[List[DataField]] = None,
                 include_row_kind: bool = False):
     """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
     read_splits = _prepare_native_read(
-        table, predicate, limit, projection, blob_parallelism,
-        nested_projection, include_row_kind)
+        table,
+        predicate=predicate,
+        limit=limit,
+        projection=projection,
+        blob_parallelism=blob_parallelism,
+        read_type=read_type,
+        include_row_kind=include_row_kind)
     return read_splits(splits)
 
 

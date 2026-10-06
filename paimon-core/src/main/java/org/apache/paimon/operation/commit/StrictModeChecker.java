@@ -29,9 +29,12 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -139,23 +142,42 @@ public class StrictModeChecker {
             return false;
         }
         String indexManifest = snapshot.indexManifest();
-        if (indexManifest == null) {
-            return false;
-        }
         // Fast exit: if this snapshot's indexManifest file name equals the
         // previous snapshot's, no index file was added/removed by this commit
         // (writeIndexFiles reuses the previous file when newIndexFiles is empty).
+        String prevIndexManifest = null;
         long prevId = snapshot.id() - 1;
-        if (snapshotManager.snapshotExists(prevId)
-                && indexManifest.equals(snapshotManager.snapshot(prevId).indexManifest())) {
+        if (snapshotManager.snapshotExists(prevId)) {
+            prevIndexManifest = snapshotManager.snapshot(prevId).indexManifest();
+        }
+        if (Objects.equals(indexManifest, prevIndexManifest)) {
             return false;
         }
-        for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
-            if (newPartitions.contains(entry.partition())) {
+        // Count only the index entries this commit added, replaced or removed relative to
+        // the previous snapshot (every entry if that snapshot is gone). Removals matter
+        // because an OVERWRITE such as rollbackToAsLatest can drop a DV entry without any
+        // data-file delta.
+        Set<IndexManifestEntry> previousEntries =
+                readEntriesInPartitions(prevIndexManifest, newPartitions);
+        for (IndexManifestEntry entry : readEntriesInPartitions(indexManifest, newPartitions)) {
+            if (!previousEntries.remove(entry)) {
                 return true;
             }
         }
-        return false;
+        return !previousEntries.isEmpty();
+    }
+
+    private Set<IndexManifestEntry> readEntriesInPartitions(
+            @Nullable String indexManifest, Set<BinaryRow> partitions) {
+        Set<IndexManifestEntry> entries = new HashSet<>();
+        if (indexManifest != null) {
+            for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
+                if (partitions.contains(entry.partition())) {
+                    entries.add(entry);
+                }
+            }
+        }
+        return entries;
     }
 
     private boolean hasOverlappedPartition(

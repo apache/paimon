@@ -1479,7 +1479,7 @@ class BlobTest(unittest.TestCase):
         self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
         self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
 
-        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2)
+        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0)
         video_bytes = video.serialize()
         self.assertEqual(video_bytes, BlobDescriptor.deserialize(video_bytes).serialize())
         self.assertEqual(video, BlobDescriptor.parse_if_serialized(video_bytes))
@@ -1597,14 +1597,12 @@ class BlobTest(unittest.TestCase):
             BlobDescriptor("file:///tmp/blob.bin", 0, 10),
         )
 
-    def test_blob_descriptor_fields_ignores_legacy_stored_key(self):
+    def test_blob_descriptor_fields_uses_java_fallback_key(self):
         from pypaimon.common.options.core_options import CoreOptions
 
-        # Python master ignored this key and wrote dedicated .blob files.
-        # A global fallback would break rolling upgrades.
         legacy_only = CoreOptions(
             Options({"blob.stored-descriptor-fields": "legacy_col"}))
-        self.assertEqual(set(), legacy_only.blob_descriptor_fields())
+        self.assertEqual({'legacy_col'}, legacy_only.blob_descriptor_fields())
 
         canonical_wins = CoreOptions(Options({
             "blob-descriptor-field": "canon",
@@ -1663,7 +1661,7 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=["payload"]))
 
-        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2).serialize()
+        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0).serialize()
         writer._validate_inline_stored_fields_input(
             pa.RecordBatch.from_arrays(
                 [pa.array([video_bytes], type=pa.large_binary())], names=["payload"]))
@@ -1757,7 +1755,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"video-frame-payload"
         descriptor = VideoFrameDescriptor(
-            "file-backed/video.mp4", 0, len(data), 2)
+            "file-backed/video.mp4", 0, len(data), 2, -1, 0)
         file_io = self._token_aware_file_io(data)
         row = OffsetRow(
             (descriptor.serialize(),), 0, 1,
@@ -1785,7 +1783,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"convert video blob"
         descriptor = VideoFrameDescriptor(
-            "file-backed/convert.mp4", 0, len(data), 2)
+            "file-backed/convert.mp4", 0, len(data), 2, -1, 0)
         file_io = self._token_aware_file_io(data)
         batch = RecordBatch.from_arrays(
             [pa.array([descriptor.serialize()], type=pa.large_binary())],
@@ -2428,7 +2426,7 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(needs_blob_inline_convert(_Table({
             "blob-as-descriptor": "true",
         })))
-        self.assertFalse(needs_blob_inline_convert(_Table({
+        self.assertTrue(needs_blob_inline_convert(_Table({
             "blob.stored-descriptor-fields": "picture",
         })))
 

@@ -17,6 +17,8 @@
 
 from typing import Dict, Tuple
 
+import pyarrow as pa
+
 from pypaimon.schema.data_types import (
     ArrayType,
     AtomicType,
@@ -178,6 +180,26 @@ class PostponeBucketPlan:
     def __init__(self, num_buckets: Dict[Tuple, int]):
         self._num_buckets = dict(num_buckets)
 
+    def to_arrow(self, table) -> pa.RecordBatch:
+        """Encode only the per-partition plan for the native core router."""
+        from pypaimon.schema.data_types import PyarrowFieldParser
+
+        fields = [table.field_dict[name] for name in table.partition_keys]
+        schema = PyarrowFieldParser.from_paimon_schema(fields)
+        schema = schema.append(pa.field('total_buckets', pa.int32(), nullable=False))
+        partitions = list(self._num_buckets)
+        counts = list(self._num_buckets.values())
+        if any(len(partition) != len(fields) for partition in partitions):
+            raise ValueError('Bucket plan partition arity does not match the table schema')
+        if any(isinstance(count, bool) or not isinstance(count, int)
+               or not 0 < count <= 2147483647 for count in counts):
+            raise ValueError('Bucket plan total_buckets must be a positive 32-bit integer')
+        # Use positional columns: a partition may itself be named total_buckets.
+        columns = [pa.array([partition[i] for partition in partitions], type=field.type)
+                   for i, field in enumerate(list(schema)[:-1])]
+        columns.append(pa.array(counts, type=pa.int32()))
+        return pa.RecordBatch.from_arrays(columns, schema=schema)
+
     def contains(self, partition: Tuple) -> bool:
         return tuple(partition) in self._num_buckets
 
@@ -216,33 +238,37 @@ class PostponeBucketPlanner:
                 .format(bucket_function)
             )
 
-        self.max_num_buckets = (
-            options.postpone_batch_write_fixed_bucket_max_parallelism()
-        )
-        if self.max_num_buckets <= 0:
-            raise ValueError(
-                "postpone.batch-write-fixed-bucket.max-parallelism must be "
-                "positive, got {}".format(self.max_num_buckets)
+        self.default_bucket_num = options.postpone_default_bucket_num()
+        self.target_row_num_per_bucket = None
+        self.target_size_per_bucket = None
+        if self.default_bucket_num is None:
+            self.max_num_buckets = (
+                options.postpone_batch_write_fixed_bucket_max_parallelism()
             )
-        self.target_row_num_per_bucket = (
-            options.postpone_target_row_num_per_bucket()
-        )
-        if self.target_row_num_per_bucket is not None:
-            if self.target_row_num_per_bucket <= 0:
+            if self.max_num_buckets <= 0:
                 raise ValueError(
-                    "postpone.target-row-num-per-bucket must be positive, "
-                    "got {}".format(self.target_row_num_per_bucket)
+                    "postpone.batch-write-fixed-bucket.max-parallelism must be "
+                    "positive, got {}".format(self.max_num_buckets)
                 )
-            self.target_size_per_bucket = None
-        else:
-            self.target_size_per_bucket = (
-                options.postpone_target_size_per_bucket()
+            self.target_row_num_per_bucket = (
+                options.postpone_target_row_num_per_bucket()
             )
-            if self.target_size_per_bucket <= 0:
-                raise ValueError(
-                    "postpone.target-size-per-bucket must be positive, got "
-                    "{}".format(self.target_size_per_bucket)
+            if self.target_row_num_per_bucket is not None:
+                if self.target_row_num_per_bucket <= 0:
+                    raise ValueError(
+                        "postpone.target-row-num-per-bucket must be positive, "
+                        "got {}".format(self.target_row_num_per_bucket)
+                    )
+                self.target_size_per_bucket = None
+            else:
+                self.target_size_per_bucket = (
+                    options.postpone_target_size_per_bucket()
                 )
+                if self.target_size_per_bucket <= 0:
+                    raise ValueError(
+                        "postpone.target-size-per-bucket must be positive, got "
+                        "{}".format(self.target_size_per_bucket)
+                    )
 
         self._partition_keys = list(table.partition_keys)
         self._field_dict = dict(table.field_dict)
@@ -298,7 +324,8 @@ class PostponeBucketPlanner:
         stats = {}
         fields = [self._field_dict[name] for name in data.schema.names]
         columns = [data.column(i) for i in range(len(fields))]
-        collect_size = self.target_row_num_per_bucket is None
+        collect_size = (self.default_bucket_num is None
+                        and self.target_row_num_per_bucket is None)
         for row, partition in enumerate(partitions):
             if partition in self._known_num_buckets:
                 continue
@@ -318,6 +345,9 @@ class PostponeBucketPlanner:
         for partition, (row_count, data_size) in partition_stats.items():
             partition = tuple(partition)
             if partition in self._known_num_buckets:
+                continue
+            if self.default_bucket_num is not None:
+                self._known_num_buckets[partition] = self.default_bucket_num
                 continue
             postpone_rows = (
                 self._postpone_row_counts.get(partition, 0)

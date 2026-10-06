@@ -171,7 +171,8 @@ class TableScan:
         by the reader. Snapshot metadata is preserved even when pruning removes
         every split.
         """
-        from pypaimon.read.native_plan import native_plan
+        from pypaimon.read.native_plan import (
+            _raise_if_native_fork_safety_error, native_plan)
 
         try:
             fs = self.file_scanner
@@ -256,6 +257,7 @@ class TableScan:
                 ) for split in splits]
             return Plan(splits, snapshot_id=plan.snapshot_id)
         except Exception as e:
+            _raise_if_native_fork_safety_error(e)
             # Any native construction/planning/pruning failure -> fall back.
             logger.warning(
                 "Native plan failed, falling back to the Python scanner: %s", e)

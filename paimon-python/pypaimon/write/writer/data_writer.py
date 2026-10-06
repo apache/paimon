@@ -99,8 +99,7 @@ class DataWriter(ABC):
         )
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
-                and self.options.variant_shredding_enabled():
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
             shredding_json = self.options.variant_shredding_schema()
             if shredding_json:
                 from pypaimon.data.variant_shredding import (
@@ -158,8 +157,10 @@ class DataWriter(ABC):
         Call only after all sidecars are prepared and validated. Until then, this
         writer retains its metadata for retry and its responsibility for cleanup.
         """
-        owned_files = self.committed_files.copy() if self.delete_file_upon_abort() else []
+        owned_files = (self.committed_files + self.committed_changelog_files
+                       if self.delete_file_upon_abort() else [])
         self.committed_files.clear()
+        self.committed_changelog_files.clear()
         return owned_files
 
     def delete_file_upon_abort(self) -> bool:

@@ -52,6 +52,7 @@ public class JsonOptions {
             ConfigOptions.key("json.line-delimiter")
                     .stringType()
                     .defaultValue("\n")
+                    .withFallbackKeys("lineSep")
                     .withDescription("The line delimiter for JSON format");
 
     /** Enum for handling null keys in JSON maps. */
