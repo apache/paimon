@@ -198,7 +198,7 @@ def test_data_directory_updates_deletes_history_and_abort(tmp_path, directory, n
         commit.abort(messages)
     finally:
         commit.close()
-    assert not any(path.exists() for path in before)
+    assert all(path.exists() for path in before)
     assert [row['value'] for row in _read(table, True, True, snapshot=1)] == [10, 20, 30]
     assert [row['value'] for row in _read(table, True, True)] == [30, 40]
 

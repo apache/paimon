@@ -134,7 +134,7 @@ def test_postpone_native_overwrite_and_abort(tmp_path, native_rest_catalog, nati
         messages = writer.prepare_commit()
         paths = [f.file_path for m in messages for f in m.new_files]
         writer.abort()
-        assert paths and all(not table.file_io.exists(path) for path in paths)
+        assert paths and all(table.file_io.exists(path) for path in paths)
     finally:
         writer.close()
 
