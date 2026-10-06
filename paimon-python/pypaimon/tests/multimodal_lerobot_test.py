@@ -1511,7 +1511,7 @@ class LeRobotValidationTest(unittest.TestCase):
             decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
             result = _decode_video_windows(
                 plans, rows, [collator], feature, False,
-                prebatch=True, share_memory=True)[key]
+                return_batch=True, share_memory=True)[key]
             expected = torch.stack([
                 frames[[1, 0, 0]], frames[[1, 0, 0]]
             ]).float().div(255)
@@ -1557,7 +1557,7 @@ class LeRobotValidationTest(unittest.TestCase):
                      for window in ([1, 0], [2, 3], [0, 1], [3, 2])]
             result = _decode_video_windows(
                 fixed, separate, [collator], feature, True,
-                prebatch=True, share_memory=True)[key]
+                return_batch=True, share_memory=True)[key]
             expected = torch.stack([
                 batch[[1, 0]], batch[[0, 1]],
                 batch[[0, 1]], batch[[1, 0]],

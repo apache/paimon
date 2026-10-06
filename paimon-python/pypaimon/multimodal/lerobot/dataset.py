@@ -364,13 +364,13 @@ class PaimonDatasetReader(ABC):
 
     def get_items(self, indices):
         """Return fully assembled frames for one batch."""
-        return self._get_items(indices, prebatch=False, share_memory=False)
+        return self._get_items(indices, return_batch=False, share_memory=False)
 
     def _get_batch(self, indices, share_memory):
         return self._get_items(
-            indices, prebatch=True, share_memory=share_memory)
+            indices, return_batch=True, share_memory=share_memory)
 
-    def _get_items(self, indices, prebatch, share_memory):
+    def _get_items(self, indices, return_batch, share_memory):
         dataset_indices = [
             _normalize_index(index, len(self)) for index in indices
         ]
@@ -440,7 +440,7 @@ class PaimonDatasetReader(ABC):
         video_windows = {} if self.image_transforms is not None else _decode_video_windows(
             plans, rows, getattr(self, "_video_collators", ()),
             self._features, self.return_uint8,
-            prebatch=prebatch, share_memory=share_memory)
+            return_batch=return_batch, share_memory=share_memory)
         for group in row_groups:
             for row in group.values():
                 for key in video_windows:
@@ -485,7 +485,7 @@ class PaimonDatasetReader(ABC):
                 for key in self._visual_keys:
                     item[key] = self.image_transforms(item[key])
             result.append(item)
-        if prebatch:
+        if return_batch:
             return _collate_lerobot_batch(result, video_windows)
         return result
 
@@ -1395,7 +1395,7 @@ def _attach_task_labels(rows, task_names, subtask_names):
 
 def _decode_video_windows(
         plans, rows, collators, features, return_uint8, *,
-        prebatch=False, share_memory=False):
+        return_batch=False, share_memory=False):
     import torch
 
     tasks = [c for c in collators if c.video_column in plans[0]["windows"]]
@@ -1429,7 +1429,7 @@ def _decode_video_windows(
             requests.setdefault((payload, keyframe_index), []).append((
                 offset, [d.frame_index for d in window]))
 
-        output = None if prebatch else [None] * len(plans)
+        output = None if return_batch else [None] * len(plans)
         with torch.inference_mode(inference_enabled), \
                 torch.set_grad_enabled(grad_enabled):
             for (payload, keyframe_index), windows in requests.items():
@@ -1447,7 +1447,7 @@ def _decode_video_windows(
                 if sum(len(window) for _, window in windows) >= 2 * len(indices):
                     frames = frames.contiguous()
                 positions = {index: pos for pos, index in enumerate(indices)}
-                if prebatch:
+                if return_batch:
                     window_sizes = {len(window) for _, window in windows}
                     if len(window_sizes) != 1:
                         raise ValueError(
@@ -1472,7 +1472,7 @@ def _decode_video_windows(
                     start = selection[0]
                     contiguous = selection == list(
                         range(start, start + len(selection)))
-                    if prebatch:
+                    if return_batch:
                         source = frames[start:start + len(selection)] \
                             if contiguous else frames.index_select(
                                 0, torch.tensor(
@@ -1486,7 +1486,7 @@ def _decode_video_windows(
                         output[offset] = frames.index_select(0, torch.tensor(
                             selection, dtype=torch.long, device=frames.device))
                     if frames.dtype == torch.uint8 and not return_uint8:
-                        if prebatch:
+                        if return_batch:
                             output[offset].div_(255)
                         else:
                             output[offset] = output[offset].float().div_(255)
