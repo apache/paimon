@@ -111,25 +111,16 @@ Install the wheel with `python -m pip install dist/*.whl`.
 
 ## Optional OSS C++ backend
 
-Native OSS reads can use the experimental C++ SDK backend. Install a
-`pypaimon-rust` build with `storage-oss-cpp` and the
-[C++ bridge](https://github.com/apache/paimon-rust/tree/main/integrations/oss-cpp)
-on every worker, then set these catalog options:
+Native OSS reads require a `pypaimon-rust` build with `storage-oss-cpp` and a
+separately installed `pypaimon_oss_cpp` bridge on each worker. With
+[Rust bridge discovery](https://github.com/apache/paimon-rust/pull/1043), no
+library path is needed; set `fs.oss.cpp.library.path` only for a manually
+installed bridge.
 
-```python
-{
-    "fs.oss.impl": "cpp",
-    "fs.oss.cpp.library.path": "/opt/paimon/liboss_cpp_bridge.so",
-    "fs.oss.python.impl": "legacy",
-}
-```
-
-Enable `scan.native-plan.enabled` / `read.native.enabled` on the table to use
-native planning / reading. Python-side I/O, including Blob downloads, uses
-`fs.oss.python.impl`: `jindo` (default, with the usual legacy fallback) or
-`legacy`. The C++ backend is read-only; use a separate non-C++ catalog for native
-writes and `spawn`, not `fork`, for workers. Native availability and fallback
-rules are unchanged; selecting `cpp` alone does not enable native execution.
+Set `fs.oss.impl=cpp` in the catalog and enable `scan.native-plan.enabled` and
+`read.native.enabled` on the table. Python I/O uses Jindo by default, or set
+`fs.oss.python.impl=legacy`. The C++ backend is read-only; use `spawn`, not
+`fork`, for workers.
 
 ## Verify the installation
 
