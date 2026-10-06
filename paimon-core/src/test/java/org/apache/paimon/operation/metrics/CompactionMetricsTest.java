@@ -270,8 +270,7 @@ public class CompactionMetricsTest {
 
     @Test
     public void testCompactTimersRetiredAfterPerBucketWorkerChurn() throws Exception {
-        CompactionMetrics metrics =
-                new CompactionMetrics(new TestMetricRegistry(), "myTable", true);
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
         for (int i = 0; i < 32; i++) {
             ExecutorService worker = Executors.newSingleThreadExecutor();
             CompactionMetrics.Reporter reporter = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
@@ -283,6 +282,7 @@ public class CompactionMetricsTest {
                                 })
                         .get(30, TimeUnit.SECONDS);
             } finally {
+                metrics.retireCompactTimersForBucket(BinaryRow.EMPTY_ROW, i);
                 reporter.unregister();
                 worker.shutdownNow();
             }
@@ -405,6 +405,30 @@ public class CompactionMetricsTest {
                 .isEqualTo(40_000L);
         assertThat(counters.get(CompactionMetrics.COMPACTION_QUEUED_COUNT).getCount())
                 .isEqualTo(0L);
+    }
+
+    @Test
+    public void testCompactTimerNotRetiredOnReporterUnregisterForSharedExecutor() throws Exception {
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+        ExecutorService sharedPool = Executors.newSingleThreadExecutor();
+        CompactionMetrics.Reporter first = metrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+        CompactionMetrics.Reporter second = metrics.createReporter(BinaryRow.EMPTY_ROW, 1);
+        try {
+            sharedPool
+                    .submit(
+                            () -> {
+                                first.getCompactTimer().start();
+                                first.getCompactTimer().finish();
+                                second.getCompactTimer().start();
+                                second.getCompactTimer().finish();
+                            })
+                    .get(30, TimeUnit.SECONDS);
+            first.unregister();
+            second.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+        } finally {
+            sharedPool.shutdownNow();
+        }
     }
 
     @Test

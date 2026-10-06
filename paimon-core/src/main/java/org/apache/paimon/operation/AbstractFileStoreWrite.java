@@ -320,11 +320,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                     writerContainer.lastModifiedCommitIdentifier,
                                     commitIdentifier);
                         }
+                        releaseCompactionExecutor(partition, bucket);
                         writerContainer.writer.close();
                         if (writerContainer.primaryKeyIndexMaintainer != null) {
                             writerContainer.primaryKeyIndexMaintainer.close();
                         }
-                        releaseCompactionExecutor(partition, bucket);
                         bucketIter.remove();
                     }
                 } else {
@@ -652,12 +652,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
-        this.compactionMetrics =
-                new CompactionMetrics(
-                        metricRegistry,
-                        tableName,
-                        options.compactionTaskExecutorMode()
-                                == CompactionTaskExecutorMode.PER_BUCKET);
+        this.compactionMetrics = new CompactionMetrics(metricRegistry, tableName);
         return this;
     }
 
@@ -745,6 +740,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         if (compactionTaskExecutorMode != CompactionTaskExecutorMode.PER_BUCKET
                 || externalCompactExecutor) {
             return;
+        }
+
+        if (compactionMetrics != null) {
+            compactionMetrics.retireCompactTimersForBucket(partition, bucket);
         }
 
         ExecutorService removed =

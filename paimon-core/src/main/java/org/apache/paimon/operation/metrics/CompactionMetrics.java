@@ -70,28 +70,28 @@ public class CompactionMetrics {
     private final Map<Long, CompactTimer> compactTimers;
     private final Map<Long, Object> compactTimerLocks;
     private final Queue<Long> compactionTimes;
-    private final boolean retireCompactTimersOnReporterUnregister;
     private Counter compactionsCompletedCounter;
     private Counter compactionsTotalCounter;
     private Counter compactionsQueuedCounter;
     private final Object sharedCounterLock = new Object();
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
-        this(registry, tableName, false);
-    }
-
-    public CompactionMetrics(
-            MetricRegistry registry,
-            String tableName,
-            boolean retireCompactTimersOnReporterUnregister) {
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.reporters = new HashMap<>();
         this.compactTimers = new ConcurrentHashMap<>();
         this.compactTimerLocks = new ConcurrentHashMap<>();
         this.compactionTimes = new ConcurrentLinkedQueue<>();
-        this.retireCompactTimersOnReporterUnregister = retireCompactTimersOnReporterUnregister;
 
         registerGenericCompactionMetrics();
+    }
+
+    /** Retire compact timers when an internally owned per-bucket compaction executor is released. */
+    public void retireCompactTimersForBucket(BinaryRow partition, int bucket) {
+        PartitionAndBucket key = new PartitionAndBucket(partition, bucket);
+        ReporterImpl reporter = reporters.get(key);
+        if (reporter != null) {
+            reporter.retireCompactTimers();
+        }
     }
 
     @VisibleForTesting
@@ -100,7 +100,7 @@ public class CompactionMetrics {
     }
 
     @VisibleForTesting
-    int activeCompactTimerCount() {
+    public int activeCompactTimerCount() {
         return compactTimers.size();
     }
 
@@ -351,13 +351,15 @@ public class CompactionMetrics {
             CompactionMetrics.this.decrementCompactionsQueuedCount();
         }
 
+        private void retireCompactTimers() {
+            for (Long threadId : compactThreadIds) {
+                releaseCompactTimer(threadId);
+            }
+            compactThreadIds.clear();
+        }
+
         @Override
         public void unregister() {
-            if (retireCompactTimersOnReporterUnregister) {
-                for (Long threadId : compactThreadIds) {
-                    releaseCompactTimer(threadId);
-                }
-            }
             compactThreadIds.clear();
             reporters.remove(key);
         }

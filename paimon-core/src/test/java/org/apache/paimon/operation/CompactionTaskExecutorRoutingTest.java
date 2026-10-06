@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.metrics.TestMetricRegistry;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -149,6 +151,51 @@ class CompactionTaskExecutorRoutingTest {
 
         write.close();
         assertThat(externalExecutor.isShutdown()).isFalse();
+    }
+
+    @Test
+    void testInternalPerBucketExecutorReleaseRetiresCompactTimer() throws Exception {
+        BinaryRow partition = EMPTY_ROW.copy();
+        ExecutorRoutingWrite write = new ExecutorRoutingWrite(coreOptions(-1));
+        write.withMetricRegistry(new TestMetricRegistry());
+
+        ExecutorService bucketExecutor = write.compactExecutorForTesting(partition, 0);
+        CompactionMetrics metrics = write.compactionMetrics();
+        CompactionMetrics.Reporter reporter = metrics.createReporter(partition, 0);
+        bucketExecutor
+                .submit(
+                        () -> {
+                            reporter.getCompactTimer().start();
+                            reporter.getCompactTimer().finish();
+                        })
+                .get(30, TimeUnit.SECONDS);
+
+        assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+        write.releaseCompactionExecutorForTesting(partition, 0);
+        assertThat(metrics.activeCompactTimerCount()).isZero();
+        reporter.unregister();
+        write.close();
+    }
+
+    @Test
+    void testExternalExecutorDisablesCompactTimerRetirementOnPerBucketMode() throws Exception {
+        externalExecutor = Executors.newSingleThreadExecutor();
+        ExecutorRoutingWrite write = new ExecutorRoutingWrite(coreOptions(-1));
+        write.withMetricRegistry(new TestMetricRegistry());
+        write.withCompactExecutor(externalExecutor);
+
+        CompactionMetrics metrics = write.compactionMetrics();
+        CompactionMetrics.Reporter reporter = metrics.createReporter(EMPTY_ROW, 0);
+        externalExecutor
+                .submit(
+                        () -> {
+                            reporter.getCompactTimer().start();
+                            reporter.getCompactTimer().finish();
+                        })
+                .get(30, TimeUnit.SECONDS);
+        reporter.unregister();
+        assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+        write.close();
     }
 
     private static CoreOptions coreOptions(int compactionTaskThreads) {
