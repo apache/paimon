@@ -20,6 +20,7 @@ import os
 import sys
 from types import SimpleNamespace
 
+import pyarrow as pa
 import torch
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
@@ -45,6 +46,9 @@ class _TableRead:
 
     def __init__(self):
         self.rank = None
+
+    def _output_arrow_schema(self):
+        return pa.schema([(field.name, pa.int64()) for field in self.read_type])
 
     def to_iterator(self, splits):
         worker_info = torch.utils.data.get_worker_info()

@@ -78,6 +78,9 @@ def test_batch_lookup_matches_individual_queries(docs, projection, with_row_id):
     for left, right in zip(expected, actual):
         assert left.schema == right.schema
         assert left.to_pylist() == right.to_pylist()
+        if projection == [] and not with_row_id:
+            assert right.num_columns == 0
+            assert right.num_rows == 3
     # Preserve the existing zero-column behavior of invalid projections.
     assert len(reads) == (3 if projection == ["missing"] and not with_row_id else 1)
 

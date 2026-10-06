@@ -347,7 +347,7 @@ class ScanQuery:
             read_builder = read_builder.with_limit(self._limit)
         if projection is None:
             return read_builder, read_table.file_io, None
-        internal_column_names = [field.name for field in read_builder.read_type()]
+        internal_column_names = [field.name for field in read_builder._output_fields()]
         visible_columns = self._projected_output_columns(read_table, projection)
         if visible_columns == internal_column_names:
             visible_columns = None
@@ -356,7 +356,7 @@ class ScanQuery:
     @staticmethod
     def _projected_output_columns(table, projection):
         builder = table.new_read_builder().with_projection(projection)
-        return [field.name for field in builder.read_type()]
+        return [field.name for field in builder._output_fields()]
 
     def _blob_descriptor_read_builder(self, blob_cols: List[str]):
         """Blob-as-descriptor read builder with this query's filter/projection/limit;
@@ -547,7 +547,7 @@ class _PreFilterQuery(ScanQuery):
             return ScanQuery._read_global_index_result(self, result)
         # Row tracking requires unique names while reading. Restore repeated
         # output columns after reading their values once.
-        fields = self._configured_read_builder().read_type()
+        fields = self._configured_read_builder()._output_fields()
         lookup = copy(self)
         lookup._projection = list(dict.fromkeys(projection))
         table = ScanQuery._read_global_index_result(lookup, result)
@@ -783,8 +783,9 @@ class BatchVectorQuery(_PreFilterQuery):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
+        projection = self._effective_projection()
         if (len(results) <= 1 or self._metadata_only_result()
-                or not self._configured_read_builder().read_type()):
+                or (projection and not self._configured_read_builder()._output_fields())):
             return [self._read_global_index_result(result) for result in results]
 
         row_ids = RoaringBitmap64()
@@ -795,13 +796,12 @@ class BatchVectorQuery(_PreFilterQuery):
         # Each result is already top-k. A shared read must not apply that limit
         # to the union; where() still filters the selected rows during lookup.
         lookup._limit = None
-        projection = self._effective_projection()
-        lookup._projection = (list(projection) if projection is not None and (
-            projection or self._score_column or self._sort_by_score) else [f.name for f in self._table.fields])
+        lookup._projection = (list(projection) if projection is not None
+                              else [f.name for f in self._table.fields])
         added_row_id = SpecialFields.ROW_ID.name not in lookup._projection
         if added_row_id:
             lookup._projection.append(SpecialFields.ROW_ID.name)
-        fields = lookup._configured_read_builder().read_type()
+        fields = lookup._configured_read_builder()._output_fields()
         row_id_column = next(i for i, field in enumerate(fields) if field.id == SpecialFields.ROW_ID.id)
         table = lookup._read_search_rows(GlobalIndexResult.create(row_ids))
         positions = {row_id: i for i, row_id in enumerate(table.column(row_id_column).to_pylist())}

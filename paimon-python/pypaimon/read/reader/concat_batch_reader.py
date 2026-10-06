@@ -23,6 +23,7 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.utils.arrow_utils import zero_column_batch
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
@@ -198,6 +199,8 @@ class MergeAllBatchReader(RecordBatchReader):
             pa.concat_arrays([batch.column(i) for batch in batches])
             for i in range(batches[0].num_columns)
         ]
+        if not columns:
+            return zero_column_batch(num_rows, batches[0].schema.metadata)
         return pa.RecordBatch.from_arrays(columns, schema=batches[0].schema)
 
     def close(self) -> None:
