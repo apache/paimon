@@ -43,12 +43,7 @@ public class FormatDataSplit implements Split {
     @Nullable private final String fileFormat;
 
     public FormatDataSplit(List<FileMeta> files, @Nullable BinaryRow partition) {
-        this(files, partition, false);
-    }
-
-    public FormatDataSplit(
-            List<FileMeta> files, @Nullable BinaryRow partition, boolean useCatalogContextFileIO) {
-        this(files, partition, useCatalogContextFileIO, null);
+        this(files, partition, false, null);
     }
 
     public FormatDataSplit(

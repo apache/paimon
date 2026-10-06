@@ -74,7 +74,8 @@ public class FormatDataSplitTest {
                 new FormatDataSplit(
                         Arrays.asList(new FileMeta(new Path("oss://archive/data.csv"), 10L)),
                         null,
-                        true);
+                        true,
+                        null);
 
         FormatDataSplit deserialized =
                 InstantiationUtil.deserializeObject(
