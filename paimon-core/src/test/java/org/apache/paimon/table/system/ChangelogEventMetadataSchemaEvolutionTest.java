@@ -19,6 +19,7 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.Schema;
@@ -27,6 +28,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -98,6 +100,52 @@ class ChangelogEventMetadataSchemaEvolutionTest extends TableTestBase {
         assertThat(batchRead(table)).containsExactly("+I[1, 20, 100, 100]");
     }
 
+    @ParameterizedTest(name = "file.format = {0}")
+    @ValueSource(strings = {"parquet", "avro"})
+    void testDropColumnDoesNotAliasMetadataInRawRead(String format) throws Exception {
+        Schema schema =
+                schemaBuilder(format)
+                        .column("id", DataTypes.INT().notNull())
+                        .column("data", DataTypes.INT())
+                        .column("event_ts", DataTypes.BIGINT())
+                        .column("extra", DataTypes.BIGINT())
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+
+        writeAndCompact(GenericRow.of(1, 10, 50L, 777L), GenericRow.of(1, 20, 100L, 888L));
+        fullCompact();
+
+        // Data files do not store metadata, so the raw read falls back to the source column. A
+        // metadata ID aliasing the dropped column would read its value instead of falling back.
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("extra"), false);
+
+        ChangelogEventMetadataTable table = new ChangelogEventMetadataTable(getTableDefault());
+        assertThat(rawBatchRead(table)).containsExactly("+I[1, 20, 100, 100]");
+    }
+
+    @ParameterizedTest(name = "file.format = {0}")
+    @ValueSource(strings = {"parquet", "avro"})
+    void testSourceTypeChangeCastsHistoricalMetadataInRawRead(String format) throws Exception {
+        Schema schema =
+                schemaBuilder(format)
+                        .column("id", DataTypes.INT().notNull())
+                        .column("data", DataTypes.INT())
+                        .column("event_ts", DataTypes.BIGINT())
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+
+        writeAndCompact(GenericRow.of(1, 10, 50L), GenericRow.of(1, 20, 100L));
+        fullCompact();
+
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.updateColumnType("event_ts", DataTypes.DECIMAL(20, 0)),
+                false);
+
+        ChangelogEventMetadataTable table = new ChangelogEventMetadataTable(getTableDefault());
+        assertThat(rawBatchRead(table)).containsExactly("+I[1, 20, 100, 100]");
+    }
+
     private Schema.Builder schemaBuilder(String format) {
         return Schema.newBuilder()
                 .primaryKey("id")
@@ -116,6 +164,17 @@ class ChangelogEventMetadataSchemaEvolutionTest extends TableTestBase {
                 write.write(rows[i]);
                 commit.commit(i, write.prepareCommit(true, i));
             }
+        }
+    }
+
+    /** Compacts all files into a single top-level file, so batch splits can be read raw. */
+    private void fullCompact() throws Exception {
+        FileStoreTable table = getTableDefault();
+        long nextIdentifier = table.snapshotManager().latestSnapshotId() + 1;
+        try (StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            commit.commit(nextIdentifier, write.prepareCommit(true, nextIdentifier));
         }
     }
 
@@ -140,6 +199,16 @@ class ChangelogEventMetadataSchemaEvolutionTest extends TableTestBase {
     private List<String> batchRead(ChangelogEventMetadataTable table) throws Exception {
         ReadBuilder readBuilder = table.newReadBuilder();
         return read(readBuilder, readBuilder.newScan().plan(), table.rowType());
+    }
+
+    private List<String> rawBatchRead(ChangelogEventMetadataTable table) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        // Guard against silently falling back to the merge read.
+        assertThat(plan.splits())
+                .isNotEmpty()
+                .allSatisfy(split -> assertThat(((DataSplit) split).rawConvertible()).isTrue());
+        return read(readBuilder, plan, table.rowType());
     }
 
     private static List<String> read(ReadBuilder readBuilder, TableScan.Plan plan, RowType rowType)
