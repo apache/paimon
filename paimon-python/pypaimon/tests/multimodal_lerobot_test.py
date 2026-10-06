@@ -930,6 +930,12 @@ class LeRobotValidationTest(unittest.TestCase):
             sample["action"], torch.tensor([0.0, 1.0, 2.0]))
         self.assertEqual([False, False, False],
                          sample["action_is_pad"].tolist())
+        batch = next(iter(dataset.to_dataloader(
+            batch_size=2, shuffle=False, num_workers=0)))
+        self.assertEqual([0, 1], batch["index"].tolist())
+        self.assertEqual([2, 3], list(batch["action"].shape))
+        with self.assertRaisesRegex(ValueError, "manages collate_fn"):
+            dataset.to_dataloader(batch_size=2, collate_fn=lambda rows: rows)
         dataset.return_uint8 = True
         self.assertTrue(reader.return_uint8)
         with self.assertRaisesRegex(TypeError, "return_uint8"):
@@ -1455,6 +1461,10 @@ class LeRobotValidationTest(unittest.TestCase):
                             item[key], expected.expand(3, 3, 2, 2).float()))
                 result[0][keys[0]].zero_()
                 self.assertEqual(1, result[0][keys[1]][-1, 0, 0, 0].item())
+                batch = reader._get_batch([0, 1], share_memory=False)
+                for key in keys:
+                    self.assertEqual(
+                        [2, 3, 3, 2, 2], list(batch[key].shape))
 
     def test_video_windows_decode_directly_and_fall_back(self):
         try:
@@ -1497,6 +1507,22 @@ class LeRobotValidationTest(unittest.TestCase):
                 self.assertTrue(torch.equal(batch, frames))
                 decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
 
+            decoder.get_frames_at.reset_mock()
+            decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
+            result = _decode_video_windows(
+                plans, rows, [collator], feature, False,
+                prebatch=True, share_memory=True)[key]
+            expected = torch.stack([
+                frames[[1, 0, 0]], frames[[1, 0, 0]]
+            ]).float().div(255)
+            self.assertTrue(result.is_shared())
+            self.assertTrue(torch.equal(result, expected))
+            result[0, 1].zero_()
+            self.assertTrue(torch.equal(result[0, 2], expected[0, 2]))
+            self.assertTrue(torch.equal(result[1], expected[1]))
+            self.assertTrue(torch.equal(frames, batch))
+            decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
+
             for indices in ([0, 1], [1, 0, 0]):
                 decoder.get_frames_at.reset_mock()
                 decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
@@ -1526,6 +1552,18 @@ class LeRobotValidationTest(unittest.TestCase):
             result[2].zero_()
             self.assertTrue(torch.equal(result[1], batch))
             self.assertTrue(torch.equal(batch, frames))
+
+            fixed = [{"windows": {key: window}}
+                     for window in ([1, 0], [2, 3], [0, 1], [3, 2])]
+            result = _decode_video_windows(
+                fixed, separate, [collator], feature, True,
+                prebatch=True, share_memory=True)[key]
+            expected = torch.stack([
+                batch[[1, 0]], batch[[0, 1]],
+                batch[[0, 1]], batch[[1, 0]],
+            ])
+            self.assertTrue(result.is_shared())
+            self.assertTrue(torch.equal(result, expected))
 
             open_decoder.reset_mock()
             mixed = dict(rows)
@@ -3095,6 +3133,16 @@ class LeRobotValidationTest(unittest.TestCase):
                         num_workers=2,
                         multiprocessing_context="spawn"):
                     worker_indices.extend(batch["index"].tolist())
+                self.assertEqual(list(range(5)), worker_indices)
+
+                worker_indices = []
+                for batch in dataset.to_dataloader(
+                        batch_size=2,
+                        shuffle=False,
+                        num_workers=2,
+                        multiprocessing_context="spawn"):
+                    worker_indices.extend(batch["index"].tolist())
+                    self.assertTrue(batch["camera"].is_shared())
                 self.assertEqual(list(range(5)), worker_indices)
             finally:
                 dataset.close()
