@@ -28,6 +28,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
@@ -48,6 +50,9 @@ public class RESTTokenRefresher {
 
     /** Expiration of the token already present in the options. */
     public static final String EXPIRES_AT_MILLIS = "data-token.expires-at-millis";
+
+    /** Keys of the token already present in the options, replaced as a whole on reload. */
+    public static final String TOKEN_KEYS = "data-token.keys";
 
     // A reloaded token is kept at least this long, and a failed reload is retried after it.
     static final long RELOAD_INTERVAL_MILLIS = 10_000L;
@@ -77,11 +82,12 @@ public class RESTTokenRefresher {
         this.cached = token == null ? null : new CachedToken(token, currentTimeMillis());
     }
 
-    /** Names the table and the expiration of the merged token, so a refresher can be created. */
-    public static void configure(Options options, Identifier identifier, long expiresAtMillis) {
+    /** Describes the table and the token merged into the options, so a refresher can be created. */
+    public static void configure(Options options, Identifier identifier, RESTToken token) {
         options.set(DATABASE, identifier.getDatabaseName());
         options.set(OBJECT, identifier.getObjectName());
-        options.set(EXPIRES_AT_MILLIS, String.valueOf(expiresAtMillis));
+        options.set(EXPIRES_AT_MILLIS, String.valueOf(token.expireAtMillis()));
+        options.set(TOKEN_KEYS, String.join(",", token.token().keySet()));
     }
 
     /** Whether the options name a table, see {@link #configure}. */
@@ -94,13 +100,26 @@ public class RESTTokenRefresher {
      * by {@link #configure}.
      */
     public static RESTTokenRefresher fromOptions(Options options) {
+        return fromOptions(options, null);
+    }
+
+    @VisibleForTesting
+    static RESTTokenRefresher fromOptions(Options options, @Nullable RESTApi api) {
         Identifier identifier = new Identifier(options.get(DATABASE), options.get(OBJECT));
         String expiresAt = options.get(EXPIRES_AT_MILLIS);
         RESTToken token =
                 expiresAt == null
                         ? null
                         : new RESTToken(options.toMap(), Long.parseLong(expiresAt));
-        return new RESTTokenRefresher(options, identifier, null, token);
+        // Reloads start from the catalog options, so no key of the previous token survives.
+        Map<String, String> catalogOptions = new HashMap<>(options.toMap());
+        String tokenKeys = options.get(TOKEN_KEYS);
+        if (tokenKeys != null) {
+            for (String key : tokenKeys.split(",")) {
+                catalogOptions.remove(key);
+            }
+        }
+        return new RESTTokenRefresher(new Options(catalogOptions), identifier, api, token);
     }
 
     /** Returns the current token, reloading it from the catalog when it is about to expire. */

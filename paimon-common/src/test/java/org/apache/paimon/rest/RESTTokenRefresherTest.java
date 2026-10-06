@@ -26,6 +26,8 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -146,7 +148,8 @@ class RESTTokenRefresherTest {
         options.set("k", "first");
         Identifier dotted = new Identifier("my.db", "table", "b1");
         long expiresAt = System.currentTimeMillis() + hours(2).toMillis();
-        RESTTokenRefresher.configure(options, dotted, expiresAt);
+        RESTTokenRefresher.configure(
+                options, dotted, new RESTToken(Collections.singletonMap("k", "first"), expiresAt));
 
         assertThat(RESTTokenRefresher.isConfigured(options)).isTrue();
         assertThat(RESTTokenRefresher.isConfigured(new Options())).isFalse();
@@ -156,6 +159,31 @@ class RESTTokenRefresherTest {
         assertThat(refresher.token().expireAtMillis()).isEqualTo(expiresAt);
         assertThat(options.get(RESTTokenRefresher.DATABASE)).isEqualTo("my.db");
         assertThat(options.get(RESTTokenRefresher.OBJECT)).isEqualTo("table$branch_b1");
+    }
+
+    @Test
+    void testReloadReplacesTheKeysOfThePreviousToken() {
+        Map<String, String> previous = new HashMap<>();
+        previous.put("access-key", "a1");
+        previous.put("security-token", "s1");
+        Options options = new Options();
+        options.set("catalog-key", "c");
+        previous.forEach(options::set);
+        // already expired, so the first call reloads
+        RESTTokenRefresher.configure(
+                options, identifier, new RESTToken(previous, System.currentTimeMillis() - 1));
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("access-key", "a2"),
+                                System.currentTimeMillis() + hours(4).toMillis()));
+
+        Map<String, String> reloaded = RESTTokenRefresher.fromOptions(options, api).token().token();
+
+        assertThat(reloaded)
+                .containsEntry("access-key", "a2")
+                .containsEntry("catalog-key", "c")
+                .doesNotContainKey("security-token");
     }
 
     private RESTTokenRefresher refresher(RESTToken token) {
