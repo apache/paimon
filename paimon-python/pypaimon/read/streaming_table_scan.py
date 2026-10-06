@@ -35,6 +35,7 @@ from pypaimon.consumer.consumer import Consumer
 from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.read.scanner.append_table_split_generator import \
@@ -194,7 +195,8 @@ class AsyncStreamingTableScan:
 
                         if prefetch_plan is not None:
                             plan = prefetch_plan
-                except Exception:
+                except Exception as error:
+                    _raise_if_native_fork_safety_error(error)
                     # Prefetch failed, fall back to synchronous
                     prefetch_used = False
                 finally:
@@ -304,7 +306,8 @@ class AsyncStreamingTableScan:
 
             plan = self._create_follow_up_plan(snapshot)
             return (plan, next_id, skipped_count)
-        except Exception:
+        except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             logging.exception("Prefetch failed for snapshot_id=%d; falling back to synchronous", start_id)
             return None
 
@@ -372,8 +375,8 @@ class AsyncStreamingTableScan:
 
         An arbitrary Python bucket predicate cannot be represented by the Rust
         planner, so sharded stream consumers retain the Python plan. Any native
-        setup or planning error is an optimization miss and falls back before
-        a plan is returned.
+        setup or planning error other than a fork-safety failure falls back
+        before a plan is returned.
         """
         if (not self.table.options.native_plan_enabled()
                 or self._bucket_filter is not None):
@@ -405,6 +408,7 @@ class AsyncStreamingTableScan:
                 return None
             return plan
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             logging.warning(
                 "Native streaming plan failed, falling back to Python planning: %s",
                 error)
