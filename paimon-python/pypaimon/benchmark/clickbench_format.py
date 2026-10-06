@@ -128,6 +128,8 @@ def write_paimon_table(catalog, table_name: str, pa_schema: pa.Schema,
     """Write data to a Paimon table and return metrics."""
     schema = Schema.from_pyarrow_schema(pa_schema, options={
         'file.format': file_format,
+        'file.compression': 'zstd',
+        'file.compression.zstd-level': '3',
         'data-evolution.enabled': 'true',
         'row-tracking.enabled': 'true',
     })

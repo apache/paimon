@@ -198,6 +198,9 @@ class DataFileBatchReader(RecordBatchReader):
         self._file_data_field_map = {
             field.name: field for field in source_fields
         }
+        self._has_selected_map_keys = any(
+            is_map_selected_keys_field(field) for field in source_fields)
+        self._aligned_schema = None
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
@@ -264,6 +267,8 @@ class DataFileBatchReader(RecordBatchReader):
 
     def _assemble_selected_map_keys(
             self, record_batch: RecordBatch) -> RecordBatch:
+        if not self._has_selected_map_keys:
+            return record_batch
         columns = list(record_batch.columns)
         fields = list(record_batch.schema)
         changed = False
@@ -358,8 +363,13 @@ class DataFileBatchReader(RecordBatchReader):
             # to span newer-schema files, and failing to concatenate when it
             # does. Align them to the current read schema, mirroring the rebuild
             # path below.
-            record_batch = self._align_batch_to_read_schema(
-                record_batch.schema.names, record_batch.columns, record_batch.num_rows)
+            # Cache the aligned physical schema, which may omit virtual system fields.
+            # Recheck each batch so mixed-schema readers still take the conversion path.
+            if (self._aligned_schema is None
+                    or not record_batch.schema.equals(self._aligned_schema, check_metadata=True)):
+                record_batch = self._align_batch_to_read_schema(
+                    record_batch.schema.names, record_batch.columns, record_batch.num_rows)
+                self._aligned_schema = record_batch.schema
             if self.row_tracking_enabled and self.system_fields:
                 record_batch = self._assign_row_tracking(record_batch)
             return record_batch
