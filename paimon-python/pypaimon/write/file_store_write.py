@@ -34,6 +34,7 @@ from pypaimon.write.writer.data_vector_writer import DataVectorWriter
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 from pypaimon.write.writer.postpone_data_writer import PostponeDataWriter
+from pypaimon.write.writer.composite_data_writer import CompositeDataWriter
 from pypaimon.table.bucket_mode import BucketMode
 
 
@@ -336,14 +337,14 @@ class FileStoreWrite:
                     total_buckets=self._runtime_total_buckets.get(partition),
                 )
                 commit_messages.append(commit_message)
-        self._release_prepared_postpone_files()
+        self._release_prepared_files()
         return commit_messages
 
-    def _release_prepared_postpone_files(self):
+    def _release_prepared_files(self):
         # Hand off only after every partition prepared successfully. Until
         # then, close/abort must still clean up files from earlier partitions.
         for writer in self.data_writers.values():
-            if isinstance(writer, PostponeDataWriter):
+            if isinstance(writer, (PostponeDataWriter, CompositeDataWriter)):
                 writer._release_prepared_files()
 
     def close(self):

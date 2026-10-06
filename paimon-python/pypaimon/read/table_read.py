@@ -60,7 +60,7 @@ _NATIVE_READ_FILE_FORMATS = frozenset({
 })
 _NATIVE_READ_FILE_SUFFIXES = tuple(
     '.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
-_NATIVE_BLOB_FILE_SUFFIX = '.blob'
+_NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
 
 
 class _ClosableArrowBatchReader:
@@ -810,7 +810,7 @@ class TableRead:
             file_name = data_file.file_name.lower()
             if ('.vector.' not in file_name
                     and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
-                    and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIX)):
+                    and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIXES)):
                 return False
         return True
 

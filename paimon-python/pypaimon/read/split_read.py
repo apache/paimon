@@ -108,9 +108,10 @@ def deferred_blob_field_names(table, read_fields: List[DataField],
             or CoreOptions.blob_as_descriptor(table.options)):
         return set()
 
-    inline_fields = (
+    non_payload_fields = (
         CoreOptions.blob_descriptor_fields(table.options)
         | CoreOptions.blob_view_fields(table.options)
+        | CoreOptions.video_frame_fields(table.options)
     )
     predicate_fields = (
         predicate_field_names(predicate) if predicate is not None else set()
@@ -118,7 +119,7 @@ def deferred_blob_field_names(table, read_fields: List[DataField],
     return {
         read_fields[index].name
         for index in blob_field_indices(read_fields)
-        if read_fields[index].name not in inline_fields
+        if read_fields[index].name not in non_payload_fields
         and read_fields[index].name not in predicate_fields
     }
 

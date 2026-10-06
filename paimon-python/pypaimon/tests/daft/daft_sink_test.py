@@ -403,6 +403,45 @@ def test_write_paimon_pk_table(pk_table):
     assert result.column("id").to_pylist() == [1, 2, 3]
 
 
+@pytest.mark.python_write
+@pytest.mark.parametrize('grouped', [False, True])
+def test_dedicated_close_failure_cleans_prepared_files(local_paimon_catalog, grouped):
+    from unittest.mock import patch
+    from pypaimon.daft.daft_datasink import make_group_write_udf
+    from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+
+    catalog, _ = local_paimon_catalog
+    arrow_schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
+    catalog.create_table('test_db.close_failure', pypaimon.Schema.from_pyarrow_schema(
+        arrow_schema, options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+                               'write.native.enabled': 'false'}), False)
+    table = catalog.get_table('test_db.close_failure')
+    data = pa.table({'id': [1, 2, 3], 'payload': [b'a', b'b', b'c']}, schema=arrow_schema)
+    original_close = DedicatedFormatWriter._close_current_writers
+    calls = []
+
+    def fail_after_prepare(writer):
+        calls.append(writer)
+        if len(calls) == 1:
+            return original_close(writer)
+        raise RuntimeError('Close failed after prepare')
+
+    with patch.object(DedicatedFormatWriter, '_close_current_writers', fail_after_prepare):
+        with pytest.raises(RuntimeError, match='Close failed after prepare'):
+            if grouped:
+                # Exercise the worker body synchronously so the injected close
+                # error reaches the same writer which prepared the files.
+                with patch('daft.func.batch', side_effect=lambda **kwargs: lambda function: function):
+                    write_group = make_group_write_udf(table, 'append', None)
+                write_group(*(daft.Series.from_arrow(column.combine_chunks()) for column in data.columns))
+            else:
+                list(PaimonDataSink(table).write(iter([MicroPartition.from_arrow(data)])))
+    assert len(calls) == 2
+    assert not [name for _, _, names in os.walk(table.table_path) for name in names
+                if name.endswith(('.parquet', '.blob'))]
+    assert table.snapshot_manager().get_latest_snapshot() is None
+
+
 # ---------------------------------------------------------------------------
 # Schema conversion tests
 # ---------------------------------------------------------------------------

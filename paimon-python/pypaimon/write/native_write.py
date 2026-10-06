@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
-from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field, is_blob_type
+from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.native_commit import (
@@ -72,11 +72,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
             or table.options.file_format() != 'parquet'
             # Rust cannot encode these partition keys yet.
             or not _native_partition_types_supported(schema, table.partition_keys)
-            # Append dedicated files currently support top-level scalar Blob fields.
-            or table.options.video_frame_fields()
-            or (not table.is_primary_key_table
-                and any(is_blob_file_field(field) and not is_blob_type(field.type)
-                        for field in table.table_schema.fields))):
+            or table.options.video_frame_fields()):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
