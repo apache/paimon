@@ -139,6 +139,23 @@ table = table.copy({"parquet.filter.columnindex.enabled": "false"})
 Unsupported reads use the normal path. Reading fewer bytes may require more
 object-store requests.
 
+# Vortex compact compression
+
+For tables using `file.format=vortex`, enable the compact compression preset with:
+
+```python
+table = table.copy({"vortex.compact.enabled": "true"})
+```
+
+The option defaults to `false`. Compact mode prioritizes smaller files over read
+throughput and latency, choosing encodings adaptively, including Zstd for strings
+and Pco for numeric data. It applies to new Vortex data and vector files written
+by the Python writer, including remote storage. Existing files are unchanged and
+both presets use the same Vortex reader.
+
+Vortex manages the compact preset's codec settings. `file.compression` and
+`file.compression.zstd-level` do not configure Vortex compression.
+
 # Native write and commit
 
 PyPaimon can write Arrow batches through the optional `pypaimon-rust` runtime.

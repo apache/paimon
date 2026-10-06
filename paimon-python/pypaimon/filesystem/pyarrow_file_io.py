@@ -729,7 +729,7 @@ class PyArrowFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
 
-    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
+    def write_vortex(self, path: str, data: pyarrow.Table, compact: bool = False, **kwargs):
         try:
             import vortex
             from vortex import store
@@ -737,7 +737,11 @@ class PyArrowFileIO(FileIO):
             from pypaimon.read.reader.vortex_utils import to_vortex_specified
             file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
 
-            if store_kwargs:
+            if compact:
+                from vortex.io import VortexWriteOptions
+                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs) if store_kwargs else None
+                VortexWriteOptions.compact().write(vortex.array(data), file_path_for_vortex, store=vortex_store)
+            elif store_kwargs:
                 vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
                 vortex_store.write(vortex.array(data))
             else:

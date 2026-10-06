@@ -342,6 +342,17 @@ class CoreOptions:
         )
     )
 
+    VORTEX_COMPACT_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("vortex.compact.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether Python Vortex writers use the compact compression preset, prioritizing "
+            "smaller files over read throughput and latency. The preset chooses encodings "
+            "adaptively; file.compression and file.compression.zstd-level do not configure it."
+        )
+    )
+
     FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("file.format")
         .string_type()
@@ -1351,6 +1362,9 @@ class CoreOptions:
 
     def parquet_write_page_index_enabled(self) -> Optional[bool]:
         return self.options.get(CoreOptions.PARQUET_WRITE_PAGE_INDEX_ENABLED)
+
+    def vortex_compact_enabled(self) -> bool:
+        return self.options.get(CoreOptions.VORTEX_COMPACT_ENABLED)
 
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)
