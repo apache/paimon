@@ -111,10 +111,9 @@ Install the wheel with `python -m pip install dist/*.whl`.
 
 ## Optional OSS C++ backend
 
-Native OSS reads require a `pypaimon-rust` build with `storage-oss-cpp` and a
-separately installed `pypaimon_oss_cpp` bridge on each worker. With
-[Rust bridge discovery](https://github.com/apache/paimon-rust/pull/1043), no
-library path is needed; set `fs.oss.cpp.library.path` only for a manually
+Native OSS reads require a `pypaimon-rust` build with `storage-oss-cpp` and
+bridge discovery, plus `pypaimon_oss_cpp` on each worker. The library path is
+detected automatically; set `fs.oss.cpp.library.path` only for a manually
 installed bridge.
 
 Set `fs.oss.impl=cpp` in the catalog and enable `scan.native-plan.enabled` and
