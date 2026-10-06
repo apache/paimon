@@ -60,7 +60,8 @@ from pypaimon.read.reader.field_indices import (
     descriptor_field_names_for_table, vector_field_indices)
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
-from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
+from pypaimon.read.reader.blob_descriptor_convert_reader import (
+    BlobDataBatchReader, BlobInlineConvertReader)
 from pypaimon.read.reader.blob_view_read_support import (
     needs_blob_inline_convert, wrap_record_reader_with_blob_inline_convert)
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
@@ -312,8 +313,14 @@ class SplitRead(ABC):
             if len(effective_row_ranges) == 0:
                 return EmptyRecordBatchReader()
 
+        row_sidecar_selected = False
         row_sidecar_file = self._row_sidecar_file_name(file)
+        descriptor_projection = (
+            CoreOptions.blob_as_descriptor(self.table.options)
+            and any(self.read_fields[index].name in read_fields
+                    for index in blob_field_indices(self.read_fields)))
         if (physical_row_ranges is None
+                and not descriptor_projection
                 and row_sidecar_file is not None
                 and self._should_read_row_sidecar(
                     file,
@@ -323,6 +330,7 @@ class SplitRead(ABC):
                     self.table.options.data_evolution_row_sidecar_max_selection_ratio())):
             file_path = self._aligned_extra_file_path(file, row_sidecar_file)
             file_format = ROW_SIDECAR_FORMAT
+            row_sidecar_selected = True
 
         # Prepare file-local native row selection. Existing native formats
         # consume row indices; Parquet keeps compact ranges to avoid expanding
@@ -548,6 +556,12 @@ class SplitRead(ABC):
                 row_id_offset_ranges=parquet_row_ranges,
                 file_data_fields=file_read_fields,
                 target_data_fields=target_fields)
+
+        if row_sidecar_selected:
+            inline_fields = (CoreOptions.blob_descriptor_fields(self.table.options)
+                             | CoreOptions.blob_view_fields(self.table.options))
+            if inline_fields:
+                reader = BlobDataBatchReader(reader, inline_fields)
 
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
         if (effective_row_ranges is not None

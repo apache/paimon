@@ -803,10 +803,6 @@ class TableRead:
     @staticmethod
     def _native_split_files_supported(split):
         for data_file in split.files:
-            # Rust does not select ROW sidecars for point reads. The primary
-            # file need not be available when the sidecar covers this read.
-            if any(name.lower().endswith('.row') for name in data_file.extra_files or []):
-                return False
             file_name = data_file.file_name.lower()
             if ('.vector.' not in file_name
                     and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)

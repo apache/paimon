@@ -355,7 +355,12 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
     with pytest.raises(RuntimeError, match='input generator failed'):
         table.new_batch_write_builder().new_update().update_by_arrow_batches_with_row_id(
             failed_input())
-    assert set(tmp_path.rglob('*.parquet')) == before
+    # Native update already returned the first table's prepared messages to
+    # the binding. A later iterator failure must not delete handed-off files.
+    assert before < set(tmp_path.rglob('*.parquet'))
+    read = table.new_read_builder()
+    assert read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').select(
+        ['id', 'age']).to_pydict() == {'id': [2, 3, 4, 10], 'age': [22, 33, 40, 11]}
 
     read_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
 

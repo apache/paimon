@@ -15,7 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -40,6 +43,54 @@ class _BatchReader(RecordBatchReader):
 
 
 class ConcatBatchReaderTest(unittest.TestCase):
+
+    def test_merge_all_resolves_blob_refs_and_keeps_row_payloads(self):
+        from pypaimon.common.options import Options
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from pypaimon.read.reader.blob_descriptor_convert_reader import (
+            BlobDataBatchReader, BlobInlineConvertReader)
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        with tempfile.TemporaryDirectory() as root:
+            # Both representations can have the same descriptor-shaped bytes.
+            payload = BlobDescriptor(str(Path(root) / 'must-not-read'), 0, 1).serialize()
+            source = Path(root) / 'source'
+            source.write_bytes(payload)
+            reference = BlobDescriptor(str(source), 0, len(payload)).serialize()
+            table = SimpleNamespace(
+                options=CoreOptions(Options({'blob-descriptor-field': 'payload'})),
+                file_io=LocalFileIO.create(),
+                catalog_environment=SimpleNamespace(catalog_loader=None))
+            schema = pa.schema([pa.field(
+                'payload', pa.large_binary(), metadata={b'description': b'keep'})])
+            for reverse in (False, True):
+                with self.subTest(reverse=reverse):
+                    refs = _BatchReader([pa.RecordBatch.from_arrays(
+                        [pa.array([reference], type=pa.large_binary())], schema=schema)])
+                    data = BlobDataBatchReader(_BatchReader([pa.RecordBatch.from_arrays(
+                        [pa.array([payload, None], type=pa.large_binary())], schema=schema)]), {'payload'})
+                    sources = [data, refs] if reverse else [refs, data]
+                    merged = MergeAllBatchReader(
+                        [lambda reader=reader: reader for reader in sources], batch_size=3)
+                    reader = BlobInlineConvertReader(merged, table)
+                    values = []
+                    sizes = []
+                    try:
+                        while True:
+                            batch = reader.read_arrow_batch()
+                            if batch is None:
+                                break
+                            values.extend(batch.column(0).to_pylist())
+                            sizes.append(batch.num_rows)
+                            metadata = batch.schema.field(0).metadata or {}
+                            self.assertNotIn(b'paimon.row-sidecar.blob-data', metadata)
+                            if batch.num_rows == 2:
+                                self.assertEqual(metadata, {b'description': b'keep'})
+                    finally:
+                        reader.close()
+                    self.assertEqual(values, [payload, None, payload] if reverse else [payload, payload, None])
+                    self.assertEqual(sizes, [2, 1] if reverse else [1, 2])
 
     def test_merge_all_zero_column_batches_keep_row_counts(self):
         batches = [pa.record_batch([pa.array(range(size))], names=['id']).select([])
