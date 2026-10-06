@@ -141,7 +141,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 && !options.changelogEventMetadataFields().isEmpty()) {
             writerFactoryBuilder.withChangelogValueType(
                     ChangelogEventMetadata.appendStorageMetadataFields(
-                            valueType, valueType, options));
+                            valueType, valueType, schema.highestFieldId(), options));
         }
     }
 

@@ -151,11 +151,18 @@ public final class ChangelogEventMetadata {
         }
     }
 
-    /** Returns the nullable public metadata fields appended to a table row. */
-    public static List<DataField> extraValueFields(RowType valueType, CoreOptions options) {
+    /**
+     * Returns the nullable public metadata fields appended to a table row.
+     *
+     * <p>{@code highestFieldId} must be the table schema's highest field ID, which also covers
+     * dropped fields, so that metadata field IDs never alias a field of a historical schema.
+     */
+    public static List<DataField> extraValueFields(
+            RowType valueType, int highestFieldId, CoreOptions options) {
         validate(valueType, options);
         return metadataValueFields(
                 valueType,
+                highestFieldId,
                 options,
                 physicalField -> metadataFieldName(physicalField.name(), options));
     }
@@ -166,12 +173,50 @@ public final class ChangelogEventMetadata {
      * <p>Storage names use the configured prefix and source field ID, so they remain stable when
      * the source column is renamed.
      */
-    public static List<DataField> storageValueFields(RowType valueType, CoreOptions options) {
+    public static List<DataField> storageValueFields(
+            RowType valueType, int highestFieldId, CoreOptions options) {
         validate(valueType, options);
         return metadataValueFields(
                 valueType,
+                highestFieldId,
                 options,
                 physicalField -> storageMetadataFieldName(physicalField, options));
+    }
+
+    /**
+     * Resolves storage metadata fields against the value fields of the schema a data file was
+     * written with.
+     *
+     * <p>The metadata values were written with the source field's type at that time, so each field
+     * takes the historical source field type. This lets schema evolution cast the values like the
+     * source field itself. Fields whose source field did not exist yet keep the current type.
+     */
+    public static List<DataField> storageValueFieldsForDataSchema(
+            List<DataField> storageFields,
+            RowType valueType,
+            List<DataField> dataValueFields,
+            List<String> preserveColumns) {
+        List<DataField> fields = new ArrayList<>(storageFields.size());
+        for (int i = 0; i < storageFields.size(); i++) {
+            DataField storageField = storageFields.get(i);
+            if (i >= preserveColumns.size() || !valueType.containsField(preserveColumns.get(i))) {
+                fields.add(storageField);
+                continue;
+            }
+            int sourceFieldId = valueType.getField(preserveColumns.get(i)).id();
+            DataField dataSourceField = null;
+            for (DataField dataField : dataValueFields) {
+                if (dataField.id() == sourceFieldId) {
+                    dataSourceField = dataField;
+                    break;
+                }
+            }
+            fields.add(
+                    dataSourceField == null
+                            ? storageField
+                            : storageField.newType(dataSourceField.type().copy(true)));
+        }
+        return fields;
     }
 
     /** Returns the physical value-field positions copied into event metadata columns. */
@@ -197,14 +242,14 @@ public final class ChangelogEventMetadata {
      * base row prepends system fields to the physical value fields.
      */
     public static RowType appendMetadataFields(
-            RowType baseRowType, RowType valueType, CoreOptions options) {
-        return appendFields(baseRowType, extraValueFields(valueType, options));
+            RowType baseRowType, RowType valueType, int highestFieldId, CoreOptions options) {
+        return appendFields(baseRowType, extraValueFields(valueType, highestFieldId, options));
     }
 
     /** Appends the internal storage metadata fields to a row type. */
     public static RowType appendStorageMetadataFields(
-            RowType baseRowType, RowType valueType, CoreOptions options) {
-        return appendFields(baseRowType, storageValueFields(valueType, options));
+            RowType baseRowType, RowType valueType, int highestFieldId, CoreOptions options) {
+        return appendFields(baseRowType, storageValueFields(valueType, highestFieldId, options));
     }
 
     private static RowType appendFields(RowType baseRowType, List<DataField> extraFields) {
@@ -244,13 +289,19 @@ public final class ChangelogEventMetadata {
     }
 
     private static List<DataField> metadataValueFields(
-            RowType valueType, CoreOptions options, Function<DataField, String> metadataName) {
+            RowType valueType,
+            int highestFieldId,
+            CoreOptions options,
+            Function<DataField, String> metadataName) {
         List<String> preserveColumns = options.changelogEventMetadataFields();
         if (preserveColumns.isEmpty()) {
             return Collections.emptyList();
         }
 
-        int nextId = RowType.currentHighestFieldId(valueType.getFields()) + 1;
+        // The schema's highest field ID never decreases, so IDs above it cannot collide with
+        // fields of historical schemas, including dropped fields.
+        int nextId =
+                Math.max(highestFieldId, RowType.currentHighestFieldId(valueType.getFields())) + 1;
         List<DataField> extraFields = new ArrayList<>(preserveColumns.size());
         for (String preserveColumn : preserveColumns) {
             DataField physicalField = valueType.getField(preserveColumn);

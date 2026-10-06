@@ -289,7 +289,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 outputRowType.getFields(),
                 dataSchema -> {
                     List<DataField> fields = new ArrayList<>(fieldsExtractor.apply(dataSchema));
-                    fields.addAll(changelogExtraValueFields);
+                    fields.addAll(
+                            ChangelogEventMetadata.storageValueFieldsForDataSchema(
+                                    changelogExtraValueFields,
+                                    schema.logicalRowType(),
+                                    dataSchema.fields(),
+                                    metadataPreserveColumns));
                     return fields;
                 },
                 filters,
@@ -467,7 +472,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private static List<DataField> createChangelogExtraValueFields(
             TableSchema schema, CoreOptions options) {
-        return ChangelogEventMetadata.storageValueFields(schema.logicalRowType(), options);
+        return ChangelogEventMetadata.storageValueFields(
+                schema.logicalRowType(), schema.highestFieldId(), options);
     }
 
     private FileRecordReader<InternalRow> applyMetadataFallbackAndOuterProjection(

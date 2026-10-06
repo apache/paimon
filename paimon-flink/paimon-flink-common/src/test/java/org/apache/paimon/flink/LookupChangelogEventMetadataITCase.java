@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** End-to-end tests for lookup changelog event metadata. */
 public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
@@ -192,5 +194,58 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
 
         physicalIterator.close();
         iterator.close();
+    }
+
+    @Test
+    public void testPassThroughToSinkWithDifferentPrimaryKey() throws Exception {
+        createSourceAndSinkWithDifferentPrimaryKeys();
+
+        // Without upsert materialization, the sink applies the retraction by its own primary key,
+        // so the old sink key is deleted even though the metadata carries the event value.
+        sEnv.getConfig().set("table.exec.sink.upsert-materialize", "NONE");
+        TableResult result =
+                sEnv.executeSql("INSERT INTO event_sink SELECT data, writetime FROM source_table");
+
+        sql("INSERT INTO source_table VALUES (1, 10, 50)");
+        sql("INSERT INTO source_table VALUES (1, 20, 100)");
+        sqlAssertWithRetry(
+                "SELECT * FROM event_sink", rows -> rows.containsExactly(Row.of(20, 100L)));
+
+        result.getJobClient().get().cancel().get();
+    }
+
+    @Test
+    public void testNonDeterministicUpdateCheckRejectsMaterializedPassThrough() {
+        createSourceAndSinkWithDifferentPrimaryKeys();
+
+        // An upsert materializer matches retractions against stored rows, which does not work for
+        // metadata carrying the event value. Flink's NDU check rejects that plan.
+        sEnv.getConfig().set("table.exec.sink.upsert-materialize", "AUTO");
+        sEnv.getConfig().set("table.optimizer.non-deterministic-update.strategy", "TRY_RESOLVE");
+        assertThatThrownBy(
+                        () ->
+                                sEnv.executeSql(
+                                        "INSERT INTO event_sink "
+                                                + "SELECT data, writetime FROM source_table"))
+                .hasStackTraceContaining("in cdc source");
+    }
+
+    private void createSourceAndSinkWithDifferentPrimaryKeys() {
+        sql(
+                "CREATE TABLE source_table ("
+                        + "id INT PRIMARY KEY NOT ENFORCED, "
+                        + "data INT, "
+                        + "event_ts BIGINT, "
+                        + "writetime BIGINT METADATA FROM '__internal__event_ts' VIRTUAL"
+                        + ") WITH ("
+                        + "'bucket'='1', "
+                        + "'changelog-producer'='lookup', "
+                        + "'sequence.field'='event_ts', "
+                        + "'changelog-producer.event-metadata-fields'='event_ts')");
+        sql(
+                "CREATE TABLE event_sink ("
+                        + "data INT PRIMARY KEY NOT ENFORCED, "
+                        + "writetime BIGINT"
+                        + ") WITH ('bucket'='1')");
     }
 }

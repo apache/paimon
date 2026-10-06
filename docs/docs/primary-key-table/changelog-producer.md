@@ -119,6 +119,16 @@ These fields are intended to be passed through to downstream sinks. Do not use t
 aggregations: those operations can remove or combine changelog records, including retractions, and
 leave downstream sinks with an incomplete changelog.
 
+Pass-through is only supported when no downstream operator matches a retraction against a previously
+emitted row, because a retraction carries the event value in metadata fields rather than the value
+that was emitted with the row. In Flink, this happens when the sink primary key differs from the
+source primary key: the planner inserts an upsert materializer (`table.exec.sink.upsert-materialize`
+is `AUTO` by default) that compares full rows, so it cannot match the retraction and the old sink
+row is never deleted. Either keep the sink primary key equal to the source primary key, or set
+`table.exec.sink.upsert-materialize` to `NONE` when the sink applies upserts and deletes by its own
+primary key. Setting `table.optimizer.non-deterministic-update.strategy` to `TRY_RESOLVE` makes
+Flink reject such plans instead of running them.
+
 Paimon readers such as Spark expose these generated fields as regular columns using the configured
 names. Flink SQL must declare the field as a metadata column on the Paimon source, for example
 `METADATA FROM '__internal__event_ts'` with the default prefix. The Flink column alias is not a
@@ -127,6 +137,10 @@ physical Paimon column and is not automatically visible to Spark.
 This option is supported only by the `lookup` changelog producer. Set
 `'changelog-producer.metadata-field-prefix'` if the default prefix conflicts with an existing column
 name. Changelog files written before this option was enabled expose these metadata fields as `NULL`.
+
+Columns listed in `'changelog-producer.event-metadata-fields'` cannot be renamed or dropped, because
+the metadata field names derived from them are referenced by downstream jobs. Remove a column from
+the option before renaming or dropping it.
 
 ```sql
 -- Source table with event metadata preservation
