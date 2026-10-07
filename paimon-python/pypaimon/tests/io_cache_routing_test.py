@@ -131,6 +131,9 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
         self.assert_endpoint(options, Op.READ, "dls://bkt/db1.db/t1/" + DATA_PATH, OSS)
         # the whitelist has no index
         self.assert_endpoint(options, Op.READ, INDEX_PATH, OSS)
+        # a Format Table file named like a manifest may be replaced in place
+        self.assert_endpoint(options, Op.READ, "review_external/manifest.parquet", OSS)
+        self.assert_endpoint(options, Op.META, "review_external/manifest.parquet", OSS)
         self.assert_endpoint(options, Op.WRITE, DATA_PATH, OSS)
         self.assert_endpoint(options, Op.TWO_PHASE_WRITE, DATA_PATH, OSS)
         for op in ORIGIN_OPS:
@@ -278,6 +281,20 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
                      "dt=1/bucket-0/data-1.parquet",
                      "dt=1/bucket-0/custom-{uuid}-0.orc",
                      "README"):
+            self.assert_type(path, None)
+        # Format Table files named like metadata or indexes, which may be replaced in place
+        for path in ("dt=1/manifest.parquet",
+                     "dt=1/stat-2024.parquet",
+                     "dt=1/index-a.csv",
+                     "dt=1/foo.index",
+                     "review_external/manifest.parquet",
+                     "manifest/manifest-old",
+                     "manifest/manifest-old.avro.sidecar",
+                     "manifest/manifest-list-{uuid}-1.avro.sidecar",
+                     "statistics/stat-old",
+                     "index/index-old",
+                     "index/my-global-index.index",
+                     "index/btree-global-index-{uuid}-0.index"):
             self.assert_type(path, None)
 
         self.assert_type("manifest/manifest-{uuid}-0", FileType.META)

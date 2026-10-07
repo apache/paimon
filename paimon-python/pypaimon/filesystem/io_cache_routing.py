@@ -34,9 +34,17 @@ IO_CACHE_ENABLED = CatalogOptions.IO_CACHE_ENABLED.key()
 IO_CACHE_TARGET_PREFIX = "io-cache.target."
 
 _TARGET_NAME = re.compile(r"[a-z][a-z0-9-]*")
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 # Data files are named {prefix}{uuid}-{count}.{extension}; this matches what follows the prefix.
-_DATA_FILE_SUFFIX = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9]+\..+")
+_DATA_FILE_SUFFIX = re.compile(_UUID + r"-[0-9]+\..+")
+# Other types are routed only under the names Paimon writes; Format Table files may be replaced in place.
+_PAIMON_FILE_NAMES = {
+    FileType.META: re.compile(
+        r"(manifest|manifest-list|index-manifest|stat)-" + _UUID + r"-[0-9]+|manifest-" + _UUID
+        + r"-[0-9]+\.avro\.sidecar"),
+    FileType.BUCKET_INDEX: re.compile(r"index-" + _UUID + r"-[0-9]+"),
+    FileType.GLOBAL_INDEX: re.compile(r"[a-z0-9_-]+-global-index-" + _UUID + r"\.index"),
+}
 _MANIFEST_SIDECAR_SUFFIX = ".avro.sidecar"
 # JindoSDK cache client keys; the origin option set must not talk to a cache.
 _ORIGIN_DROPPED_PREFIXES = ("fs.oss.dlf-cache.", "fs.jindocache.")
@@ -119,7 +127,9 @@ def routable_type(path: str, prefixes: Tuple[str, ...]) -> Optional[FileType]:
             name.startswith("changelog-") and parent == "changelog"):
         return None
     file_type = FileType.classify(path)
-    return None if file_type == FileType.DATA else file_type
+    # data files and their file indexes are recognized by _is_data_file_name
+    pattern = _PAIMON_FILE_NAMES.get(file_type)
+    return file_type if pattern is not None and pattern.fullmatch(name) else None
 
 
 def _is_data_file_name(name: str, prefixes: Tuple[str, ...]) -> bool:
