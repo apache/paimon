@@ -136,6 +136,31 @@ def _native_update_columns_supported(table, columns):
                    and field.name not in inline for field in table.fields)
 
 
+def _upsert_row_batches(rows, fields, schema):
+    """Encode consecutive row shapes without padding absent fields with NULL.
+
+    Keep source order, including duplicates across shapes. Key matching,
+    last-write-wins and matched/append column validation belong to Rust core.
+    """
+    batches = []
+    start = 0
+    while start < len(rows):
+        names = set(rows[start])
+        if not names <= set(schema.names):
+            raise ValueError('upsert row fields must be in the table schema')
+        end = start + 1
+        while end < len(rows) and set(rows[end]) == names:
+            end += 1
+        selected = [field for field in fields if field.name in names]
+        batch_schema = pa.schema([schema.field(field.name) for field in selected])
+        batches.append(pa.RecordBatch.from_pydict({
+            field.name: [value_for_arrow(row[field.name], field) for row in rows[start:end]]
+            for field in selected
+        }, schema=batch_schema))
+        start = end
+    return batches
+
+
 def create_native_upsert(table, commit_user, data, keys, columns):
     """Prepare one core upsert from Arrow columns or named row values."""
     if table.options.video_frame_fields() or not _native_update_columns_supported(table, columns):
@@ -150,20 +175,10 @@ def create_native_upsert(table, commit_user, data, keys, columns):
     if any(not _supported_upsert_key_type(schema.field(key).type) for key in set(keys + table.partition_keys)):
         return None
     if not isinstance(data, pa.Table):
-        # Keep absent fields absent. Heterogeneous row field sets still need
-        # the row-aware updater to distinguish absence from an explicit NULL.
         if not columns or not data:
             return None
-        names = set(data[0])
-        if not names <= set(schema.names) or any(set(values) != names for values in data):
-            return None
-        fields = [field for field in fields if field.name in names]
-        schema = pa.schema([schema.field(field.name) for field in fields])
-        data = pa.Table.from_pydict({
-            field.name: [value_for_arrow(values[field.name], field) for values in data]
-            for field in fields
-        }, schema=schema)
-    if (len(data.column_names) != len(set(data.column_names))
+        data = _upsert_row_batches(data, fields, schema)
+    elif (len(data.column_names) != len(set(data.column_names))
             or not set(data.column_names) <= set(schema.names)
             or any(data.schema.field(name).type != schema.field(name).type
                    for name in data.column_names)):
@@ -295,7 +310,7 @@ class NativeTableUpdateByRowId(TableUpdateByRowId):
 
 
 class NativeTableUpsert:
-    """Submit full Arrow rows to the core Rust upsert writer."""
+    """Submit Arrow tables or row-shape batches to the core Rust upsert writer."""
 
     def __init__(self, table, writer, keys, data):
         self.table = table
