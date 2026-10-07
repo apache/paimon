@@ -75,10 +75,7 @@ def _read(table, native=False, metadata=False):
                              'scan.native-plan.enabled': str(native).lower()})
     builder = read_table.new_read_builder()
     if metadata:
-        fields = ['id', 'v', 'w', 'p', '_ROW_ID']
-        if not native:
-            fields.append('_SEQUENCE_NUMBER')
-        builder.with_projection(fields)
+        builder.with_projection(['id', 'v', 'w', 'p', '_ROW_ID', '_SEQUENCE_NUMBER'])
     read = builder.new_read()
     with ExitStack() as stack:
         if native:

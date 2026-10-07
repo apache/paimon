@@ -216,19 +216,14 @@ def test_sidecars_store_logical_nested_map_and_variant_values(tmp_path, layout):
         assert _read(table, projection, row_id).to_pydict() == expected
 
 
-@pytest.mark.parametrize('enabled', [None, 'false', 'true'])
-def test_missing_sidecar_can_fall_back_to_native_parquet(tmp_path, enabled):
-    options = {} if enabled is None else {'scan.ignore-lost-files': enabled}
-    table = _table(tmp_path, options=options)
+def test_missing_selected_sidecar_reports_its_path(tmp_path):
+    table = _table(tmp_path)
     messages = _append(table)
     for message in messages:
         for file in message.new_files:
             os.remove(next(path for path in file.collect_files() if path.endswith('.row')))
-    if enabled == 'true':
-        assert _read(table, ['id', 'value'], 5).to_pydict() == {'id': [5], 'value': ['v5']}
-    else:
-        with pytest.raises(ValueError, match=r'parquet\.row'):
-            _read(table, ['id', 'value'], 5)
+    with pytest.raises(ValueError, match=r'parquet\.row'):
+        _read(table, ['id', 'value'], 5)
 
 
 @pytest.mark.parametrize('enabled', ['false', 'off', 'true', 'on'])

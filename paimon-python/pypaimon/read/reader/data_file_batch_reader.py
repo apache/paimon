@@ -469,8 +469,9 @@ class DataFileBatchReader(RecordBatchReader):
         # Handle _SEQUENCE_NUMBER field
         if SpecialFields.SEQUENCE_NUMBER.name in self.system_fields.keys():
             idx = self.system_fields[SpecialFields.SEQUENCE_NUMBER.name]
-            # Create a new array that fills with max_sequence_number
-            arrays[idx] = pa.repeat(self.max_sequence_number, record_batch.num_rows)
+            # Java's tracking vector retains physical versions and only fills
+            # NULL entries from the manifest's max sequence number.
+            arrays[idx] = pc.fill_null(arrays[idx], self.max_sequence_number)
 
         names = record_batch.schema.names
         table = None
