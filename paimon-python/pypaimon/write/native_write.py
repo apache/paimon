@@ -103,7 +103,9 @@ class NativeTableWrite:
         self._native_writer = native_writer
         self._python_writer = None
         self._written = False
-        self._schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+        self._table_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+        self._schema = self._table_schema
+        self._write_cols = None
 
     def _switch_to_python(self):
         if self._python_writer is not None:
@@ -119,13 +121,32 @@ class NativeTableWrite:
     def _new_python_writer(self):
         from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
         if self.stream:
-            return StreamTableWrite(self.table, self.commit_user)
-        return BatchTableWrite(self.table, self.commit_user, self.static_partition)
+            writer = StreamTableWrite(self.table, self.commit_user)
+        else:
+            writer = BatchTableWrite(self.table, self.commit_user, self.static_partition)
+        if self._write_cols is not None:
+            writer.with_write_type(self._write_cols)
+        return writer
 
     def __getattr__(self, name):
         if name.startswith('_'):
             raise AttributeError(name)
         return getattr(self._switch_to_python(), name)
+
+    def with_write_type(self, write_cols):
+        if self._python_writer is not None:
+            return self._python_writer.with_write_type(write_cols)
+        if self._written:
+            raise RuntimeError('with_write_type must be called before writing; after native data it cannot change')
+        if self.table.is_primary_key_table:
+            # Core's write type is an append-table operation. Keep the existing
+            # Python writer contract for PK setters before any data is staged.
+            return self._switch_to_python().with_write_type(write_cols)
+        names = list(write_cols)
+        self._native_writer.with_write_type(names)
+        self._schema = pa.schema([self._table_schema.field(name) for name in names])
+        self._write_cols = names
+        return self
 
     def write_arrow(self, data):
         if self._python_writer is not None:
@@ -138,13 +159,19 @@ class NativeTableWrite:
     def write_arrow_batch(self, data):
         if self._python_writer is not None:
             return self._python_writer.write_arrow_batch(data)
+        if self._write_cols is not None and arrow_schemas_compatible(
+                data.schema, self._table_schema, check_top_level_nullability=False,
+                allow_binary_compatibility=True):
+            # Python accepts either the table schema or the selected schema.
+            # Project the input before handing its actual write type to core.
+            data = data.select(self._write_cols)
         if not arrow_schemas_compatible(
                 data.schema, self._schema, check_top_level_nullability=False,
                 allow_binary_compatibility=True):
             raise ValueError(
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
-                "Write cols is: None")
+                f"Write cols is: {self._write_cols}")
         data = normalize_arrow_strings(data)
         if data.num_rows:
             # A failed native write may already have produced files. Never
@@ -155,18 +182,18 @@ class NativeTableWrite:
     def write_pandas(self, dataframe):
         if self._python_writer is not None:
             return self._python_writer.write_pandas(dataframe)
-        schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
-        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=schema))
+        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=self._schema))
 
     def write_row(self, row):
         if self._python_writer is not None:
             return self._python_writer.write_row(row)
-        if any(is_blob_file_field(field) for field in self.table.table_schema.fields):
+        if any(is_blob_file_field(field) and field.name in self._schema.names
+               for field in self.table.table_schema.fields):
             # Select the row-aware writer from the first row, including byte
             # values: later rows may provide custom Blob streams or URI readers.
             return self._switch_to_python().write_row(row)
         values = row_to_named_values(row, self.table.table_schema.fields)
-        names = list(self.table.field_names)
+        names = self._schema.names
         self.write_arrow_batch(row_values_to_arrow_table(
             values, self.table.table_schema.fields, names).to_batches()[0])
 

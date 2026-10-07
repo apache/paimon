@@ -175,9 +175,9 @@ class RowKeyExtractor(ABC):
         num_rows = data.num_rows
         columns = {}
         key_names = []
-        for k, pi in enumerate(self.partition_indices):
+        for k, column in enumerate(self._input_columns(data, self.partition_indices)):
             name = f"__p{k}"
-            columns[name] = data.column(pi)
+            columns[name] = column
             key_names.append(name)
         columns["__bucket"] = pa.array(buckets, type=pa.int32())
         key_names.append("__bucket")
@@ -248,7 +248,7 @@ class RowKeyExtractor(ABC):
         if not self.partition_indices:
             return [() for _ in range(data.num_rows)]
 
-        partition_columns = [data.column(i) for i in self.partition_indices]
+        partition_columns = self._input_columns(data, self.partition_indices)
 
         partitions = []
         for row_idx in range(data.num_rows):
@@ -256,6 +256,17 @@ class RowKeyExtractor(ABC):
             partitions.append(partition_values)
 
         return partitions
+
+    def _input_columns(self, data: pa.RecordBatch, field_indices: List[int]):
+        """Resolve routing fields in the actual write type, as Java's converter does."""
+        columns = []
+        for field_index in field_indices:
+            name = self.table_schema.fields[field_index].name
+            index = data.schema.get_field_index(name)
+            if index < 0:
+                raise ValueError(f"Input must contain exactly one routing column '{name}'.")
+            columns.append(data.column(index))
+        return columns
 
     @staticmethod
     def _binary_row_hash_code(values: Tuple, fields: List) -> int:
@@ -292,7 +303,7 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
         self._bucket_key_fields = table_schema.logical_bucket_key_fields
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
-        columns = [data.column(i) for i in self.bucket_key_indices]
+        columns = self._input_columns(data, self.bucket_key_indices)
         return [
             _bucket_from_hash(
                 self._binary_row_hash_code(
@@ -519,7 +530,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
         return partitions, partition_hashes, key_hashes
 
     def _extract_key_hashes_batch(self, data: pa.RecordBatch) -> List[int]:
-        key_columns = [data.column(i) for i in self.bucket_key_indices]
+        key_columns = self._input_columns(data, self.bucket_key_indices)
         return [
             self._binary_row_hash_code(
                 tuple(column[row_idx].as_py() for column in key_columns),
@@ -765,7 +776,7 @@ class PostponeFixedBucketRowKeyExtractor(RowKeyExtractor):
         self, data: pa.RecordBatch
     ) -> Tuple[List[Tuple], List[int]]:
         partitions = self._extract_partitions_batch(data)
-        columns = [data.column(i) for i in self.bucket_key_indices]
+        columns = self._input_columns(data, self.bucket_key_indices)
         buckets = [
             _bucket_from_hash(
                 self._binary_row_hash_code(
