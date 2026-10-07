@@ -492,6 +492,8 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 snapshot = table.snapshot_manager().get_snapshot_by_id(
                     base_snapshot_id
                 )
+                if snapshot is None:
+                    raise ValueError("Snapshot id '{}' doesn't exist".format(base_snapshot_id))
             self.base_snapshot_id = snapshot.id if snapshot is not None else 0
             self._assigner = HashBucketAssigner(
                 table=table,
@@ -662,58 +664,25 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
     def notify_precomputed_bucket_batch(
         self, data: pa.RecordBatch, bucket: int
     ) -> Optional[Tuple]:
-        """Maintain HASH indexes for rows assigned by an upstream coordinator."""
-        partitions, _, key_hashes = self.extract_hashes_batch(data)
-        return self.notify_precomputed_bucket_hashes_batch(
-            data, bucket, key_hashes, partitions=partitions
-        )
-
-    def notify_precomputed_bucket_hashes_batch(
-        self,
-        data: pa.RecordBatch,
-        bucket: int,
-        key_hashes: List[int],
-        partitions: Optional[List[Tuple]] = None,
-        new_mappings: Optional[List[bool]] = None,
-    ) -> Optional[Tuple]:
-        """Maintain HASH indexes using hashes carried through the shuffle."""
+        """Maintain HASH indexes for every row in an upstream bucket."""
         from pypaimon.index.dynamic_bucket import to_signed_int32
 
         if self._index_maintainer is None:
-            raise RuntimeError(
-                "Precomputed dynamic buckets require a persistent table extractor"
-            )
-        if len(key_hashes) != data.num_rows:
-            raise ValueError(
-                "Precomputed key hash count {} does not match row count {}".format(
-                    len(key_hashes), data.num_rows
-                )
-            )
-        if partitions is None:
-            partitions = self._extract_partitions_batch(data)
-        if new_mappings is not None and len(new_mappings) != data.num_rows:
-            raise ValueError(
-                "Precomputed new-mapping count {} does not match row count {}".format(
-                    len(new_mappings), data.num_rows
-                )
-            )
+            raise RuntimeError('Precomputed dynamic buckets require a persistent table extractor')
+        partitions, _, key_hashes = self.extract_hashes_batch(data)
         if not partitions:
             return None
         partition = tuple(partitions[0])
-        if new_mappings is None:
-            new_mappings = [True] * data.num_rows
-        for actual_partition, key_hash, is_new in zip(
-            partitions, key_hashes, new_mappings
-        ):
-            if tuple(actual_partition) != tuple(partition):
-                raise RuntimeError(
-                    "A precomputed dynamic-bucket group contained multiple "
-                    f"partitions: expected {partition}, got {actual_partition}"
-                )
-            if is_new:
-                self._index_maintainer.notify_new_record(
-                    partition, bucket, to_signed_int32(key_hash)
-                )
+        if any(tuple(actual_partition) != partition for actual_partition in partitions):
+            raise RuntimeError(
+                "A precomputed dynamic-bucket group contained multiple "
+                f"partitions: expected {partition}, got {partitions}"
+            )
+        # Java's maintainer observes every written key after RowKind filtering.
+        for key_hash in key_hashes:
+            self._index_maintainer.notify_new_record(
+                partition, bucket, to_signed_int32(key_hash)
+            )
         return partition
 
     def release_prepared(self) -> None:

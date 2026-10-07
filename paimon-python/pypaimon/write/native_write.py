@@ -48,7 +48,7 @@ def _native_partition_types_supported(schema, partition_keys):
 
 
 def create_native_write(table, commit_user, static_partition=None, stream=False,
-                        *, fixed_bucket=False, bucket_plan=None):
+                        *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     if (not native_write_available()
@@ -83,8 +83,10 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
         builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
         if static_partition is not None:
             builder = builder.with_overwrite(static_partition)
+    if restore_snapshot_id is not None:
+        builder.with_restore_snapshot(restore_snapshot_id)
     return NativeTableWrite(table, commit_user, static_partition, stream,
-                            builder.new_write())
+                            builder.new_write(), restore_snapshot_id)
 
 
 class NativeTableWrite:
@@ -95,7 +97,8 @@ class NativeTableWrite:
     logical write across two writers, so it is rejected.
     """
 
-    def __init__(self, table, commit_user, static_partition, stream, native_writer):
+    def __init__(self, table, commit_user, static_partition, stream, native_writer,
+                 restore_snapshot_id=None):
         self.table = table
         self.commit_user = commit_user
         self.static_partition = static_partition
@@ -106,6 +109,7 @@ class NativeTableWrite:
         self._table_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
         self._schema = self._table_schema
         self._write_cols = None
+        self._restore_snapshot_id = restore_snapshot_id
 
     def _switch_to_python(self):
         if self._python_writer is not None:
@@ -121,9 +125,11 @@ class NativeTableWrite:
     def _new_python_writer(self):
         from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
         if self.stream:
-            writer = StreamTableWrite(self.table, self.commit_user)
+            writer = StreamTableWrite(self.table, self.commit_user,
+                                      restore_snapshot_id=self._restore_snapshot_id)
         else:
-            writer = BatchTableWrite(self.table, self.commit_user, self.static_partition)
+            writer = BatchTableWrite(self.table, self.commit_user, self.static_partition,
+                                     restore_snapshot_id=self._restore_snapshot_id)
         if self._write_cols is not None:
             writer.with_write_type(self._write_cols)
         return writer
@@ -148,17 +154,26 @@ class NativeTableWrite:
         self._write_cols = names
         return self
 
-    def write_arrow(self, data):
+    def write_arrow(self, data, bucket=None):
         if self._python_writer is not None:
-            return self._python_writer.write_arrow(data)
+            return self._python_writer.write_arrow(data, bucket)
+        data = self._prepare_native_arrow_data(data)
         if isinstance(data, pa.RecordBatch):
-            return self.write_arrow_batch(data)
+            return self.write_arrow_batch(data, bucket)
         for batch in data.to_batches():
-            self.write_arrow_batch(batch)
+            self.write_arrow_batch(batch, bucket)
 
-    def write_arrow_batch(self, data):
+    def write_arrow_batch(self, data, bucket=None):
         if self._python_writer is not None:
-            return self._python_writer.write_arrow_batch(data)
+            return self._python_writer.write_arrow_batch(data, bucket)
+        data = self._prepare_native_arrow_data(data)
+        if data.num_rows:
+            # A failed native write may already have produced files. Never
+            # retry that batch through Python after this point.
+            self._written = True
+        self._native_writer.write_arrow(data, bucket)
+
+    def _prepare_native_arrow_data(self, data):
         if self._write_cols is not None and arrow_schemas_compatible(
                 data.schema, self._table_schema, check_top_level_nullability=False,
                 allow_binary_compatibility=True):
@@ -172,12 +187,7 @@ class NativeTableWrite:
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
                 f"Write cols is: {self._write_cols}")
-        data = normalize_arrow_strings(data)
-        if data.num_rows:
-            # A failed native write may already have produced files. Never
-            # retry that batch through Python after this point.
-            self._written = True
-        self._native_writer.write_arrow(data)
+        return normalize_arrow_strings(data)
 
     def write_pandas(self, dataframe):
         if self._python_writer is not None:

@@ -341,8 +341,15 @@ class DataWriter(ABC):
 
             # Read the range without advancing it: the advance belongs with the
             # append below, so a retried flush derives the same range.
-            min_seq = self.sequence_generator.start
-            max_seq = self.sequence_generator.current
+            if self.table.is_primary_key_table and '_SEQUENCE_NUMBER' in data.schema.names:
+                # PK files can contain a deduplicated or split subset of the
+                # buffer. Java records the range of the rows actually written.
+                sequences = data.column('_SEQUENCE_NUMBER')
+                min_seq = pc.min(sequences).as_py()
+                max_seq = pc.max(sequences).as_py()
+            else:
+                min_seq = self.sequence_generator.start
+                max_seq = self.sequence_generator.current
             creation_time = Timestamp.now()
             data_meta = self._create_data_file_meta(
                 file_name=file_name,
