@@ -162,6 +162,21 @@ public class JindoIoCacheRoutingTest {
     }
 
     @Test
+    public void testExistsUsesOssWithoutTheExistsToken() throws IOException {
+        Options options = cacheTargetOptions();
+        options.set("io-cache.policy", "meta,read");
+        JindoFileIO fileIO = configuredFileIO(options);
+
+        fileIO.exists(DATA);
+        fileIO.exists(MANIFEST);
+        fileIO.getFileStatus(DATA);
+        verify(ossFs, times(2)).exists(any());
+        verify(clusterFs).getFileStatus(any());
+        verify(clusterFs, never()).exists(any());
+        verify(accelFs, never()).exists(any());
+    }
+
+    @Test
     public void testCacheTargetErrorsAreThrown() throws IOException {
         JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
         IOException unavailable = jindoError(6503, "open failed: 503 Service Unavailable");
@@ -379,6 +394,7 @@ public class JindoIoCacheRoutingTest {
         options.set("io-cache.target.cluster.endpoint", "http://" + CLUSTER_HOST);
         options.set("io-cache.target.cluster.path-style-access", "true");
         options.set("io-cache.routes", "meta=accel;data,bucket-index=cluster");
+        options.set("io-cache.policy", "meta,read,exists");
         return options;
     }
 

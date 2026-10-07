@@ -225,6 +225,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             shouldCache = writeCacheEnabled && shouldCache(path);
         } else if (opType.equalsIgnoreCase("meta")) {
             shouldCache = metaCacheEnabled && shouldCache(path);
+        } else if (opType.equalsIgnoreCase("exists")) {
+            shouldCache = existsCacheEnabled && shouldCache(path);
         }
         if (!shouldCache) {
             return hadoopOptions;

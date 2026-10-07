@@ -72,6 +72,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     protected boolean metaCacheEnabled = false;
     protected boolean readCacheEnabled = false;
     protected boolean writeCacheEnabled = false;
+    protected boolean existsCacheEnabled = false;
 
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> fsMap;
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> jindoCacheFsMap;
@@ -120,11 +121,13 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             metaCacheEnabled = cacheRouting.metaCacheEnabled();
             readCacheEnabled = cacheRouting.readCacheEnabled();
             writeCacheEnabled = cacheRouting.writeCacheEnabled();
+            existsCacheEnabled = cacheRouting.existsCacheEnabled();
             LOG.info(
-                    "Cache endpoints enabled: meta {}, read {}, write {}, {}",
+                    "Cache endpoints enabled: meta {}, read {}, write {}, exists {}, {}",
                     metaCacheEnabled,
                     readCacheEnabled,
                     writeCacheEnabled,
+                    existsCacheEnabled,
                     cacheRouting);
         } else {
             // Keep legacy JindoCache policy matching unchanged; endpoint routing uses exact tokens.
@@ -134,6 +137,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             metaCacheEnabled = options.get(IO_CACHE_POLICY).contains(META_CACHE_ENABLED_TAG);
             readCacheEnabled = options.get(IO_CACHE_POLICY).contains(READ_CACHE_ENABLED_TAG);
             writeCacheEnabled = options.get(IO_CACHE_POLICY).contains(WRITE_CACHE_ENABLED_TAG);
+            existsCacheEnabled = metaCacheEnabled;
             String whitelist = options.get(IO_CACHE_WHITELIST_PATH);
             if (!whitelist.equals("*")) {
                 cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
@@ -217,7 +221,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public boolean exists(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        boolean shouldCache = metaCacheEnabled && shouldCache(path);
+        boolean shouldCache = existsCacheEnabled && shouldCache(path);
         LOG.debug("Exists should cache {} for path {}", shouldCache, path);
         return getFileSystem(hadoopPath, shouldCache).exists(hadoopPath);
     }
