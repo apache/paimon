@@ -122,6 +122,7 @@ def _supported_upsert_key_type(data_type):
         pa.types.is_large_string, pa.types.is_binary, pa.types.is_large_binary,
         pa.types.is_fixed_size_binary, pa.types.is_date, pa.types.is_decimal,
         pa.types.is_time, pa.types.is_timestamp,
+        pa.types.is_floating,
     ))
 
 
@@ -136,7 +137,7 @@ def _native_update_columns_supported(table, columns):
 
 
 def create_native_upsert(table, commit_user, data, keys, columns):
-    """Prepare one core upsert from full Arrow rows or named row values."""
+    """Prepare one core upsert from Arrow columns or named row values."""
     if table.options.video_frame_fields() or not _native_update_columns_supported(table, columns):
         # An upsert can append unmatched rows; packed video writing is still
         # provided by the Python writer.
@@ -149,18 +150,23 @@ def create_native_upsert(table, commit_user, data, keys, columns):
     if any(not _supported_upsert_key_type(schema.field(key).type) for key in set(keys + table.partition_keys)):
         return None
     if not isinstance(data, pa.Table):
-        # Missing fields retain their row-object semantics on the fallback
-        # path; converting them to Arrow NULLs would change update behavior.
-        if not columns or any(set(values) != set(schema.names) for values in data):
+        # Keep absent fields absent. Heterogeneous row field sets still need
+        # the row-aware updater to distinguish absence from an explicit NULL.
+        if not columns or not data:
             return None
+        names = set(data[0])
+        if not names <= set(schema.names) or any(set(values) != names for values in data):
+            return None
+        fields = [field for field in fields if field.name in names]
+        schema = pa.schema([schema.field(field.name) for field in fields])
         data = pa.Table.from_pydict({
             field.name: [value_for_arrow(values[field.name], field) for values in data]
             for field in fields
         }, schema=schema)
-    if (len(data.column_names) != len(schema.names)
-            or set(data.column_names) != set(schema.names)
+    if (len(data.column_names) != len(set(data.column_names))
+            or not set(data.column_names) <= set(schema.names)
             or any(data.schema.field(name).type != schema.field(name).type
-                   for name in schema.names)):
+                   for name in data.column_names)):
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)

@@ -741,7 +741,7 @@ def test_native_row_upsert_uses_public_operation_with_composite_null_keys(tmp_pa
 
 
 @pytest.mark.parametrize('case', ['partial', 'float-key', 'empty-columns'])
-def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
+def test_row_upsert_input_capabilities(tmp_path, case):
     from pypaimon.table.row.generic_row import GenericRow
     from pypaimon.write.native_update import NativeTableUpsert
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
@@ -782,8 +782,9 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
             'id': [1, 2], 'age': [10, 20], 'region': ['east', 'west'],
         }
         return
-    with patch.object(NativeTableUpsert, 'upsert',
-                      side_effect=AssertionError('Unsupported native upsert selected')):
+    from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+                      side_effect=AssertionError('Python upsert fallback')):
         messages = builder.new_update().with_update_type(['age']).upsert_by_key(rows, ['id'])
     builder.new_commit().commit(messages)
     read = table.new_read_builder()
