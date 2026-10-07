@@ -312,6 +312,63 @@ def test_hash_dynamic_pk_restores_bucket_mapping_across_commits(catalog):
     )
 
 
+@pytest.mark.native_plan
+@pytest.mark.parametrize('bucket', ['4', '-1'])
+@pytest.mark.parametrize('partitioned', [False, True])
+@pytest.mark.parametrize('overwrite', [False, True])
+def test_grouped_pk_writes_use_native_without_python_fallback(
+        catalog, monkeypatch, bucket, partitioned, overwrite):
+    from pypaimon.write.native_write import NativeTableWrite
+
+    def reject_fallback(self):
+        raise AssertionError('Grouped Daft write fell back to Python')
+
+    monkeypatch.setattr(NativeTableWrite, '_switch_to_python', reject_fallback)
+    table = _create_pk_table(catalog, 'native_grouped', partitioned=partitioned, options={
+        'bucket': bucket, 'dynamic-bucket.target-row-num': '1',
+        'write.native.enabled': 'true', 'read.native.enabled': 'true',
+    })
+    initial = {'id': [1, 2], 'value': ['old', 'keep']}
+    updated = {'id': [1, 3], 'value': ['new', 'added']}
+    if partitioned:
+        initial['dt'] = ['a', 'b']
+        updated['dt'] = ['a', 'c']
+    _write_table(daft.from_pydict(initial).into_partitions(2), table).to_pydict()
+    _write_table(daft.from_pydict(updated).into_partitions(2), table,
+                 mode='overwrite' if overwrite else 'append').to_pydict()
+    # Partitioned tables overwrite only the incoming partitions by default.
+    expected = updated if overwrite and not partitioned else {
+        'id': [1, 2, 3], 'value': ['new', 'keep', 'added']}
+    if partitioned:
+        expected['dt'] = ['a', 'b', 'c']
+    assert _read_table(table).sort('id').to_pydict() == expected
+    if bucket == '-1':
+        indexes = [entry for entry in IndexFileHandler(table).scan(
+            table.snapshot_manager().get_latest_snapshot())
+            if entry.index_file.index_type == 'HASH']
+        assert sum(entry.index_file.row_count for entry in indexes) == len(expected['id'])
+        assert len({(tuple(entry.partition.values), entry.bucket) for entry in indexes}) == len(indexes)
+
+
+@pytest.mark.parametrize('native', [False, pytest.param(True, marks=pytest.mark.native_plan)])
+@pytest.mark.parametrize('ignore_option,kind', [
+    ('ignore-delete', '-D'), ('ignore-update-before', '-U')])
+def test_grouped_dynamic_row_kind_filter_keeps_surviving_key_indexed(catalog, native, ignore_option, kind):
+    options = {'bucket': '-1', 'file.format': 'parquet', 'rowkind.field': 'op',
+               ignore_option: 'true', 'write.native.enabled': str(native).lower()}
+    catalog.create_table('test_db.filtered_group', pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('value', pa.string()), ('op', pa.string())]),
+        primary_keys=['id'], options=options), False)
+    table = catalog.get_table('test_db.filtered_group')
+    _write_table(daft.from_pydict({'id': [1, 1], 'value': ['ignored', 'retained'],
+                                  'op': [kind, '+I']}), table).to_pydict()
+    assert _read_table(table).to_pydict() == {'id': [1], 'value': ['retained'], 'op': ['+I']}
+    indexes = [entry for entry in IndexFileHandler(table).scan(
+        table.snapshot_manager().get_latest_snapshot()) if entry.index_file.index_type == 'HASH']
+    assert len(indexes) == 1
+    assert indexes[0].index_file.row_count == 1
+
+
 def test_hash_dynamic_pins_one_driver_snapshot_for_all_group_udfs(
     catalog, monkeypatch
 ):

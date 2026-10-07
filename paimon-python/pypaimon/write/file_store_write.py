@@ -57,6 +57,7 @@ class FileStoreWrite:
         self.data_writers: Dict[Tuple, DataWriter] = {}
         self._runtime_total_buckets: Dict[Tuple, int] = {}
         self.max_seq_numbers: dict = {}
+        self.restore_snapshot_id = None
         self.write_cols = None
         self.blob_consumer = None
         self.blob_uri_reader_factory = None
@@ -173,7 +174,8 @@ class FileStoreWrite:
                     "unset it or write with Java/Flink/Spark.")
 
         def max_seq_number():
-            return self._seq_number_stats(partition).get(bucket, 1)
+            default = -1 if self.table.is_primary_key_table else 1
+            return self._seq_number_stats(partition).get(bucket, default)
 
         # Dedicated Blob files are an append-table layout. PK tables require
         # managed packs and references attached to their key-value Parquet files.
@@ -375,6 +377,15 @@ class FileStoreWrite:
         return buckets
 
     def _sequence_read_table(self):
+        if self.restore_snapshot_id is not None:
+            snapshot = None
+            if self.restore_snapshot_id != 0:
+                snapshot = self.table.snapshot_manager().get_snapshot_by_id(self.restore_snapshot_id)
+                if snapshot is None:
+                    raise ValueError("Snapshot id '{}' doesn't exist".format(self.restore_snapshot_id))
+            # Replace inherited selectors and mode, including an explicit empty
+            # view. plan_for_write still validates row filters and column masks.
+            return self.table._copy_with_snapshot(snapshot)
         return self.table
 
     def _load_seq_number_stats(self, partition: Tuple) -> dict:

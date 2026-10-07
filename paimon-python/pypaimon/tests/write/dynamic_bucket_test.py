@@ -69,13 +69,17 @@ class DynamicBucketTest(unittest.TestCase):
         return catalog.get_table(f'default.{name}')
 
     @staticmethod
-    def _prepare_indexed_write(table, ids):
+    def _prepare_indexed_write(table, ids, bucket=None):
         builder = table.new_batch_write_builder()
-        writer = builder.new_write().with_dynamic_bucket_index()
-        writer.write_arrow_batch(pa.RecordBatch.from_pydict({
+        writer = builder.new_write()
+        batch = pa.RecordBatch.from_pydict({
             'id': ids,
             'value': [f'v-{value}' for value in ids],
-        }))
+        })
+        if bucket is None:
+            writer.write_arrow_batch(batch)
+        else:
+            writer.write_arrow(batch, bucket=bucket)
         return writer, builder.new_commit(), writer.prepare_commit()
 
     @staticmethod
@@ -538,8 +542,7 @@ class DynamicBucketTest(unittest.TestCase):
             table = self._create_table(root, 'implicit_hash_replace')
             self._commit_arrow(table, [1], ['one'])
             writer, commit, messages = self._prepare_indexed_write(table, [2])
-            self.assertEqual(1, len(messages[0].index_deletes))
-            messages[0].index_deletes.clear()
+            self.assertEqual([], messages[0].index_deletes)
             commit.commit(messages)
             indexes = self._hash_indexes(table)
             self.assertEqual(1, len(indexes))
@@ -547,7 +550,7 @@ class DynamicBucketTest(unittest.TestCase):
             writer.close()
             commit.close()
 
-    def test_concurrent_hash_index_replacement_conflicts(self):
+    def test_sequential_hash_index_replacements_keep_one_complete_index(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'concurrent_replace')
             seed_writer, seed_commit, seed_messages = (
@@ -560,24 +563,17 @@ class DynamicBucketTest(unittest.TestCase):
             writer1, commit1, messages1 = self._prepare_indexed_write(
                 table, [2]
             )
+            commit1.commit(messages1)
             writer2, commit2, messages2 = self._prepare_indexed_write(
                 table, [3]
             )
-            old_index = messages1[0].index_deletes[0].index_file.file_name
-            self.assertEqual(
-                old_index,
-                messages2[0].index_deletes[0].index_file.file_name,
-            )
-
-            commit1.commit(messages1)
-            with self.assertRaisesRegex(
-                RuntimeError, 'HASH index conflict detected'
-            ):
-                commit2.commit(messages2)
+            self.assertEqual([], messages1[0].index_deletes)
+            self.assertEqual([], messages2[0].index_deletes)
+            commit2.commit(messages2)
 
             indexes = self._hash_indexes(table)
             self.assertEqual(1, len(indexes))
-            self.assertEqual(2, indexes[0].index_file.row_count)
+            self.assertEqual(3, indexes[0].index_file.row_count)
             writer1.close()
             writer2.close()
             commit1.close()
@@ -598,20 +594,12 @@ class DynamicBucketTest(unittest.TestCase):
             seed_writer.close()
             seed_commit.close()
 
-            with patch(
-                'pypaimon.index.dynamic_bucket.random.choice',
-                return_value=0,
-            ):
-                writer1, commit1, messages1 = self._prepare_indexed_write(
-                    table, [3]
-                )
-            with patch(
-                'pypaimon.index.dynamic_bucket.random.choice',
-                return_value=1,
-            ):
-                writer2, commit2, messages2 = self._prepare_indexed_write(
-                    table, [4]
-                )
+            writer1, commit1, messages1 = self._prepare_indexed_write(
+                table, [3], bucket=0
+            )
+            writer2, commit2, messages2 = self._prepare_indexed_write(
+                table, [4], bucket=1
+            )
 
             self.assertNotEqual(messages1[0].bucket, messages2[0].bucket)
             commit1.commit(messages1)
@@ -662,11 +650,13 @@ class DynamicBucketTest(unittest.TestCase):
             stale_writer.close()
             stale_commit.close()
 
-    def test_retry_then_hash_index_conflict_preserves_prepared_files(self):
+    def test_retry_after_disjoint_hash_index_commit_preserves_prepared_files(self):
         with tempfile.TemporaryDirectory() as root:
-            table = self._create_table(root, 'retry_hash_conflict')
+            table = self._create_table(root, 'retry_hash_commit', target_row_num=1)
             self._commit_arrow(table, [0], ['seed'])
-            writer, commit, messages = self._prepare_indexed_write(table, [1])
+            # The pending upsert owns bucket 0. A new key is assigned bucket 1,
+            # so the competing commit obeys Java's single owner per bucket.
+            writer, commit, messages = self._prepare_indexed_write(table, [0])
             prepared_paths = [
                 file.file_path
                 for message in messages
@@ -680,19 +670,22 @@ class DynamicBucketTest(unittest.TestCase):
                 for entry in message.index_adds
             ]
             original_snapshot_commit = commit.file_store_commit.snapshot_commit
+            snapshot_commit = original_snapshot_commit.commit
             calls = 0
 
             def lose_first_compare_and_set(
                     base_snapshot_uuid, snapshot, statistics):
                 nonlocal calls
                 calls += 1
-                concurrent_writer, concurrent_commit, concurrent_messages = (
-                    self._prepare_indexed_write(table, [2])
-                )
-                concurrent_commit.commit(concurrent_messages)
-                concurrent_writer.close()
-                concurrent_commit.close()
-                return False
+                if calls == 1:
+                    concurrent_writer, concurrent_commit, concurrent_messages = (
+                        self._prepare_indexed_write(table, [2])
+                    )
+                    concurrent_commit.commit(concurrent_messages)
+                    concurrent_writer.close()
+                    concurrent_commit.close()
+                    return False
+                return snapshot_commit(base_snapshot_uuid, snapshot, statistics)
 
             with patch.object(
                 original_snapshot_commit,
@@ -702,15 +695,14 @@ class DynamicBucketTest(unittest.TestCase):
                 commit.file_store_commit,
                 '_commit_retry_wait',
             ):
-                with self.assertRaisesRegex(
-                    RuntimeError, 'HASH index conflict detected'
-                ):
-                    commit.commit(messages)
+                commit.commit(messages)
 
-            self.assertEqual(1, calls)
+            self.assertEqual(2, calls)
             self.assertTrue(all(
                 table.file_io.exists(path) for path in prepared_paths
             ))
+            self.assertEqual({'id': [0, 2], 'value': ['v-0', 'v-2']},
+                             self._read_arrow(table).sort_by('id').to_pydict())
             writer.close()
             commit.close()
 

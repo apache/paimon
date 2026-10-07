@@ -324,22 +324,12 @@ def _write_table(
             ],
             "__paimon_key_hash__",
         )
-        new_mapping_column = _pick_internal_column(
-            df.column_names + [
-                commit_column,
-                assigner_column,
-                bucket_column,
-                key_hash_column,
-            ],
-            "__paimon_new_mapping__",
-        )
         base_snapshot_column = _pick_internal_column(
             df.column_names + [
                 commit_column,
                 assigner_column,
                 bucket_column,
                 key_hash_column,
-                new_mapping_column,
             ],
             "__paimon_base_snapshot__",
         )
@@ -360,7 +350,6 @@ def _write_table(
             num_assigners,
             bucket_column,
             key_hash_column,
-            new_mapping_column,
             base_snapshot_column,
             ignore_existing=mode == "overwrite",
             base_snapshot_id=base_snapshot_id,
@@ -388,8 +377,6 @@ def _write_table(
             group_write(
                 *data_columns,
                 daft.col(bucket_column),
-                daft.col(key_hash_column),
-                daft.col(new_mapping_column),
                 daft.col(base_snapshot_column),
             ).alias(commit_column)
         )

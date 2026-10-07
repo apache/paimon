@@ -520,7 +520,12 @@ class FileStoreTable(Table):
     def _copy_with_snapshot(self, snapshot):
         """Keep one resolved read view, including tag metadata and empty tables."""
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-        options = {key: None for key in SCAN_KEYS if key in self.table_schema.options}
+        selectors = SCAN_KEYS + [
+            CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
+            CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
+            CoreOptions.SCAN_CREATION_TIME_MILLIS.key(),
+        ]
+        options = {key: None for key in selectors if key in self.table_schema.options}
         options[CoreOptions.SCAN_MODE.key()] = "from-snapshot" if snapshot is not None else "default"
         if snapshot is not None:
             options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot.id)
