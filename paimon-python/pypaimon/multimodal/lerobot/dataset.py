@@ -681,7 +681,7 @@ class PaimonLeRobotDataset:
                 "PaimonLeRobotDataset.to_dataloader manages collate_fn.")
         from torch.utils.data import DataLoader
         num_workers = kwargs.get("num_workers", 0)
-        batched = _PaimonLeRobotBatchDataset(
+        batched = _LeRobotDataLoaderAdapter(
             self, share_memory=bool(num_workers))
         return DataLoader(batched, collate_fn=_identity, **kwargs)
 
@@ -725,7 +725,7 @@ class PaimonLeRobotDataset:
             self.reader.__class__.__name__, self.__class__.__name__, 1)
 
 
-class _PaimonLeRobotBatchDataset:
+class _LeRobotDataLoaderAdapter:
 
     def __init__(self, dataset, share_memory):
         self.dataset = dataset
