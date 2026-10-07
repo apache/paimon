@@ -1334,18 +1334,40 @@ class NativePlanTest(unittest.TestCase):
         native.assert_not_called()
         fs.scan.assert_not_called()
 
-    def test_primary_key_shard_defers_limit_until_after_bucket_selection(self):
+    def test_primary_key_shard_and_limit_are_planned_in_rust(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.is_primary_key_table = True
+        scan.table.options.global_index_enabled.return_value = False
         scan.limit = 1
         fs.idx_of_this_subtask, fs.number_of_para_subtasks = 1, 2
-        splits = [Mock(bucket=0), Mock(bucket=1)]
+        # A file-name shard may own files from any bucket; never filter the
+        # already-selected Rust splits again using a Python bucket rule.
+        splits = [Mock(bucket=0)]
+        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits, 3)) as native:
+            self.assertEqual(scan.plan().splits(), splits)
+        self.assertEqual(native.call_args[1]['shard'], (1, 2))
+        self.assertEqual(native.call_args[1]['limit'], 1)
+        fs._apply_push_down_limit.assert_not_called()
+        fs.scan.assert_not_called()
+
+    def test_primary_key_shard_defers_limit_until_python_index_refinement(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(True, fs)
+        scan.table.is_primary_key_table = True
+        scan.table.options.global_index_enabled.return_value = True
+        scan.limit = 1
+        fs.idx_of_this_subtask, fs.number_of_para_subtasks = 1, 2
+        scan.predicate = Mock()
+        splits = [Mock(bucket=0), Mock(bucket=0)]
+        fs._apply_primary_key_sorted_indexes.return_value = splits[1:]
         fs._apply_push_down_limit.side_effect = lambda selected: selected
         with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits, 3)) as native:
-            self.assertEqual(scan.plan().splits(), [splits[1]])
+            self.assertEqual(scan.plan().splits(), splits[1:])
+        self.assertEqual(native.call_args[1]['shard'], (1, 2))
         self.assertIsNone(native.call_args[1]['limit'])
-        fs._apply_push_down_limit.assert_called_once_with([splits[1]])
+        fs._apply_primary_key_sorted_indexes.assert_called_once()
+        fs._apply_push_down_limit.assert_called_once_with(splits[1:])
         fs.scan.assert_not_called()
 
     def test_native_plan_requires_split_api(self):
