@@ -6302,11 +6302,9 @@ class BlobConsumerTest(unittest.TestCase):
 
         self.assertGreater(len(received), 0)
 
-        # Capture data writers before close() clears them, then abort each one.
-        data_writers = list(writer.file_store_write.data_writers.values())
-        self.assertGreater(len(data_writers), 0)
-        for dw in data_writers:
-            dw.abort()
+        # Public abort covers both Python and Native writers. Consumer-held
+        # descriptors keep their Blob files regardless of the writer backend.
+        writer.abort()
 
         # Every descriptor returned to the consumer must still be readable.
         uri_reader = FileUriReader(table.file_io)

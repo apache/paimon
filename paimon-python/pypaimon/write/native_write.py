@@ -109,6 +109,7 @@ class NativeTableWrite:
         self._table_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
         self._schema = self._table_schema
         self._write_cols = None
+        self._blob_consumer = None
         self._restore_snapshot_id = restore_snapshot_id
 
     def _switch_to_python(self):
@@ -132,6 +133,8 @@ class NativeTableWrite:
                                      restore_snapshot_id=self._restore_snapshot_id)
         if self._write_cols is not None:
             writer.with_write_type(self._write_cols)
+        if self._blob_consumer is not None:
+            writer.with_blob_consumer(self._blob_consumer)
         return writer
 
     def __getattr__(self, name):
@@ -152,6 +155,27 @@ class NativeTableWrite:
         self._native_writer.with_write_type(names)
         self._schema = pa.schema([self._table_schema.field(name) for name in names])
         self._write_cols = names
+        return self
+
+    def with_blob_consumer(self, blob_consumer):
+        if self._python_writer is not None:
+            return self._python_writer.with_blob_consumer(blob_consumer)
+        if self._written:
+            raise RuntimeError('with_blob_consumer must be called before any write operation.')
+        if blob_consumer is None:
+            self._native_writer.with_blob_consumer(None)
+            self._blob_consumer = None
+            return self
+        if not callable(blob_consumer):
+            raise TypeError('blob_consumer must be callable')
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        def consume(field_name, encoded):
+            descriptor = None if encoded is None else BlobDescriptor.deserialize(encoded)
+            return blob_consumer(field_name, descriptor)
+
+        self._native_writer.with_blob_consumer(consume)
+        self._blob_consumer = blob_consumer
         return self
 
     def write_arrow(self, data, bucket=None):
