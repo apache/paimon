@@ -63,11 +63,11 @@ def _flag(value) -> bool:
 
 
 def _parse_policy(value) -> FrozenSet[Op]:
-    # read, meta and write can use a target; none turns it off
+    # read, meta, exists and write can use a target; none turns it off
     tokens = {token.strip().lower() for token in str(value or "").split(",")}
     if "none" in tokens:
         return frozenset()
-    return frozenset(op for op in (Op.READ, Op.META, Op.WRITE) if op.value in tokens)
+    return frozenset(op for op in (Op.READ, Op.META, Op.EXISTS, Op.WRITE) if op.value in tokens)
 
 
 def _parse_routes(value: str) -> List[Tuple[set, str]]:
@@ -192,10 +192,8 @@ class IoCacheRouting:
 
     def route(self, op: Op, path: str) -> Optional[str]:
         """Name of the target of one request, or None when it goes to origin."""
-        # An existence check is a file status lookup, a two-phase write is a write.
-        if op is Op.EXISTS:
-            op = Op.META
-        elif op is Op.TWO_PHASE_WRITE:
+        # A two-phase write is a write; exists has its own token, as a cache may keep deleted files.
+        if op is Op.TWO_PHASE_WRITE:
             op = Op.WRITE
         # Only OSS paths can use cache targets.
         if op not in self._policy or not path.startswith("oss://"):

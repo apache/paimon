@@ -217,6 +217,9 @@ class IoCacheRoutingFileIOTest(unittest.TestCase):
         self._put(self.origin, OTHER_DATA, b"origin")
         self._put(self.origin, SNAPSHOT, b"origin")
         self._put(self.origin, TABLE + "/manifest/manifest-list-" + UUID + "-0", b"origin")
+        # Without the exists token the origin, which has neither file, answers.
+        self.assertFalse(self.file_io.exists(DATA))
+        self.file_io = self._file_io(_routing(policy="meta,read,exists"))
         self.assertTrue(self.file_io.exists(DATA))
         # OTHER_DATA is routed to the cluster, which does not have it
         self.assertFalse(self.file_io.exists(OTHER_DATA))
@@ -631,9 +634,10 @@ FILE_IO_CALLS = [(op, name, call) for op, calls in OP_CALLS.items() for name, ca
 
 @pytest.mark.parametrize("op,name,call", FILE_IO_CALLS,
                          ids=["{} / {}".format(op, name) for op, name, _ in FILE_IO_CALLS])
-@pytest.mark.parametrize("policy", ["meta,read", "meta,read,write"])
+@pytest.mark.parametrize("policy", ["meta,read", "meta,read,write", "meta,read,exists"])
 def test_each_file_io_call_reaches_its_endpoint(policy, op, name, call):
-    routed = {"read", "meta", "exists"} | ({"write", "two-phase-write"} if "write" in policy else set())
+    tokens = set(policy.split(","))
+    routed = {"read", "meta"} | ({"write", "two-phase-write"} if "write" in tokens else set()) | (tokens & {"exists"})
     routing = _routing(policy=policy)
     for path, target in ((DATA, "cluster"), (MANIFEST, "accel"), (SNAPSHOT, "origin"), (UNKNOWN, "origin")):
         file_ios = {key: _RecordingFileIO() for key in ("origin", "accel", "cluster")}

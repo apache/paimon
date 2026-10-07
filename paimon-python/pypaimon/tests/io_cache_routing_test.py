@@ -40,6 +40,7 @@ CACHE = "http://cache.example.com"
 ACCEL = "https://accelerator.example.com"
 CLUSTER = "http://cluster.example.com"
 WRITE = "io-cache.policy=meta,read,write"
+EXISTS = "io-cache.policy=meta,read,exists"
 ORIGIN_OPS = (Op.LIST, Op.DELETE, Op.RENAME, Op.MKDIRS, Op.COPY, Op.ATOMIC_WRITE, Op.PRESIGN)
 
 
@@ -113,7 +114,10 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
         options = single()
         self.assert_endpoint(options, Op.READ, DATA_PATH, CACHE)
         self.assert_endpoint(options, Op.META, DATA_PATH, CACHE)
-        self.assert_endpoint(options, Op.EXISTS, DATA_PATH, CACHE)
+        # exists asks whether a file is still there, so it needs its own policy token
+        self.assert_endpoint(options, Op.EXISTS, DATA_PATH, OSS)
+        self.assert_endpoint(single(EXISTS), Op.EXISTS, DATA_PATH, CACHE)
+        self.assert_endpoint(single(EXISTS), Op.EXISTS, SNAPSHOT_PATH, OSS)
         self.assert_endpoint(options, Op.READ, MANIFEST_PATH, CACHE)
         self.assert_endpoint(options, Op.READ, "manifest/manifest-list-{uuid}-1", CACHE)
         self.assert_endpoint(options, Op.READ, "oss://other-bkt/db1.db/t1/" + DATA_PATH, CACHE)
@@ -149,6 +153,9 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
         write_only = single("io-cache.policy=write")
         self.assert_endpoint(write_only, Op.WRITE, DATA_PATH, CACHE)
         self.assert_endpoint(write_only, Op.EXISTS, DATA_PATH, OSS)
+        exists_only = single("io-cache.policy=exists")
+        self.assert_endpoint(exists_only, Op.EXISTS, DATA_PATH, CACHE)
+        self.assert_endpoint(exists_only, Op.META, DATA_PATH, OSS)
 
         self.assert_endpoint(single("-io-cache.whitelist"), Op.READ, INDEX_PATH, CACHE)
         self.assert_endpoint(single("io-cache.whitelist=*"), Op.READ, GLOBAL_INDEX_PATH, CACHE)
@@ -185,9 +192,10 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
         options = multi()
         self.assert_endpoint(options, Op.READ, MANIFEST_PATH, ACCEL)
         self.assert_endpoint(options, Op.META, MANIFEST_PATH, ACCEL)
-        self.assert_endpoint(options, Op.EXISTS, MANIFEST_PATH, ACCEL)
+        self.assert_endpoint(options, Op.EXISTS, MANIFEST_PATH, OSS)
+        self.assert_endpoint(multi(EXISTS), Op.EXISTS, MANIFEST_PATH, ACCEL)
         self.assert_endpoint(options, Op.READ, DATA_PATH, CLUSTER)
-        self.assert_endpoint(options, Op.EXISTS, DATA_PATH, CLUSTER)
+        self.assert_endpoint(multi(EXISTS), Op.EXISTS, DATA_PATH, CLUSTER)
         self.assert_endpoint(options, Op.READ, INDEX_PATH, CLUSTER)
         self.assert_endpoint(options, Op.READ, GLOBAL_INDEX_PATH, CLUSTER)
         self.assert_endpoint(options, Op.READ, SNAPSHOT_PATH, OSS)
@@ -358,7 +366,7 @@ class IoCacheRoutingTest(unittest.TestCase):
         self.assertIsNotNone(IoCacheRouting.create(self._options(**{"io-cache.enabled": " TRUE "})))
         for overrides in ({"io-cache.enabled": "false"}, {"io-cache.enabled": "yes"},
                           {"io-cache.policy": "none"}, {"io-cache.policy": "read,none"},
-                          {"io-cache.policy": "exists,prefetch"}, {"io-cache.targets": ""},
+                          {"io-cache.policy": "prefetch,metadata"}, {"io-cache.targets": ""},
                           {"io-cache.targets": "Bad_Name,1x"},
                           {"dlf.oss-endpoint": "oss-cn-hangzhou.aliyuncs.com"}):
             with self.subTest(overrides=overrides):
@@ -369,7 +377,7 @@ class IoCacheRoutingTest(unittest.TestCase):
 
     def test_policy_routes_read_meta_and_write(self):
         routing = IoCacheRouting.create(self._options(**{"io-cache.policy": " Meta , READ ,prefetch,write"}))
-        routed = (Op.READ, Op.META, Op.EXISTS, Op.WRITE, Op.TWO_PHASE_WRITE)
+        routed = (Op.READ, Op.META, Op.WRITE, Op.TWO_PHASE_WRITE)
         for op in Op:
             with self.subTest(op=op):
                 expected = "default" if op in routed else None
@@ -377,6 +385,9 @@ class IoCacheRoutingTest(unittest.TestCase):
         write_only = IoCacheRouting.create(self._options(**{"io-cache.policy": "write"}))
         self.assertEqual("default", write_only.route(Op.WRITE, self.DATA))
         self.assertIsNone(write_only.route(Op.READ, self.DATA))
+        exists_only = IoCacheRouting.create(self._options(**{"io-cache.policy": "exists"}))
+        self.assertEqual("default", exists_only.route(Op.EXISTS, self.DATA))
+        self.assertIsNone(exists_only.route(Op.META, self.DATA))
         read_only = IoCacheRouting.create(self._options(**{"io-cache.policy": "read"}))
         self.assertIsNone(read_only.route(Op.META, self.DATA))
         self.assertIsNone(read_only.route(Op.EXISTS, self.DATA))
