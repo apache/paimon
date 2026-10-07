@@ -67,9 +67,22 @@ final class IoCacheRouting implements Serializable {
 
     // Data files are named {prefix}{uuid}-{count}.{extension}; this matches what follows the
     // prefix.
-    private static final Pattern DATA_FILE_SUFFIX =
+    private static final String UUID =
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    private static final Pattern DATA_FILE_SUFFIX = Pattern.compile(UUID + "-[0-9]+\\..+");
+
+    // Other types are routed only under the names Paimon writes; Format Table files may be
+    // replaced in place.
+    private static final Pattern META_FILE =
             Pattern.compile(
-                    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9]+\\..+");
+                    "(manifest|manifest-list|index-manifest|stat)-"
+                            + UUID
+                            + "-[0-9]+|manifest-"
+                            + UUID
+                            + "-[0-9]+\\.avro\\.sidecar");
+    private static final Pattern BUCKET_INDEX_FILE = Pattern.compile("index-" + UUID + "-[0-9]+");
+    private static final Pattern GLOBAL_INDEX_FILE =
+            Pattern.compile("[a-z0-9_-]+-global-index-" + UUID + "\\.index");
 
     private static final String MANIFEST_SIDECAR_SUFFIX = ".avro.sidecar";
 
@@ -220,7 +233,21 @@ final class IoCacheRouting implements Serializable {
             return null;
         }
         FileType type = FileType.classify(path);
-        return type == FileType.DATA ? null : type;
+        return isPaimonFileName(type, name) ? type : null;
+    }
+
+    private static boolean isPaimonFileName(FileType type, String name) {
+        switch (type) {
+            case META:
+                return META_FILE.matcher(name).matches();
+            case BUCKET_INDEX:
+                return BUCKET_INDEX_FILE.matcher(name).matches();
+            case GLOBAL_INDEX:
+                return GLOBAL_INDEX_FILE.matcher(name).matches();
+            default:
+                // data files and their file indexes are recognized by isDataFileName
+                return false;
+        }
     }
 
     // Manifests, indexes and statistics share the uuid-count shape but have no extension.
