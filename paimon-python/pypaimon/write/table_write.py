@@ -37,15 +37,18 @@ if TYPE_CHECKING:
 
 class TableWrite:
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None,
-                 *, index_restore_snapshot_id=None):
+                 *, restore_snapshot_id=None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
         self.commit_user = commit_user
         self.static_partition = static_partition
-        self.index_restore_snapshot_id = index_restore_snapshot_id
+        self.restore_snapshot_id = restore_snapshot_id
         self.file_store_write = self._create_file_store_write(commit_user)
+        self.file_store_write.restore_snapshot_id = (
+            0 if static_partition is not None and restore_snapshot_id is not None
+            else restore_snapshot_id)
         if static_partition is not None:
             # An overwrite replaces state, not an input changelog. Java's
             # overwrite commit does not publish changelog manifests; avoid
@@ -57,12 +60,12 @@ class TableWrite:
         return FileStoreWrite(self.table, commit_user)
 
     def _create_row_key_extractor(self, static_partition):
-        if self.index_restore_snapshot_id is not None:
+        if self.restore_snapshot_id is not None:
             from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
             return DynamicBucketRowKeyExtractor(
                 self.table.table_schema, table=self.table,
                 ignore_existing=static_partition is not None,
-                base_snapshot_id=self.index_restore_snapshot_id)
+                base_snapshot_id=self.restore_snapshot_id)
         return self.table.create_row_key_extractor(
             ignore_existing=static_partition is not None
         )
@@ -346,9 +349,9 @@ class TableWrite:
 
 class BatchTableWrite(TableWrite):
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None,
-                 *, index_restore_snapshot_id=None):
+                 *, restore_snapshot_id=None):
         super().__init__(table, commit_user, static_partition,
-                         index_restore_snapshot_id=index_restore_snapshot_id)
+                         restore_snapshot_id=restore_snapshot_id)
         self.batch_committed = False
 
     def prepare_commit(self) -> List[CommitMessage]:
@@ -360,9 +363,9 @@ class BatchTableWrite(TableWrite):
 
 class StreamTableWrite(TableWrite):
 
-    def __init__(self, table, commit_user, *, index_restore_snapshot_id=None):
+    def __init__(self, table, commit_user, *, restore_snapshot_id=None):
         super().__init__(table, commit_user, None,
-                         index_restore_snapshot_id=index_restore_snapshot_id)
+                         restore_snapshot_id=restore_snapshot_id)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         return self._prepare_commit(commit_identifier)

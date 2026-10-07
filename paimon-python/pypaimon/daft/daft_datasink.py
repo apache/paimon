@@ -698,7 +698,7 @@ def make_group_write_udf(
         if mode == "overwrite":
             write_builder.overwrite({})
         if precomputed_bucket and dynamic_bucket:
-            write_builder.with_index_restore_snapshot(group_base_snapshot_id)
+            write_builder.with_restore_snapshot(group_base_snapshot_id)
         table_write = write_builder.new_write()
         commit_messages = []
         try:

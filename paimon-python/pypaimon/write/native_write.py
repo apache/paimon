@@ -48,7 +48,7 @@ def _native_partition_types_supported(schema, partition_keys):
 
 
 def create_native_write(table, commit_user, static_partition=None, stream=False,
-                        *, fixed_bucket=False, bucket_plan=None, index_restore_snapshot_id=None):
+                        *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     if (not native_write_available()
@@ -83,10 +83,10 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
         builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
         if static_partition is not None:
             builder = builder.with_overwrite(static_partition)
-    if index_restore_snapshot_id is not None:
-        builder.with_index_restore_snapshot(index_restore_snapshot_id)
+    if restore_snapshot_id is not None:
+        builder.with_restore_snapshot(restore_snapshot_id)
     return NativeTableWrite(table, commit_user, static_partition, stream,
-                            builder.new_write(), index_restore_snapshot_id)
+                            builder.new_write(), restore_snapshot_id)
 
 
 class NativeTableWrite:
@@ -98,7 +98,7 @@ class NativeTableWrite:
     """
 
     def __init__(self, table, commit_user, static_partition, stream, native_writer,
-                 index_restore_snapshot_id=None):
+                 restore_snapshot_id=None):
         self.table = table
         self.commit_user = commit_user
         self.static_partition = static_partition
@@ -109,7 +109,7 @@ class NativeTableWrite:
         self._table_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
         self._schema = self._table_schema
         self._write_cols = None
-        self._index_restore_snapshot_id = index_restore_snapshot_id
+        self._restore_snapshot_id = restore_snapshot_id
 
     def _switch_to_python(self):
         if self._python_writer is not None:
@@ -126,10 +126,10 @@ class NativeTableWrite:
         from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
         if self.stream:
             writer = StreamTableWrite(self.table, self.commit_user,
-                                      index_restore_snapshot_id=self._index_restore_snapshot_id)
+                                      restore_snapshot_id=self._restore_snapshot_id)
         else:
             writer = BatchTableWrite(self.table, self.commit_user, self.static_partition,
-                                     index_restore_snapshot_id=self._index_restore_snapshot_id)
+                                     restore_snapshot_id=self._restore_snapshot_id)
         if self._write_cols is not None:
             writer.with_write_type(self._write_cols)
         return writer
