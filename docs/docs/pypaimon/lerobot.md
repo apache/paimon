@@ -211,15 +211,21 @@ For map-style training, pass an image- or video-backed table group created by
 `PaimonLeRobotWriter` is not sufficient.
 
 ```python
-from torch.utils.data import DataLoader
 from pypaimon.multimodal import PaimonLeRobotDataset
 
 dataset = PaimonLeRobotDataset(
     conn.get_table("robot_data"),
     tag_name=tag,
 )
-loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
+loader = dataset.to_dataloader(
+    batch_size=32,
+    shuffle=True,
+    num_workers=4,
+)
 ```
+
+`to_dataloader` writes decoded video windows directly into shared worker
+batches, avoiding a second full-resolution copy during collation.
 
 Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
 on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GOPs, then fetch
