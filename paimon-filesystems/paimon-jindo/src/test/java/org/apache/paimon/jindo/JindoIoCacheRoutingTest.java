@@ -61,7 +61,7 @@ public class JindoIoCacheRoutingTest {
     private static final String TABLE = "oss://bkt/db1.db/t1";
     private static final String UUID = "8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b";
     private static final Path DATA = new Path(TABLE + "/dt=1/bucket-0/data-" + UUID + "-1.orc");
-    private static final Path MANIFEST = new Path(TABLE + "/manifest/manifest-1");
+    private static final Path MANIFEST = new Path(TABLE + "/manifest/manifest-" + UUID + "-1");
     private static final Path SNAPSHOT = new Path(TABLE + "/snapshot/snapshot-2");
     private static final Path LATEST = new Path(TABLE + "/snapshot/LATEST");
     private static final String ACCEL_HOST = "cn-hangzhou-j-internal.oss-data-acc.aliyuncs.com";
@@ -331,10 +331,14 @@ public class JindoIoCacheRoutingTest {
         fileIO.configure(CatalogContext.create(cacheTargetOptions()));
 
         Pair<JindoHadoopSystem, String> first =
-                fileIO.getFileSystemPair(hadoopPath(TABLE + "/manifest/manifest-a"), true);
-        assertThat(fileIO.getFileSystemPair(hadoopPath(TABLE + "/manifest/manifest-b"), true))
+                fileIO.getFileSystemPair(
+                        hadoopPath(TABLE + "/manifest/manifest-" + UUID + "-1"), true);
+        assertThat(
+                        fileIO.getFileSystemPair(
+                                hadoopPath(TABLE + "/manifest/manifest-" + UUID + "-2"), true))
                 .isSameAs(first);
-        fileIO.getFileSystemPair(hadoopPath("oss://other/t/manifest/manifest-c"), true);
+        fileIO.getFileSystemPair(
+                hadoopPath("oss://other/t/manifest/manifest-" + UUID + "-3"), true);
         fileIO.getFileSystemPair(
                 hadoopPath(TABLE + "/dt=1/bucket-0/data-" + UUID + "-3.orc"), true);
         assertThat(created).containsExactly("accel/bkt", "accel/other", "cluster/bkt");

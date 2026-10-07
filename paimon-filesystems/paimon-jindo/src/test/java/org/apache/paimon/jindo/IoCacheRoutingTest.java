@@ -87,6 +87,9 @@ public class IoCacheRoutingTest {
         assertEndpoint(options, "read", "dls://bkt/db1.db/t1/" + DATA_PATH, OSS);
         // the whitelist has no index
         assertEndpoint(options, "read", INDEX_PATH, OSS);
+        // a Format Table file named like a manifest may be replaced in place
+        assertEndpoint(options, "read", "review_external/manifest.parquet", OSS);
+        assertEndpoint(options, "meta", "review_external/manifest.parquet", OSS);
         assertEndpoint(options, "write", DATA_PATH, OSS);
         for (String op : Arrays.asList("list", "delete", "rename", "mkdirs")) {
             assertEndpoint(options, op, DATA_PATH, OSS);
@@ -253,6 +256,23 @@ public class IoCacheRoutingTest {
                         "dt=1/bucket-0/data-1.parquet",
                         "dt=1/bucket-0/custom-{uuid}-0.orc",
                         "README")) {
+            assertType(path, null);
+        }
+        // Format Table files named like metadata or indexes, which may be replaced in place
+        for (String path :
+                Arrays.asList(
+                        "dt=1/manifest.parquet",
+                        "dt=1/stat-2024.parquet",
+                        "dt=1/index-a.csv",
+                        "dt=1/foo.index",
+                        "review_external/manifest.parquet",
+                        "manifest/manifest-old",
+                        "manifest/manifest-old.avro.sidecar",
+                        "manifest/manifest-list-{uuid}-1.avro.sidecar",
+                        "statistics/stat-old",
+                        "index/index-old",
+                        "index/my-global-index.index",
+                        "index/btree-global-index-{uuid}-0.index")) {
             assertType(path, null);
         }
 
