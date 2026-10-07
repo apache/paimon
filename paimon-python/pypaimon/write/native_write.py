@@ -110,6 +110,7 @@ class NativeTableWrite:
         self._schema = self._table_schema
         self._write_cols = None
         self._blob_consumer = None
+        self._blob_uri_reader_factory = None
         self._restore_snapshot_id = restore_snapshot_id
 
     def _switch_to_python(self):
@@ -135,6 +136,8 @@ class NativeTableWrite:
             writer.with_write_type(self._write_cols)
         if self._blob_consumer is not None:
             writer.with_blob_consumer(self._blob_consumer)
+        if self._blob_uri_reader_factory is not None:
+            writer.with_blob_uri_reader_factory(self._blob_uri_reader_factory)
         return writer
 
     def __getattr__(self, name):
@@ -176,6 +179,15 @@ class NativeTableWrite:
 
         self._native_writer.with_blob_consumer(consume)
         self._blob_consumer = blob_consumer
+        return self
+
+    def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if self._python_writer is not None:
+            return self._python_writer.with_blob_uri_reader_factory(uri_reader_factory)
+        if self._written:
+            raise RuntimeError('with_blob_uri_reader_factory must be called before any write operation.')
+        self._native_writer.with_blob_uri_reader_factory(uri_reader_factory)
+        self._blob_uri_reader_factory = uri_reader_factory
         return self
 
     def write_arrow(self, data, bucket=None):
