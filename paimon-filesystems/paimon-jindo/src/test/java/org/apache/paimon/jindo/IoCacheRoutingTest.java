@@ -63,13 +63,17 @@ public class IoCacheRoutingTest {
     private static final String ACCEL = "https://accelerator.example.com";
     private static final String CLUSTER = "http://cluster.example.com";
     private static final String WRITE = "io-cache.policy=meta,read,write";
+    private static final String EXISTS = "io-cache.policy=meta,read,exists";
 
     @Test
     public void testOneCacheTarget() {
         Options options = single();
         assertEndpoint(options, "read", DATA_PATH, CACHE);
         assertEndpoint(options, "meta", DATA_PATH, CACHE);
-        assertEndpoint(options, "exists", DATA_PATH, CACHE);
+        // exists asks whether a file is still there, so it needs its own policy token
+        assertEndpoint(options, "exists", DATA_PATH, OSS);
+        assertEndpoint(single(EXISTS), "exists", DATA_PATH, CACHE);
+        assertEndpoint(single(EXISTS), "exists", SNAPSHOT_PATH, OSS);
         assertEndpoint(options, "read", MANIFEST_PATH, CACHE);
         assertEndpoint(options, "read", "manifest/manifest-list-{uuid}-1", CACHE);
         assertEndpoint(options, "read", "oss://other-bkt/db1.db/t1/" + DATA_PATH, CACHE);
@@ -103,6 +107,9 @@ public class IoCacheRoutingTest {
         Options writeOnly = single("io-cache.policy=write");
         assertEndpoint(writeOnly, "write", DATA_PATH, CACHE);
         assertEndpoint(writeOnly, "exists", DATA_PATH, OSS);
+        Options existsOnly = single("io-cache.policy=exists");
+        assertEndpoint(existsOnly, "exists", DATA_PATH, CACHE);
+        assertEndpoint(existsOnly, "meta", DATA_PATH, OSS);
 
         assertEndpoint(single("-io-cache.whitelist"), "read", INDEX_PATH, CACHE);
         assertEndpoint(single("io-cache.whitelist=*"), "read", GLOBAL_INDEX_PATH, CACHE);
@@ -145,9 +152,10 @@ public class IoCacheRoutingTest {
         Options options = multi();
         assertEndpoint(options, "read", MANIFEST_PATH, ACCEL);
         assertEndpoint(options, "meta", MANIFEST_PATH, ACCEL);
-        assertEndpoint(options, "exists", MANIFEST_PATH, ACCEL);
+        assertEndpoint(options, "exists", MANIFEST_PATH, OSS);
+        assertEndpoint(multi(EXISTS), "exists", MANIFEST_PATH, ACCEL);
         assertEndpoint(options, "read", DATA_PATH, CLUSTER);
-        assertEndpoint(options, "exists", DATA_PATH, CLUSTER);
+        assertEndpoint(multi(EXISTS), "exists", DATA_PATH, CLUSTER);
         assertEndpoint(options, "read", INDEX_PATH, CLUSTER);
         assertEndpoint(options, "read", GLOBAL_INDEX_PATH, CLUSTER);
         assertEndpoint(options, "read", SNAPSHOT_PATH, OSS);
@@ -500,9 +508,7 @@ public class IoCacheRoutingTest {
         }
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(CatalogContext.create(copy));
-        // exists is a status lookup
-        String opType = "exists".equals(op) ? "meta" : op;
-        assertThat(host(fileIO.hadoopOptions(path(path), opType).get("fs.oss.endpoint")))
+        assertThat(host(fileIO.hadoopOptions(path(path), op).get("fs.oss.endpoint")))
                 .as("%s %s with %s", op, path, options.toMap())
                 .isEqualTo(host(expect));
     }
