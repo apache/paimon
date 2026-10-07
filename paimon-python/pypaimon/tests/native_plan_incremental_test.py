@@ -28,6 +28,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.read.split import DataSplit
 from pypaimon.utils.range import Range
 
@@ -192,6 +193,35 @@ def test_primary_key_shards_preserve_all_selected_commits(native, catalog):
             assert limited[0] in actual
     assert sorted((row['k'], row['v']) for row in result) == [
         (key, version) for key in range(20) for version in ('new', 'old')]
+
+
+@pytest.mark.parametrize('engine,dv', [('first-row', False), ('deduplicate', True)])
+def test_raw_primary_key_incremental_shards_preserve_file_events(native, catalog, engine, dv):
+    table = _table(catalog, 'raw_pk_shards', True, {
+        'bucket': '1', 'merge-engine': engine,
+        'deletion-vectors.enabled': str(dv).lower(),
+        'source.split.target-size': '1b',
+    })
+    _write(table, 100, [{'k': 0, 'v': 'outside'}])
+    for key in range(8):
+        _write(table, 200 + key * 2, [{'k': key, 'v': 'old'}])
+        _write(table, 201 + key * 2, [{'k': key, 'v': 'new'}])
+    events, file_names = [], set()
+    for shard in range(5):
+        plan, rows = _read(table, native, (100, 400), shard=(shard, 5))
+        assert plan.snapshot_id == 17
+        assert all(split.is_streaming and split.bucket == 0 for split in plan.splits())
+        names = {file.file_name for split in plan.splits() for file in split.files}
+        assert all(java_file_name_shard(name, 5) == shard for name in names)
+        assert not file_names.intersection(names)
+        file_names.update(names)
+        events.extend(rows)
+        if rows:
+            _, limited = _read(table, native, (100, 400), shard=(shard, 5), limit=1)
+            assert len(limited) == 1 and limited[0] in rows
+    assert len(file_names) == 16
+    assert sorted((row['k'], row['v']) for row in events) == [
+        (key, version) for key in range(8) for version in ('new', 'old')]
 
 
 def test_data_evolution_positions_intersect_incremental_row_ranges(native, catalog):
