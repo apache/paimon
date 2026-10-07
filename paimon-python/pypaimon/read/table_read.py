@@ -43,7 +43,7 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import (
-    DataField, MapType, PyarrowFieldParser, is_map_blob_type)
+    DataField, MapType, PyarrowFieldParser, is_blob_file_field, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.arrow_utils import zero_column_batch
 
@@ -254,13 +254,12 @@ class TableRead:
         table reads do not guarantee row order. Python fallback reads remain
         serial.
         """
-        # Cleanup ownership follows the uncapped concurrency decision. LIMIT
-        # may reduce the actual native worker count to one, but the returned
-        # PyArrow reader still does not close its suspended batch iterator.
+        # PyArrow does not close a suspended Python batch iterator. Keep its
+        # cleanup even when LIMIT or BLOB pruning serializes native reads.
         effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
-        if self._should_run_parallel(splits, effective):
+        if self._requires_batch_iterator_cleanup(splits, effective):
             return _ClosableArrowBatchReader(reader, batch_iterator)
         return reader
 
@@ -280,7 +279,7 @@ class TableRead:
         effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
             splits, blob_parallelism, parallelism)
-        if self._should_run_parallel(splits, effective):
+        if self._requires_batch_iterator_cleanup(splits, effective):
             return _ClosableArrowBatchReader(reader, batch_iterator)
         if (_RECORD_BATCH_READER_FROM_STREAM is not None
                 and hasattr(reader, "close")):
@@ -377,9 +376,9 @@ class TableRead:
                 ``>= 1``. Note that with ``>= 2`` (or auto)
                 and a ``limit`` set, the returned rows are an arbitrary
                 subset of the requested size, since which splits fill the row
-                quota first is non-deterministic. Data-evolution reads with
-                deferred BLOB resolution falls back to the Python reader when
-                a limit may discard rows, so discarded payloads are not read.
+                quota first is non-deterministic. Reads with BLOB payloads run
+                serially when a limit may discard rows, so discarded payloads
+                are not fetched by speculative split workers.
             blob_parallelism: maximum concurrent blob range reads within each
                 split reader. ``None`` or ``1`` (default) reads blobs serially;
                 ``>= 2`` enables concurrent ranged reads. On the
@@ -498,22 +497,9 @@ class TableRead:
                 "the table file format is not supported")
         if not splits:
             return []
-        sequence_fields = self.table.options.sequence_field()
-        if self.table.is_primary_key_table and sequence_fields:
-            sequence_schema = PyarrowFieldParser.from_paimon_schema(
-                [self.table.field_dict[name] for name in sequence_fields])
-            # Native merge cannot extract floating sequence values: they
-            # would silently become missing sequence values.
-            if any(pyarrow.types.is_floating(field.type) for field in sequence_schema):
-                return self._native_fallback(
-                    "floating sequence fields are not supported")
         if not self._native_blob_view_supported():
             return self._native_fallback(
                 "the table uses an unsupported BLOB view")
-        if (self._deferred_blob_limit_may_prune(splits)
-                and not self.table.options.data_evolution_enabled()):
-            return self._native_fallback(
-                "deferred BLOB LIMIT pruning requires the Python reader")
         # Query authorization has additional filtering, masking and projection
         # semantics which are already implemented by the Python reader.
         if any(isinstance(split, QueryAuthSplit) for split in splits):
@@ -982,8 +968,12 @@ class TableRead:
     def _deferred_blob_limit_may_prune(self, splits: List[Split]) -> bool:
         return (self.limit is not None
                 and (self._deferred_blob_fields
-                     or self._native_inline_blob_fields())
+                     or self._native_resolved_blob_fields())
                 and not self._limit_covers_all_splits(splits))
+
+    def _requires_batch_iterator_cleanup(self, splits: List[Split], effective: int) -> bool:
+        return (self._should_run_parallel(splits, effective)
+                or self._deferred_blob_limit_may_prune(splits))
 
     def _native_blob_view_supported(self) -> bool:
         """Use native view resolution only with the REST catalog environment."""
@@ -999,11 +989,13 @@ class TableRead:
         from pypaimon.read.native_plan import _catalog_metastore
         return _catalog_metastore(loader) == 'rest'
 
-    def _native_inline_blob_fields(self) -> set:
-        """Return configured BLOB fields that native reads resolve eagerly."""
+    def _native_resolved_blob_fields(self) -> set:
+        """BLOB fields Rust resolves before emitting a batch."""
         options = self.table.options
         if options.blob_as_descriptor():
             return set()
+        if self.table.is_primary_key_table:
+            return {field.name for field in self._scan_read_type if is_blob_file_field(field)}
         inline_fields = (
             options.blob_descriptor_fields()
             | options.blob_view_fields()
