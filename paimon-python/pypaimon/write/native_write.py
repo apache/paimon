@@ -132,6 +132,9 @@ class NativeTableWrite:
         else:
             writer = BatchTableWrite(self.table, self.commit_user, self.static_partition,
                                      restore_snapshot_id=self._restore_snapshot_id)
+        return self._configure_python_writer(writer)
+
+    def _configure_python_writer(self, writer):
         if self._write_cols is not None:
             writer.with_write_type(self._write_cols)
         if self._blob_consumer is not None:
@@ -288,5 +291,5 @@ class NativePostponeFixedBucketTableWrite(NativeTableWrite):
 
     def _new_python_writer(self):
         from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
-        return PostponeFixedBucketBatchTableWrite(
-            self.table, self.commit_user, self.static_partition, self._bucket_plan)
+        return self._configure_python_writer(PostponeFixedBucketBatchTableWrite(
+            self.table, self.commit_user, self.static_partition, self._bucket_plan))
