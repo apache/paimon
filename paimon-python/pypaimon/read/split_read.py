@@ -159,7 +159,7 @@ class SplitRead(ABC):
         self.predicate = predicate
         self.push_down_predicate = self._push_down_predicate()
         self._arrow_filter_pushdown_enabled = predicate_supports_arrow_filter(
-            self.push_down_predicate)
+            self.push_down_predicate) and not self._has_row_tracking_predicate()
         self.split = split
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
@@ -254,6 +254,10 @@ class SplitRead(ABC):
     def _push_down_predicate(self) -> Optional[Predicate]:
         if self.predicate is None:
             return None
+        elif self._has_row_tracking_predicate():
+            # Metadata is assigned after file decoding. Filtering here would
+            # see missing/NULL versions and renumber positional row IDs.
+            return None
         elif self.table.is_primary_key_table:
             pk_predicate = trim_predicate_by_fields(self.predicate, self.table.primary_keys)
             if not pk_predicate:
@@ -261,6 +265,12 @@ class SplitRead(ABC):
             return pk_predicate
         else:
             return self.predicate
+
+    def _has_row_tracking_predicate(self) -> bool:
+        return (self.table.options.row_tracking_enabled()
+                and self.predicate is not None
+                and bool(predicate_field_names(self.predicate) & {
+                    SpecialFields.ROW_ID.name, SpecialFields.SEQUENCE_NUMBER.name}))
 
     @abstractmethod
     def create_reader(self) -> RecordReader:
