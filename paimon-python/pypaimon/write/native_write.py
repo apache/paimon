@@ -51,10 +51,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    sequence_fields = table.options.sequence_field()
-    if (table.is_primary_key_table and any(
-            pa.types.is_floating(schema.field(name).type) for name in sequence_fields)):
-        return None
     if (not native_write_available()
             or table.bucket_mode() not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC,
                                            BucketMode.BUCKET_UNAWARE,
