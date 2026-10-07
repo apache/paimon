@@ -110,6 +110,7 @@ class NativeTableWrite:
         self._schema = self._table_schema
         self._write_cols = None
         self._blob_consumer = None
+        self._blob_uri_reader_factory = None
         self._restore_snapshot_id = restore_snapshot_id
 
     def _switch_to_python(self):
@@ -131,10 +132,15 @@ class NativeTableWrite:
         else:
             writer = BatchTableWrite(self.table, self.commit_user, self.static_partition,
                                      restore_snapshot_id=self._restore_snapshot_id)
+        return self._configure_python_writer(writer)
+
+    def _configure_python_writer(self, writer):
         if self._write_cols is not None:
             writer.with_write_type(self._write_cols)
         if self._blob_consumer is not None:
             writer.with_blob_consumer(self._blob_consumer)
+        if self._blob_uri_reader_factory is not None:
+            writer.with_blob_uri_reader_factory(self._blob_uri_reader_factory)
         return writer
 
     def __getattr__(self, name):
@@ -176,6 +182,15 @@ class NativeTableWrite:
 
         self._native_writer.with_blob_consumer(consume)
         self._blob_consumer = blob_consumer
+        return self
+
+    def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if self._python_writer is not None:
+            return self._python_writer.with_blob_uri_reader_factory(uri_reader_factory)
+        if self._written:
+            raise RuntimeError('with_blob_uri_reader_factory must be called before any write operation.')
+        self._native_writer.with_blob_uri_reader_factory(uri_reader_factory)
+        self._blob_uri_reader_factory = uri_reader_factory
         return self
 
     def write_arrow(self, data, bucket=None):
@@ -276,5 +291,5 @@ class NativePostponeFixedBucketTableWrite(NativeTableWrite):
 
     def _new_python_writer(self):
         from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
-        return PostponeFixedBucketBatchTableWrite(
-            self.table, self.commit_user, self.static_partition, self._bucket_plan)
+        return self._configure_python_writer(PostponeFixedBucketBatchTableWrite(
+            self.table, self.commit_user, self.static_partition, self._bucket_plan))

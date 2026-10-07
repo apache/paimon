@@ -453,13 +453,13 @@ def test_primary_key_full_write_type_selects_writer_before_staging(tmp_path, str
 
 
 @requires_native
-def test_advanced_api_switches_before_write_and_rejects_late_switch(tmp_path):
+def test_uri_reader_factory_none_keeps_native_and_rejects_late_change(tmp_path):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
     assert isinstance(writer, NativeTableWrite)
-    assert writer.with_blob_uri_reader_factory(None) is writer._python_writer
-    assert writer._native_writer is None
+    assert writer.with_blob_uri_reader_factory(None) is writer
+    assert writer._python_writer is None
     writer.write_arrow_batch(_batch([1], ['a']))
     builder.new_commit().commit(writer.prepare_commit())
     writer.close()
@@ -467,6 +467,8 @@ def test_advanced_api_switches_before_write_and_rejects_late_switch(tmp_path):
 
     native = table.new_batch_write_builder().new_write()
     native.write_arrow_batch(_batch([2], ['a']))
+    with pytest.raises(RuntimeError, match='before any write'):
+        native.with_blob_uri_reader_factory(None)
     with pytest.raises(RuntimeError, match='after native data'):
         native.with_write_type(['id'])
     native.abort()
