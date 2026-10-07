@@ -740,6 +740,22 @@ class _LeRobotDataLoaderAdapter:
     def __getitems__(self, indices):
         return self.dataset.reader._get_batch(indices, self.share_memory)
 
+    @property
+    def return_uint8(self):
+        return self.dataset.return_uint8
+
+    @return_uint8.setter
+    def return_uint8(self, value):
+        self.dataset.return_uint8 = value
+
+    @property
+    def image_transforms(self):
+        return self.dataset.image_transforms
+
+    @image_transforms.setter
+    def image_transforms(self, value):
+        self.dataset.image_transforms = value
+
     def __getattr__(self, name):
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)

@@ -150,6 +150,17 @@ def _catalog_metadata(connection, name):
     }
 
 
+def _increment_image(value):
+    return value + 1
+
+
+def _configure_uint8_transform_worker(unused_worker_id):
+    from torch.utils.data import get_worker_info
+    dataset = get_worker_info().dataset
+    dataset.return_uint8 = True
+    dataset.image_transforms = _increment_image
+
+
 class LeRobotValidationTest(unittest.TestCase):
 
     def test_episode_metadata_pickle_stays_small_and_usable(self):
@@ -3973,6 +3984,24 @@ class LeRobotImportTest(unittest.TestCase):
                 multiprocessing_context="spawn"):
             worker_indices.extend(batch["index"].tolist())
         self.assertEqual(list(range(5)), worker_indices)
+
+        worker_batches = list(dataset.to_dataloader(
+            batch_size=2,
+            shuffle=False,
+            num_workers=1,
+            multiprocessing_context="spawn",
+            worker_init_fn=_configure_uint8_transform_worker,
+        ))
+        self.assertEqual("torch.uint8", str(
+            worker_batches[0]["observation.image"].dtype))
+        self.assertEqual(
+            1.0,
+            float(worker_batches[0]["observation.image"][0].float().mean()),
+        )
+        self.assertEqual(
+            101.0,
+            float(worker_batches[-1]["observation.image"][-1].float().mean()),
+        )
 
         uint8_dataset = pmm.PaimonLeRobotDataset(
             table,
