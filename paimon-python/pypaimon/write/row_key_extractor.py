@@ -700,20 +700,17 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
         if not partitions:
             return None
         partition = tuple(partitions[0])
-        if new_mappings is None:
-            new_mappings = [True] * data.num_rows
-        for actual_partition, key_hash, is_new in zip(
-            partitions, key_hashes, new_mappings
-        ):
-            if tuple(actual_partition) != tuple(partition):
-                raise RuntimeError(
-                    "A precomputed dynamic-bucket group contained multiple "
-                    f"partitions: expected {partition}, got {actual_partition}"
-                )
-            if is_new:
-                self._index_maintainer.notify_new_record(
-                    partition, bucket, to_signed_int32(key_hash)
-                )
+        if any(tuple(actual_partition) != partition for actual_partition in partitions):
+            raise RuntimeError(
+                "A precomputed dynamic-bucket group contained multiple "
+                f"partitions: expected {partition}, got {partitions}"
+            )
+        # Java's maintainer observes every written key. A coordinator's true
+        # flag can belong to an ignored retract of the same surviving key.
+        for key_hash in key_hashes:
+            self._index_maintainer.notify_new_record(
+                partition, bucket, to_signed_int32(key_hash)
+            )
         return partition
 
     def release_prepared(self) -> None:

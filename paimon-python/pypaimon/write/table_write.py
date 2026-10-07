@@ -148,7 +148,19 @@ class TableWrite:
         if not isinstance(self.row_key_extractor, DynamicBucketRowKeyExtractor):
             if bucket_mode == BucketMode.HASH_DYNAMIC:
                 raise RuntimeError("Dynamic bucket extractor is not configured")
-        data = self._prepare_arrow_data(data)
+        row_count = data.num_rows
+        data, selection = self._prepare_arrow_data_with_selection(data)
+        if new_mappings is not None and key_hashes is None:
+            raise ValueError('Precomputed new-mapping flags require key hashes')
+        for kind, values in [('key hash', key_hashes), ('new-mapping', new_mappings)]:
+            if values is not None and len(values) != row_count:
+                raise ValueError('Precomputed {} count {} does not match row count {}'.format(
+                    kind, len(values), row_count))
+        if selection is not None:
+            if key_hashes is not None:
+                key_hashes = [value for value, keep in zip(key_hashes, selection) if keep]
+            if new_mappings is not None:
+                new_mappings = [value for value, keep in zip(new_mappings, selection) if keep]
         if bucket_mode == BucketMode.HASH_DYNAMIC:
             if key_hashes is None:
                 partition = self.row_key_extractor.notify_precomputed_bucket_batch(
@@ -347,14 +359,17 @@ class TableWrite:
             release()
 
     def _prepare_arrow_data(self, data):
+        return self._prepare_arrow_data_with_selection(data)[0]
+
+    def _prepare_arrow_data_with_selection(self, data):
         self._validate_pyarrow_schema(data.schema)
         data = normalize_arrow_strings(data)
         # Schema-only writers can normalize input without table options.
         table = getattr(self, 'table', None)
         if table is None:
-            return data
-        from pypaimon.write.row_kind import filter_write_batch
-        return filter_write_batch(table, data)
+            return data, None
+        from pypaimon.write.row_kind import filter_write_batch_with_selection
+        return filter_write_batch_with_selection(table, data)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):

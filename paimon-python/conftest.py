@@ -130,17 +130,21 @@ def pytest_configure(config):
     if _native_write_enabled():
         from pypaimon.write.native_write import NativeTableWrite
 
-        original_write = NativeTableWrite.write_arrow_batch
+        def track_write(method):
+            original_write = getattr(NativeTableWrite, method)
 
-        def tracked_write(self, data):
-            global _native_write_count
-            native = self._native_writer is not None
-            result = original_write(self, data)
-            if native and data.num_rows and _force_native_write_for_test:
-                _native_write_count += 1
-            return result
+            def tracked_write(self, data, *args, **kwargs):
+                global _native_write_count
+                native = self._native_writer is not None
+                result = original_write(self, data, *args, **kwargs)
+                if native and data.num_rows and _force_native_write_for_test:
+                    _native_write_count += 1
+                return result
 
-        NativeTableWrite.write_arrow_batch = tracked_write
+            setattr(NativeTableWrite, method, tracked_write)
+
+        track_write('write_arrow_batch')
+        track_write('write_arrow_batch_to_bucket')
 
     if _native_commit_enabled():
         from pypaimon.write.table_commit import TableCommit

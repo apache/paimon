@@ -106,6 +106,7 @@ class NativeTableWrite:
         self._table_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
         self._schema = self._table_schema
         self._write_cols = None
+        self._dynamic_bucket_index = None
 
     def _switch_to_python(self):
         if self._python_writer is not None:
@@ -126,6 +127,8 @@ class NativeTableWrite:
             writer = BatchTableWrite(self.table, self.commit_user, self.static_partition)
         if self._write_cols is not None:
             writer.with_write_type(self._write_cols)
+        if self._dynamic_bucket_index is not None:
+            writer.with_dynamic_bucket_index(**self._dynamic_bucket_index)
         return writer
 
     def __getattr__(self, name):
@@ -159,6 +162,14 @@ class NativeTableWrite:
     def write_arrow_batch(self, data):
         if self._python_writer is not None:
             return self._python_writer.write_arrow_batch(data)
+        data = self._prepare_native_arrow_data(data)
+        if data.num_rows:
+            # A failed native write may already have produced files. Never
+            # retry that batch through Python after this point.
+            self._written = True
+        self._native_writer.write_arrow(data)
+
+    def _prepare_native_arrow_data(self, data):
         if self._write_cols is not None and arrow_schemas_compatible(
                 data.schema, self._table_schema, check_top_level_nullability=False,
                 allow_binary_compatibility=True):
@@ -172,12 +183,32 @@ class NativeTableWrite:
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
                 f"Write cols is: {self._write_cols}")
-        data = normalize_arrow_strings(data)
+        return normalize_arrow_strings(data)
+
+    def with_dynamic_bucket_index(self, ignore_existing=False, base_snapshot_id=None):
+        if self._python_writer is not None:
+            return self._python_writer.with_dynamic_bucket_index(
+                ignore_existing=ignore_existing, base_snapshot_id=base_snapshot_id)
+        if self._written:
+            raise RuntimeError('Dynamic bucket index maintenance must be enabled before writing')
+        if base_snapshot_id is None:
+            # Preserve the same resolved base if an advanced method selects
+            # the Python writer before any data is staged.
+            snapshot = self.table.snapshot_manager().get_latest_snapshot()
+            base_snapshot_id = snapshot.id if snapshot is not None else 0
+        self._native_writer.with_dynamic_bucket_index(ignore_existing, base_snapshot_id)
+        self._dynamic_bucket_index = {
+            'ignore_existing': ignore_existing, 'base_snapshot_id': base_snapshot_id}
+        return self
+
+    def write_arrow_batch_to_bucket(self, data, bucket, key_hashes=None, new_mappings=None):
+        if self._python_writer is not None:
+            return self._python_writer.write_arrow_batch_to_bucket(
+                data, bucket, key_hashes, new_mappings)
+        data = self._prepare_native_arrow_data(data)
         if data.num_rows:
-            # A failed native write may already have produced files. Never
-            # retry that batch through Python after this point.
             self._written = True
-        self._native_writer.write_arrow(data)
+        self._native_writer.write_arrow_batch_to_bucket(data, bucket, key_hashes, new_mappings)
 
     def write_pandas(self, dataframe):
         if self._python_writer is not None:
