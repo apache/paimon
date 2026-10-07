@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
@@ -42,6 +43,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -223,6 +225,20 @@ class DataEvolutionSplitReadTest {
         assertTrue(
                 DataEvolutionSplitRead.shouldReadRowSidecar(
                         smallFile, Collections.singletonList(new Range(10L, 15L)), 64L, 0.25d));
+    }
+
+    @Test
+    public void testShouldReadRowSidecarUsesFinalBitmapSelection() {
+        DataFileMeta file =
+                createFile("file1.parquet", 10L, 100, 1, Collections.singletonList("file1.row"));
+        BitmapIndexResult bitmap = new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(0, 5, 20));
+        List<Range> rowRanges = Collections.singletonList(new Range(10L, 19L));
+
+        assertTrue(DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.02d));
+        assertFalse(
+                DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 1L, 0.02d));
+        assertFalse(
+                DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.01d));
     }
 
     @Test

@@ -40,6 +40,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -680,6 +681,32 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testMergedGroupFinalSelectionChoosesRowSidecar() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_dv_row_sidecar", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        assertRow(assertSingleRow(readAfterDeletingDataFiles(table, filter)), 50);
+    }
+
+    @Test
+    public void testSingleFileFinalSelectionChoosesRowSidecar() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_bitmap_dv_row_sidecar", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        assertRow(assertSingleRow(readAfterDeletingDataFiles(table, filter)), 50);
+    }
+
+    @Test
     public void testMergedGroupFileIndexSkipsBeforeReadingDeletionVector() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
@@ -1040,6 +1067,27 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         return readWithFilter(table, predicate, null);
     }
 
+    private List<InternalRow> readAfterDeletingDataFiles(FileStoreTable table, Predicate predicate)
+            throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        ReadBuilder readBuilder = latest.newReadBuilder().withFilter(predicate);
+        DataSplit split = (DataSplit) readBuilder.newScan().plan().splits().get(0);
+        DataFilePathFactory pathFactory =
+                latest.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(split.partition(), split.bucket());
+        for (DataFileMeta file : split.dataFiles()) {
+            assertThat(latest.fileIO().delete(pathFactory.toPath(file), false)).isTrue();
+        }
+
+        List<InternalRow> rows = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(latest.rowType());
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+        return rows;
+    }
+
     private List<InternalRow> readWithFilter(
             FileStoreTable table, Predicate predicate, @Nullable RowType readType)
             throws Exception {
@@ -1193,6 +1241,14 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
     private static Predicate equalF1(String value) {
         return new PredicateBuilder(rowType()).equal(1, BinaryString.fromString(value));
+    }
+
+    private static Predicate equalAnyF1(int... values) {
+        Predicate[] predicates = new Predicate[values.length];
+        for (int i = 0; i < values.length; i++) {
+            predicates[i] = equalF1(f1(values[i]));
+        }
+        return PredicateBuilder.or(predicates);
     }
 
     private static Predicate equalF2(String value) {

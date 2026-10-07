@@ -471,7 +471,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
             FieldBunch bunch = fieldsFiles.get(i);
             DataFileMeta firstFile = bunch.files().get(0);
-            FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
+            FileReadTarget readTarget =
+                    readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection);
             String formatIdentifier = readTarget.formatIdentifier;
             long schemaId = firstFile.schemaId();
             TableSchema dataSchema = bunchDataSchemas[i];
@@ -525,7 +526,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         // Use the physical schema: the full table schema may declare columns this file never wrote.
         FormatReaderMapping mapping =
                 formatBuilder.build(
-                        readTarget(firstFile, dataFilePathFactory, rowRanges).formatIdentifier,
+                        readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection)
+                                .formatIdentifier,
                         schema,
                         dataSchema,
                         readRowType.getFields(),
@@ -722,8 +724,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable DeletionVectorWithRange deletionVector,
             @Nullable FileIndexResult precomputedFileIndexResult)
             throws IOException {
-        FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
-        String formatIdentifier = readTarget.formatIdentifier;
         long schemaId = file.schemaId();
         TableSchema dataSchema = schemaId == schema.id() ? schema : schemaFetcher.apply(schemaId);
         boolean nestedFieldEnabled = nestedFieldEnabledFor(Collections.singletonList(file));
@@ -731,18 +731,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         // no column merge here, so the filters this file can answer reach both the file index and
         // the format reader
         List<Predicate> fileFilters = fileFilters(filters, file);
-        FormatReaderMapping formatReaderMapping =
-                singleFileReaderMappings.computeIfAbsent(
-                        new SingleFileKey(
-                                schemaId,
-                                formatIdentifier,
-                                file.writeCols(),
-                                readRowType,
-                                nestedFieldEnabled),
-                        key ->
-                                formatBuilder(readRowType, fileFilters, nestedFieldEnabled)
-                                        .build(formatIdentifier, schema, dataSchema));
-
         FileIndexResult fileIndexResult = precomputedFileIndexResult;
         if (fileIndexResult == null && fileIndexReadEnabled) {
             DeletionVector dv = deletionVector == null ? null : deletionVector.deletionVector;
@@ -766,6 +754,21 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 return new EmptyFileRecordReader<>();
             }
         }
+
+        FileReadTarget readTarget =
+                readTarget(file, dataFilePathFactory, rowRanges, fileIndexResult);
+        String formatIdentifier = readTarget.formatIdentifier;
+        FormatReaderMapping formatReaderMapping =
+                singleFileReaderMappings.computeIfAbsent(
+                        new SingleFileKey(
+                                schemaId,
+                                formatIdentifier,
+                                file.writeCols(),
+                                readRowType,
+                                nestedFieldEnabled),
+                        key ->
+                                formatBuilder(readRowType, fileFilters, nestedFieldEnabled)
+                                        .build(formatIdentifier, schema, dataSchema));
 
         return createFileReader(
                 partition,
@@ -814,7 +817,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 formatReaderMapping,
                 rowRanges,
                 readRowType,
-                readTarget(file, dataFilePathFactory, rowRanges),
+                readTarget(file, dataFilePathFactory, rowRanges, groupSelection),
                 deletionVector,
                 groupSelection);
     }
@@ -1173,13 +1176,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     private FileReadTarget readTarget(
-            DataFileMeta file, DataFilePathFactory dataFilePathFactory, List<Range> rowRanges)
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory,
+            List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult)
             throws IOException {
         String rowSidecar = rowSidecarFileName(file);
         if (rowSidecar != null
                 && shouldReadRowSidecar(
                         file,
                         rowRanges,
+                        fileIndexResult,
                         coreOptions.dataEvolutionRowSidecarMaxSelectedRows(),
                         coreOptions.dataEvolutionRowSidecarMaxSelectionRatio())) {
             Path rowPath = dataFilePathFactory.toAlignedPath(rowSidecar, file);
@@ -1213,6 +1220,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return shouldReadRowSidecar(
                 file,
                 rowRanges,
+                null,
                 CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.defaultValue(),
                 CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO.defaultValue());
     }
@@ -1223,16 +1231,24 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable List<Range> rowRanges,
             long maxSelectedRows,
             double maxSelectionRatio) {
-        if (rowRanges == null
-                || rowRanges.isEmpty()
-                || file.rowCount() <= 0
+        return shouldReadRowSidecar(file, rowRanges, null, maxSelectedRows, maxSelectionRatio);
+    }
+
+    @VisibleForTesting
+    static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
+        if (file.rowCount() <= 0
                 || isBlobFile(file.fileName())
                 || isVectorStoreFile(file.fileName())
                 || rowSidecarFileName(file) == null) {
             return false;
         }
 
-        long selectedRowCount = selectedRowCount(file, rowRanges);
+        long selectedRowCount = selectedRowCount(file, rowRanges, fileIndexResult);
         if (selectedRowCount <= 0 || selectedRowCount >= file.rowCount()) {
             return false;
         }
@@ -1254,6 +1270,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return Range.sortAndMergeOverlap(intersections, true).stream()
                 .mapToLong(Range::count)
                 .sum();
+    }
+
+    private static long selectedRowCount(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult) {
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            RoaringBitmap32 indexSelection = ((BitmapIndexResult) fileIndexResult).get();
+            RoaringBitmap32 rangeSelection = file.toFileSelection(rowRanges);
+            return rangeSelection == null
+                    ? indexSelection.getCardinality()
+                    : RoaringBitmap32.and(rangeSelection, indexSelection).getCardinality();
+        }
+        return isNullOrEmpty(rowRanges) ? file.rowCount() : selectedRowCount(file, rowRanges);
     }
 
     private static boolean isRowSidecarFile(String fileName) {
