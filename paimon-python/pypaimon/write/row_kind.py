@@ -34,24 +34,19 @@ def row_kinds(options, data):
 
 
 def filter_write_batch(table, data):
-    return filter_write_batch_with_selection(table, data)[0]
-
-
-def filter_write_batch_with_selection(table, data):
-    """Keep metadata carried through a shuffle aligned with filtered rows."""
     if not table.is_primary_key_table:
-        return data, None
+        return data
     options = table.options
     raw = options.options.to_map()
     if 'rowkind.field' not in raw:
-        return data, None
+        return data
     kinds = row_kinds(options, data)
     ignore_delete = options.ignore_delete()
     ignore_before = str(raw.get('ignore-update-before', 'false')).lower() == 'true'
     if not ignore_delete and not ignore_before:
-        return data, None
+        return data
     keep = [not _is_filtered(kind, ignore_delete, ignore_before) for kind in kinds]
-    return data.filter(pa.array(keep, type=pa.bool_())), keep
+    return data.filter(pa.array(keep, type=pa.bool_()))
 
 
 def skip_write_row(table, values):

@@ -71,7 +71,7 @@ class DynamicBucketTest(unittest.TestCase):
     @staticmethod
     def _prepare_indexed_write(table, ids, bucket=None):
         builder = table.new_batch_write_builder()
-        writer = builder.new_write().with_dynamic_bucket_index()
+        writer = builder.new_write()
         batch = pa.RecordBatch.from_pydict({
             'id': ids,
             'value': [f'v-{value}' for value in ids],
@@ -79,7 +79,7 @@ class DynamicBucketTest(unittest.TestCase):
         if bucket is None:
             writer.write_arrow_batch(batch)
         else:
-            writer.write_arrow_batch_to_bucket(batch, bucket)
+            writer.write_arrow(batch, bucket=bucket)
         return writer, builder.new_commit(), writer.prepare_commit()
 
     @staticmethod

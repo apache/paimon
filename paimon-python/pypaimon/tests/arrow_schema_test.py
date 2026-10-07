@@ -102,7 +102,7 @@ class ArrowSchemaTest(unittest.TestCase):
                 if entry in ('batch', 'postpone_batch'):
                     writer.write_arrow_batch(source.to_batches()[0])
                 elif entry == 'bucket':
-                    writer.write_arrow_batch_to_bucket(source.to_batches()[0], 0)
+                    writer.write_arrow(source.to_batches()[0], bucket=0)
                 else:
                     writer.write_arrow(source)
                 commit.commit(writer.prepare_commit())

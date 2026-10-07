@@ -144,7 +144,6 @@ def pytest_configure(config):
             setattr(NativeTableWrite, method, tracked_write)
 
         track_write('write_arrow_batch')
-        track_write('write_arrow_batch_to_bucket')
 
     if _native_commit_enabled():
         from pypaimon.write.table_commit import TableCommit

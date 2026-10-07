@@ -71,7 +71,7 @@ def test_native_precomputed_fixed_bucket_after_regular_write(tmp_path, streaming
     try:
         with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')):
             writer.write_arrow_batch(_batch([1], ['regular']))
-            writer.write_arrow_batch_to_bucket(_batch([2, 2], ['old', 'new']), 3)
+            writer.write_arrow(_batch([2, 2], ['old', 'new']), bucket=3)
             messages = writer.prepare_commit(7) if streaming else writer.prepare_commit()
         assert any(message.bucket == 3 for message in messages)
         commit = builder.new_commit()
@@ -94,8 +94,7 @@ def test_native_dynamic_index_keeps_upstream_bucket_on_restart(tmp_path, partiti
         assert isinstance(writer, NativeTableWrite)
         try:
             with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')):
-                assert writer.with_dynamic_bucket_index() is writer
-                writer.write_arrow_batch_to_bucket(_batch(ids, values), 17)
+                writer.write_arrow(_batch(ids, values), bucket=17)
                 messages = writer.prepare_commit()
             assert {message.bucket for message in messages} == {17}
             builder.new_commit().commit(messages)
@@ -110,30 +109,21 @@ def test_native_dynamic_index_keeps_upstream_bucket_on_restart(tmp_path, partiti
                             {'id': 3, 'value': 'three', 'pt': 'a'}]
 
 
-def _hashes(table, batch):
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
-
-    extractor = DynamicBucketRowKeyExtractor(table.table_schema)
-    return extractor.extract_hashes_batch(batch)[2]
-
-
 @pytest.mark.parametrize('streaming', [False, True])
 @pytest.mark.parametrize('partitioned', [False, True])
-def test_supplied_java_hashes_and_new_mapping_flags(tmp_path, streaming, partitioned):
+def test_native_computes_java_hashes_for_multiple_batches(tmp_path, streaming, partitioned):
     table = _table(tmp_path, -1, partitioned)
     builder = (table.new_stream_write_builder() if streaming
                else table.new_batch_write_builder())
+    builder.with_index_restore_snapshot(0)
     writer = builder.new_write()
     first = _batch([1, 2], ['one', 'two'])
-    # PyPaimon carries unsigned BinaryRow hashes through the Daft shuffle.
-    first_hashes = [value & 0xffffffff for value in _hashes(table, first)]
     try:
         with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')):
-            writer.with_dynamic_bucket_index(base_snapshot_id=0)
-            writer.write_arrow_batch_to_bucket(first, 12, first_hashes, [True, True])
+            writer.write_arrow(first, bucket=12)
             # A second batch can refer to this writer's uncommitted mappings.
             updated = _batch([2, 3], ['updated', 'three'])
-            writer.write_arrow_batch_to_bucket(updated, 12, _hashes(table, updated), [False, True])
+            writer.write_arrow(updated, bucket=12)
             messages = writer.prepare_commit(8) if streaming else writer.prepare_commit()
         assert len(messages) == 1
         assert messages[0].index_adds[0].index_file.row_count == 3
@@ -155,24 +145,17 @@ def test_supplied_java_hashes_and_new_mapping_flags(tmp_path, streaming, partiti
 
 
 @pytest.mark.parametrize('bucket', [4, -1])
-@pytest.mark.parametrize('invalid', ['bucket', 'hash_count', 'flag_count', 'flags_without_hashes', 'partition'])
+@pytest.mark.parametrize('invalid', ['bucket', 'partition'])
 def test_invalid_precomputed_group_cannot_stage_half_a_partition(tmp_path, bucket, invalid):
     table = _table(tmp_path, bucket, partitioned=True)
     writer = table.new_batch_write_builder().new_write()
     batch = _batch([1, 2], ['a', 'b'])
-    args = {
-        'bucket': (-1, None, None),
-        'hash_count': (0, [1], None),
-        'flag_count': (0, [1, 2], [True]),
-        'flags_without_hashes': (0, None, [True, True]),
-        'partition': (0, None, None),
-    }
     if invalid == 'partition':
         batch = _batch([1, 2], ['a', 'b'], ['a', 'b'])
     try:
         with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')):
             with pytest.raises(ValueError):
-                writer.write_arrow_batch_to_bucket(batch, *args[invalid])
+                writer.write_arrow(batch, bucket=-1 if invalid == 'bucket' else 0)
             assert writer.prepare_commit() == []
     finally:
         writer.close()
@@ -187,8 +170,8 @@ def test_precomputed_append_projects_full_or_selected_schema(tmp_path):
     try:
         with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')):
             writer.with_write_type(['pt', 'id'])
-            writer.write_arrow_batch_to_bucket(_batch([1], ['omitted']), 3)
-            writer.write_arrow_batch_to_bucket(_batch([2], ['omitted']).select(['pt', 'id']), 3)
+            writer.write_arrow(_batch([1], ['omitted']), bucket=3)
+            writer.write_arrow(_batch([2], ['omitted']).select(['pt', 'id']), bucket=3)
             messages = writer.prepare_commit()
         assert {message.bucket for message in messages} == {3}
         assert all(file.write_cols == ['pt', 'id'] for message in messages for file in message.new_files)
@@ -207,9 +190,8 @@ def test_pinned_dynamic_configuration_survives_early_python_selection(tmp_path):
     initial.new_commit().commit(first.prepare_commit())
     first.close()
     pinned_id = table.snapshot_manager().get_latest_snapshot().id
-    writer = table.new_batch_write_builder().new_write()
+    writer = table.new_batch_write_builder().with_index_restore_snapshot(pinned_id).new_write()
     try:
-        assert writer.with_dynamic_bucket_index() is writer
         later = table.new_batch_write_builder()
         second = later.new_write()
         second.write_arrow_batch(_batch([2], ['later']))
@@ -222,16 +204,20 @@ def test_pinned_dynamic_configuration_survives_early_python_selection(tmp_path):
         writer.close()
 
 
-@pytest.mark.parametrize('ignore_existing', [False, True])
-def test_dynamic_index_configuration_is_locked_after_input(tmp_path, ignore_existing):
+@pytest.mark.parametrize('streaming', [False, True])
+def test_builder_snapshot_configuration_is_copied_to_each_writer(tmp_path, streaming):
     table = _table(tmp_path, -1)
-    writer = table.new_batch_write_builder().new_write()
+    builder = (table.new_stream_write_builder() if streaming
+               else table.new_batch_write_builder())
+    assert builder.with_index_restore_snapshot(0) is builder
+    writer = builder.new_write()
     try:
-        writer.write_arrow_batch_to_bucket(_batch([], []), 0, [], [])
-        assert writer.with_dynamic_bucket_index(ignore_existing=ignore_existing) is writer
-        writer.write_arrow_batch_to_bucket(_batch([1], ['one']), 0)
-        with pytest.raises(RuntimeError, match='before writing'):
-            writer.with_dynamic_bucket_index()
+        writer.write_arrow(_batch([], []), bucket=0)
+        # Later builder configuration must not alter a writer already created.
+        builder.with_index_restore_snapshot(99)
+        writer.write_arrow(_batch([1], ['one']), bucket=0)
+        messages = writer.prepare_commit(1) if streaming else writer.prepare_commit()
+        assert messages[0].index_adds[0].index_file.row_count == 1
     finally:
         writer.close()
 
@@ -241,13 +227,13 @@ def test_native_hash_mapping_conflict_poisoned_writer_preserves_prepared_files(t
     builder = table.new_stream_write_builder()
     writer = builder.new_write()
     try:
-        writer.write_arrow_batch_to_bucket(_batch([1], ['published']), 7)
+        writer.write_arrow(_batch([1], ['published']), bucket=7)
         messages = writer.prepare_commit(1)
         builder.new_commit().commit(messages, 1)
         paths = [file.file_path for message in messages for file in message.new_files]
-        writer.write_arrow_batch_to_bucket(_batch([2], ['pending']), 7)
+        writer.write_arrow(_batch([2], ['pending']), bucket=7)
         with pytest.raises(ValueError, match='belongs to bucket 7'):
-            writer.write_arrow_batch_to_bucket(_batch([2], ['conflict']), 8)
+            writer.write_arrow(_batch([2], ['conflict']), bucket=8)
         with pytest.raises(ValueError, match='cannot be reused'):
             writer.prepare_commit(2)
         assert all(table.file_io.exists(path) for path in paths)
@@ -259,16 +245,15 @@ def test_native_hash_mapping_conflict_poisoned_writer_preserves_prepared_files(t
 @pytest.mark.parametrize('publish_first', [False, True])
 def test_native_checkpoint_sequence_advances_with_pinned_index_base(tmp_path, publish_first):
     table = _table(tmp_path, -1)
-    builder = table.new_stream_write_builder()
+    builder = table.new_stream_write_builder().with_index_restore_snapshot(0)
     writer = builder.new_write()
     commit = builder.new_commit()
     try:
-        writer.with_dynamic_bucket_index(base_snapshot_id=0)
-        writer.write_arrow_batch_to_bucket(_batch([2, 1], ['other', 'old']), 7)
+        writer.write_arrow(_batch([2, 1], ['other', 'old']), bucket=7)
         first = writer.prepare_commit(1)
         if publish_first:
             commit.commit(first, 1)
-        writer.write_arrow_batch_to_bucket(_batch([1], ['new']), 7)
+        writer.write_arrow(_batch([1], ['new']), bucket=7)
         second = writer.prepare_commit(2)
         assert second[0].new_files[0].min_sequence_number == 2
         if not publish_first:
@@ -285,22 +270,60 @@ def test_first_native_sequence_uses_current_files_not_index_base(tmp_path):
     table = _table(tmp_path, -1)
     first_builder = table.new_batch_write_builder()
     first = first_builder.new_write()
-    first.write_arrow_batch_to_bucket(_batch([1], ['old']), 7)
+    first.write_arrow(_batch([1], ['old']), bucket=7)
     first_builder.new_commit().commit(first.prepare_commit())
     first.close()
-    builder = table.new_batch_write_builder()
+    builder = table.new_batch_write_builder().with_index_restore_snapshot(1)
     pinned = builder.new_write()
     try:
-        pinned.with_dynamic_bucket_index(base_snapshot_id=1)
         later_builder = table.new_batch_write_builder()
         later = later_builder.new_write()
-        later.write_arrow_batch_to_bucket(_batch([1, 1, 1], ['b', 'c', 'd']), 7)
+        later.write_arrow(_batch([1, 1, 1], ['b', 'c', 'd']), bucket=7)
         later_builder.new_commit().commit(later.prepare_commit())
         later.close()
-        pinned.write_arrow_batch_to_bucket(_batch([1], ['new']), 7)
+        pinned.write_arrow(_batch([1], ['new']), bucket=7)
         messages = pinned.prepare_commit()
         assert messages[0].new_files[0].min_sequence_number == 4
         builder.new_commit().commit(messages)
     finally:
         pinned.close()
     assert _rows(table) == [{'id': 1, 'value': 'new', 'pt': 'a'}]
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('bucket_mode', [4, -1])
+def test_arrow_table_keeps_explicit_zero_bucket_across_chunks(tmp_path, streaming, bucket_mode):
+    table = _table(tmp_path, bucket_mode)
+    builder = (table.new_stream_write_builder() if streaming
+               else table.new_batch_write_builder())
+    writer = builder.new_write()
+    data = pa.Table.from_batches([_batch([1, 2], ['old', 'other']), _batch([1], ['new'])])
+    assert len(data.to_batches()) == 2
+    try:
+        with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python fallback')):
+            writer.write_arrow(data, bucket=0)
+            messages = writer.prepare_commit(1) if streaming else writer.prepare_commit()
+        assert {message.bucket for message in messages} == {0}
+        commit = builder.new_commit()
+        try:
+            commit.commit(messages, 1) if streaming else commit.commit(messages)
+        finally:
+            commit.close()
+    finally:
+        writer.close()
+    assert _rows(table) == [{'id': 1, 'value': 'new', 'pt': 'a'},
+                            {'id': 2, 'value': 'other', 'pt': 'a'}]
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+def test_builder_rejects_invalid_index_snapshot_before_native_selection(tmp_path, streaming):
+    table = _table(tmp_path, -1)
+    builder = (table.new_stream_write_builder() if streaming
+               else table.new_batch_write_builder())
+    for value in [-1, True, None, '1']:
+        with pytest.raises(ValueError, match='nonnegative integer'):
+            builder.with_index_restore_snapshot(value)
+    fixed = _table(tmp_path / 'fixed', 4)
+    with pytest.raises(ValueError, match='HASH_DYNAMIC'):
+        fixed.new_batch_write_builder().with_index_restore_snapshot(0)
+    assert table.snapshot_manager().get_latest_snapshot() is None

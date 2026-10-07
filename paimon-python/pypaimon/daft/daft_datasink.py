@@ -519,7 +519,6 @@ def make_dynamic_bucket_assignment_udf(
     num_assigners: int,
     bucket_column: str,
     key_hash_column: str,
-    new_mapping_column: str,
     base_snapshot_column: str,
     ignore_existing: bool = False,
     base_snapshot_id: int | None = None,
@@ -549,9 +548,7 @@ def make_dynamic_bucket_assignment_udf(
         field.name: DataType.from_arrow_type(field.type)
         for field in output_fields
     }
-    return_fields[key_hash_column] = DataType.int32()
     return_fields[bucket_column] = DataType.int32()
-    return_fields[new_mapping_column] = DataType.bool()
     return_fields[base_snapshot_column] = DataType.int64()
 
     @daft.func.batch(
@@ -566,9 +563,7 @@ def make_dynamic_bucket_assignment_udf(
                 pa.array([], type=pa.struct([
                     pa.field(field.name, field.type) for field in output_fields
                 ] + [
-                    pa.field(key_hash_column, pa.int32()),
                     pa.field(bucket_column, pa.int32()),
-                    pa.field(new_mapping_column, pa.bool_()),
                     pa.field(base_snapshot_column, pa.int64()),
                 ]))
             )
@@ -598,25 +593,21 @@ def make_dynamic_bucket_assignment_udf(
             base_snapshot_id=base_snapshot_id,
         )
         buckets = []
-        new_mappings = []
         offset = 0
         for batch in arrow_table.to_batches():
             batch_hashes = key_hash_values[offset:offset + batch.num_rows]
-            _, batch_buckets, batch_new_mappings = (
+            _, batch_buckets, _ = (
                 extractor.extract_partition_bucket_status_from_hashes_batch(
                     batch, batch_hashes
                 )
             )
             buckets.extend(batch_buckets)
-            new_mappings.extend(batch_new_mappings)
             offset += batch.num_rows
         arrays = [
             arrow_table.column(field.name).combine_chunks()
             for field in output_fields
         ]
-        arrays.append(pa.array(key_hash_values, type=pa.int32()))
         arrays.append(pa.array(buckets, type=pa.int32()))
-        arrays.append(pa.array(new_mappings, type=pa.bool_()))
         arrays.append(pa.array(
             [extractor.base_snapshot_id] * arrow_table.num_rows,
             type=pa.int64(),
@@ -625,9 +616,7 @@ def make_dynamic_bucket_assignment_udf(
             pa.StructArray.from_arrays(
                 arrays,
                 names=[field.name for field in output_fields] + [
-                    key_hash_column,
                     bucket_column,
-                    new_mapping_column,
                     base_snapshot_column,
                 ],
             )
@@ -667,8 +656,6 @@ def make_group_write_udf(
     def _write_group(*columns) -> Series:
         data_columns = columns[:data_column_count]
         bucket = None
-        key_hash_values = None
-        new_mapping_values = None
         group_base_snapshot_id = base_snapshot_id
         if precomputed_bucket:
             bucket_values = columns[data_column_count].to_pylist()
@@ -680,11 +667,7 @@ def make_group_write_udf(
                     "A Paimon write group contained multiple buckets"
                 )
             if dynamic_bucket:
-                key_hash_values = columns[data_column_count + 1].to_pylist()
-                new_mapping_values = columns[data_column_count + 2].to_pylist()
-                base_snapshot_values = columns[
-                    data_column_count + 3
-                ].to_pylist()
+                base_snapshot_values = columns[data_column_count + 1].to_pylist()
                 observed_base_snapshot_id = base_snapshot_values[0]
                 if any(
                     value != observed_base_snapshot_id
@@ -714,33 +697,13 @@ def make_group_write_udf(
             write_builder.commit_user = commit_user
         if mode == "overwrite":
             write_builder.overwrite({})
-        table_write = write_builder.new_write()
         if precomputed_bucket and dynamic_bucket:
-            table_write.with_dynamic_bucket_index(
-                ignore_existing=mode == "overwrite",
-                base_snapshot_id=group_base_snapshot_id,
-            )
+            write_builder.with_index_restore_snapshot(group_base_snapshot_id)
+        table_write = write_builder.new_write()
         commit_messages = []
         try:
             if precomputed_bucket:
-                offset = 0
-                for batch in arrow_table.to_batches():
-                    batch_hashes = None
-                    batch_new_mappings = None
-                    if key_hash_values is not None:
-                        batch_hashes = key_hash_values[
-                            offset:offset + batch.num_rows
-                        ]
-                        batch_new_mappings = new_mapping_values[
-                            offset:offset + batch.num_rows
-                        ]
-                    table_write.write_arrow_batch_to_bucket(
-                        batch,
-                        bucket,
-                        batch_hashes,
-                        batch_new_mappings,
-                    )
-                    offset += batch.num_rows
+                table_write.write_arrow(arrow_table, bucket=bucket)
             else:
                 table_write.write_arrow(arrow_table)
             commit_messages = table_write.prepare_commit()

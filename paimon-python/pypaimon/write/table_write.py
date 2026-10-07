@@ -36,13 +36,15 @@ if TYPE_CHECKING:
 
 
 class TableWrite:
-    def __init__(self, table, commit_user, static_partition: Optional[dict] = None):
+    def __init__(self, table, commit_user, static_partition: Optional[dict] = None,
+                 *, index_restore_snapshot_id=None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
         self.commit_user = commit_user
         self.static_partition = static_partition
+        self.index_restore_snapshot_id = index_restore_snapshot_id
         self.file_store_write = self._create_file_store_write(commit_user)
         if static_partition is not None:
             # An overwrite replaces state, not an input changelog. Java's
@@ -55,17 +57,27 @@ class TableWrite:
         return FileStoreWrite(self.table, commit_user)
 
     def _create_row_key_extractor(self, static_partition):
+        if self.index_restore_snapshot_id is not None:
+            from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+            return DynamicBucketRowKeyExtractor(
+                self.table.table_schema, table=self.table,
+                ignore_existing=static_partition is not None,
+                base_snapshot_id=self.index_restore_snapshot_id)
         return self.table.create_row_key_extractor(
             ignore_existing=static_partition is not None
         )
 
-    def write_arrow(self, table: pa.Table):
-        table = self._prepare_arrow_data(table)
-        batches_iterator = table.to_batches()
-        for batch in batches_iterator:
-            self.write_arrow_batch(batch)
+    def write_arrow(self, data, bucket: Optional[int] = None):
+        """Write Arrow data, optionally to a bucket assigned upstream."""
+        self._validate_pyarrow_schema(data.schema)
+        if isinstance(data, pa.RecordBatch):
+            return self.write_arrow_batch(data, bucket)
+        for batch in data.to_batches():
+            self.write_arrow_batch(batch, bucket)
 
-    def write_arrow_batch(self, data: pa.RecordBatch):
+    def write_arrow_batch(self, data: pa.RecordBatch, bucket: Optional[int] = None):
+        if bucket is not None:
+            return self._write_precomputed_bucket(data, bucket)
         data = self._prepare_arrow_data(data)
 
         for partition, bucket, row_indices in \
@@ -102,40 +114,8 @@ class TableWrite:
     def _write_partition_bucket_batch(self, partition, bucket, data):
         self.file_store_write.write(partition, bucket, data)
 
-    def with_dynamic_bucket_index(
-        self,
-        ignore_existing: bool = False,
-        base_snapshot_id: Optional[int] = None,
-    ):
-        """Enable persistent HASH-index maintenance for coordinated writes."""
-        from pypaimon.table.bucket_mode import BucketMode
-        from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
-
-        if self.table.bucket_mode() != BucketMode.HASH_DYNAMIC:
-            raise ValueError(
-                "Dynamic bucket index maintenance is only valid for "
-                "HASH_DYNAMIC tables"
-            )
-        if self.file_store_write.data_writers:
-            raise RuntimeError(
-                "Dynamic bucket index maintenance must be enabled before writing"
-            )
-        self.row_key_extractor = DynamicBucketRowKeyExtractor(
-            self.table.table_schema,
-            table=self.table,
-            ignore_existing=ignore_existing,
-            base_snapshot_id=base_snapshot_id,
-        )
-        return self
-
-    def write_arrow_batch_to_bucket(
-        self,
-        data: pa.RecordBatch,
-        bucket: int,
-        key_hashes: Optional[List[int]] = None,
-        new_mappings: Optional[List[bool]] = None,
-    ):
-        """Write one complete group whose bucket was computed upstream."""
+    def _write_precomputed_bucket(self, data, bucket):
+        """Write one partition/bucket group using normal index maintenance."""
         from pypaimon.table.bucket_mode import BucketMode
         from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
@@ -148,54 +128,20 @@ class TableWrite:
         if not isinstance(self.row_key_extractor, DynamicBucketRowKeyExtractor):
             if bucket_mode == BucketMode.HASH_DYNAMIC:
                 raise RuntimeError("Dynamic bucket extractor is not configured")
-        row_count = data.num_rows
-        data, selection = self._prepare_arrow_data_with_selection(data)
-        if new_mappings is not None and key_hashes is None:
-            raise ValueError('Precomputed new-mapping flags require key hashes')
-        for kind, values in [('key hash', key_hashes), ('new-mapping', new_mappings)]:
-            if values is not None and len(values) != row_count:
-                raise ValueError('Precomputed {} count {} does not match row count {}'.format(
-                    kind, len(values), row_count))
-        if selection is not None:
-            if key_hashes is not None:
-                key_hashes = [value for value, keep in zip(key_hashes, selection) if keep]
-            if new_mappings is not None:
-                new_mappings = [value for value, keep in zip(new_mappings, selection) if keep]
+        from pypaimon.index.dynamic_bucket import MAX_DYNAMIC_BUCKETS
+        upper_bound = MAX_DYNAMIC_BUCKETS if bucket_mode == BucketMode.HASH_DYNAMIC else self.table.options.bucket()
+        if not 0 <= bucket < upper_bound:
+            raise ValueError('Bucket id must be between 0 and {}'.format(upper_bound - 1))
+        data = self._prepare_arrow_data(data)
         if bucket_mode == BucketMode.HASH_DYNAMIC:
-            if key_hashes is None:
-                partition = self.row_key_extractor.notify_precomputed_bucket_batch(
-                    data, bucket
-                )
-            else:
-                partition = (
-                    self.row_key_extractor
-                    .notify_precomputed_bucket_hashes_batch(
-                        data,
-                        bucket,
-                        key_hashes,
-                        new_mappings=new_mappings,
-                    )
-                )
+            partition = self.row_key_extractor.notify_precomputed_bucket_batch(data, bucket)
         else:
-            if key_hashes is not None:
-                raise ValueError(
-                    "Precomputed key hashes are only valid for HASH_DYNAMIC tables"
-                )
-            if new_mappings is not None:
-                raise ValueError(
-                    "Precomputed new-mapping flags are only valid for "
-                    "HASH_DYNAMIC tables"
-                )
             partitions = self.row_key_extractor.extract_partitions_batch(data)
             if not partitions:
                 return
             partition = tuple(partitions[0])
-            for actual_partition in partitions[1:]:
-                if tuple(actual_partition) != partition:
-                    raise RuntimeError(
-                        "A precomputed fixed-bucket group contained multiple "
-                        f"partitions: expected {partition}, got {actual_partition}"
-                    )
+            if any(tuple(actual) != partition for actual in partitions):
+                raise ValueError('A precomputed bucket group contained multiple partitions')
         if partition is None:
             return
         self._write_partition_bucket_batch(partition, bucket, data)
@@ -359,17 +305,14 @@ class TableWrite:
             release()
 
     def _prepare_arrow_data(self, data):
-        return self._prepare_arrow_data_with_selection(data)[0]
-
-    def _prepare_arrow_data_with_selection(self, data):
         self._validate_pyarrow_schema(data.schema)
         data = normalize_arrow_strings(data)
         # Schema-only writers can normalize input without table options.
         table = getattr(self, 'table', None)
         if table is None:
-            return data, None
-        from pypaimon.write.row_kind import filter_write_batch_with_selection
-        return filter_write_batch_with_selection(table, data)
+            return data
+        from pypaimon.write.row_kind import filter_write_batch
+        return filter_write_batch(table, data)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
@@ -402,8 +345,10 @@ class TableWrite:
 
 
 class BatchTableWrite(TableWrite):
-    def __init__(self, table, commit_user, static_partition: Optional[dict] = None):
-        super().__init__(table, commit_user, static_partition)
+    def __init__(self, table, commit_user, static_partition: Optional[dict] = None,
+                 *, index_restore_snapshot_id=None):
+        super().__init__(table, commit_user, static_partition,
+                         index_restore_snapshot_id=index_restore_snapshot_id)
         self.batch_committed = False
 
     def prepare_commit(self) -> List[CommitMessage]:
@@ -415,8 +360,9 @@ class BatchTableWrite(TableWrite):
 
 class StreamTableWrite(TableWrite):
 
-    def __init__(self, table, commit_user):
-        super().__init__(table, commit_user, None)
+    def __init__(self, table, commit_user, *, index_restore_snapshot_id=None):
+        super().__init__(table, commit_user, None,
+                         index_restore_snapshot_id=index_restore_snapshot_id)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         return self._prepare_commit(commit_identifier)
