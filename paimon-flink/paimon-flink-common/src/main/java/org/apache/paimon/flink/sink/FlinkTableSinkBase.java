@@ -25,16 +25,21 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,7 +55,13 @@ import static org.apache.paimon.CoreOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SORT_IN_CLUSTER;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CHANGELOG_AS_APPEND;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CHANGELOG_KIND_FIELD;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CHANGELOG_TIME_FIELD;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
+import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /** Table sink to create sink. */
 public abstract class FlinkTableSinkBase
@@ -75,6 +86,12 @@ public abstract class FlinkTableSinkBase
 
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
+        if (changelogAsAppend()) {
+            validateChangelogAsAppend();
+            // Event materialization needs before-images and full deletes, even if the source
+            // advertises an upsert changelog. Do not enable the key-only deletes capability.
+            return ChangelogMode.all();
+        }
         if (table.primaryKeys().isEmpty()) {
             // Don't check this, for example, only inserts are available from the database, but the
             // plan phase contains all changelogs
@@ -126,6 +143,9 @@ public abstract class FlinkTableSinkBase
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
+        if (changelogAsAppend()) {
+            validateChangelogAsAppend();
+        }
         if (overwrite && !context.isBounded()) {
             throw new UnsupportedOperationException(
                     "Paimon doesn't support streaming INSERT OVERWRITE.");
@@ -148,10 +168,24 @@ public abstract class FlinkTableSinkBase
         return new PaimonDataStreamSinkProvider(
                 (dataStream) -> {
                     FlinkSinkBuilder builder = createSinkBuilder();
-                    builder.forRowData(
+                    DataStream<RowData> input =
                             new DataStream<>(
                                     dataStream.getExecutionEnvironment(),
-                                    dataStream.getTransformation()));
+                                    dataStream.getTransformation());
+                    if (changelogAsAppend()) {
+                        RowType rowType = (RowType) toLogicalType(table.rowType());
+                        SingleOutputStreamOperator<RowData> materialized =
+                                input.map(
+                                                new ChangelogAsAppend(
+                                                        rowType,
+                                                        conf.get(SINK_CHANGELOG_KIND_FIELD),
+                                                        conf.get(SINK_CHANGELOG_TIME_FIELD)))
+                                        .returns(InternalTypeInfo.of(rowType))
+                                        .name("Materialize changelog as append");
+                        forwardParallelism(materialized, input);
+                        input = materialized;
+                    }
+                    builder.forRowData(input);
                     if (!conf.get(CLUSTERING_INCREMENTAL)
                             || conf.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE)) {
                         builder.clusteringIfPossible(
@@ -168,6 +202,30 @@ public abstract class FlinkTableSinkBase
                 },
                 name,
                 table);
+    }
+
+    private boolean changelogAsAppend() {
+        return Options.fromMap(table.options()).get(SINK_CHANGELOG_AS_APPEND);
+    }
+
+    private void validateChangelogAsAppend() {
+        Options options = Options.fromMap(table.options());
+        if (!(table instanceof FileStoreTable)
+                || !table.primaryKeys().isEmpty()
+                || overwrite
+                || options.get(CoreOptions.IGNORE_DELETE)
+                || options.get(SINK_KEY_ONLY_DELETES_ENABLED)
+                || table.options().containsKey(CoreOptions.ROWKIND_FIELD.key())) {
+            throw new IllegalArgumentException(
+                    "sink.changelog-as-append requires a non-keyed FileStoreTable without "
+                            + "overwrite, ignore-delete, rowkind.field or key-only deletes.");
+        }
+        String kind = options.get(SINK_CHANGELOG_KIND_FIELD);
+        String time = options.get(SINK_CHANGELOG_TIME_FIELD);
+        if (table.partitionKeys().contains(kind) || table.partitionKeys().contains(time)) {
+            throw new IllegalArgumentException("Changelog metadata cannot be partition fields.");
+        }
+        new ChangelogAsAppend((RowType) toLogicalType(table.rowType()), kind, time);
     }
 
     protected FlinkSinkBuilder createSinkBuilder() {

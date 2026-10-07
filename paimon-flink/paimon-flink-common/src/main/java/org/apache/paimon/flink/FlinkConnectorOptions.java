@@ -38,6 +38,36 @@ import static org.apache.paimon.options.description.TextElement.text;
 /** Options for flink connector. */
 public class FlinkConnectorOptions {
 
+    public static final ConfigOption<Boolean> SINK_CHANGELOG_AS_APPEND =
+            key("sink.changelog-as-append")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Materialize each received INSERT, UPDATE_BEFORE, UPDATE_AFTER and DELETE "
+                                    + "payload as an independent INSERT event in a non-keyed file-store table. "
+                                    + "Duplicate payloads are retained. Requires explicit kind and time fields; "
+                                    + "does not support overwrite, ignore-delete, rowkind.field or key-only deletes. "
+                                    + "Only applies to the Flink SQL table sink. Disabled by default.");
+
+    public static final ConfigOption<String> SINK_CHANGELOG_KIND_FIELD =
+            key("sink.changelog-as-append.kind-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Nullable physical STRING field populated with the original Flink row kind "
+                                    + "when sink.changelog-as-append is enabled. Must accommodate UPDATE_BEFORE "
+                                    + "and cannot be a partition field. The sink overwrites the supplied value.");
+
+    public static final ConfigOption<String> SINK_CHANGELOG_TIME_FIELD =
+            key("sink.changelog-as-append.time-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Nullable physical BIGINT field populated with conversion-time epoch milliseconds "
+                                    + "when sink.changelog-as-append is enabled. Cannot be a partition field. "
+                                    + "The sink overwrites the supplied value. This is not source event time or "
+                                    + "commit time; replay may assign a new timestamp.");
+
     public static final String NONE = "none";
 
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon.";
