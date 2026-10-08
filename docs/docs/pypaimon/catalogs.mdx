@@ -172,15 +172,14 @@ Use this catalog for the database and table operations below.
 
 ## OSS and custom S3 checksums
 
-With PyArrow 22+, PyArrow-backed OSS or S3 clients with an explicit endpoint
-(including AWS endpoints) default `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED`
-process-wide. Explicit values take precedence: `WHEN_SUPPORTED` retains optional checksums
-and may remain incompatible with the endpoint. Older PyArrow versions and required
-checksums are unaffected.
+On PyArrow 22+, PyArrow-backed OSS or S3 with an explicit endpoint (including AWS)
+automatically defaults `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` process-wide.
+Explicit values win; `WHEN_SUPPORTED` may still cause incompatibility. Older PyArrow
+versions and required checksums are unchanged.
 
-Set `fs.s3.checksum-compatibility.auto-configure=false` on all relevant catalogs before
-creating any S3 clients to disable automatic configuration. It neither clears an existing
-process setting nor provides per-client checksum isolation.
+To disable auto-configuration, set `fs.s3.checksum-compatibility.auto-configure=false`
+on all relevant catalogs before creating clients. This neither clears existing settings
+nor isolates clients.
 
 ## Create Database
 
