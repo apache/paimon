@@ -224,7 +224,7 @@ public class CompactReassignReuseTest extends TableTestBase {
         for (DataSplit split :
                 GlobalIndexBuilderUtils.splitByContiguousRowRange(
                         new SortedGlobalIndexScanner(table, "btree")
-                                .withIndexField("id")
+                                .withIndexFields(Collections.singletonList("id"))
                                 .scan()
                                 .get()
                                 .entries())) {
@@ -249,7 +249,7 @@ public class CompactReassignReuseTest extends TableTestBase {
         DataSplit split =
                 GlobalIndexBuilderUtils.splitByContiguousRowRange(
                                 new SortedGlobalIndexScanner(table, "btree")
-                                        .withIndexField("id")
+                                        .withIndexFields(Collections.singletonList("id"))
                                         .scan()
                                         .get()
                                         .entries())
