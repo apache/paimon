@@ -50,6 +50,32 @@ docs.create_index("embedding", index_type="ivf-pq")
 docs.create_index("content", index_type="full-text")
 ```
 
+### Build vector indexes with Ray
+
+Pass `execution="ray"` to distribute native vector-index shards across Ray
+workers. BTree, Bitmap and full-text builds still use local execution.
+
+```python
+docs.create_index(
+    "embedding", index_type="ivf-flat",
+    options={"global-index.row-count-per-shard": "1000000"},
+    execution="ray", concurrency=4, ray_remote_args={"num_cpus": 1},
+)
+```
+
+The driver plans uncovered row ranges from one snapshot. Workers build files;
+the driver publishes their index entries in one commit after all shards succeed.
+`concurrency` bounds running shards; `global-index.build.parallelism` controls
+only local thread-based builds. Install the same `pypaimon[ray,vindex]`
+dependencies on every worker and use storage accessible to the entire cluster.
+
+Write tasks require `max_retries=0` and `retry_exceptions=False` (set by default).
+On a task failure, the driver stops submissions, waits for dispatched tasks,
+and removes their uncommitted output files. Rerun the build after the failure;
+already committed index coverage is skipped. Driver/cluster termination can
+still leave orphan files for normal orphan-file maintenance. Retain the source
+snapshot's files until the build and its commit finish.
+
 ## Search
 
 Use `search` for one vector query or one full-text query.
