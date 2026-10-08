@@ -57,7 +57,7 @@ class OSSRetryStrategy extends RetryStrategy {
         if (ex instanceof ClientException) {
             return RETRYABLE_CLIENT_ERRORS.contains(((ClientException) ex).getErrorCode());
         }
-        // Trust the status: a 503 whose error body fails to parse surfaces as InvalidResponse.
+        // Decide by status alone, so throttling is retried even if its error body is unreadable.
         return response != null && RETRYABLE_STATUS.contains(response.getStatusCode());
     }
 
