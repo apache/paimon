@@ -75,7 +75,7 @@ public class FileIndexProcessor {
         this.pathFactory = table.store().pathFactory();
         this.pathFactories = new DataFilePathFactories(pathFactory);
         this.schemaInfoCache = new SchemaCache(fileIndexOptions, table.schemaManager());
-        this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
+        this.sizeInMeta = Math.toIntExact(table.coreOptions().fileIndexInManifestThreshold());
     }
 
     public DataFileMeta process(BinaryRow partition, int bucket, ManifestEntry manifestEntry)

@@ -143,7 +143,7 @@ public final class DataFileIndexWriter implements Closeable {
                 }
             }
         }
-        this.inManifestThreshold = fileIndexOptions.fileIndexInManifestThreshold();
+        this.inManifestThreshold = Math.toIntExact(fileIndexOptions.fileIndexInManifestThreshold());
         this.formatVersion = fileIndexOptions.formatVersion();
     }
 

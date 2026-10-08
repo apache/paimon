@@ -18,9 +18,16 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,6 +37,7 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.URL;
@@ -42,6 +50,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory.BITMAP_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Binary compatibility tests for {@link FileIndexFormat}. */
@@ -61,6 +70,27 @@ public class FileIndexFormatCompatibilityTest {
 
         byte[] constructorContainer = write(legacyClient, "writeWithConstructor", indexes);
         assertThat(read(legacyClient, "readWithConstructor", constructorContainer)).isEqualTo(42);
+
+        Method createPredicate =
+                legacyClient.getDeclaredMethod(
+                        "createPredicate", SeekableInputStream.class, RowType.class);
+        RowType rowType = RowType.builder().field("f0", DataTypes.INT()).build();
+        try (FileIndexPredicate ignored =
+                (FileIndexPredicate)
+                        createPredicate.invoke(
+                                null, new ByteArraySeekableStream(v1BitmapContainer()), rowType)) {
+            PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
+            assertThat(((BitmapIndexResult) ignored.evaluate(predicateBuilder.equal(0, 42))).get())
+                    .isEqualTo(RoaringBitmap32.bitmapOf(0));
+            assertThat(ignored.evaluate(predicateBuilder.equal(0, 43)).remain()).isFalse();
+        }
+
+        Method coreThreshold = legacyClient.getDeclaredMethod("coreThreshold", CoreOptions.class);
+        assertThat((long) coreThreshold.invoke(null, new CoreOptions(new Options())))
+                .isEqualTo(500L);
+        Method fileIndexThreshold =
+                legacyClient.getDeclaredMethod("fileIndexThreshold", FileIndexOptions.class);
+        assertThat((long) fileIndexThreshold.invoke(null, new FileIndexOptions())).isEqualTo(500L);
     }
 
     private byte[] write(
@@ -87,11 +117,28 @@ public class FileIndexFormatCompatibilityTest {
         return (int) readMetadata.invoke(null, new ByteArraySeekableStream(container));
     }
 
+    private byte[] v1BitmapContainer() throws IOException {
+        FileIndexWriter indexWriter =
+                new BitmapFileIndex(DataTypes.INT(), new Options()).createWriter();
+        indexWriter.writeRecord(42);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(output, 1)) {
+            writer.writeIndex("f0", BITMAP_INDEX, indexWriter::writeTo);
+            writer.finish();
+        }
+        return output.toByteArray();
+    }
+
     private Class<?> compileLegacyClient() throws Exception {
         Path sourceDirectory = temporaryDirectory.resolve("source");
         Path classesDirectory = temporaryDirectory.resolve("classes");
         Path oldFormat =
                 sourceDirectory.resolve("org/apache/paimon/fileindex/FileIndexFormat.java");
+        Path oldPredicate =
+                sourceDirectory.resolve("org/apache/paimon/fileindex/FileIndexPredicate.java");
+        Path oldCoreOptions = sourceDirectory.resolve("org/apache/paimon/CoreOptions.java");
+        Path oldFileIndexOptions =
+                sourceDirectory.resolve("org/apache/paimon/fileindex/FileIndexOptions.java");
         Path legacyClient =
                 sourceDirectory.resolve(
                         "org/apache/paimon/fileindex/compatible/LegacyFileIndexFormatClient.java");
@@ -132,13 +179,45 @@ public class FileIndexFormatCompatibilityTest {
                         "}"),
                 StandardCharsets.UTF_8);
         Files.write(
+                oldPredicate,
+                Arrays.asList(
+                        "package org.apache.paimon.fileindex;",
+                        "import java.io.Closeable;",
+                        "import java.io.IOException;",
+                        "import org.apache.paimon.fs.SeekableInputStream;",
+                        "import org.apache.paimon.types.RowType;",
+                        "public class FileIndexPredicate implements Closeable {",
+                        "  public FileIndexPredicate(SeekableInputStream input, RowType type) {}",
+                        "  public void close() throws IOException {}",
+                        "}"),
+                StandardCharsets.UTF_8);
+        Files.write(
+                oldCoreOptions,
+                Arrays.asList(
+                        "package org.apache.paimon;",
+                        "public class CoreOptions {",
+                        "  public long fileIndexInManifestThreshold() { return 0; }",
+                        "}"),
+                StandardCharsets.UTF_8);
+        Files.write(
+                oldFileIndexOptions,
+                Arrays.asList(
+                        "package org.apache.paimon.fileindex;",
+                        "public class FileIndexOptions {",
+                        "  public long fileIndexInManifestThreshold() { return 0; }",
+                        "}"),
+                StandardCharsets.UTF_8);
+        Files.write(
                 legacyClient,
                 Arrays.asList(
                         "package org.apache.paimon.fileindex.compatible;",
                         "import java.io.IOException;",
                         "import java.io.OutputStream;",
                         "import java.util.Map;",
+                        "import org.apache.paimon.CoreOptions;",
                         "import org.apache.paimon.fileindex.FileIndexFormat;",
+                        "import org.apache.paimon.fileindex.FileIndexOptions;",
+                        "import org.apache.paimon.fileindex.FileIndexPredicate;",
                         "import org.apache.paimon.fs.SeekableInputStream;",
                         "import org.apache.paimon.types.RowType;",
                         "public class LegacyFileIndexFormatClient {",
@@ -179,6 +258,16 @@ public class FileIndexFormatCompatibilityTest {
                         "    }",
                         "    return reader.readAll().get(\"f0\").get(\"legacy\")[0];",
                         "  }",
+                        "  public static FileIndexPredicate createPredicate(",
+                        "      SeekableInputStream input, RowType type) {",
+                        "    return new FileIndexPredicate(input, type);",
+                        "  }",
+                        "  public static long coreThreshold(CoreOptions options) {",
+                        "    return options.fileIndexInManifestThreshold();",
+                        "  }",
+                        "  public static long fileIndexThreshold(FileIndexOptions options) {",
+                        "    return options.fileIndexInManifestThreshold();",
+                        "  }",
                         "}"),
                 StandardCharsets.UTF_8);
 
@@ -201,7 +290,11 @@ public class FileIndexFormatCompatibilityTest {
                                             "-Xlint:-options"),
                                     null,
                                     fileManager.getJavaFileObjects(
-                                            oldFormat.toFile(), legacyClient.toFile()))
+                                            oldFormat.toFile(),
+                                            oldPredicate.toFile(),
+                                            oldCoreOptions.toFile(),
+                                            oldFileIndexOptions.toFile(),
+                                            legacyClient.toFile()))
                             .call();
             assertThat(compiled).isTrue();
         }

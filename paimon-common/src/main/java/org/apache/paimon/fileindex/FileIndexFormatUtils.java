@@ -19,10 +19,13 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.Pair;
 
 import java.io.DataInput;
+import java.io.DataInputStream;
 import java.io.DataOutput;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.HashMap;
@@ -43,6 +46,18 @@ final class FileIndexFormatUtils {
         output.writeLong(MAGIC);
         // writeVersion
         output.writeInt(version);
+    }
+
+    static boolean isV2(SeekableInputStream input) throws IOException {
+        long position = input.getPos();
+        try {
+            DataInputStream dataInput = new DataInputStream(input);
+            return dataInput.readLong() == MAGIC && dataInput.readInt() == VERSION_2;
+        } catch (EOFException e) {
+            return false;
+        } finally {
+            input.seek(position);
+        }
     }
 
     static Map<String, Map<String, Pair<Long, Long>>> readIndexEntries(DataInput input, int version)

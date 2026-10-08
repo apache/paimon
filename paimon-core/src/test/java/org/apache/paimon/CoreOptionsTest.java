@@ -362,7 +362,7 @@ public class CoreOptionsTest {
         conf.set(
                 CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("2147483647 bytes"));
         assertThat(new CoreOptions(conf).fileIndexInManifestThreshold())
-                .isEqualTo(Integer.MAX_VALUE);
+                .isEqualTo((long) Integer.MAX_VALUE);
 
         conf.set(
                 CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD, MemorySize.parse("2147483648 bytes"));

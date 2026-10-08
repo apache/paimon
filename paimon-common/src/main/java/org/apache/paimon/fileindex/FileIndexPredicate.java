@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,9 +60,7 @@ public class FileIndexPredicate implements Closeable {
     @Nullable private Path path;
 
     public FileIndexPredicate(Path path, FileIO fileIO, RowType fileRowType) throws IOException {
-        long length = fileIO.getFileStatus(path).getLen();
-        this.reader =
-                FileIndexFormat.createReader(fileIO.newInputStream(path), fileRowType, length);
+        this.reader = createReader(path, fileIO, fileRowType);
         this.path = path;
     }
 
@@ -69,11 +68,39 @@ public class FileIndexPredicate implements Closeable {
         this(new ByteArraySeekableStream(serializedBytes), fileRowType, serializedBytes.length);
     }
 
+    /**
+     * @deprecated Use {@link #FileIndexPredicate(SeekableInputStream, RowType, long)} for V2
+     *     containers.
+     */
+    @Deprecated
+    public FileIndexPredicate(SeekableInputStream inputStream, RowType fileRowType) {
+        this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
+    }
+
     public FileIndexPredicate(
             SeekableInputStream inputStream, RowType fileRowType, long containerLength) {
         // createReader itself closes the stream when container validation fails, so
         // there is no stream to release here anymore.
         this.reader = FileIndexFormat.createReader(inputStream, fileRowType, containerLength);
+    }
+
+    private static FileIndexFormat.Reader createReader(
+            Path path, FileIO fileIO, RowType fileRowType) throws IOException {
+        SeekableInputStream inputStream = fileIO.newInputStream(path);
+        boolean v2;
+        long length = -1;
+        try {
+            v2 = FileIndexFormatUtils.isV2(inputStream);
+            if (v2) {
+                length = fileIO.getFileStatus(path).getLen();
+            }
+        } catch (IOException | RuntimeException e) {
+            IOUtils.closeQuietly(inputStream);
+            throw e;
+        }
+        return v2
+                ? FileIndexFormat.createReader(inputStream, fileRowType, length)
+                : FileIndexFormat.createReader(inputStream, fileRowType);
     }
 
     public FileIndexResult evaluate(@Nullable Predicate predicate) {
