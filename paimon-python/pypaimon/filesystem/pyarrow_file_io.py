@@ -110,7 +110,7 @@ class PyArrowFileIO(FileIO):
     def _configure_s3_checksums(self):
         if parse(pyarrow.__version__) < parse("22.0.0"):
             return
-        if self._uses_s3_compatibility() and self.properties.get(S3Options.CHECKSUM_COMPATIBILITY_ENABLED):
+        if self._uses_s3_compatibility() and self.properties.get(S3Options.CHECKSUM_COMPATIBILITY_AUTO_CONFIGURE):
             # Process-wide default; preserve explicit settings and do not restore it.
             os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
 

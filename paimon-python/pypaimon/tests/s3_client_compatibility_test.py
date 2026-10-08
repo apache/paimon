@@ -131,9 +131,26 @@ class S3ClientCompatibilityTest(unittest.TestCase):
         with mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
             PyArrowFileIO("s3://test-bucket/", Options({
                 "fs.s3.endpoint": "http://minio:9000",
-                "fs.s3.checksum-compatibility.enabled": "false",
+                "fs.s3.checksum-compatibility.auto-configure": "false",
             }))
         self.assertNotIn("AWS_REQUEST_CHECKSUM_CALCULATION", os.environ)
+
+    @mock.patch.object(pyarrow, "__version__", "23.0.0")
+    def test_disabling_auto_configuration_preserves_existing_process_default(self):
+        settings = []
+
+        def create_client(**kwargs):
+            settings.append(os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"))
+            return mock.Mock()
+
+        with mock.patch("pyarrow.fs.S3FileSystem", side_effect=create_client):
+            for auto_configure in ("true", "false"):
+                PyArrowFileIO("s3://test-bucket/", Options({
+                    "fs.s3.endpoint": "http://minio:9000",
+                    "fs.s3.checksum-compatibility.auto-configure": auto_configure,
+                }))
+        self.assertEqual(["WHEN_REQUIRED", "WHEN_REQUIRED"], settings)
+        self.assertEqual("WHEN_REQUIRED", os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
 
     def _new_file_io(self, scheme="s3"):
         if scheme == "oss":

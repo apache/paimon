@@ -176,8 +176,9 @@ For PyArrow 22+ OSS/custom-S3 clients, PyPaimon defaults
 `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` process-wide, preserving explicit values.
 Older PyArrow versions and required checksums are unaffected.
 
-Set `fs.s3.checksum-compatibility.enabled=false` to opt out; this does not undo an
-existing process setting.
+Set `fs.s3.checksum-compatibility.auto-configure=false` on all relevant catalogs before
+creating any S3 clients to disable automatic configuration. It neither clears an existing
+process setting nor provides per-client checksum isolation.
 
 ## Create Database
 
