@@ -333,17 +333,27 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                     this.nextSnapshotId = nextSnapshotId;
                     return;
                 }
-                // No changelog to fall back on. Keeping the expired id would make every restart
-                // fail with OutOfRangeException, so the job could never self-recover; restart the
-                // scan from the starting scanner instead.
+                if (scanMode == StreamScanMode.COMPACT_BUCKET_TABLE) {
+                    // Only the dedicated compaction job has a recovery contract that can restart
+                    // from the starting scanner: compaction is idempotent, so resuming from the
+                    // latest compact snapshot is safe. For any other consumer, resetting would
+                    // reapply the configured startup mode and silently skip snapshots that are
+                    // still retained, so keep the stalled id and let the reader surface the
+                    // expiry instead of losing data.
+                    LOG.warn(
+                            "The restored snapshot with id {} has expired for the dedicated "
+                                    + "compaction job. The earliest snapshot is {}. "
+                                    + "Falling back to the starting scanner.",
+                            nextSnapshotId,
+                            earliestSnapshotId);
+                    this.nextSnapshotId = null;
+                    return;
+                }
                 LOG.warn(
-                        "The restored snapshot with id {} has expired. "
-                                + "The earliest snapshot is {}. "
-                                + "Falling back to starting scanner.",
+                        "The restored snapshot with id {} has expired. The earliest snapshot is "
+                                + "{}. Keeping the restored id; the reader will report the expiry.",
                         nextSnapshotId,
                         earliestSnapshotId);
-                this.nextSnapshotId = null;
-                return;
             }
         }
         this.nextSnapshotId = nextSnapshotId;
