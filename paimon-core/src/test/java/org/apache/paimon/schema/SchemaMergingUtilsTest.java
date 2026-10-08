@@ -172,9 +172,11 @@ public class SchemaMergingUtilsTest {
     @Test
     public void testRejectTypeWideningOnPartitionColumn() {
         // Partition columns are equally encoded into the partition path; widening them would
-        // silently create a second partition layout for the same logical key.
+        // silently create a second partition layout for the same logical key. This uses a plain
+        // INT -> BIGINT widening with allowExplicitCast = false, so the rejection is exercised by
+        // the normal type-widening path and is independent of explicit-cast behavior.
         DataField a = new DataField(0, "a", new IntType());
-        DataField b = new DataField(1, "b", new VarCharType(VarCharType.MAX_LENGTH));
+        DataField b = new DataField(1, "b", new IntType());
         TableSchema current =
                 new TableSchema(
                         0,
@@ -185,10 +187,10 @@ public class SchemaMergingUtilsTest {
                         new HashMap<>(),
                         "");
 
-        DataField bWidened = new DataField(-1, "b", new VarCharType(100));
+        DataField bWidened = new DataField(-1, "b", new BigIntType());
         RowType t = new RowType(Lists.newArrayList(a, bWidened));
 
-        assertThatThrownBy(() -> SchemaMergingUtils.mergeSchemas(current, t, true, true, true))
+        assertThatThrownBy(() -> SchemaMergingUtils.mergeSchemas(current, t, true, false, true))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Cannot update partition column type");
     }

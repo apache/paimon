@@ -723,10 +723,14 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                 }
                 checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected2)
 
-                // Case 2: two fields with the evolved types: Int -> Long, Long -> Decimal
+                // Case 2: a non-key column evolves its type (Long -> Decimal). The primary key
+                // `a` deliberately keeps its INT type: widening a primary-key or partition column
+                // changes its bucket hash and is rejected by the merge path (see
+                // SchemaMergingUtilsTest#testRejectTypeWideningOnPrimaryKeyColumn). Key widening is
+                // exercised as a rejection case in its own test below.
                 val df3 = Seq(
-                  (2L, "b2", BigDecimal.decimal(234), Map("k" -> 22.2)),
-                  (4L, "d", BigDecimal.decimal(456), Map("k" -> 44.4))).toDF("a", "b", "c", "d")
+                  (2, "b2", BigDecimal.decimal(234), Map("k" -> 22.2)),
+                  (4, "d", BigDecimal.decimal(456), Map("k" -> 44.4))).toDF("a", "b", "c", "d")
                 df3.write
                   .format("paimon")
                   .mode("append")
@@ -734,39 +738,58 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                   .option("write.merge-schema.type-widening", "true")
                   .save(location)
                 val expected3 = if (hasPk) {
-                  Row(1L, "a2", BigDecimal.decimal(123), Map("k" -> 11.1)) :: Row(
-                    2L,
+                  Row(1, "a2", BigDecimal.decimal(123), Map("k" -> 11.1)) :: Row(
+                    2,
                     "b2",
                     BigDecimal.decimal(234),
                     Map("k" -> 22.2)) :: Row(
-                    3L,
+                    3,
                     "c",
                     BigDecimal.decimal(345),
                     Map("k" -> 33.3)) :: Row(
-                    4L,
+                    4,
                     "d",
                     BigDecimal.decimal(456),
                     Map("k" -> 44.4)) :: Nil
                 } else {
-                  Row(1L, "a", null, null) :: Row(
-                    1L,
+                  Row(1, "a", null, null) :: Row(
+                    1,
                     "a2",
                     BigDecimal.decimal(123),
-                    Map("k" -> 11.1)) :: Row(2L, "b", null, null) :: Row(
-                    2L,
+                    Map("k" -> 11.1)) :: Row(2, "b", null, null) :: Row(
+                    2,
                     "b2",
                     BigDecimal.decimal(234),
                     Map("k" -> 22.2)) :: Row(
-                    3L,
+                    3,
                     "c",
                     BigDecimal.decimal(345),
                     Map("k" -> 33.3)) :: Row(
-                    4L,
+                    4,
                     "d",
                     BigDecimal.decimal(456),
                     Map("k" -> 44.4)) :: Nil
                 }
                 checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+
+                // Case 2b: widening a primary-key column must be rejected and leave the schema
+                // and the previously committed rows unchanged.
+                if (hasPk) {
+                  val schemaIdBefore = loadTable("T").schema().id()
+                  val dfKeyWiden = Seq((2L, "b2"), (4L, "d")).toDF("a", "b")
+                  val widMsg = intercept[Exception] {
+                    dfKeyWiden.write
+                      .format("paimon")
+                      .mode("append")
+                      .option("write.merge-schema", "true")
+                      .option("write.merge-schema.type-widening", "true")
+                      .save(location)
+                  }.getMessage
+                  assert(widMsg.contains("Cannot update primary key type"))
+                  // The rejected merge must not have persisted a schema change or new rows.
+                  assert(loadTable("T").schema().id() == schemaIdBefore)
+                  checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+                }
 
                 // Case 3: insert Decimal(20,18) to Decimal(38,18)
                 val df4 = Seq((99L, "df4", BigDecimal.decimal(4.0), Map("4" -> 4.1)))
@@ -840,9 +863,10 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
             }
             checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected2)
 
-            // Case 2: a: Int -> Long, b: String -> Date, c: Long -> Int, d: Map -> String
+            // Case 2: a is kept INT (widening a primary-key column is rejected), b: String -> Date,
+            // c: Long -> Int, d: Map -> String are the evolved non-key columns.
             val date = java.sql.Date.valueOf("2023-07-31")
-            val df3 = Seq((2L, date, 234, null), (4L, date, 456, "2023-08-01 11:00:00.0")).toDF(
+            val df3 = Seq((2, date, 234, null), (4, date, 456, "2023-08-01 11:00:00.0")).toDF(
               "a",
               "b",
               "c",
@@ -866,26 +890,22 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
               .option("write.merge-schema.explicit-cast", "true")
               .save(location)
             val expected3 = if (hasPk) {
-              Row(1L, Date.valueOf("2023-08-01"), 12, ts.toString) :: Row(
-                2L,
-                date,
-                234,
-                null) :: Row(3L, Date.valueOf("2023-08-03"), 34, ts.toString) :: Row(
-                4L,
-                date,
-                456,
-                "2023-08-01 11:00:00.0") :: Nil
+              Row(1, Date.valueOf("2023-08-01"), 12, ts.toString) :: Row(2, date, 234, null) :: Row(
+                3,
+                Date.valueOf("2023-08-03"),
+                34,
+                ts.toString) :: Row(4, date, 456, "2023-08-01 11:00:00.0") :: Nil
             } else {
-              Row(1L, Date.valueOf("2023-08-01"), null, null) :: Row(
-                1L,
+              Row(1, Date.valueOf("2023-08-01"), null, null) :: Row(
+                1,
                 Date.valueOf("2023-08-01"),
                 12,
-                ts.toString) :: Row(2L, date, 234, null) :: Row(
-                2L,
+                ts.toString) :: Row(2, date, 234, null) :: Row(
+                2,
                 Date.valueOf("2023-08-02"),
                 null,
-                null) :: Row(3L, Date.valueOf("2023-08-03"), 34, ts.toString) :: Row(
-                4L,
+                null) :: Row(3, Date.valueOf("2023-08-03"), 34, ts.toString) :: Row(
+                4,
                 date,
                 456,
                 "2023-08-01 11:00:00.0") :: Nil
