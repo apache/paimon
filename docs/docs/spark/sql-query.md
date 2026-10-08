@@ -167,6 +167,33 @@ To inspect row kinds, including deletes, query the [`audit_log` system table](..
 
 ## Query Optimization
 
+### Repartition Oversized Scan Output
+
+When a Paimon batch scan has an input partition larger than the split size computed
+by `BinPackingSplits.computeMaxSplitBytes`, the optimizer inserts a shuffle immediately
+after the scan. The output partition count is `ceil(total input partition bytes / threshold)`,
+including all input partitions. The threshold reuses the scan bin-packing calculation:
+
+```text
+min(maxPartitionBytes, max(openFileCost, estimatedInputBytes / minPartitionNum))
+```
+
+`maxPartitionBytes` uses Paimon's `source.split.target-size`, falling back to an explicitly
+configured `spark.sql.files.maxPartitionBytes`, then Paimon's default split size.
+The open-file cost similarly uses `source.split.open-file-cost` or
+`spark.sql.files.openCostInBytes`. Estimated input bytes include file open costs.
+`minPartitionNum` uses `spark.sql.files.minPartitionNum`, falling back to
+`spark.sql.leafNodeDefaultParallelism` or Spark's default parallelism.
+
+Sizes are the sum of data file sizes reported by the splits in each input partition,
+including Blob file sizes. They are metadata estimates, not decoded row sizes or
+measured shuffle bytes. The rule increases parallelism for downstream operators;
+it does not split source scan tasks. It leaves streaming scans and an existing
+shuffle directly above the scan unchanged. Runtime filtering can subsequently
+reduce the scan input without changing this statically planned repartition count.
+
+### Filter Pushdown
+
 It is highly recommended to specify partition and primary key filters
 along with the query, which will speed up the data skipping of the query.
 

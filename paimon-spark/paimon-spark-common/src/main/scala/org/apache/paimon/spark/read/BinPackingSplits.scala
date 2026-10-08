@@ -232,7 +232,7 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
     }
   }
 
-  private def computeMaxSplitBytes(dataSplits: Seq[DataSplit]): Long = {
+  private[spark] def computeMaxSplitBytes(dataSplits: Seq[DataSplit]): Long = {
     val defaultMaxSplitBytes = filesMaxPartitionBytes
     val minPartitionNum = conf.filesMinPartitionNum.getOrElse(leafNodeDefaultParallelism)
 
