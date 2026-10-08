@@ -203,7 +203,7 @@ class FileStoreCommit:
         check_from_snapshot = _row_id_check_from_messages(commit_messages)
         self._set_fixed_bucket_commit_check(commit_messages)
         # A committer can be reused; an untagged commit clears the prior baseline.
-        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
+        self.conflict_detection.set_row_id_check_from_snapshot(check_from_snapshot)
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
@@ -287,7 +287,7 @@ class FileStoreCommit:
         _reject_compact_increment(commit_messages)
         check_from_snapshot = _row_id_check_from_messages(commit_messages)
         self._set_fixed_bucket_commit_check(commit_messages)
-        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
+        self.conflict_detection.set_row_id_check_from_snapshot(check_from_snapshot)
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
@@ -466,7 +466,7 @@ class FileStoreCommit:
 
             if isinstance(result, RewriteResult):
                 rewritten_commit_entries = result.rewrite.commit_entries
-                self.conflict_detection._row_id_check_from_snapshot = (
+                self.conflict_detection.set_row_id_check_from_snapshot(
                     latest_snapshot.id
                 )
                 # No snapshot commit was attempted for the conflicting files,

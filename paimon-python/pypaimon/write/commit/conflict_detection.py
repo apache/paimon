@@ -193,7 +193,48 @@ class ConflictDetection:
         self.table = table
         self._row_id_check_from_snapshot = None
         self.fixed_bucket_commit_check = None
+        self._base_snapshot_uuid = None
         self.commit_scanner = commit_scanner
+
+    SNAPSHOT_LINEAGE_CONFLICT_MESSAGE = (
+        "For Data Evolution table, the base snapshot lineage has changed, possibly due to a"
+        " rollback. Staged updates from the old snapshot lineage cannot be committed.")
+
+    def set_row_id_check_from_snapshot(self, snapshot_id, base_snapshot_uuid=None):
+        """Set the base snapshot the staged update was planned against.
+
+        The snapshot UUID is captured so a rollback that deletes the base snapshot and a later
+        commit that reuses the same numeric ID (ABA) can be detected at commit time. Callers that
+        only know the ID leave the UUID None; full snapshot equality is then used as a fallback.
+        """
+        self._row_id_check_from_snapshot = snapshot_id
+        if snapshot_id is None:
+            self._base_snapshot_uuid = None
+            return
+        if base_snapshot_uuid is None:
+            base = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            base_snapshot_uuid = base.uuid if base is not None else None
+        self._base_snapshot_uuid = base_snapshot_uuid
+
+    def _check_base_snapshot_lineage(self, latest_snapshot):
+        """Fail closed when the staged update's base snapshot lineage no longer exists.
+
+        Returns a RuntimeError when a rollback has removed the base snapshot, or when the snapshot
+        at the base ID is no longer the one the update was planned against (ABA). Mirrors the Java
+        DataEvolutionConflictDetection lineage validation.
+        """
+        base_id = self._row_id_check_from_snapshot
+        if base_id is None or latest_snapshot is None:
+            return None
+        if latest_snapshot.id < base_id:
+            return RuntimeError(self.SNAPSHOT_LINEAGE_CONFLICT_MESSAGE)
+        base_snapshot = self.snapshot_manager.get_snapshot_by_id(base_id)
+        if base_snapshot is None:
+            return RuntimeError(self.SNAPSHOT_LINEAGE_CONFLICT_MESSAGE)
+        if (self._base_snapshot_uuid is not None
+                and base_snapshot.uuid != self._base_snapshot_uuid):
+            return RuntimeError(self.SNAPSHOT_LINEAGE_CONFLICT_MESSAGE)
+        return None
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
         for entry in append_file_entries or []:
@@ -484,7 +525,16 @@ class ConflictDetection:
             return None
         if self._row_id_check_from_snapshot is None:
             return None
-        if latest_snapshot is None or latest_snapshot.id <= self._row_id_check_from_snapshot:
+        if latest_snapshot is None:
+            return None
+
+        # Rollback/ABA: a rollback may have removed the base snapshot, or a later commit may reuse
+        # the same numeric ID for a different snapshot lineage.
+        lineage_error = self._check_base_snapshot_lineage(latest_snapshot)
+        if lineage_error is not None:
+            return lineage_error
+
+        if latest_snapshot.id <= self._row_id_check_from_snapshot:
             return None
         if not any(entry.kind == 1 for entry in delta_entries):
             return None
@@ -676,6 +726,12 @@ class ConflictDetection:
             return None
         if self._row_id_check_from_snapshot is None:
             return None
+
+        # Run lineage validation before the empty-checker fast path so DV-only and index-only
+        # commits are also protected against rollback/ABA.
+        lineage_error = self._check_base_snapshot_lineage(latest_snapshot)
+        if lineage_error is not None:
+            return lineage_error
 
         delta_files = [entry.file for entry in commit_entries]
         column_checker = RowIdColumnConflictChecker.from_data_files(
