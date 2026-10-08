@@ -45,11 +45,15 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.BlobFileContext;
+import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -57,6 +61,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -349,6 +354,79 @@ public class AppendOnlyWriterTest {
         assertThat(compactBefore.get(compactBefore.size() - 1).maxSequenceNumber())
                 .isEqualTo(compactAfter.get(compactAfter.size() - 1).maxSequenceNumber());
         assertThat(secInc.newFilesIncrement().newFiles()).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRepeatedCompaction(boolean commitBetweenCompactions) throws Exception {
+        List<DataFileMeta> inputs = createCompactionInputs(5);
+        AppendOnlyWriter writer = createWriter(1024 * 1024L, false, inputs.subList(0, 3)).getLeft();
+        try {
+            // The first compaction produces a small file which is eligible for compaction again.
+            writer.flush(false, false);
+            writer.sync();
+            assertThat(writer.dataFiles()).hasSize(1);
+            DataFileMeta intermediate = writer.dataFiles().iterator().next();
+            assertThat(intermediate.extraFiles()).hasSize(1);
+
+            List<CommitIncrement> increments = new ArrayList<>();
+            if (commitBetweenCompactions) {
+                CommitIncrement first = writer.prepareCommit(true);
+                assertThat(first.compactIncrement().compactBefore())
+                        .containsExactlyElementsOf(inputs.subList(0, 3));
+                assertThat(first.compactIncrement().compactAfter()).containsExactly(intermediate);
+                increments.add(first);
+            }
+
+            // Add two more inputs so the next compaction rewrites the intermediate file.
+            writer.addNewFiles(inputs.subList(3, 5));
+            writer.flush(false, false);
+            writer.sync();
+            CommitIncrement last = writer.prepareCommit(true);
+            increments.add(last);
+
+            assertThat(last.compactIncrement().compactBefore())
+                    .containsExactlyInAnyOrderElementsOf(
+                            commitBetweenCompactions
+                                    ? Arrays.asList(intermediate, inputs.get(3), inputs.get(4))
+                                    : inputs);
+            assertThat(last.compactIncrement().compactAfter()).hasSize(1);
+            DataFileMeta output = last.compactIncrement().compactAfter().get(0);
+            assertThat(output.rowCount()).isEqualTo(5);
+
+            // A file handed to a previous commit must remain available even before that commit
+            // finishes. Otherwise, both the intermediate data file and its index can be removed.
+            for (Path path : intermediate.collectFiles(pathFactory)) {
+                assertThat(LocalFileIO.create().exists(path)).isEqualTo(commitBetweenCompactions);
+            }
+            for (DataFileMeta file : inputs) {
+                assertThat(LocalFileIO.create().exists(pathFactory.toPath(file))).isTrue();
+            }
+            for (Path path : output.collectFiles(pathFactory)) {
+                assertThat(LocalFileIO.create().exists(path)).isTrue();
+            }
+
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (DataFileMeta file : inputs) {
+                entries.add(ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file));
+            }
+            ManifestEntryChanges changes = new ManifestEntryChanges(1);
+            for (CommitIncrement increment : increments) {
+                changes.collect(
+                        new CommitMessageImpl(
+                                BinaryRow.EMPTY_ROW,
+                                0,
+                                1,
+                                increment.newFilesIncrement(),
+                                increment.compactIncrement()));
+            }
+            entries.addAll(changes.compactTableFiles);
+            assertThat(FileEntry.mergeEntries(entries))
+                    .extracting(ManifestEntry::file)
+                    .containsExactly(output);
+        } finally {
+            writer.close();
+        }
     }
 
     @Test
@@ -1315,6 +1393,37 @@ public class AppendOnlyWriterTest {
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
+    }
+
+    private List<DataFileMeta> createCompactionInputs(int count) throws IOException {
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            Path path = pathFactory.newPath("input-");
+            LocalFileIO.create().newOutputStream(path, false).close();
+            String name = String.format("%03d", i);
+            files.add(
+                    DataFileMeta.forAppend(
+                            path.getName(),
+                            10L,
+                            1L,
+                            STATS_SERIALIZER.toBinaryAllMode(
+                                    new SimpleColStats[] {
+                                        initStats(i, i, 0),
+                                        initStats(name, name, 0),
+                                        initStats(PART, PART, 0)
+                                    }),
+                            i,
+                            i,
+                            SCHEMA_ID,
+                            Collections.emptyList(),
+                            null,
+                            FileSource.APPEND,
+                            null,
+                            null,
+                            null,
+                            null));
+        }
+        return files;
     }
 
     private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) throws IOException {
