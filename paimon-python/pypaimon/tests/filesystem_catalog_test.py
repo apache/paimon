@@ -60,6 +60,53 @@ class FileSystemCatalogTest(unittest.TestCase):
         database = catalog.get_database("test_db")
         self.assertEqual(database.name, "test_db")
 
+    def test_cascade_drop_preserves_table_created_during_drop(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("db", False)
+        schema = Schema(fields=[DataField(0, "value", AtomicType("INT"))])
+        catalog.create_table("db.old", schema, False)
+        delete = catalog.file_io.delete
+        old_path = catalog.get_database_path("db") + "/old"
+
+        def delete_and_create(path, recursive=False):
+            result = delete(path, recursive)
+            if path == old_path:
+                catalog.create_table("db.new", schema, False)
+            return result
+
+        with patch.object(catalog.file_io, "delete", side_effect=delete_and_create):
+            with self.assertRaisesRegex(OSError, "changed during drop"):
+                catalog.drop_database("db", cascade=True)
+
+        self.assertEqual(["new"], catalog.list_tables("db"))
+        self.assertIsNotNone(catalog.get_table("db.new"))
+        catalog.drop_database("db", cascade=True)
+        with self.assertRaises(DatabaseNotExistException):
+            catalog.get_database("db")
+
+    def test_drop_database_preserves_unlisted_contents(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        for cascade in (False, True):
+            with self.subTest(cascade=cascade):
+                name = "db_" + str(cascade)
+                catalog.create_database(name, False)
+                path = catalog.get_database_path(name) + "/pending"
+                with open(path, "wb") as stream:
+                    stream.write(b"in-progress table creation")
+                self.assertEqual([], catalog.list_tables(name))
+                with self.assertRaisesRegex(OSError, "not empty"):
+                    catalog.drop_database(name, cascade=cascade)
+                with open(path, "rb") as stream:
+                    self.assertEqual(b"in-progress table creation", stream.read())
+
+    def test_drop_empty_database(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        for cascade in (False, True):
+            with self.subTest(cascade=cascade):
+                catalog.create_database("db", False)
+                catalog.drop_database("db", cascade=cascade)
+                self.assertFalse(os.path.exists(catalog.get_database_path("db")))
+
     def test_table(self):
         fields = [
             DataField.from_dict({"id": 1, "name": "f0", "type": "INT"}),
