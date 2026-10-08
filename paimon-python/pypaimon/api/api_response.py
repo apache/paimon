@@ -23,6 +23,7 @@ from pypaimon.api.api_request import RESTRequest
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import T, json_field, optional_json_field
 from pypaimon.common.options import Options
+from pypaimon.management.data_policy import DataPolicy
 from pypaimon.management.permission_assignment import PermissionAssignment
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
@@ -54,6 +55,7 @@ class ErrorResponse(RESTResponse):
     RESOURCE_TYPE_BRANCH = "BRANCH"
     RESOURCE_TYPE_DEFINITION = "DEFINITION"
     RESOURCE_TYPE_DIALECT = "DIALECT"
+    RESOURCE_TYPE_POLICY = "POLICY"
 
     resource_type: Optional[str] = json_field("resourceType", default=None)
     resource_name: Optional[str] = json_field("resourceName", default=None)
@@ -664,4 +666,36 @@ class ListPermissionsResponse(PagedResponse[PermissionAssignment]):
             None if permissions is None else [
                 None if permission is None else PermissionAssignment.from_dict(permission)
                 for permission in permissions],
+            data.get(PagedResponse.FIELD_NEXT_PAGE_TOKEN))
+
+
+class ListPoliciesResponse(PagedResponse[DataPolicy]):
+    FIELD_POLICIES = "policies"
+
+    def __init__(self, policies: Optional[List[DataPolicy]], next_page_token: Optional[str] = None):
+        self._policies = policies
+        self._next_page_token = next_page_token
+
+    def get_policies(self) -> Optional[List[DataPolicy]]:
+        return self._policies
+
+    def data(self) -> Optional[List[DataPolicy]]:
+        return self._policies
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self._next_page_token
+
+    def to_dict(self) -> dict:
+        result = {self.FIELD_POLICIES: None if self._policies is None else [
+            None if policy is None else policy.to_dict() for policy in self._policies]}
+        if self._next_page_token is not None:
+            result[PagedResponse.FIELD_NEXT_PAGE_TOKEN] = self._next_page_token
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ListPoliciesResponse":
+        policies = data.get(cls.FIELD_POLICIES)
+        return cls(
+            None if policies is None else [
+                None if policy is None else DataPolicy.from_dict(policy) for policy in policies],
             data.get(PagedResponse.FIELD_NEXT_PAGE_TOKEN))

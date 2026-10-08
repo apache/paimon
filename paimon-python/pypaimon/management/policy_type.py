@@ -14,19 +14,19 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from enum import Enum
 from typing import Optional
 
 
-def is_blank(value: Optional[str]) -> bool:
-    """Java ``trim().isEmpty()``: only characters <= U+0020 are blank, unlike ``str.strip()``."""
-    return value is None or all(ch <= ' ' for ch in value)
+class PolicyType(Enum):
+    ROW_FILTER = "ROW_FILTER"
+    COLUMN_MASKING = "COLUMN_MASKING"
 
-
-def java_length(value: str) -> int:
-    """Java ``String.length()``: UTF-16 code units, not code points."""
-    return len(value.encode('utf-16-le', 'surrogatepass')) // 2
-
-
-def utf8_length(value: str) -> int:
-    """Java ``getBytes(UTF_8).length``: an unpaired surrogate counts as one byte."""
-    return len(value.encode('utf-8', 'replace'))
+    @staticmethod
+    def from_string(value: Optional[str]) -> Optional["PolicyType"]:
+        if value is None:
+            return None
+        name = value.upper()
+        if name not in PolicyType.__members__:
+            raise ValueError("No enum constant PolicyType.{}".format(name))
+        return PolicyType[name]
