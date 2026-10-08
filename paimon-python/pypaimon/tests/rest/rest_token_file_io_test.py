@@ -29,6 +29,8 @@ from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
+from pypaimon.filesystem.io_cache_routing import Op
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.table.row.blob import BlobDescriptor
 
@@ -639,6 +641,112 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
         called_identifier = mock_api.load_table_token.call_args[0][0]
         self.assertEqual(called_identifier.get_object_name(), "my_table")
+
+    _TABLE = "oss://bkt/db1.db/t1"
+    _DATA = _TABLE + "/bucket-0/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.parquet"
+    _IO_CACHE_TOKEN = {
+        OssOptions.OSS_ENDPOINT.key(): "http://cache.example.com",
+        "io-cache.enabled": "true",
+        "io-cache.endpoint": "http://cache.example.com",
+        "io-cache.origin.endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        "io-cache.policy": "meta,read",
+        "fs.oss.dlf-cache.consistent-hash.enabled": "true",
+    }
+
+    def _resolve_file_io(self, token, catalog_options=None, path=_TABLE, targets=()):
+        """Returns the FileIO built for the token and the options of every FileIO.get call,
+        after creating the given targets."""
+        file_io = RESTTokenFileIO(self.identifier, path, Options(catalog_options or {}))
+        file_io.token = RESTToken(token, int(time.time() * 1000) + 7_200_000)
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get') as get_io:
+            get_io.side_effect = lambda location, options: MagicMock(name=location)
+            resolved = file_io.file_io()
+            for target in targets:
+                resolved._file_io(target)
+        for call in get_io.call_args_list:
+            self.assertEqual(path, call[0][0])
+        return resolved, [call[0][1].to_map() for call in get_io.call_args_list]
+
+    def test_io_cache_routing_builds_origin_and_target_file_io(self):
+        resolved, created = self._resolve_file_io(self._IO_CACHE_TOKEN)
+        self.assertIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual(1, len(created))
+        origin = created[0]
+        self.assertEqual("https://oss-cn-hangzhou-internal.aliyuncs.com", origin[OssOptions.OSS_ENDPOINT.key()])
+        self.assertEqual("true", origin["fs.oss.https.enable"])
+        self.assertNotIn("fs.oss.dlf-cache.consistent-hash.enabled", origin)
+        self.assertEqual("default", resolved._routing.route(Op.READ, self._DATA))
+
+        _, (_, target) = self._resolve_file_io(self._IO_CACHE_TOKEN, targets=["default"])
+        self.assertEqual("http://cache.example.com", target[OssOptions.OSS_ENDPOINT.key()])
+        self.assertEqual("false", target["fs.oss.https.enable"])
+        self.assertEqual("true", target["fs.oss.dlf-cache.consistent-hash.enabled"])
+
+    def test_io_cache_routing_builds_one_file_io_per_target(self):
+        token = dict(self._IO_CACHE_TOKEN, **{
+            "io-cache.targets": "accel,cluster",
+            "io-cache.target.accel.endpoint": "https://accel.example.com",
+            "io-cache.target.cluster.endpoint": "http://10.0.0.1:8080",
+            "io-cache.target.cluster.path-style-access": "true",
+            "io-cache.target.cluster.region": "cn-shanghai",
+            "io-cache.routes": "meta=accel;data=cluster",
+            OssOptions.OSS_REGION.key(): "cn-hangzhou",
+        })
+        resolved, (_, accel, cluster) = self._resolve_file_io(token, targets=["accel", "cluster"])
+        self.assertEqual("cluster", resolved._routing.route(Op.READ, self._DATA))
+        self.assertEqual(("https://accel.example.com", "false", "cn-hangzhou"), (
+            accel[OssOptions.OSS_ENDPOINT.key()], accel["fs.oss.second.level.domain.enable"],
+            accel[OssOptions.OSS_REGION.key()]))
+        self.assertEqual(("http://10.0.0.1:8080", "true", "cn-shanghai"), (
+            cluster[OssOptions.OSS_ENDPOINT.key()], cluster["fs.oss.second.level.domain.enable"],
+            cluster[OssOptions.OSS_REGION.key()]))
+
+    def test_io_cache_routing_off_without_target(self):
+        token = dict(self._IO_CACHE_TOKEN)
+        del token["io-cache.endpoint"]
+        resolved, created = self._resolve_file_io(token)
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual([token], [{key: options[key] for key in token} for options in created])
+
+    def test_io_cache_routing_off_without_enabled(self):
+        token = dict(self._IO_CACHE_TOKEN)
+        del token["io-cache.enabled"]
+        resolved, created = self._resolve_file_io(token)
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual(["http://cache.example.com"], [options[OssOptions.OSS_ENDPOINT.key()] for options in created])
+
+    def test_catalog_io_cache_enabled_wins_over_token(self):
+        enabled = CatalogOptions.IO_CACHE_ENABLED.key()
+        resolved, created = self._resolve_file_io(self._IO_CACHE_TOKEN, {enabled: "False"})
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual("false", created[0][enabled])
+
+        token = dict(self._IO_CACHE_TOKEN)
+        del token[enabled]
+        resolved, _ = self._resolve_file_io(token, {enabled: "TRUE"})
+        self.assertIsInstance(resolved, IoCacheRoutingFileIO)
+
+    def test_merge_token_applies_catalog_io_cache_enabled(self):
+        enabled = CatalogOptions.IO_CACHE_ENABLED.key()
+        token = {enabled: "true", "io-cache.endpoint": "http://cache.example.com"}
+        for catalog_options, expected in (({}, "true"), ({enabled: False}, "false"), ({enabled: "TRUE"}, "true")):
+            with self.subTest(catalog_options=catalog_options):
+                file_io = RESTTokenFileIO(self.identifier, self._TABLE, Options(catalog_options))
+                self.assertEqual(expected, file_io._merge_token_with_catalog_options(token)[enabled])
+        self.assertEqual("true", token[enabled])
+
+    def test_io_cache_routing_needs_an_oss_table(self):
+        resolved, created = self._resolve_file_io(self._IO_CACHE_TOKEN, path=self.warehouse_path)
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual(1, len(created))
+
+    def test_dlf_oss_endpoint_turns_io_cache_routing_off(self):
+        override = "oss-cn-hangzhou.aliyuncs.com"
+        resolved, created = self._resolve_file_io(
+            self._IO_CACHE_TOKEN, {CatalogOptions.DLF_OSS_ENDPOINT.key(): override})
+        self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
+        self.assertEqual([override], [options[OssOptions.OSS_ENDPOINT.key()] for options in created])
 
 
 if __name__ == '__main__':

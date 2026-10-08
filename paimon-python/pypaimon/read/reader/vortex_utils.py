@@ -21,9 +21,11 @@ from urllib.parse import urlparse
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 
 
-def to_vortex_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:
+def to_vortex_specified(file_io: FileIO, file_path: str,
+                        is_read: bool = False) -> Tuple[str, Optional[Dict[str, str]]]:
     """Convert path and extract storage options for Vortex store.from_url().
 
     Returns (url, store_kwargs) where store_kwargs can be passed as
@@ -32,6 +34,9 @@ def to_vortex_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[
     """
     if hasattr(file_io, 'file_io'):
         file_io = file_io.file_io()
+
+    if is_read and isinstance(file_io, IoCacheRoutingFileIO):
+        file_io = file_io.read_file_io(file_path)
 
     if hasattr(file_io, 'get_merged_properties'):
         properties = file_io.get_merged_properties()
@@ -54,13 +59,19 @@ def to_vortex_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[
     if scheme == 'oss' and properties:
         parsed = urlparse(file_path)
         bucket = parsed.netloc
+        endpoint = properties.get(OssOptions.OSS_ENDPOINT)
+        parsed_endpoint = urlparse(endpoint if '://' in endpoint else 'https://' + endpoint)
+        path_style = properties.get(OssOptions.OSS_SECOND_LEVEL_DOMAIN_ENABLE)
+        host = parsed_endpoint.netloc if path_style else f"{bucket}.{parsed_endpoint.netloc}"
 
         store_kwargs = {
-            'endpoint': f"https://{bucket}.{properties.get(OssOptions.OSS_ENDPOINT)}",
+            'endpoint': f"{parsed_endpoint.scheme}://{host}",
             'access_key_id': properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             'secret_access_key': properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
-            'virtual_hosted_style_request': 'true',
+            'virtual_hosted_style_request': 'false' if path_style else 'true',
         }
+        if parsed_endpoint.scheme == 'http':
+            store_kwargs['allow_http'] = 'true'
         if properties.contains(OssOptions.OSS_SECURITY_TOKEN):
             store_kwargs['session_token'] = properties.get(OssOptions.OSS_SECURITY_TOKEN)
 

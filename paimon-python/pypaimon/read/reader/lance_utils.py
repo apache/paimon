@@ -21,9 +21,11 @@ from urllib.parse import urlparse
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 
 
-def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:
+def to_lance_specified(file_io: FileIO, file_path: str,
+                       is_read: bool = False) -> Tuple[str, Optional[Dict[str, str]]]:
     """Convert path and extract storage options for Lance format."""
     # For RESTTokenFileIO, get underlying FileIO which already has latest token merged
     # This follows Java implementation: ((RESTTokenFileIO) fileIO).fileIO()
@@ -32,6 +34,9 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
         # Call file_io() to get underlying FileIO with latest token
         # This ensures token is refreshed and merged with catalog options
         file_io = file_io.file_io()
+
+    if is_read and isinstance(file_io, IoCacheRoutingFileIO):
+        file_io = file_io.read_file_io(file_path)
     
     # Now get properties from the underlying FileIO (which has latest token)
     if hasattr(file_io, 'get_merged_properties'):
@@ -62,9 +67,13 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
                     storage_options[key] = value
 
             endpoint = properties.get(OssOptions.OSS_ENDPOINT)
+            path_style = properties.get(OssOptions.OSS_SECOND_LEVEL_DOMAIN_ENABLE)
             if endpoint:
-                endpoint_clean = endpoint.replace('http://', '').replace('https://', '')
-                storage_options['endpoint'] = f"https://{bucket}.{endpoint_clean}"
+                parsed_endpoint = urlparse(endpoint if '://' in endpoint else 'https://' + endpoint)
+                host = parsed_endpoint.netloc if path_style else f"{bucket}.{parsed_endpoint.netloc}"
+                storage_options['endpoint'] = f"{parsed_endpoint.scheme}://{host}"
+                if parsed_endpoint.scheme == 'http':
+                    storage_options['allow_http'] = 'true'
 
             if properties.contains(OssOptions.OSS_ACCESS_KEY_ID):
                 storage_options['access_key_id'] = properties.get(OssOptions.OSS_ACCESS_KEY_ID)
@@ -78,7 +87,7 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
             if properties.contains(OssOptions.OSS_ENDPOINT):
                 storage_options['oss_endpoint'] = properties.get(OssOptions.OSS_ENDPOINT)
             
-            storage_options['virtual_hosted_style_request'] = 'true'
+            storage_options['virtual_hosted_style_request'] = 'false' if path_style else 'true'
 
             if bucket and path:
                 file_path_for_lance = f"oss://{bucket}/{path}"
