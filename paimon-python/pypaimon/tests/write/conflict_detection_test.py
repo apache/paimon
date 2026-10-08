@@ -331,10 +331,11 @@ class TestOverwriteConflictDetection(unittest.TestCase):
 
 class _FakeSnapshot:
 
-    def __init__(self, snapshot_id, commit_kind, next_row_id=None):
+    def __init__(self, snapshot_id, commit_kind, next_row_id=None, uuid=None):
         self.id = snapshot_id
         self.commit_kind = commit_kind
         self.next_row_id = next_row_id
+        self.uuid = uuid if uuid is not None else "uuid-{}".format(snapshot_id)
 
 
 class _FakeSnapshotManager:
@@ -447,6 +448,56 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
                     [check_snap, compact_snap], {2: compact_entries})
                 self.assertIsNone(
                     detection.check_row_id_from_snapshot(compact_snap, delta))
+
+    def test_rollback_fails_closed_when_latest_snapshot_id_below_base(self):
+        # Commit, stage an update against snapshot 2, then roll back to snapshot 1 so the base
+        # snapshot is gone. The staged update must not be committed.
+        check_snap = _FakeSnapshot(2, "APPEND", next_row_id=200)
+        latest_after_rollback = _FakeSnapshot(1, "APPEND", next_row_id=100)
+        detection = self._make_detection(
+            [check_snap, latest_after_rollback], {})
+        detection.set_row_id_check_from_snapshot(2)
+        result = detection.check_row_id_from_snapshot(
+            latest_after_rollback, self._blob_delta(), check_compaction=False)
+        self.assertIsNotNone(result)
+        self.assertIn(
+            ConflictDetection.SNAPSHOT_LINEAGE_CONFLICT_MESSAGE, str(result))
+
+    def test_aba_fails_closed_when_uuid_differs_at_same_id(self):
+        # snapshotManager snapshot(1) is cache-aware in Java; here it returns the recreated
+        # snapshot at the same numeric ID but a different UUID.
+        original = _FakeSnapshot(1, "APPEND", next_row_id=100, uuid="uuid-original")
+        recreated = _FakeSnapshot(1, "APPEND", next_row_id=100, uuid="uuid-recreated")
+        latest = _FakeSnapshot(2, "APPEND", next_row_id=150)
+        detection = ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=_FakeSnapshotManager([recreated, latest]),
+            manifest_list_manager=None,
+            table=_FakeTable(_FakeSchemaManager([_DEFAULT_SCHEMA])),
+            commit_scanner=_FakeCommitScanner({}, {}),
+        )
+        # The staged update captured the original snapshot's identity.
+        detection.set_row_id_check_from_snapshot(1, original.uuid)
+        result = detection.check_row_id_from_snapshot(
+            latest, self._blob_delta(), check_compaction=False)
+        self.assertIsNotNone(result)
+        self.assertIn(
+            ConflictDetection.SNAPSHOT_LINEAGE_CONFLICT_MESSAGE, str(result))
+
+    def test_aba_passes_when_uuid_matches(self):
+        base = _FakeSnapshot(1, "APPEND", next_row_id=100, uuid="uuid-same")
+        latest = _FakeSnapshot(2, "APPEND", next_row_id=150)
+        detection = ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=_FakeSnapshotManager([base, latest]),
+            manifest_list_manager=None,
+            table=_FakeTable(_FakeSchemaManager([_DEFAULT_SCHEMA])),
+            commit_scanner=_FakeCommitScanner({}, {}),
+        )
+        detection.set_row_id_check_from_snapshot(1, base.uuid)
+        result = detection.check_row_id_from_snapshot(
+            latest, self._blob_delta(), check_compaction=False)
+        self.assertIsNone(result)
 
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):
