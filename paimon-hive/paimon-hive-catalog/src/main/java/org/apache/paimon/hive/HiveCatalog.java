@@ -251,7 +251,10 @@ public class HiveCatalog extends AbstractCatalog {
         Path location;
         if (tableOptions.containsKey(CoreOptions.PATH.key())) {
             externalTable = true;
-            location = new Path(tableOptions.get(CoreOptions.PATH.key()));
+            // A `LOCATION '/path'` without a scheme must resolve against the default filesystem;
+            // otherwise FileIO#get treats it as local and the schema files land on the driver's
+            // disk on a cluster.
+            location = resolveLocationScheme(new Path(tableOptions.get(CoreOptions.PATH.key())));
         } else {
             externalTable = usingExternalTable(tableOptions);
             location = getTableLocation(identifier, null);
@@ -1144,7 +1147,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void createObjectTable(Identifier identifier, Schema schema) {
         Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
-        Path location = resolveLocationScheme(pair.getLeft());
+        Path location = pair.getLeft();
         boolean externalTable = pair.getRight();
         schema.options().putIfAbsent(PATH.key(), location.toString());
         Schema objectSchema = buildObjectTableSchema(schema);
@@ -1259,7 +1262,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         Pair<Path, Boolean> pair = initialTableLocation(schema.options(), identifier);
-        Path location = resolveLocationScheme(pair.getLeft());
+        Path location = pair.getLeft();
         boolean externalTable = pair.getRight();
         TableSchema tableSchema;
         try {
