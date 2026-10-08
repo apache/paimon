@@ -32,18 +32,15 @@ Both produce a source archive and wheel in `dist/`.
 
 ## PyArrow checksums with OSS and custom S3 endpoints
 
-For endpoints that do not support the optional request checksums used by newer
-PyArrow AWS SDKs, configure the process before starting the application and its
-workers:
+If your endpoint rejects optional request checksums, set this before starting
+Python and its workers:
 
 ```bash
 export AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED
 ```
 
-This setting applies to AWS SDK clients throughout the process, not just Paimon.
-PyPaimon does not modify it. Existing workers and clients must be restarted after
-changing it. This only addresses optional write checksums; required checksums on
-batch deletion are a separate compatibility concern.
+This affects AWS SDK clients process-wide; PyPaimon does not set it automatically.
+Required checksums, including those for batch deletion, remain enabled.
 
 # OSS metadata commits
 
