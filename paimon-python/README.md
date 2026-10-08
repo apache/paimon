@@ -184,8 +184,9 @@ except for a sole unconditional DELETE, following Paimon Spark MERGE.
 For table sources, core independently pins the selected source branch/snapshot
 and reads only keys and referenced columns. Append and primary-key sources do
 not require data evolution. Source scan options select the same point in time
-on Python and native paths. Incremental source scans, non-REST Blob views
-requiring catalog resolution, and packed-video inserts use the Python path
+on Python and native paths. Numeric `incremental-between-timestamp` source
+windows are resolved and read by core. Non-REST Blob views
+requiring catalog resolution and packed-video inserts use the Python path
 selected before native execution starts. Native failures propagate without
 Python retry or deleting files from earlier prepared actions.
 
@@ -435,7 +436,10 @@ counts can differ between shards. Limits are applied after shard/slice selection
 Timestamp incremental scans require `ReadBuilder.new_incremental_scan()` and
 stream-aware splits exposing `Split.is_streaming()`. Python resolves
 `(start_timestamp, end_timestamp]` to snapshot IDs; Rust packs the selected APPEND
-deltas into one plan. Continuous streaming uses the same native path for initial
+deltas into one plan. Equal timestamp bounds produce an empty result, as in Java.
+AUTO selects physical changelog files when a changelog producer is configured;
+each split carries the selected ending snapshot ID. Numeric bounds use signed
+64-bit milliseconds and Java's integer syntax. Continuous streaming uses the same native path for initial
 and delta frames. When `changelog-producer` is enabled, follow-up frames request
 Rust's explicit `changelog` mode and read the physical changelog manifests.
 OVERWRITE changelog frames retain per-snapshot Python planning because Java
