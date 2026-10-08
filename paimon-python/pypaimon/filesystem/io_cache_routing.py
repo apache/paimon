@@ -37,11 +37,12 @@ _TARGET_NAME = re.compile(r"[a-z][a-z0-9-]*")
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 # Data files are named {prefix}{uuid}-{count}.{extension}; this matches what follows the prefix.
 _DATA_FILE_SUFFIX = re.compile(_UUID + r"-[0-9]+\..+")
-# Other types are routed only under the names Paimon writes; Format Table files may be replaced in place.
+# Other types are routed only under the names Paimon writes (paimon-rust adds -changelog to changelog
+# manifests); Format Table files may be replaced in place.
 _PAIMON_FILE_NAMES = {
     FileType.META: re.compile(
-        r"(manifest|manifest-list|index-manifest|stat)-" + _UUID + r"-[0-9]+|manifest-" + _UUID
-        + r"-[0-9]+\.avro\.sidecar"),
+        r"(manifest-list|index-manifest|stat)-" + _UUID + r"-[0-9]+|manifest-" + _UUID
+        + r"(-changelog)?-[0-9]+(\.avro\.sidecar)?"),
     FileType.BUCKET_INDEX: re.compile(r"index-" + _UUID + r"-[0-9]+"),
     FileType.GLOBAL_INDEX: re.compile(r"[a-z0-9_-]+-global-index-" + _UUID + r"\.index"),
 }

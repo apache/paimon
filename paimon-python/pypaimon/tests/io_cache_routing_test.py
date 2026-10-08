@@ -291,6 +291,8 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
                      "manifest/manifest-old",
                      "manifest/manifest-old.avro.sidecar",
                      "manifest/manifest-list-{uuid}-1.avro.sidecar",
+                     "manifest/manifest-list-{uuid}-changelog-1",
+                     "manifest/manifest-{uuid}-changelog",
                      "statistics/stat-old",
                      "index/index-old",
                      "index/my-global-index.index",
@@ -301,6 +303,8 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
         self.assert_type("manifest/manifest-list-{uuid}-1", FileType.META)
         self.assert_type("manifest/index-manifest-{uuid}-0", FileType.META)
         self.assert_type("manifest/manifest-{uuid}-0.avro.sidecar", FileType.META)
+        self.assert_type("manifest/manifest-{uuid}-changelog-0", FileType.META)
+        self.assert_type("manifest/manifest-{uuid}-changelog-0.avro.sidecar", FileType.META)
         self.assert_type("statistics/stat-{uuid}-0", FileType.META)
         self.assert_type("dt=1/bucket-0/data-{uuid}-0.parquet", FileType.DATA)
         self.assert_type("dt=1/bucket-0/changelog-{uuid}-0.parquet", FileType.DATA)
