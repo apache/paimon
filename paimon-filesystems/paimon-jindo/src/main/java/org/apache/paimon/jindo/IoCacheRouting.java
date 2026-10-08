@@ -71,15 +71,15 @@ final class IoCacheRouting implements Serializable {
             "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
     private static final Pattern DATA_FILE_SUFFIX = Pattern.compile(UUID + "-[0-9]+\\..+");
 
-    // Other types are routed only under the names Paimon writes; Format Table files may be
-    // replaced in place.
+    // Other types are routed only under the names Paimon writes (paimon-rust adds -changelog to
+    // changelog manifests); Format Table files may be replaced in place.
     private static final Pattern META_FILE =
             Pattern.compile(
-                    "(manifest|manifest-list|index-manifest|stat)-"
+                    "(manifest-list|index-manifest|stat)-"
                             + UUID
                             + "-[0-9]+|manifest-"
                             + UUID
-                            + "-[0-9]+\\.avro\\.sidecar");
+                            + "(-changelog)?-[0-9]+(\\.avro\\.sidecar)?");
     private static final Pattern BUCKET_INDEX_FILE = Pattern.compile("index-" + UUID + "-[0-9]+");
     private static final Pattern GLOBAL_INDEX_FILE =
             Pattern.compile("[a-z0-9_-]+-global-index-" + UUID + "\\.index");

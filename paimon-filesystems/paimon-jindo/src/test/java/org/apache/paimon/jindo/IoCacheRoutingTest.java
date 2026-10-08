@@ -269,6 +269,8 @@ public class IoCacheRoutingTest {
                         "manifest/manifest-old",
                         "manifest/manifest-old.avro.sidecar",
                         "manifest/manifest-list-{uuid}-1.avro.sidecar",
+                        "manifest/manifest-list-{uuid}-changelog-1",
+                        "manifest/manifest-{uuid}-changelog",
                         "statistics/stat-old",
                         "index/index-old",
                         "index/my-global-index.index",
@@ -280,6 +282,8 @@ public class IoCacheRoutingTest {
         assertType("manifest/manifest-list-{uuid}-1", META);
         assertType("manifest/index-manifest-{uuid}-0", META);
         assertType("manifest/manifest-{uuid}-0.avro.sidecar", META);
+        assertType("manifest/manifest-{uuid}-changelog-0", META);
+        assertType("manifest/manifest-{uuid}-changelog-0.avro.sidecar", META);
         assertType("statistics/stat-{uuid}-0", META);
         assertType("dt=1/bucket-0/data-{uuid}-0.parquet", DATA);
         assertType("dt=1/bucket-0/changelog-{uuid}-0.parquet", DATA);
