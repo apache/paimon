@@ -168,6 +168,22 @@ path select the Python writer before native data is written. If the runtime or t
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
 
+Batch and stream `merge_into` also use Rust core for eligible data-evolution
+Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
+`WhenNotMatched` clauses accept Arrow/pandas input or self-merge on `_ROW_ID`.
+Core pins the target snapshot, matches keys, selects the first satisfied clause
+and prepares updates, deletion vectors and inserts. SQL conditions, including
+subqueries, execute in the Rust DataFusion adapter; Python transports the
+normalized clauses and returned commit messages. Conditional MERGE requires
+Python 3.10+ and the existing `pypaimon[sql]` extra, which installs both Python
+DataFusion and `pypaimon-rust`. Shared clause validation checks that dependency
+before native execution. NULL keys do not match.
+Multiple source rows matching a target are rejected before action conditions,
+except for a sole unconditional DELETE, following Paimon Spark MERGE.
+Non-self table sources and packed-video inserts use the Python path selected
+before native execution starts. Native failures propagate without Python retry
+or deleting files from earlier prepared actions.
+
 MAP columns configured with `fields.<name>.map.storage-layout=shared-shredding`
 also use native Parquet writes and data-evolution updates, including predicate
 updates and upserts. Rust applies Java's `plain`, `sequential` and `lru` column
