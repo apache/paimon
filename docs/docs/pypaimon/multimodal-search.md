@@ -378,3 +378,26 @@ batch_neighbors = (
     .to_list()
 )
 ```
+
+## Full-text and Hybrid queries on Ray
+
+Full-text and Hybrid queries accept `execution="ray"`, `concurrency`, and
+`ray_remote_args` on `to_arrow`, `to_pandas`, and `to_list`, matching vector queries:
+
+```python
+rows = (docs.search("robot grasp", column="content")
+        .with_score().order_by_score().limit(20)
+        .to_arrow(execution="ray", concurrency=4))
+```
+
+This path supports data-evolution tables and requires `pypaimon[ray,full-text]`
+on every worker (plus `vindex` for native vector routes). Index shards run as
+bounded Ray tasks. Full-text raw fallback runs on one worker with the complete
+uncovered corpus, preserving existing BM25 statistics; that corpus must fit the
+worker's memory. Pre-filters and deletion vectors keep the local ranking semantics.
+
+Hybrid routes share one resolved snapshot, use Ray for their shard work, and
+reuse the existing RRF, MRR, or weighted-score fusion on the driver. Routes run
+successively so `concurrency` bounds the whole query. Final Arrow/Pandas row lookup
+remains on the driver. Native resources close on workers; task errors propagate
+and pending read tasks are cancelled.

@@ -669,7 +669,29 @@ class VectorQuery(_PreFilterQuery):
         return builder
 
 
-class TextQuery(_PreFilterQuery):
+class _RayTextQuery(_PreFilterQuery):
+    """Shared output methods for full-text and hybrid Ray execution."""
+
+    def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        if execution == "local":
+            if concurrency is not None or ray_remote_args is not None:
+                raise ValueError("Ray options require execution='ray'.")
+            return super().to_arrow()
+        if execution != "ray":
+            raise ValueError("execution must be 'local' or 'ray'.")
+        query = self._for_execution()
+        return query._read_global_index_result(query._execute_ray(concurrency, ray_remote_args))
+
+    def to_pandas(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        return self.to_arrow(execution=execution, concurrency=concurrency,
+                             ray_remote_args=ray_remote_args).to_pandas()
+
+    def to_list(self, *, execution="local", concurrency=None, ray_remote_args=None):
+        return self.to_arrow(execution=execution, concurrency=concurrency,
+                             ray_remote_args=ray_remote_args).to_pylist()
+
+
+class TextQuery(_RayTextQuery):
     """Chainable query wrapper for full-text global-index search."""
 
     def __init__(self, table, text_query, pre_filter=None):
@@ -678,6 +700,14 @@ class TextQuery(_PreFilterQuery):
             table, result_factory=self._execute_fts, pre_filter=pre_filter)
 
     def _execute_fts(self, query):
+        return self._full_text_search_builder(query).execute_local()
+
+    def _execute_ray(self, concurrency, ray_remote_args):
+        from pypaimon.ray.full_text_search import _execute_full_text_search
+        return _execute_full_text_search(self._full_text_search_builder(self),
+                                         concurrency=concurrency, ray_remote_args=ray_remote_args)
+
+    def _full_text_search_builder(self, query):
         limit = query._limit if query._limit is not None else 10
         builder = (
             query._table.new_full_text_search_builder()
@@ -686,10 +716,10 @@ class TextQuery(_PreFilterQuery):
         )
         if query._pre_filter is not None:
             builder = builder.with_filter(query._pre_filter)
-        return builder.execute_local()
+        return builder
 
 
-class HybridQuery(_PreFilterQuery):
+class HybridQuery(_RayTextQuery):
     """Chainable query wrapper for hybrid global-index search."""
 
     def __init__(
@@ -712,6 +742,14 @@ class HybridQuery(_PreFilterQuery):
         return self
 
     def _execute_hybrid(self, query):
+        return self._hybrid_search_builder(query).execute_local()
+
+    def _execute_ray(self, concurrency, ray_remote_args):
+        from pypaimon.ray.full_text_search import _execute_hybrid_search
+        return _execute_hybrid_search(self._hybrid_search_builder(self),
+                                      concurrency=concurrency, ray_remote_args=ray_remote_args)
+
+    def _hybrid_search_builder(self, query):
         final_limit = query._limit if query._limit is not None else 10
         route_limit = self._route_limit or final_limit
         builder = (
@@ -737,7 +775,7 @@ class HybridQuery(_PreFilterQuery):
             )
         if query._pre_filter is not None:
             builder = builder.with_filter(query._pre_filter)
-        return builder.execute_local()
+        return builder
 
 
 class BatchVectorQuery(_PreFilterQuery):
