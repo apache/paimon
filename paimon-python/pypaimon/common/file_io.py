@@ -120,9 +120,6 @@ class FileIO(ABC):
     def delete(self, path: str, recursive: bool = False) -> bool:
         pass
 
-    def check_non_recursive_delete_supported(self, path: str) -> None:
-        """Reject known unsupported directory deletion before any mutation."""
-
     @abstractmethod
     def mkdirs(self, path: str) -> bool:
         pass

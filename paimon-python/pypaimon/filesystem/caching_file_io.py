@@ -417,9 +417,6 @@ class CachingFileIO(FileIO):
     def exists(self, path: str) -> bool:
         return self._delegate.exists(path)
 
-    def check_non_recursive_delete_supported(self, path: str) -> None:
-        self._delegate.check_non_recursive_delete_supported(path)
-
     def delete(self, path: str, recursive: bool = False) -> bool:
         return self._delegate.delete(path, recursive)
 

@@ -105,7 +105,6 @@ class FileSystemCatalog(Catalog):
             return
 
         db_path = self.get_database_path(name)
-        self.file_io.check_non_recursive_delete_supported(db_path)
 
         if cascade:
             for table_name in self.list_tables(name):
@@ -123,7 +122,7 @@ class FileSystemCatalog(Catalog):
                 f"Use cascade=True to drop all tables first."
             )
 
-        self.file_io.delete(db_path, False)
+        self.file_io.delete(db_path, True)
 
     def list_tables(self, database_name: str) -> List[str]:
         try:

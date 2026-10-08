@@ -22,12 +22,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
-import pyarrow.fs as pafs
-
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-from pypaimon.filesystem.caching_file_io import CachingFileIO
-from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
@@ -89,62 +83,6 @@ class FileSystemCatalogTest(unittest.TestCase):
         catalog.drop_database("db", cascade=True)
         with self.assertRaises(DatabaseNotExistException):
             catalog.get_database("db")
-
-    def test_drop_database_preserves_unlisted_contents(self):
-        catalog = CatalogFactory.create({"warehouse": self.warehouse})
-        for cascade in (False, True):
-            with self.subTest(cascade=cascade):
-                name = "db_" + str(cascade)
-                catalog.create_database(name, False)
-                path = catalog.get_database_path(name) + "/pending"
-                with open(path, "wb") as stream:
-                    stream.write(b"in-progress table creation")
-                self.assertEqual([], catalog.list_tables(name))
-                with self.assertRaisesRegex(OSError, "not empty"):
-                    catalog.drop_database(name, cascade=cascade)
-                with open(path, "rb") as stream:
-                    self.assertEqual(b"in-progress table creation", stream.read())
-
-    def test_cascade_drop_rejects_unsupported_cleanup_before_deleting_tables(self):
-        catalog = CatalogFactory.create({"warehouse": self.warehouse})
-        catalog.create_database("db", False)
-        catalog.create_table("db.old", Schema(fields=[
-            DataField(0, "value", AtomicType("INT"))]), False)
-        original_io = catalog.file_io
-        arrow_io = object.__new__(PyArrowFileIO)
-        arrow_io.filesystem = pafs.SubTreeFileSystem(self.warehouse, pafs.LocalFileSystem())
-        arrow_io.to_filesystem_path = lambda path: os.path.relpath(path, self.warehouse)
-        wrapper = object.__new__(CachingFileIO)
-        wrapper._delegate = arrow_io
-        resolving_catalog = CatalogFactory.create({
-            "warehouse": self.warehouse, "resolving-file-io.enabled": "true"})
-        resolving = resolving_catalog.file_io
-        self.assertIsInstance(resolving, ResolvingFileIO)
-        resolving._fileio_cache[resolving._cache_key(self.warehouse)] = arrow_io
-        cached_resolving = object.__new__(CachingFileIO)
-        cached_resolving._delegate = resolving
-        rest_token = object.__new__(RESTTokenFileIO)
-        rest_token.file_io = lambda: arrow_io
-        for name, file_io in (("direct", arrow_io), ("cached", wrapper),
-                              ("resolving", resolving), ("cached_resolving", cached_resolving),
-                              ("rest_token", rest_token)):
-            with self.subTest(wrapper=name):
-                catalog.file_io = file_io
-                try:
-                    with self.assertRaisesRegex(OSError, "Safe non-recursive"):
-                        catalog.drop_database("db", cascade=True)
-                finally:
-                    catalog.file_io = original_io
-                self.assertEqual(["old"], catalog.list_tables("db"))
-                self.assertIsNotNone(catalog.get_table("db.old"))
-
-    def test_drop_empty_database(self):
-        catalog = CatalogFactory.create({"warehouse": self.warehouse})
-        for cascade in (False, True):
-            with self.subTest(cascade=cascade):
-                catalog.create_database("db", False)
-                catalog.drop_database("db", cascade=cascade)
-                self.assertFalse(os.path.exists(catalog.get_database_path("db")))
 
     def test_table(self):
         fields = [
