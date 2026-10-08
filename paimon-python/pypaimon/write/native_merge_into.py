@@ -51,13 +51,14 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
                 or source.options.video_frame_fields() or source.options.with_vector_format()
                 or (source.is_primary_key_table and not source.trimmed_primary_keys)):
             return None
-        source.new_read_builder().new_scan()._validate_scan_mode()
+        from pypaimon.read.table_scan import _validate_scan_mode
+        _validate_scan_mode(source)
         if not _native_blob_view_supported(source, source.field_names):
             return None
-        # This operation reads one full source snapshot. Incremental scans stay
-        # on the Python path, whose scanner applies the requested delta range.
-        if (source.options.scan_mode() not in ('default', 'from-snapshot', 'from-timestamp')
-                or any(str(key).startswith('incremental-') for key in source.table_schema.options)):
+        # Core resolves a full snapshot or PyPaimon's existing timestamp window.
+        if (source.options.scan_mode() not in ('default', 'from-snapshot', 'from-timestamp', 'incremental')
+                or any(str(key).startswith('incremental-') and key != 'incremental-between-timestamp'
+                       for key in source.table_schema.options)):
             return None
         from pypaimon.schema.data_types import PyarrowFieldParser
         source_schema = PyarrowFieldParser.from_paimon_schema(source.table_schema.fields)

@@ -286,7 +286,7 @@ def test_incremental_ignores_deletion_vectors_from_window_end(native, catalog):
     assert actual == [rows[4]]
 
 
-@pytest.mark.parametrize('window', ['100,100', '200,100', '100', 'one,200'])
+@pytest.mark.parametrize('window', ['100', 'one,200', '0,100,200'])
 def test_invalid_timestamp_window_is_rejected_even_for_empty_tables(catalog, window):
     table = _table(catalog, 'invalid')
     with pytest.raises(ValueError):
@@ -590,3 +590,36 @@ def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native,
                 side_effect=AssertionError('explicit DV native read fell back')))
         result = read_table.new_read_builder().new_read().to_arrow([dv_split]).to_pylist()
     assert result == [{'k': 1, 'v': '1'}, {'k': 3, 'v': '3'}]
+
+
+@pytest.mark.parametrize('window', [(100, 100), (200, 100)])
+def test_empty_table_timestamp_windows_follow_java(catalog, native, window):
+    table = _table(catalog, 'empty_window')
+    plan, rows = _read(table, native, window)
+    assert rows == []
+    assert plan.snapshot_id is None
+
+
+def test_reverse_window_is_rejected_when_snapshots_exist(catalog):
+    table = _table(catalog, 'reverse_window')
+    _write(table, 100, [{'k': 1, 'v': 'base'}])
+    with pytest.raises(ValueError, match='Ending timestamp'):
+        table.copy({'incremental-between-timestamp': '200,100'}).new_read_builder().new_scan()
+
+
+def test_equal_window_is_empty_for_populated_tables(native, history):
+    plan, rows = _read(history, native, (100, 100))
+    assert rows == []
+    assert plan.snapshot_id is None
+
+
+def test_timestamp_auto_reads_physical_changelog(native, catalog):
+    table = _table(catalog, 'batch_changelog', True, {'bucket': '1', 'changelog-producer': 'input'})
+    _write(table, 100, [{'k': 1, 'v': 'old'}])
+    _write(table, 200, [{'k': 1, 'v': 'new'}, {'k': 2, 'v': 'insert'}])
+    _write(table, 300, [{'k': 9, 'v': 'overwrite'}], overwrite=True)
+    plan, rows = _read(table, native, (100, 300))
+    assert plan.snapshot_id == 3
+    assert all(split.snapshot_id == 3 for split in plan.splits())
+    assert all(file.file_name.startswith('changelog-') for split in plan.splits() for file in split.files)
+    assert sorted((row['k'], row['v']) for row in rows) == [(1, 'new'), (2, 'insert')]
