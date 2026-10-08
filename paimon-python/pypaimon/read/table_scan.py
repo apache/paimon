@@ -17,6 +17,8 @@
 
 import json as _json
 import logging
+import random
+import time
 from typing import List, Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
@@ -31,6 +33,30 @@ from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
 
 logger = logging.getLogger(__name__)
+
+_NATIVE_TOKEN_DNS_RETRY_DELAYS = (0.1, 0.3, 0.7)
+
+
+def _is_native_token_dns_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return ('http get failed' in message and '/token' in message
+            and ('dns error' in message or
+                 'failed to lookup address information' in message))
+
+
+def _retry_native_token_dns(plan):
+    """Retry a native plan only when its table-token DNS lookup fails."""
+    for attempt, delay in enumerate(_NATIVE_TOKEN_DNS_RETRY_DELAYS, 1):
+        try:
+            return plan()
+        except Exception as error:
+            if not _is_native_token_dns_error(error):
+                raise
+            logger.warning('Native table-token DNS lookup failed; retrying (%s/%s)',
+                           attempt, len(_NATIVE_TOKEN_DNS_RETRY_DELAYS))
+            time.sleep(delay + random.uniform(0, delay))
+    return plan()
+
 
 _NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
     CoreOptions.SCAN_VERSION.key(),
@@ -212,7 +238,7 @@ class TableScan:
             defer_limit = has_distribution and (
                 not self.table.is_primary_key_table
                 or self.table.options.global_index_enabled())
-            plan = native_plan(
+            plan = _retry_native_token_dns(lambda: native_plan(
                 self.table,
                 predicate=native_predicate,
                 limit=None if defer_limit else self.limit,
@@ -221,7 +247,7 @@ class TableScan:
                     if self._read_type is not None and chunk_shuffle is None else None),
                 row_ranges=row_ranges,
                 **extra_options,
-            )
+            ))
             splits = plan.splits()
             if (self.table.options.merge_engine() == 'first-row'
                     and not fs.skip_level0 and not fs.is_streaming
