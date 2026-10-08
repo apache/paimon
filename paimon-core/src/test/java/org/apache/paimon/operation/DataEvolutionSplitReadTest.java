@@ -235,9 +235,7 @@ class DataEvolutionSplitReadTest {
         List<Range> rowRanges = Collections.singletonList(new Range(10L, 19L));
 
         assertTrue(DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.02d));
-        assertFalse(
-                DataEvolutionSplitRead.shouldReadRowSidecar(
-                        file, null, bitmap, 2L, 0.02d));
+        assertFalse(DataEvolutionSplitRead.shouldReadRowSidecar(file, null, bitmap, 2L, 0.02d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 1L, 0.02d));
         assertFalse(
