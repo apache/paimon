@@ -26,6 +26,8 @@ import pyarrow.fs as pafs
 
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.filesystem.caching_file_io import CachingFileIO
+from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
@@ -114,8 +116,19 @@ class FileSystemCatalogTest(unittest.TestCase):
         arrow_io.to_filesystem_path = lambda path: os.path.relpath(path, self.warehouse)
         wrapper = object.__new__(CachingFileIO)
         wrapper._delegate = arrow_io
-        for file_io in (arrow_io, wrapper):
-            with self.subTest(cached=file_io is wrapper):
+        resolving_catalog = CatalogFactory.create({
+            "warehouse": self.warehouse, "resolving-file-io.enabled": "true"})
+        resolving = resolving_catalog.file_io
+        self.assertIsInstance(resolving, ResolvingFileIO)
+        resolving._fileio_cache[resolving._cache_key(self.warehouse)] = arrow_io
+        cached_resolving = object.__new__(CachingFileIO)
+        cached_resolving._delegate = resolving
+        rest_token = object.__new__(RESTTokenFileIO)
+        rest_token.file_io = lambda: arrow_io
+        for name, file_io in (("direct", arrow_io), ("cached", wrapper),
+                              ("resolving", resolving), ("cached_resolving", cached_resolving),
+                              ("rest_token", rest_token)):
+            with self.subTest(wrapper=name):
                 catalog.file_io = file_io
                 try:
                     with self.assertRaisesRegex(OSError, "Safe non-recursive"):

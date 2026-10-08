@@ -149,6 +149,9 @@ class RESTTokenFileIO(FileIO):
     def exists(self, path: str) -> bool:
         return self.file_io().exists(path)
 
+    def check_non_recursive_delete_supported(self, path: str) -> None:
+        self.file_io().check_non_recursive_delete_supported(path)
+
     def delete(self, path: str, recursive: bool = False) -> bool:
         return self.file_io().delete(path, recursive)
 

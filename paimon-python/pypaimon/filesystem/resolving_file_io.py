@@ -88,6 +88,9 @@ class ResolvingFileIO(FileIO):
             result.update(fio.exists_batch(group_paths))
         return result
 
+    def check_non_recursive_delete_supported(self, path: str) -> None:
+        self._get_fileio(path).check_non_recursive_delete_supported(path)
+
     def delete(self, path: str, recursive: bool = False) -> bool:
         return self._get_fileio(path).delete(path, recursive)
 
