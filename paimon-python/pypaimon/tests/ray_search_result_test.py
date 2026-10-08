@@ -84,3 +84,16 @@ def test_blob_descriptors_can_be_resolved_on_workers(tmp_path, ray_cluster):
         return scalar.append_column("body", pa.array(blobs["image"]))
 
     assert table.map_with_blobs(dataset, ["image"], resolve).take_all() == [{"id": 0, "body": b"a"}]
+
+
+@pytest.mark.parametrize("projection", [["id"], ["_ROW_ID"]])
+@pytest.mark.parametrize("execution", ["local", "ray"])
+def test_empty_table_retains_scored_schema(table, ray_cluster, projection, execution):
+    query = table.search([1., 1.]).select(projection).with_score().order_by_score()
+    dataset = query.to_ray(execution=execution)
+    assert dataset.take_all() == []
+    assert dataset.schema().names == projection + ["_score"]
+    batch = table.search_vectors([[1., 1.]]).select(projection).with_score().order_by_score()
+    dataset = batch.to_ray(execution=execution)[0]
+    assert dataset.take_all() == []
+    assert dataset.schema().names == projection + ["_score"]

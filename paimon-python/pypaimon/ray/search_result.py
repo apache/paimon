@@ -56,11 +56,13 @@ def read_search_result(query, result, concurrency, remote_args, override_num_blo
     rank_column = "_paimon_search_rank_" + uuid.uuid4().hex
     finish = copy(query)
     finish._sort_by_score = False
-    score_getter = result.score_getter() if query._sort_by_score else None
+    sort_by_score = query._sort_by_score
+    score_getter = (result.score_getter()
+                    if sort_by_score and not result.results().is_empty() else None)
 
     def finish_batch(batch):
         output = finish._finish_search_result(batch, result, False)
-        if score_getter is not None:
+        if sort_by_score:
             output = output.append_column(rank_column, pa.array(
                 [-score_getter(value) for value in batch[row_id].to_pylist()], type=pa.float64()))
         return output
