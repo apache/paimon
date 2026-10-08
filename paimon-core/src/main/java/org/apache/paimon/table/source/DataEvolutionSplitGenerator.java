@@ -21,9 +21,13 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.BinPacking;
+import org.apache.paimon.utils.DataEvolutionUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RangeHelper;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -49,6 +53,23 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
+        // A file without a first row id predates row tracking on this table (see
+        // DataEvolutionUtils#splitByRowIdPresence): it holds complete rows and is split like a
+        // plain append file, after the row-id-range groups.
+        Pair<List<DataFileMeta>, List<DataFileMeta>> byRowId =
+                DataEvolutionUtils.splitByRowIdPresence(input, file -> file);
+        List<SplitGroup> groups = new ArrayList<>(splitRowIdRanges(byRowId.getLeft()));
+        List<DataFileMeta> withoutRowId = new ArrayList<>(byRowId.getRight());
+        withoutRowId.sort(Comparator.comparing(DataFileMeta::minSequenceNumber));
+        BinPacking.packForOrdered(
+                        withoutRowId,
+                        file -> Math.max(file.fileSize(), openFileCost),
+                        targetSplitSize)
+                .forEach(files -> groups.add(SplitGroup.rawConvertibleGroup(files)));
+        return groups;
+    }
+
+    private List<SplitGroup> splitRowIdRanges(List<DataFileMeta> input) {
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(input);
         Function<List<DataFileMeta>, Long> weightFunc =

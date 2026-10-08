@@ -199,6 +199,10 @@ public class RESTApiJsonTest {
         assertEquals(
                 Collections.singletonMap("action", "dropPrimaryKey"),
                 RESTApi.fromJson(RESTApi.toJson(SchemaChange.dropPrimaryKey()), Map.class));
+        // enabling data evolution is not part of the REST protocol: a server cannot parse it
+        assertThrows(
+                Exception.class,
+                () -> RESTApi.fromJson("{\"action\":\"enableDataEvolution\"}", SchemaChange.class));
 
         Map<String, Object> expectedViewComment = new HashMap<>();
         expectedViewComment.put("action", "updateComment");

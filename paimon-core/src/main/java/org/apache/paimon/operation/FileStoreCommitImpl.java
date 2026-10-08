@@ -33,6 +33,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -66,6 +67,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
@@ -74,6 +76,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DataEvolutionUtils;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -112,6 +115,8 @@ import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.leavesRowsWithoutRowIds;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.storesRowIds;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -1043,6 +1048,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        TableSchema latestSchema =
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
+        long latestSchemaId = latestSchema.id();
+        checkRowTrackingOrDataEvolutionNotEnabledAfterLoad(latestSchema);
+        if (options.dataEvolutionEnabled()) {
+            checkNewFilesKeepRowIds(deltaFiles, latestSchema);
+        }
+
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
         if (latestSnapshot != null) {
@@ -1051,6 +1064,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (nextRowId != null) {
                 firstRowIdStart = nextRowId;
             }
+        }
+
+        if (options.dataEvolutionEnabled()) {
+            deltaFiles = stampFilesOfWritersBeforeDataEvolution(deltaFiles);
         }
 
         if (latestSnapshot == null) {
@@ -1232,11 +1249,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             indexManifest =
                     indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles, bucketMode);
 
-            long latestSchemaId =
-                    schemaManager
-                            .latestOrThrow("Cannot get latest schema for table " + tableName)
-                            .id();
-
             // write new stats or inherit from the previous snapshot
             String statsFileName = null;
             if (newStatsFileName != null) {
@@ -1406,6 +1418,99 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
+    /**
+     * Row tracking derives every row id from the {@code firstRowId} that the commit assigns to a
+     * new file, so a file committed by a writer which does not know that the table enabled row
+     * tracking would never get one and could not be read as a data-evolution file. Such a writer
+     * loaded the table before {@code sys.enable_data_evolution} converted it: refuse its commit so
+     * that it reloads the table. A row-tracking-only writer must also reload after data evolution
+     * is enabled: its compactor does not preserve row ids and its files use row-count sequences.
+     */
+    private void checkRowTrackingOrDataEvolutionNotEnabledAfterLoad(TableSchema latestSchema) {
+        CoreOptions latestOptions = CoreOptions.fromMap(latestSchema.options());
+        String feature;
+        if (!options.rowTrackingEnabled() && latestOptions.rowTrackingEnabled()) {
+            feature = "row tracking";
+        } else if (!options.dataEvolutionEnabled() && latestOptions.dataEvolutionEnabled()) {
+            feature = "data evolution";
+        } else {
+            return;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Table %s enabled %s in schema %d after this writer loaded the "
+                                + "table without it. Restart the writer so that it picks up the "
+                                + "current schema.",
+                        tableName, feature, latestSchema.id()));
+    }
+
+    /**
+     * A data-evolution writer starts the sequence numbers of every file at 0, so that the commit
+     * stamps the file with its snapshot id, and a later column update of the same rows wins. A
+     * writer that loaded the table before {@code sys.enable_data_evolution} converted it numbers
+     * the rows of all files it rolls in one sequence, and the commit keeps the numbers of a file
+     * that does not start at 0. They can exceed the snapshot ids of later commits and hide later
+     * column updates. A committer loaded after the conversion can still commit such files, for
+     * example when a job restores them from a checkpoint taken before the conversion. Their rows
+     * are new, get their row ids from this commit and hold complete rows: stamp them with the
+     * baseline sequence 1 that the conversion gives every file from before data evolution.
+     */
+    private List<ManifestEntry> stampFilesOfWritersBeforeDataEvolution(
+            List<ManifestEntry> deltaFiles) {
+        Map<Long, Boolean> dataEvolutionSchemas = new HashMap<>();
+        List<ManifestEntry> result = new ArrayList<>(deltaFiles.size());
+        for (ManifestEntry entry : deltaFiles) {
+            DataFileMeta file = entry.file();
+            if (entry.kind() == FileKind.ADD
+                    && file.firstRowId() == null
+                    && file.fileSource().map(FileSource.APPEND::equals).orElse(false)
+                    && !storesRowIds(file)
+                    && !dataEvolutionSchemas.computeIfAbsent(
+                            file.schemaId(),
+                            id ->
+                                    CoreOptions.fromMap(schemaManager.schema(id).options())
+                                            .dataEvolutionEnabled())) {
+                result.add(
+                        entry.assignSequenceNumber(
+                                Snapshot.FIRST_SNAPSHOT_ID, Snapshot.FIRST_SNAPSHOT_ID));
+            } else {
+                result.add(entry);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * A data-evolution read derives every row id from the first row id of its file. A commit
+     * assigns one to every new {@link FileSource#APPEND} file, while a compaction must carry the
+     * first row id of its input over to its output. The output of a compactor that does not would
+     * replace files that have row ids by files without: refuse it before it is published. Such a
+     * compactor is the append compactor of a row-tracking-only table, for example when a job
+     * restores its compaction state from a checkpoint taken before {@code
+     * sys.enable_data_evolution} converted the table. The committer itself is then loaded with the
+     * current schema, so {@link #checkRowTrackingOrDataEvolutionNotEnabledAfterLoad} passes.
+     */
+    private void checkNewFilesKeepRowIds(List<ManifestEntry> deltaFiles, TableSchema latestSchema) {
+        for (ManifestEntry entry : deltaFiles) {
+            if (entry.kind() == FileKind.ADD && leavesRowsWithoutRowIds(entry.file())) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Cannot commit data file %s to table %s: data evolution is "
+                                        + "enabled in schema %d, but the file has no first row id "
+                                        + "and, as %s output, gets none on commit. It was written "
+                                        + "with schema %d by a writer that does not preserve row "
+                                        + "ids, for example compaction state restored from before "
+                                        + "sys.enable_data_evolution converted the table. Discard "
+                                        + "that state and restart the writer.",
+                                entry.file().fileName(),
+                                tableName,
+                                latestSchema.id(),
+                                entry.file().fileSource().map(Enum::name).orElse("unknown"),
+                                entry.file().schemaId()));
+            }
+        }
+    }
+
     public boolean replaceManifestList(
             Snapshot latest,
             long totalRecordCount,
@@ -1435,6 +1540,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long nextRowId) {
         return replaceManifestList(
                 latest,
+                latest.schemaId(),
                 totalRecordCount,
                 baseManifestList,
                 deltaManifestList,
@@ -1451,10 +1557,34 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
+        return replaceManifestList(
+                latest,
+                latest.schemaId(),
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                indexManifest,
+                nextRowId,
+                properties);
+    }
+
+    /**
+     * Same as {@link #replaceManifestList(Snapshot, long, Pair, Pair, String, Long, Map)}, but the
+     * new snapshot references {@code schemaId} instead of the schema of {@code latest}.
+     */
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long schemaId,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
-                        latest.schemaId(),
+                        schemaId,
                         baseManifestList.getLeft(),
                         baseManifestList.getRight(),
                         deltaManifestList.getKey(),
@@ -1486,6 +1616,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
                         "Latest snapshot is null, can not roll back.");
+        DataEvolutionUtils.checkRollbackKeepsRowTracking(
+                tableName,
+                schemaManager,
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName),
+                targetSnapshot);
 
         Map<FileEntry.Identifier, ManifestEntry> latestEntries = new HashMap<>();
         FileEntry.mergeEntries(
@@ -1528,6 +1663,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 manifestEntry.totalBuckets(),
                                 manifestEntry.file()));
             }
+        }
+
+        TableSchema latestSchema =
+                schemaManager.latestOrThrow("Cannot get latest schema for table " + tableName);
+        if (DataEvolutionUtils.convertedToDataEvolution(schemaManager, latestSchema)) {
+            // Only the files that the rollback adds back matter: the others keep the metadata
+            // of the latest snapshot.
+            DataEvolutionUtils.checkRollbackFilesKeepDataEvolution(
+                    tableName,
+                    targetSnapshot.id(),
+                    deltaFiles.iterator(),
+                    Collections.emptySet(),
+                    schemaManager::schema);
         }
 
         Pair<String, Long> baseManifestList =

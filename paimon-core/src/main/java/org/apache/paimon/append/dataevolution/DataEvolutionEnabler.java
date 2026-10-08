@@ -1,0 +1,765 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.append.dataevolution;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.DelegateCatalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.rest.RESTCatalog;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaValidation;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RetryWaiter;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.storesRowIds;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
+
+/**
+ * Enables data evolution on an existing append table without rewriting its data files.
+ *
+ * <p>{@code row-tracking.enabled} and {@code data-evolution.enabled} are immutable for {@code ALTER
+ * TABLE} because a data-evolution table derives every row id from the first row id of its file, and
+ * only the commit that adds a file assigns one. Files that are already in the table would therefore
+ * never get a row id. This class closes that gap in four steps:
+ *
+ * <ol>
+ *   <li>Assign a first row id to every live data file that has none, by rewriting the manifests of
+ *       the latest snapshot and committing them as a metadata-only snapshot. Ids are contiguous per
+ *       partition, in the order {@code sys.reassign_row_id} would produce, so the converted table
+ *       needs no reassignment afterwards.
+ *   <li>Commit a schema with both options enabled through the catalog, so that catalog metadata
+ *       stays in sync. Only this class can create that schema change, see {@link
+ *       EnableDataEvolution}.
+ *   <li>Commit a fence: an empty snapshot on the new schema. A writer that checked the previous
+ *       schema read its base snapshot before that check, so it either committed before the fence,
+ *       or its commit loses the race for the next snapshot id and is refused on retry, see {@code
+ *       FileStoreCommitImpl}.
+ *   <li>Assign ids to the files committed before the fence without one.
+ * </ol>
+ *
+ * <p>The procedure is idempotent: it reports {@code skipped} once the files have row ids and
+ * compatible sequence numbers, and a snapshot on a data-evolution schema has fenced old writers.
+ */
+public class DataEvolutionEnabler {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionEnabler.class);
+    private static final String COMMIT_USER_PREFIX = "enable-data-evolution";
+
+    private final Catalog catalog;
+    private final Identifier identifier;
+    private final Runnable beforeRowIdCommit;
+    private final Runnable beforeSchemaChange;
+    private final Runnable beforeFence;
+
+    public DataEvolutionEnabler(Catalog catalog, Identifier identifier) {
+        this(catalog, identifier, () -> {}, () -> {}, () -> {});
+    }
+
+    DataEvolutionEnabler(
+            Catalog catalog,
+            Identifier identifier,
+            Runnable beforeRowIdCommit,
+            Runnable beforeSchemaChange) {
+        this(catalog, identifier, beforeRowIdCommit, beforeSchemaChange, () -> {});
+    }
+
+    /** Hooks for tests to inject concurrent activity between the steps. */
+    DataEvolutionEnabler(
+            Catalog catalog,
+            Identifier identifier,
+            Runnable beforeRowIdCommit,
+            Runnable beforeSchemaChange,
+            Runnable beforeFence) {
+        this.catalog = catalog;
+        this.identifier = identifier;
+        this.beforeRowIdCommit = beforeRowIdCommit;
+        this.beforeSchemaChange = beforeSchemaChange;
+        this.beforeFence = beforeFence;
+    }
+
+    /** Validates and, unless {@code dryRun}, converts the table. */
+    public Result run(boolean dryRun) throws Exception {
+        FileStoreTable table = loadTable();
+        CoreOptions options = table.coreOptions();
+        boolean enabled = options.rowTrackingEnabled() && options.dataEvolutionEnabled();
+        validate(table, enabled);
+
+        long schemaBefore = table.schema().id();
+        Long snapshotBefore = table.snapshotManager().latestSnapshotId();
+        Assignment planned = plan(table);
+        // Also before reporting the table as done: an earlier run may have switched the schema and
+        // then found files it cannot convert.
+        checkConvertible(planned, enabled);
+        if (enabled && !planned.hasChanges() && hasFence(table, planned.snapshot)) {
+            return Result.skipped(
+                    schemaBefore, snapshotBefore, "data evolution is already enabled");
+        }
+        if (dryRun) {
+            return Result.dryRun(schemaBefore, snapshotBefore, enabled, planned);
+        }
+
+        Totals totals = new Totals();
+        if (!enabled) {
+            assignRowIdsAndEnable(table, planned, totals);
+            table = loadTable();
+            checkState(
+                    table.coreOptions().rowTrackingEnabled()
+                            && table.coreOptions().dataEvolutionEnabled(),
+                    "Schema change did not enable data evolution on table %s.",
+                    identifier.getFullName());
+        }
+
+        // A writer that checked the previous schema may still be on its way to commit. After the
+        // fence it can no longer succeed, so the files that need a row id are final.
+        beforeFence.run();
+        commitFence(table);
+        Assignment remaining = plan(table);
+        checkConvertible(remaining, true);
+        if (remaining.hasChanges()) {
+            LOG.info(
+                    "Repairing row ids or sequence numbers of table {} after fencing old writers.",
+                    identifier.getFullName());
+            totals.add(assignRowIdsWithRetry(table, remaining));
+        }
+        checkState(
+                !plan(table).hasChanges(),
+                "Table %s still has data files without a row id or with incompatible sequence "
+                        + "numbers. A writer of an older Paimon "
+                        + "version may still be writing to it; stop it and run the procedure "
+                        + "again.",
+                identifier.getFullName());
+
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        return new Result(
+                schemaBefore,
+                table.schema().id(),
+                snapshotBefore,
+                latest == null ? null : latest.id(),
+                totals.files,
+                totals.rows,
+                latest == null ? null : latest.nextRowId(),
+                false,
+                false,
+                null);
+    }
+
+    /**
+     * Assigns row ids to the files of the latest snapshot and switches the schema. Files that a
+     * writer on the previous schema commits in between get their row ids after the fence.
+     */
+    private void assignRowIdsAndEnable(FileStoreTable table, Assignment planned, Totals totals)
+            throws Exception {
+        if (planned.hasChanges()) {
+            totals.add(assignRowIdsWithRetry(table, planned));
+        }
+        beforeSchemaChange.run();
+        if (dataEvolutionEnabled(table)) {
+            // a concurrent run switched the schema already
+            return;
+        }
+        // A writer on the current schema may have committed files that cannot be converted since
+        // the plan. Refuse while the table is still unchanged: once the schema is switched, the
+        // table stays on it. Only a writer that passed its schema check before the switch and
+        // commits before the fence can still slip in, see run.
+        checkConvertible(plan(table), false);
+        catalog.alterTable(identifier, new EnableDataEvolution(), false);
+    }
+
+    /**
+     * Refuses files that the conversion cannot give correct row ids. {@code enabled} tells whether
+     * the schema is switched already, so that the message says the table is left on it.
+     *
+     * <ul>
+     *   <li>A copy-on-write UPDATE, DELETE or MERGE INTO on a row-tracking table rewrites a file
+     *       with the row ids of its rows stored in it, and no first row id. Such ids need not be
+     *       contiguous, so no first row id describes them, and a new one would contradict the
+     *       stored ids: a later column update by the row ids the rows read with would not reach
+     *       them. A commit never assigns a first row id to such a file either.
+     *   <li>Files written before the conversion are complete-row files, so their row id ranges must
+     *       not overlap: a data-evolution read merges files of overlapping ranges, and rows of one
+     *       would hide the rows of the other. Ranges overlap when files that carry row ids are
+     *       copied into a table, for example by {@code sys.copy}, which does not advance the next
+     *       row id of the table, and rows are written afterwards.
+     * </ul>
+     *
+     * <p>Rewriting those rows, for example with INSERT OVERWRITE, gives them new row ids.
+     */
+    private void checkConvertible(Assignment assignment, boolean enabled) {
+        String problem;
+        if (!assignment.storingRowIds.isEmpty()) {
+            problem =
+                    String.format(
+                            "%d data file(s) store the row ids of their rows, written by a "
+                                    + "copy-on-write UPDATE, DELETE or MERGE INTO on the "
+                                    + "row-tracking table, and have no first row id, so their "
+                                    + "rows cannot be addressed by a data-evolution update. "
+                                    + "Files: %s",
+                            assignment.storingRowIds.size(), describe(assignment.storingRowIds));
+        } else if (!assignment.overlappingRowIds.isEmpty()) {
+            problem =
+                    String.format(
+                            "data files written before the conversion were assigned "
+                                    + "overlapping row ids, for example by copying files into "
+                                    + "the table with sys.copy and writing rows afterwards, so a "
+                                    + "data-evolution read would let the rows of one hide the "
+                                    + "rows of another. Files: %s",
+                            describe(assignment.overlappingRowIds));
+        } else {
+            return;
+        }
+        throw new IllegalArgumentException(
+                String.format(
+                        "%s: %s. Rewrite those rows first, for example with INSERT OVERWRITE, "
+                                + "and run the procedure again.",
+                        enabled
+                                ? String.format(
+                                        "Table %s has data evolution enabled, but cannot be "
+                                                + "fully converted",
+                                        identifier.getFullName())
+                                : String.format(
+                                        "Cannot enable data evolution on table %s",
+                                        identifier.getFullName()),
+                        problem));
+    }
+
+    private static String describe(List<String> files) {
+        int shown = Math.min(5, files.size());
+        return files.subList(0, shown) + (shown < files.size() ? " ..." : "");
+    }
+
+    private boolean dataEvolutionEnabled(FileStoreTable table) {
+        CoreOptions latest =
+                CoreOptions.fromMap(
+                        table.schemaManager()
+                                .latestOrThrow(
+                                        "Cannot get latest schema for table "
+                                                + identifier.getFullName())
+                                .options());
+        return latest.rowTrackingEnabled() && latest.dataEvolutionEnabled();
+    }
+
+    private boolean hasFence(FileStoreTable table, @Nullable Snapshot snapshot) {
+        // A writer that passed the old schema check read its base snapshot before that check.
+        // Any snapshot on a DE schema therefore forces it to retry (and fail the new check).
+        // Merely seeing the enabled schema is insufficient after a failure before commitFence.
+        return snapshot != null
+                && CoreOptions.fromMap(table.schemaManager().schema(snapshot.schemaId()).options())
+                        .dataEvolutionEnabled();
+    }
+
+    /**
+     * Commits an empty snapshot through the normal commit path, which refuses writers on a schema
+     * without row tracking.
+     */
+    private void commitFence(FileStoreTable table) throws Exception {
+        String commitUser = COMMIT_USER_PREFIX + "-" + UUID.randomUUID();
+        try (FileStoreCommit commit = table.store().newCommit(commitUser, table)) {
+            commit.ignoreEmptyCommit(false);
+            commit.commit(new ManifestCommittable(BatchWriteBuilder.COMMIT_IDENTIFIER), false);
+        }
+    }
+
+    private FileStoreTable loadTable() throws Exception {
+        Table table = catalog.getTable(identifier);
+        checkArgument(
+                table instanceof FileStoreTable,
+                "Only a FileStoreTable can enable data evolution, but table %s is a %s.",
+                identifier.getFullName(),
+                table.getClass().getSimpleName());
+        return (FileStoreTable) table;
+    }
+
+    private void validate(FileStoreTable table, boolean enabled) {
+        checkArgument(
+                !(DelegateCatalog.rootCatalog(catalog) instanceof RESTCatalog),
+                "Enabling data evolution on table %s of a REST catalog is not supported yet.",
+                identifier.getFullName());
+        if (enabled) {
+            return;
+        }
+        // The constraints of a row-tracking table are the ones of the schema this will create.
+        TableSchema current = table.schema();
+        Map<String, String> options = new HashMap<>(current.options());
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        try {
+            SchemaValidation.validateTableSchema(
+                    new TableSchema(
+                            current.id() + 1,
+                            current.fields(),
+                            current.highestFieldId(),
+                            current.partitionKeys(),
+                            current.primaryKeys(),
+                            options,
+                            current.comment()));
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot enable data evolution on table %s: %s",
+                            identifier.getFullName(), e.getMessage()),
+                    e);
+        }
+    }
+
+    /**
+     * Plans missing row ids and normalizes the sequence baseline of files before data evolution.
+     */
+    private Assignment plan(FileStoreTable table) {
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        if (latest == null) {
+            return Assignment.empty(null, 0L);
+        }
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        List<ManifestFileMeta> manifests = manifestList.readDataManifests(latest);
+
+        Map<FileEntry.Identifier, ManifestEntry> live = new LinkedHashMap<>();
+        FileEntry.mergeEntries(
+                manifestFile, manifests, live, table.coreOptions().scanManifestParallelism());
+
+        List<ManifestEntry> withoutRowId = new ArrayList<>();
+        List<String> storingRowIds = new ArrayList<>();
+        Set<FileEntry.Identifier> resetSequences = new HashSet<>();
+        Map<Long, Boolean> dataEvolutionSchemas = new HashMap<>();
+        List<ManifestEntry> completeRowFiles = new ArrayList<>();
+        long maxRowIdEnd = 0L;
+        for (ManifestEntry entry : live.values()) {
+            if (entry.kind() != FileKind.ADD) {
+                continue;
+            }
+            if (entry.file().firstRowId() == null && storesRowIds(entry.file())) {
+                // see checkConvertible
+                storingRowIds.add(entry.file().fileName());
+                continue;
+            }
+            if (entry.file().firstRowId() != null) {
+                maxRowIdEnd =
+                        Math.max(maxRowIdEnd, entry.file().firstRowId() + entry.file().rowCount());
+                if (!isBlobFile(entry.file().fileName())
+                        && !isVectorStoreFile(entry.file().fileName())
+                        && !dataEvolutionSchemas.computeIfAbsent(
+                                entry.file().schemaId(),
+                                id ->
+                                        CoreOptions.fromMap(
+                                                        table.schemaManager().schema(id).options())
+                                                .dataEvolutionEnabled())) {
+                    completeRowFiles.add(entry);
+                }
+            }
+            if (entry.file().firstRowId() == null) {
+                withoutRowId.add(entry);
+            }
+            // Every file written before data evolution holds complete rows and gets the baseline
+            // sequence 1, older than every data-evolution update. Its own sequence numbers can be
+            // higher: a row-tracking-only writer numbers the rows of a file, and a file copied
+            // from another table, for example by sys.copy, keeps the numbers it had there.
+            if ((entry.file().firstRowId() == null
+                            || entry.file().minSequenceNumber() != Snapshot.FIRST_SNAPSHOT_ID
+                            || entry.file().maxSequenceNumber() != Snapshot.FIRST_SNAPSHOT_ID)
+                    && !dataEvolutionSchemas.computeIfAbsent(
+                            entry.file().schemaId(),
+                            id ->
+                                    CoreOptions.fromMap(table.schemaManager().schema(id).options())
+                                            .dataEvolutionEnabled())) {
+                resetSequences.add(entry.identifier());
+            }
+        }
+        // Files written before the conversion hold complete rows, see checkConvertible. Files of a
+        // data-evolution writer (a column update) share the range of the file they update.
+        completeRowFiles.sort(Comparator.comparingLong(entry -> entry.file().nonNullFirstRowId()));
+        List<String> overlappingRowIds = new ArrayList<>();
+        for (int i = 1; i < completeRowFiles.size(); i++) {
+            DataFileMeta previous = completeRowFiles.get(i - 1).file();
+            DataFileMeta current = completeRowFiles.get(i).file();
+            if (current.nonNullFirstRowId() < previous.nonNullFirstRowId() + previous.rowCount()) {
+                overlappingRowIds.add(
+                        String.format(
+                                "%s %s and %s %s",
+                                previous.fileName(),
+                                previous.nonNullRowIdRange(),
+                                current.fileName(),
+                                current.nonNullRowIdRange()));
+            }
+        }
+
+        // The next row id of a snapshot does not cover files committed with a first row id they
+        // already had, for example files copied into the table by sys.copy: continue after them.
+        long snapshotNextRowId = latest.nextRowId() == null ? 0L : latest.nextRowId();
+        long start = Math.max(snapshotNextRowId, maxRowIdEnd);
+        boolean advancesNextRowId = start > snapshotNextRowId;
+        if (withoutRowId.isEmpty()) {
+            return new Assignment(
+                    latest,
+                    manifests,
+                    Collections.emptyList(),
+                    Collections.emptyMap(),
+                    resetSequences,
+                    storingRowIds,
+                    overlappingRowIds,
+                    advancesNextRowId,
+                    0L,
+                    start);
+        }
+
+        // Contiguous per partition, partitions in order: the layout reassign_row_id produces.
+        // Within a partition the files keep the order they have in the manifests, which is the
+        // order they were committed in (the sort is stable).
+        RecordComparator partitionComparator =
+                CodeGenUtils.newRecordComparator(
+                        table.schema().logicalPartitionType().getFieldTypes());
+        withoutRowId.sort(
+                (left, right) -> partitionComparator.compare(left.partition(), right.partition()));
+
+        Map<FileEntry.Identifier, Long> firstRowIds = new HashMap<>();
+        long next = start;
+        long rowCount = 0;
+        for (ManifestEntry entry : withoutRowId) {
+            firstRowIds.put(entry.identifier(), next);
+            next += entry.file().rowCount();
+            rowCount += entry.file().rowCount();
+        }
+        return new Assignment(
+                latest,
+                manifests,
+                withoutRowId,
+                firstRowIds,
+                resetSequences,
+                storingRowIds,
+                overlappingRowIds,
+                true,
+                rowCount,
+                next);
+    }
+
+    private Assignment assignRowIdsWithRetry(FileStoreTable table, Assignment initial)
+            throws Exception {
+        CoreOptions options = table.coreOptions();
+        RetryWaiter retryWaiter =
+                new RetryWaiter(options.commitMinRetryWait(), options.commitMaxRetryWait());
+        long startMillis = System.currentTimeMillis();
+        Assignment assignment = initial;
+        int retryCount = 0;
+        while (true) {
+            if (commitAssignment(table, assignment)) {
+                return assignment;
+            }
+            if (System.currentTimeMillis() - startMillis > options.commitTimeout()
+                    || retryCount >= options.commitMaxRetries()) {
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to assign row ids to table %s after %s millis and %s "
+                                        + "retries because newer snapshots kept being committed.",
+                                identifier.getFullName(),
+                                System.currentTimeMillis() - startMillis,
+                                retryCount));
+            }
+            retryWaiter.retryWait(retryCount);
+            retryCount++;
+            // Another commit landed: plan again from the new latest snapshot. Files that already
+            // received an id in it (written by a writer on the new schema) keep it.
+            assignment = plan(table);
+            checkConvertible(assignment, dataEvolutionEnabled(table));
+            if (!assignment.hasChanges()) {
+                return assignment;
+            }
+            LOG.info(
+                    "Retrying row id assignment for table {} on snapshot {} ({}/{}).",
+                    identifier.getFullName(),
+                    assignment.snapshot.id(),
+                    retryCount,
+                    options.commitMaxRetries());
+        }
+    }
+
+    /**
+     * Rewrites the manifests holding the planned files and commits them, referencing the latest
+     * schema. Returns false when the snapshot moved on in the meantime.
+     */
+    private boolean commitAssignment(FileStoreTable table, Assignment assignment) {
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        ManifestList manifestList = table.store().manifestListFactory().create();
+
+        // A data-evolution read takes each column from the file with the highest sequence number,
+        // and a commit stamps new files with its snapshot id. A file from before data evolution
+        // gets the baseline sequence 1, see plan: its own sequence numbers can exceed the snapshot
+        // ids of later commits and would hide later updates. Using this commit's snapshot id could
+        // hide an update committed before a retry. A file of a data-evolution schema without row
+        // id is stamped like the commit that gives it its row ids.
+        long sequenceNumber = assignment.snapshot.id() + 1;
+        List<ManifestFileMeta> baseManifests = new ArrayList<>();
+        for (ManifestFileMeta manifest : assignment.manifests) {
+            List<ManifestEntry> entries =
+                    manifestFile.read(manifest.fileName(), manifest.fileSize());
+            List<ManifestEntry> rewritten = new ArrayList<>(entries.size());
+            boolean changed = false;
+            for (ManifestEntry entry : entries) {
+                Long firstRowId = assignment.firstRowIds.get(entry.identifier());
+                if (firstRowId != null && entry.file().firstRowId() == null) {
+                    long assignedSequence =
+                            assignment.resetSequences.contains(entry.identifier())
+                                    ? Snapshot.FIRST_SNAPSHOT_ID
+                                    : sequenceNumber;
+                    rewritten.add(
+                            entry.assignFirstRowId(firstRowId)
+                                    .assignSequenceNumber(assignedSequence, assignedSequence));
+                    changed = true;
+                } else if (assignment.resetSequences.contains(entry.identifier())) {
+                    // Keep its row ids, but make it older than every data-evolution update.
+                    rewritten.add(
+                            entry.assignSequenceNumber(
+                                    Snapshot.FIRST_SNAPSHOT_ID, Snapshot.FIRST_SNAPSHOT_ID));
+                    changed = true;
+                } else {
+                    rewritten.add(entry);
+                }
+            }
+            if (changed) {
+                baseManifests.addAll(manifestFile.write(rewritten));
+            } else {
+                baseManifests.add(manifest);
+            }
+        }
+
+        Pair<String, Long> baseManifestList = manifestList.write(baseManifests);
+        Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
+        String commitUser = COMMIT_USER_PREFIX + "-" + UUID.randomUUID();
+        try (FileStoreCommitImpl commit =
+                (FileStoreCommitImpl) table.store().newCommit(commitUser, table)) {
+            beforeRowIdCommit.run();
+            // A schema change creates no snapshot, so it does not fail the snapshot CAS below:
+            // read the latest schema for every attempt, as the normal commit path does.
+            long schemaId =
+                    table.schemaManager()
+                            .latestOrThrow(
+                                    "Cannot get latest schema for table "
+                                            + identifier.getFullName())
+                            .id();
+            return commit.replaceManifestList(
+                    assignment.snapshot,
+                    schemaId,
+                    assignment.snapshot.totalRecordCount(),
+                    baseManifestList,
+                    deltaManifestList,
+                    assignment.snapshot.indexManifest(),
+                    assignment.nextRowId,
+                    assignment.snapshot.properties());
+        }
+    }
+
+    /**
+     * Switches on {@code row-tracking.enabled} and {@code data-evolution.enabled}. The constructor
+     * is private: switching the options without assigning row ids to the existing files before and
+     * fencing off writers on the previous schema after would leave files without a row id, so this
+     * class is the only one that issues it. It is not part of the REST protocol either.
+     */
+    public static final class EnableDataEvolution implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        private EnableDataEvolution() {}
+    }
+
+    private static class Assignment {
+        @Nullable final Snapshot snapshot;
+        final List<ManifestFileMeta> manifests;
+        final List<ManifestEntry> files;
+        final Map<FileEntry.Identifier, Long> firstRowIds;
+        final Set<FileEntry.Identifier> resetSequences;
+        /** Files without a first row id that store the row id field physically. */
+        final List<String> storingRowIds;
+        /** Pairs of files written before the conversion whose row id ranges overlap. */
+        final List<String> overlappingRowIds;
+        /** Whether the snapshot's next row id lags behind the row ids of its files. */
+        final boolean advancesNextRowId;
+
+        final long rowCount;
+        final long nextRowId;
+
+        Assignment(
+                @Nullable Snapshot snapshot,
+                List<ManifestFileMeta> manifests,
+                List<ManifestEntry> files,
+                Map<FileEntry.Identifier, Long> firstRowIds,
+                Set<FileEntry.Identifier> resetSequences,
+                List<String> storingRowIds,
+                List<String> overlappingRowIds,
+                boolean advancesNextRowId,
+                long rowCount,
+                long nextRowId) {
+            this.snapshot = snapshot;
+            this.manifests = manifests;
+            this.files = files;
+            this.firstRowIds = firstRowIds;
+            this.resetSequences = resetSequences;
+            this.storingRowIds = storingRowIds;
+            this.overlappingRowIds = overlappingRowIds;
+            this.advancesNextRowId = advancesNextRowId;
+            this.rowCount = rowCount;
+            this.nextRowId = nextRowId;
+        }
+
+        boolean hasChanges() {
+            return !files.isEmpty() || !resetSequences.isEmpty() || advancesNextRowId;
+        }
+
+        static Assignment empty(@Nullable Snapshot snapshot, long nextRowId) {
+            return new Assignment(
+                    snapshot,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyMap(),
+                    Collections.emptySet(),
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    false,
+                    0L,
+                    nextRowId);
+        }
+    }
+
+    private static class Totals {
+        long files;
+        long rows;
+
+        void add(Assignment committed) {
+            files += committed.files.size();
+            rows += committed.rowCount;
+        }
+    }
+
+    /** What the procedure did, or would do. */
+    public static class Result {
+        public final long schemaBefore;
+        public final long schemaAfter;
+        @Nullable public final Long snapshotBefore;
+        @Nullable public final Long snapshotAfter;
+        public final long assignedFileCount;
+        public final long assignedRowCount;
+        @Nullable public final Long nextRowId;
+        public final boolean skipped;
+        public final boolean dryRun;
+        @Nullable public final String skipReason;
+
+        Result(
+                long schemaBefore,
+                long schemaAfter,
+                @Nullable Long snapshotBefore,
+                @Nullable Long snapshotAfter,
+                long assignedFileCount,
+                long assignedRowCount,
+                @Nullable Long nextRowId,
+                boolean skipped,
+                boolean dryRun,
+                @Nullable String skipReason) {
+            this.schemaBefore = schemaBefore;
+            this.schemaAfter = schemaAfter;
+            this.snapshotBefore = snapshotBefore;
+            this.snapshotAfter = snapshotAfter;
+            this.assignedFileCount = assignedFileCount;
+            this.assignedRowCount = assignedRowCount;
+            this.nextRowId = nextRowId;
+            this.skipped = skipped;
+            this.dryRun = dryRun;
+            this.skipReason = skipReason;
+        }
+
+        static Result skipped(long schema, @Nullable Long snapshot, String reason) {
+            return new Result(schema, schema, snapshot, snapshot, 0, 0, null, true, false, reason);
+        }
+
+        static Result dryRun(
+                long schema, @Nullable Long snapshot, boolean enabled, Assignment planned) {
+            return new Result(
+                    schema,
+                    enabled ? schema : schema + 1,
+                    snapshot,
+                    snapshot,
+                    planned.files.size(),
+                    planned.rowCount,
+                    planned.snapshot == null ? null : planned.nextRowId,
+                    false,
+                    true,
+                    null);
+        }
+
+        /** One-line summary for procedure output. */
+        public String describe(Identifier identifier) {
+            if (skipped) {
+                return String.format(
+                        "Skipped. Table '%s' was not changed: %s.",
+                        identifier.getFullName(), skipReason);
+            }
+            String work =
+                    String.format(
+                            "schema %d -> %d, snapshot %s -> %s, %d file(s) with %d row(s) assigned "
+                                    + "row ids, nextRowId=%s",
+                            schemaBefore,
+                            schemaAfter,
+                            snapshotBefore,
+                            snapshotAfter,
+                            assignedFileCount,
+                            assignedRowCount,
+                            nextRowId);
+            return dryRun
+                    ? String.format(
+                            "Dry run. Enabling data evolution on table '%s' would do: %s.",
+                            identifier.getFullName(), work)
+                    : String.format(
+                            "Success. Enabled data evolution on table '%s': %s.",
+                            identifier.getFullName(), work);
+        }
+    }
+}

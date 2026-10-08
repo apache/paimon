@@ -352,7 +352,13 @@ public interface DataFileMeta {
 
     default long nonNullFirstRowId() {
         Long firstRowId = firstRowId();
-        checkArgument(firstRowId != null, "First row id should not be null.");
+        checkArgument(
+                firstRowId != null,
+                "Data file %s has no first row id. A file written before the table enabled row "
+                        + "tracking is assigned one by the sys.enable_data_evolution procedure; "
+                        + "until then it can be read but not compacted, indexed or updated as a "
+                        + "data-evolution file.",
+                fileName());
         return firstRowId;
     }
 

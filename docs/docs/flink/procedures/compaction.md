@@ -384,3 +384,32 @@ CALL sys.reassign_row_id(`table` => 'test_db.T');
 -- reassign row IDs for the specified partition in the table
 CALL sys.reassign_row_id(`table` => 'test_db.T', partitions => 'pt=a');
 ```
+
+## enable_data_evolution
+
+Enable data evolution on an existing append table by rewriting metadata only: every data file is
+assigned a row ID range, then `row-tracking.enabled` and `data-evolution.enabled` are switched on
+in a new schema. The table must be an append table without primary key, with `bucket = -1` and
+without `clustering.incremental`; REST catalog tables are not supported yet. Arguments:
+
+- `table`: `databaseName.tableName`.
+
+- `dry_run`: report what would change without changing the table, default `false`.
+
+**Syntax**
+
+```sql
+-- Use named argument
+CALL [catalog.]sys.enable_data_evolution(<`table` => identifier> [, <dry_run => dry_run>]);
+
+-- Use indexed argument
+CALL [catalog.]sys.enable_data_evolution(<identifier> [, <dry_run>]);
+```
+
+**Example**
+
+```sql
+CALL sys.enable_data_evolution(`table` => 'test_db.T', dry_run => true);
+
+CALL sys.enable_data_evolution(`table` => 'test_db.T');
+```
