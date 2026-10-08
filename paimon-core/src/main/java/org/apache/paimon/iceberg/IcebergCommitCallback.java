@@ -201,10 +201,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         // Compute Iceberg schema and partition spec for Avro manifest metadata.
         // Snowflake and other Iceberg readers require these in the manifest file header.
-        // Iceberg field IDs must be positive. Paimon column IDs start at 0, which Iceberg
-        // readers reject (see #9012), so remap top-level fields to start from 1. Nested type
-        // IDs are left as-is for a follow-up.
-        IcebergSchema icebergSchema = withPositiveFieldIds(IcebergSchema.create(table.schema()));
+        // Iceberg field IDs must be positive; IcebergSchema#create applies one consistent
+        // positive-ID mapping to top-level and nested fields alike, so the manifest header,
+        // the table metadata and the metrics maps share the same ID space.
+        IcebergSchema icebergSchema = IcebergSchema.create(table.schema());
         List<IcebergPartitionField> partitionFields =
                 getPartitionFields(table.schema().partitionKeys(), icebergSchema);
         Map<String, String> avroMetadata = new HashMap<>();
@@ -758,28 +758,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             fieldId++;
         }
         return result;
-    }
-
-    /**
-     * Rebuilds the schema with positive field IDs starting from 1 for the Avro manifest header. See
-     * PR #9497 review: `Schema.Builder` starts Paimon column IDs at 0 and Iceberg readers like
-     * Snowflake reject them.
-     */
-    private static IcebergSchema withPositiveFieldIds(IcebergSchema schema) {
-        int[] nextId = {1};
-        List<IcebergDataField> fields =
-                schema.fields().stream()
-                        .map(
-                                field ->
-                                        new IcebergDataField(
-                                                nextId[0]++,
-                                                field.name(),
-                                                field.required(),
-                                                field.type(),
-                                                field.dataType(),
-                                                field.doc()))
-                        .collect(Collectors.toList());
-        return new IcebergSchema(schema.schemaId(), fields);
     }
 
     /** VARIANT is an Iceberg format-version-3 type; reject publishing it into v2 metadata. */
