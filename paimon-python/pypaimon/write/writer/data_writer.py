@@ -95,7 +95,7 @@ class DataWriter(ABC):
 
         self.path_factory = self.table.path_factory()
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
-            self.partition, self.bucket
+            self.partition, self.bucket, canonical_partition=True
         )
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
@@ -498,8 +498,8 @@ class DataWriter(ABC):
         if self.external_path_provider:
             return self.external_path_provider.get_next_external_data_path(file_name)
 
-        bucket_path = self.path_factory.data_file_bucket_path(
-            self.partition, self.bucket)
+        bucket_path = self.path_factory.bucket_path(
+            self.partition, self.bucket, canonical_partition=True)
         return f"{bucket_path.rstrip('/')}/{file_name}"
 
     def _should_write_row_sidecar(self) -> bool:

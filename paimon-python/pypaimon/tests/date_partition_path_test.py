@@ -15,10 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""验证 DATE 分区路径与 Java 命名规则的一致性及历史目录兼容性。"""
+"""Verify DATE partition paths match Java and preserve historical reads."""
 
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -29,19 +30,26 @@ from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+from pypaimon.write.writer.data_writer import DataWriter
 
 
-def _create_table(tmp_path, legacy_partition_name=True):
+def _create_table(tmp_path, legacy_partition_name=True, composite_partition=False):
     table_path = str(tmp_path / "table")
     file_io = LocalFileIO()
-    arrow_schema = pa.schema([("id", pa.int64()), ("day", pa.date32())])
+    fields = [("id", pa.int64()), ("day", pa.date32())]
+    partition_keys = ["day"]
+    if composite_partition:
+        fields.append(("region", pa.string()))
+        partition_keys.append("region")
+    arrow_schema = pa.schema(fields)
     schema = Schema.from_pyarrow_schema(
         arrow_schema,
-        partition_keys=["day"],
+        partition_keys=partition_keys,
         options={
             "partition.legacy-name": str(legacy_partition_name).lower(),
             "scan.native-plan.enabled": "false",
             "write.native.enabled": "false",
+            "commit.native.enabled": "false",
         },
     )
     table_schema = SchemaManager(file_io, table_path).create_table(schema)
@@ -54,20 +62,35 @@ def _create_table(tmp_path, legacy_partition_name=True):
     return table, arrow_schema
 
 
-def _write_one_row(table, arrow_schema):
+def _write_rows(table, arrow_schema, rows):
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
-        writer.write_arrow(
-            pa.table(
-                {"id": [1], "day": [date(1970, 1, 2)]},
-                schema=arrow_schema,
-            )
-        )
+        writer.write_arrow(pa.Table.from_pylist(rows, schema=arrow_schema))
         commit.commit(writer.prepare_commit())
     finally:
         writer.close()
         commit.close()
+
+
+def _write_one_row(table, arrow_schema):
+    _write_rows(table, arrow_schema, [{"id": 1, "day": date(1970, 1, 2)}])
+
+
+def _write_legacy_composite_row(table, arrow_schema, row):
+    historical_bucket = (
+        Path(table.table_path)
+        / "day=1970-01-02"
+        / "region=a"
+        / "b"
+        / "bucket-0"
+    )
+    with patch.object(
+        DataWriter,
+        "_generate_file_path",
+        lambda writer, file_name: str(historical_bucket / file_name),
+    ):
+        _write_rows(table, arrow_schema, [row])
 
 
 def _read_rows(table):
@@ -110,6 +133,59 @@ def test_non_legacy_date_partition_write_keeps_iso_name(tmp_path):
     assert partition_directories == ["day=1970-01-02"]
 
 
+def test_legacy_composite_date_write_reads_back_from_canonical_path(tmp_path):
+    table, arrow_schema = _create_table(tmp_path, composite_partition=True)
+
+    _write_rows(table, arrow_schema, [{
+        "id": 1, "day": date(1970, 1, 2), "region": "a/b",
+    }])
+
+    assert _read_rows(table) == [{
+        "id": 1, "day": date(1970, 1, 2), "region": "a/b",
+    }]
+    assert (Path(table.table_path) / "day=1" / "region=a%2Fb" / "bucket-0").is_dir()
+
+
+def test_old_and_new_composite_partition_files_coexist_after_append(tmp_path):
+    table, arrow_schema = _create_table(tmp_path, composite_partition=True)
+    row = {"day": date(1970, 1, 2), "region": "a/b"}
+
+    _write_legacy_composite_row(table, arrow_schema, {"id": 1, **row})
+    first_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+    historical_bucket = (
+        Path(table.table_path)
+        / "day=1970-01-02"
+        / "region=a"
+        / "b"
+        / "bucket-0"
+    )
+    assert historical_bucket.is_dir()
+
+    _write_rows(table, arrow_schema, [{"id": 2, **row}])
+    canonical_directory = Path(table.table_path) / "day=1" / "region=a%2Fb"
+
+    assert {item["id"] for item in _read_rows(table)} == {1, 2}
+    assert canonical_directory.joinpath("bucket-0").is_dir()
+
+    table.rollback_to(first_snapshot_id)
+
+    assert [item["id"] for item in _read_rows(table)] == [1]
+
+
+def test_non_legacy_composite_date_write_uses_canonical_escaping(tmp_path):
+    table, arrow_schema = _create_table(
+        tmp_path, legacy_partition_name=False, composite_partition=True)
+
+    _write_rows(table, arrow_schema, [{
+        "id": 1, "day": date(1970, 1, 2), "region": "a/b",
+    }])
+
+    assert _read_rows(table) == [{
+        "id": 1, "day": date(1970, 1, 2), "region": "a/b",
+    }]
+    assert (Path(table.table_path) / "day=1970-01-02" / "region=a%2Fb" / "bucket-0").is_dir()
+
+
 def test_date_compatibility_does_not_reformat_other_partition_types():
     factory = FileStorePathFactory(
         "/table",
@@ -124,9 +200,9 @@ def test_date_compatibility_does_not_reformat_other_partition_types():
         partition_types=[AtomicType("DATE"), AtomicType("STRING")],
     )
 
-    assert factory.data_file_relative_bucket_path(
-        (date(1970, 1, 2), "a/b"), 0
-    ) == "day=1/region=a/b/bucket-0"
+    assert factory.relative_bucket_path(
+        (date(1970, 1, 2), "a/b"), 0, canonical_partition=True
+    ) == "day=1/region=a%2Fb/bucket-0"
 
 
 def test_date_compatibility_applies_to_external_data_and_bucket_index_paths():
@@ -147,7 +223,8 @@ def test_date_compatibility_applies_to_external_data_and_bucket_index_paths():
         partition_types=[AtomicType("DATE")],
     )
 
-    external_provider = factory.create_external_path_provider(partition, 0)
+    external_provider = factory.create_external_path_provider(
+        partition, 0, canonical_partition=True)
     assert external_provider.get_next_external_data_path("data.parquet") == (
         "/external/day=1/bucket-0/data.parquet"
     )

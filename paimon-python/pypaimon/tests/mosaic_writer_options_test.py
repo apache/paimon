@@ -37,13 +37,10 @@ class _PathFactory:
     def __init__(self, bucket_path):
         self._bucket_path = bucket_path
 
-    def create_external_path_provider(self, partition, bucket):
+    def create_external_path_provider(self, partition, bucket, canonical_partition=False):
         return None
 
-    def bucket_path(self, partition, bucket):
-        return self._bucket_path
-
-    def data_file_bucket_path(self, partition, bucket):
+    def bucket_path(self, partition, bucket, canonical_partition=False):
         return self._bucket_path
 
 
