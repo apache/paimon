@@ -2196,7 +2196,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTToken expiredDataToken =
                 new RESTToken(
                         ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
-                        System.currentTimeMillis() + 3600_000L);
+                        System.currentTimeMillis() + 60_000L);
         setDataTokenToRestServerForMock(identifier, expiredDataToken);
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
