@@ -463,7 +463,11 @@ class PyArrowFileIO(FileIO):
                 self.filesystem.delete_dir_contents(path_str)
                 self.filesystem.delete_dir(path_str)
             else:
-                self.filesystem.delete_dir(path_str)
+                # Arrow delete_dir is recursive, even after an emptiness check.
+                if not isinstance(self.filesystem, pafs.LocalFileSystem):
+                    raise OSError(
+                        f"Safe non-recursive directory deletion is unsupported for {path}")
+                os.rmdir(path_str)
         else:
             self.filesystem.delete_file(path_str)
         return True

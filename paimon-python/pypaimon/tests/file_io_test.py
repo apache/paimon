@@ -381,6 +381,47 @@ class FileIOTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_pyarrow_empty_directory_delete_preserves_late_child(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = os.path.join(root, "db")
+            os.mkdir(directory)
+            file_io = object.__new__(PyArrowFileIO)
+            file_io.filesystem = pafs.LocalFileSystem()
+            file_io.to_filesystem_path = lambda path: path
+            rmdir = os.rmdir
+            child = os.path.join(directory, "new", "schema", "schema-0")
+
+            def create_before_rmdir(path):
+                os.makedirs(os.path.dirname(child))
+                with open(child, "wb") as stream:
+                    stream.write(b"schema")
+                return rmdir(path)
+
+            with patch("pypaimon.filesystem.pyarrow_file_io.os.rmdir",
+                       side_effect=create_before_rmdir):
+                with self.assertRaises(OSError):
+                    file_io.delete(directory, False)
+            with open(child, "rb") as stream:
+                self.assertEqual(b"schema", stream.read())
+
+    def test_pyarrow_remote_empty_directory_delete_fails_closed(self):
+        file_io = object.__new__(PyArrowFileIO)
+        file_io.filesystem = pafs.LocalFileSystem()
+        file_io.to_filesystem_path = lambda path: path
+        for scheme in ("s3", "oss", "gs", "hdfs"):
+            with self.subTest(scheme=scheme):
+                filesystem = MagicMock()
+                filesystem.get_file_info.return_value = []
+                file_io.filesystem = filesystem
+                with patch.object(file_io, "to_filesystem_path", return_value="bucket/db"), \
+                        patch.object(file_io, "_get_file_info",
+                                     return_value=pafs.FileInfo("bucket/db", pafs.FileType.Directory)):
+                    with self.assertRaisesRegex(OSError, "Safe non-recursive"):
+                        file_io.delete(scheme + "://bucket/db", False)
+                filesystem.delete_dir.assert_not_called()
+                filesystem.delete_dir_contents.assert_not_called()
+                filesystem.delete_file.assert_not_called()
+
     def test_delete_returns_false_when_file_not_exists(self):
         temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
         try:
