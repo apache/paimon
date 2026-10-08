@@ -77,6 +77,16 @@ def native_reader_available() -> bool:
             and native_method_available('TableRead', 'read'))
 
 
+def _native_blob_view_supported(table, read_names) -> bool:
+    """Resolve Blob views natively only with the REST catalog environment."""
+    if (not (table.options.blob_view_fields() & set(read_names))
+            or not table.options.blob_view_resolve_enabled()):
+        return True
+    loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
+    # Python also leaves view structs unresolved without a loader.
+    return loader is None or _catalog_metastore(loader) == 'rest'
+
+
 def native_split_bridge_available() -> bool:
     """Whether Rust accepts Java-compatible split bytes from Python plans."""
     return native_reader_available() and native_method_available(
