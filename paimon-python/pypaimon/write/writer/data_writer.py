@@ -29,6 +29,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
@@ -364,6 +365,7 @@ class DataWriter(ABC):
                 max_sequence_number=max_seq,
                 extra_files=extra_files,
                 creation_time=creation_time,
+                delete_row_count=self._count_delete_rows(data),
             )
 
             if self.changelog_producer == ChangelogProducer.INPUT:
@@ -402,7 +404,7 @@ class DataWriter(ABC):
     def _create_data_file_meta(self, file_name, file_path, row_count,
                                min_key, max_key, key_stats, value_stats,
                                min_sequence_number, max_sequence_number,
-                               extra_files=None, creation_time=None):
+                               extra_files=None, creation_time=None, delete_row_count=0):
         """Common metadata finalization for buffered and incremental files."""
         return DataFileMeta.create(
             file_name=file_name,
@@ -415,11 +417,19 @@ class DataWriter(ABC):
             schema_id=self.table.table_schema.id, level=0,
             extra_files=extra_files if extra_files is not None else [],
             creation_time=creation_time if creation_time is not None else Timestamp.now(),
-            delete_row_count=0, file_source=0,
+            delete_row_count=delete_row_count, file_source=0,
             value_stats_cols=None if self.options.metadata_stats_enabled() else [],
             external_path=file_path if self.external_path_provider is not None else None,
             first_row_id=None, write_cols=self.write_cols, file_path=file_path,
         )
+
+    def _count_delete_rows(self, data: pa.Table) -> int:
+        # Count the final file contents, after merging and rolling the buffer.
+        if not self.table.is_primary_key_table or '_VALUE_KIND' not in data.schema.names:
+            return 0
+        kind_counts = pc.value_counts(data.column('_VALUE_KIND'))
+        return sum(entry['counts'].as_py() for entry in kind_counts
+                   if entry['values'].as_py() in (RowKind.UPDATE_BEFORE.value, RowKind.DELETE.value))
 
     def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
         """Transform VARIANT columns into shredded Parquet format.
@@ -483,7 +493,7 @@ class DataWriter(ABC):
                 level=0,
                 extra_files=[],
                 creation_time=creation_time,
-                delete_row_count=0,
+                delete_row_count=self._count_delete_rows(data),
                 file_source=0,
                 value_stats_cols=None if value_stats_enabled else [],
                 external_path=changelog_external_path,
