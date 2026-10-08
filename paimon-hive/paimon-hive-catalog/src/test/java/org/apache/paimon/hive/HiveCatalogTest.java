@@ -376,6 +376,39 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testCleanupDoesNotDropAConcurrentlyCreatedTable(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // A competing caller can register the same identifier (for example an external create that
+        // reuses an existing filesystem schema at a different location) after this call wrote its
+        // schema but before it registered. Cleanup must not drop that winner's table or its data.
+        String databaseName = "test_db";
+        String tableName = "raced_table";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+
+        // The winner's table, registered at its own location.
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        catalog.createTable(identifier, schema, false);
+        assertThat(hiveCatalog.tableExists(identifier)).isTrue();
+
+        // The loser resolves a different location, so it must not consider itself the owner.
+        Path loserLocation = new Path(tempDir.resolve("loser_table").toString());
+        hiveCatalog.cleanupOnCreateTableFailure(identifier, loserLocation, false);
+
+        // The winner's entry must survive the loser's cleanup attempt.
+        assertThat(hiveCatalog.tableExists(identifier)).isTrue();
+    }
+
+    @Test
     public void testDropTableWhenTablePathMissing() throws Exception {
         String databaseName = "test_db";
         String tableName = "new_table";
