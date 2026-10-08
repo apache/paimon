@@ -17,7 +17,11 @@
 
 """Exercise Ray vector-index construction with real worker processes."""
 
+import os
+import threading
 import time
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -127,3 +131,61 @@ def test_validate_before_empty_plan(table, kwargs, match):
 def test_reject_non_vector_ray_build(table):
     with pytest.raises(ValueError, match="only native vector"):
         table.create_index("id", "btree", execution="ray")
+
+
+@contextmanager
+def _jindo_sdk_stub():
+    from pypaimon.filesystem import jindo_file_system_handler as jindo_module
+    from pypaimon.filesystem import pyarrow_file_io as arrow_module
+    from pypaimon.tests.jindo_file_system_test import _RecordingConfig
+
+    def connect(root, user, config):
+        return SimpleNamespace(pid=os.getpid(), lock=threading.Lock(), config=config.values)
+
+    with patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+            patch.object(arrow_module, "JINDO_AVAILABLE", True), \
+            patch.object(jindo_module, "jfs", SimpleNamespace(connect=connect)), \
+            patch.object(jindo_module, "jutil", SimpleNamespace(Config=_RecordingConfig)):
+        yield
+
+
+def _inspect_jindo_context(context_refs):
+    # Nested object refs postpone deserialization until the worker has installed
+    # the SDK stand-in. Only Config/connect are replaced, not serialization.
+    with _jindo_sdk_stub():
+        builder, field, table_read, index_path = ray.get(context_refs[0])
+        handler = builder._table.file_io.filesystem.handler
+        assert table_read.table.file_io is builder._table.file_io
+        assert field.name == "embedding"
+        assert handler._known_file_size("oss://bucket/object") is None
+        handler.register_file_size("object", 456)
+        return (os.getpid(), handler._jindo_fs.pid, handler._known_file_size("oss://bucket/object"),
+                handler.root_path, handler._jindo_fs.config["fs.oss.securityToken"], index_path)
+
+
+def test_jindo_build_context_reconstructs_on_worker(table, ray_cluster):
+    from pypaimon.common.options import Options
+    from pypaimon.filesystem.oss_file_io import OssFileIO
+    from pypaimon.read.table_read import TableRead
+    from pypaimon.table.special_fields import SpecialFields
+
+    builder = GlobalIndexBuilder(table.raw_table, "embedding", "ivf-flat", options=OPTIONS)
+    field = table.raw_table.field_dict["embedding"]
+    reader = TableRead(table.raw_table, None, [field, SpecialFields.ROW_ID])
+    with _jindo_sdk_stub():
+        file_io = OssFileIO("oss://bucket/table", Options({
+            "fs.oss.impl": "jindo", "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.accessKeyId": "test-ak", "fs.oss.accessKeySecret": "test-sk",
+            "fs.oss.securityToken": "test-token",
+        }))
+    original = file_io.filesystem.handler
+    original.register_file_size("object", 123)
+    with patch.object(table.raw_table, "file_io", file_io):
+        # This is the exact tuple broadcast by build_vector_index.
+        context = ray.put((builder, field, reader, "oss://bucket/index"))
+        result = ray.get(ray.remote(_inspect_jindo_context).remote([context]))
+    worker_pid, client_pid, size, root, token, index_path = result
+    assert worker_pid != os.getpid()
+    assert client_pid == worker_pid
+    assert (size, root, token, index_path) == (456, "oss://bucket/", "test-token", "oss://bucket/index")
+    assert original._known_file_size("oss://bucket/object") == 123
