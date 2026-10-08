@@ -46,10 +46,6 @@ def _pyarrow_lt_7():
     return parse(pyarrow.__version__) < parse("7.0.0")
 
 
-_S3_CHECKSUM_LOCK = threading.Lock()
-_S3_CHECKSUM_ENV = "AWS_REQUEST_CHECKSUM_CALCULATION"
-
-
 class LegacyOssDirectoryListingError(RuntimeError):
     """Raised when legacy PyArrow OSS cannot enumerate a directory."""
 
@@ -110,22 +106,6 @@ class PyArrowFileIO(FileIO):
     def _uses_s3_compatibility(self) -> bool:
         return (not self._use_jindo
                 and (self._is_oss or bool(self._s3_endpoint)))
-
-    @staticmethod
-    def _create_s3_filesystem(client_kwargs, compatible: bool) -> FileSystem:
-        with _S3_CHECKSUM_LOCK:
-            if not compatible:
-                return pafs.S3FileSystem(**client_kwargs)
-            # PyArrow has no per-client checksum option; AWS reads this at construction.
-            previous = os.environ.get(_S3_CHECKSUM_ENV)
-            os.environ[_S3_CHECKSUM_ENV] = "WHEN_REQUIRED"
-            try:
-                return pafs.S3FileSystem(**client_kwargs)
-            finally:
-                if previous is None:
-                    os.environ.pop(_S3_CHECKSUM_ENV, None)
-                else:
-                    os.environ[_S3_CHECKSUM_ENV] = previous
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -269,7 +249,7 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return self._create_s3_filesystem(client_kwargs, compatible=True)
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
         access_key = self._get_property(
@@ -309,8 +289,7 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return self._create_s3_filesystem(
-            client_kwargs, compatible=bool(self._s3_endpoint))
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_hdfs_fs(self, scheme: str, netloc: Optional[str]) -> FileSystem:
         if 'HADOOP_HOME' not in os.environ:
