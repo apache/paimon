@@ -79,21 +79,18 @@ class PostponeDataWriter(KeyValueDataWriter):
 
     def _write_data_to_file(self, data):
         sequence = data.column('_SEQUENCE_NUMBER')
-        self._writing_stats = (
-            sequence[0].as_py(), sequence[-1].as_py(),
-            sum(kind in (1, 3) for kind in data.column('_VALUE_KIND').to_pylist()))
+        self._writing_stats = (sequence[0].as_py(), sequence[-1].as_py())
         try:
             super()._write_data_to_file(data)
         finally:
             self._writing_stats = None
 
     def _create_data_file_meta(self, **kwargs):
-        minimum, maximum, deletes = self._writing_stats
+        assert self._writing_stats is not None
+        minimum, maximum = self._writing_stats
         kwargs['min_sequence_number'] = minimum
         kwargs['max_sequence_number'] = maximum
-        meta = super()._create_data_file_meta(**kwargs)
-        meta.delete_row_count = deletes
-        return meta
+        return super()._create_data_file_meta(**kwargs)
 
     def prepare_commit(self):
         self._ensure_active()
