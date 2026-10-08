@@ -282,6 +282,12 @@ class ConflictDetection:
         if conflict is not None:
             return conflict
 
+        if (not delta_entries and self._row_id_check_from_snapshot is not None
+                and any(entry.index_file.global_index_meta is not None for entry in (delta_index_entries or []))
+                and (latest_snapshot is None or latest_snapshot.id != self._row_id_check_from_snapshot)):
+            return RuntimeError(
+                "Global index maintenance conflict: table snapshot changed after planning; rerun maintenance.")
+
         conflict = self.check_global_index_row_id_existence(
             base_entries, delta_index_entries)
         if conflict is not None:

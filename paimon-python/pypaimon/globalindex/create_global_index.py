@@ -173,13 +173,7 @@ class GlobalIndexBuilder:
 
         index_field = self._table.field_dict[self._index_columns[0]]
         snapshot = self._snapshot_for_plan(plan)
-        unindexed_ranges = _unindexed_row_ranges(
-            self._table,
-            snapshot,
-            partition_filter,
-            index_field.id,
-            self._index_type,
-        )
+        unindexed_ranges = self._unindexed_ranges(snapshot, partition_filter, index_field.id)
         if not unindexed_ranges:
             return []
 
@@ -212,6 +206,10 @@ class GlobalIndexBuilder:
         if snapshot_id is not None:
             return snapshot_manager.get_snapshot_by_id(snapshot_id)
         return snapshot_manager.get_latest_snapshot()
+
+    def _unindexed_ranges(self, snapshot, partition_filter, field_id):
+        return _unindexed_row_ranges(
+            self._table, snapshot, partition_filter, field_id, self._index_type)
 
     def _build_sorted_index(
         self, splits, unindexed_ranges, index_field, table_read, index_path: str
