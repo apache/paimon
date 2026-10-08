@@ -136,7 +136,7 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
                         return activeWriter;
                     }
                 };
-        writer.withIndexField("f0");
+        writer.withIndexFields(Collections.singletonList("f0"));
 
         assertThatThrownBy(
                         () ->

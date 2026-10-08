@@ -20,8 +20,9 @@
 
 import random
 import struct
+import uuid
 from dataclasses import dataclass
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Set, Tuple
 
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -30,7 +31,6 @@ from pypaimon.table.row.generic_row import GenericRow
 
 HASH_INDEX = "HASH"
 _ADD = 0
-_DELETE = 1
 SHORT_MAX_VALUE = 32767
 MAX_DYNAMIC_BUCKETS = SHORT_MAX_VALUE + 1
 _SNAPSHOT_UNSET = object()
@@ -83,12 +83,9 @@ def validate_bucket_id(bucket: int) -> None:
 
 def _iter_hashes(table, entry: IndexManifestEntry) -> Iterator[int]:
     meta = entry.index_file
-    path = meta.external_path
-    if path is None:
-        # Files without an external path always live in the table's index
-        # directory, even if global-index.external-path was configured later.
-        index_path = table.path_factory().global_index_path_factory().index_path()
-        path = f"{index_path}/{meta.file_name}"
+    path = table.path_factory().bucket_index_path(
+        tuple(entry.partition.values), entry.bucket, meta, table.file_io
+    )
     with table.file_io.new_input_stream(path) as stream:
         remainder = b""
         while True:
@@ -427,7 +424,7 @@ class DynamicBucketIndexMaintainer:
             self.snapshot.id if self.snapshot is not None else 0
         )
         self._states: Dict[
-            Tuple[Tuple, int], Tuple[Set[int], Optional[IndexManifestEntry], bool]
+            Tuple[Tuple, int], Tuple[Set[int], bool]
         ] = {}
         self._new_paths: List[str] = []
 
@@ -437,32 +434,29 @@ class DynamicBucketIndexMaintainer:
         key = (partition, bucket)
         state = self._states.get(key)
         if state is None:
-            hashes, old_entry = self._load_bucket(partition, bucket)
-            state = (hashes, old_entry, False)
-        hashes, old_entry, modified = state
+            state = (self._load_bucket(partition, bucket), False)
+        hashes, modified = state
         previous_size = len(hashes)
         hashes.add(to_signed_int32(key_hash))
-        self._states[key] = (hashes, old_entry, modified or len(hashes) != previous_size)
+        self._states[key] = (hashes, modified or len(hashes) != previous_size)
 
     def prepare_commit(self) -> Dict[Tuple[Tuple, int], DynamicBucketIndexChanges]:
         changes: Dict[Tuple[Tuple, int], DynamicBucketIndexChanges] = {}
-        for key, (hashes, old_entry, modified) in self._states.items():
+        prepared_states = {}
+        for key, (hashes, modified) in self._states.items():
             if not modified:
                 continue
             partition, bucket = key
             new_entry = self._write_index(partition, bucket, hashes)
             changes[key] = DynamicBucketIndexChanges(
                 additions=[new_entry],
-                deletions=[
-                    IndexManifestEntry(
-                        kind=_DELETE,
-                        partition=old_entry.partition,
-                        bucket=old_entry.bucket,
-                        index_file=old_entry.index_file,
-                    )
-                ] if old_entry is not None else [],
+                # Java sends only the full new HASH file. BucketedCombiner
+                # replaces the previous entry by partition and bucket.
+                deletions=[],
             )
-            self._states[key] = (hashes, new_entry, False)
+            prepared_states[key] = (hashes, False)
+        # A failed bucket must not make a retry forget earlier additions.
+        self._states.update(prepared_states)
         return changes
 
     def release_prepared(self) -> None:
@@ -476,7 +470,7 @@ class DynamicBucketIndexMaintainer:
 
     def _load_bucket(
         self, partition: Tuple, bucket: int
-    ) -> Tuple[Set[int], Optional[IndexManifestEntry]]:
+    ) -> Set[int]:
         """Load a complete bucket index for full-file replacement.
 
         This matches Java's HASH index lifecycle. A modified bucket therefore
@@ -484,10 +478,10 @@ class DynamicBucketIndexMaintainer:
         format is introduced.
         """
         if self.ignore_existing:
-            return set(), None
+            return set()
         snapshot = self.snapshot
         if snapshot is None:
-            return set(), None
+            return set()
         entries = IndexFileHandler(self.table).scan(
             snapshot,
             lambda entry: entry.index_file.index_type == HASH_INDEX
@@ -501,15 +495,17 @@ class DynamicBucketIndexMaintainer:
                 f"{[entry.index_file.file_name for entry in entries]}"
             )
         if not entries:
-            return set(), None
-        return _read_hashes(self.table, entries[0]), entries[0]
+            return set()
+        return _read_hashes(self.table, entries[0])
 
     def _write_index(
         self, partition: Tuple, bucket: int, hashes: Set[int]
     ) -> IndexManifestEntry:
-        path_factory = self.table.path_factory().global_index_path_factory()
-        self.table.file_io.check_or_mkdirs(path_factory.global_index_root_path())
-        path = path_factory.new_path()
+        file_name = f"index-{uuid.uuid4()}-0"
+        path, external = self.table.path_factory().new_bucket_index_path(
+            partition, bucket, file_name
+        )
+        self.table.file_io.check_or_mkdirs(path.rsplit("/", 1)[0])
         payload = b"".join(struct.pack(">i", value) for value in sorted(hashes))
         try:
             with self.table.file_io.new_output_stream(path) as stream:
@@ -524,7 +520,7 @@ class DynamicBucketIndexMaintainer:
             file_name=path.rsplit("/", 1)[-1],
             file_size=self.table.file_io.get_file_size(path),
             row_count=len(hashes),
-            external_path=path if path_factory.is_external_path() else None,
+            external_path=path if external else None,
         )
         return IndexManifestEntry(
             kind=_ADD,

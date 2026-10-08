@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import sys
 import threading
+from types import ModuleType
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -23,17 +25,20 @@ import pytest
 
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.read.read_type import OutputProjection, project_read_type, reader_adapter
+from pypaimon.read.variant_read_type import with_variant_extractions
+from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
 
 
 class _Split:
     def __init__(self, file_name='data.parquet', file_size=1):
-        self.files = [Mock(file_name=file_name, file_size=file_size)]
+        self.files = [Mock(file_name=file_name, file_size=file_size, extra_files=[], write_cols=None)]
 
 
 def _table_read(limit=None):
     read = TableRead.__new__(TableRead)
     read.table = Mock()
+    read.table.is_primary_key_table = False
     read.table.options.native_read_enabled.return_value = True
     read.table.options.sequence_field.return_value = []
     read.table.options.file_format.return_value = 'parquet'
@@ -46,12 +51,17 @@ def _table_read(limit=None):
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
-    read.nested_name_paths = None
+    read.output_projection = None
+    read.table.options.row_tracking_enabled.return_value = False
+    read.table.fields = read.read_type
+    read._adapter_read_type = read.read_type
     read.limit = limit
     read._read_parallelism = 1
     read._deferred_blob_fields = set()
     read._predicate_extra_fields = []
-    read._scan_read_type = read.read_type
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
     read._output_column_names = ['id']
     return read
 
@@ -60,7 +70,9 @@ def _blob_table_read(limit=None):
     read = _table_read(limit)
     read.read_type = [DataField(0, 'payload', AtomicType('BLOB'))]
     read._output_column_names = ['payload']
-    read._scan_read_type = read.read_type
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
     return read
 
 
@@ -69,17 +81,97 @@ def _id_batch(values):
         [pa.array(values, type=pa.int32())], names=['id'])
 
 
+def test_native_read_falls_back_before_opening_primary_file_with_row_sidecar():
+    read = _table_read()
+    split = _Split()
+    split.files[0].extra_files = ['point-read.row']
+    with patch('pypaimon.read.native_plan.native_read') as native:
+        assert read._try_native_batches([split], pa.schema([('id', pa.int32())])) is None
+    native.assert_not_called()
+
+
+def test_native_read_returns_named_variant_expression_columns():
+    read = _table_read()
+    variants = {
+        'payload': {
+            'paths': ['$.ratio', '$.missing'],
+            'target_type': pa.float32(),
+            'fail_on_error': [False, True],
+        }
+    }
+    read.read_type = with_variant_extractions([
+        DataField(0, 'id', AtomicType('INT')),
+        DataField(1, 'payload', AtomicType('VARIANT')),
+    ], variants)
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
+    read._output_column_names = ['id', 'payload']
+    read.output_projection = OutputProjection([
+        ('identifier', ['id']),
+        ('ratio', ['payload', '0']),
+        ('missing', ['payload', '1']),
+    ], True)
+    split = _Split()
+    split._native_split = object()
+    payload_type = pa.struct([
+        pa.field('0', pa.float32()),
+        pa.field('1', pa.float32()),
+    ])
+    batch = pa.record_batch([
+        pa.array([1, 2, 3], type=pa.int32()),
+        pa.array([
+            {'0': 1.25, '1': None},
+            {'0': 2.5, '1': None},
+            None,
+        ], type=payload_type),
+    ], names=['id', 'payload'])
+
+    with patch('pypaimon.read.native_plan.native_read',
+               return_value=[batch]) as native:
+        result = read.to_arrow([split])
+
+    assert result.column_names == ['identifier', 'ratio', 'missing']
+    assert result.schema.field('ratio').type == pa.float32()
+    assert result.column('identifier').to_pylist() == [1, 2, 3]
+    assert result.column('ratio').to_pylist() == [1.25, 2.5, None]
+    assert result.column('missing').to_pylist() == [None, None, None]
+    assert 'variant_fields' not in native.call_args.kwargs
+    assert native.call_args.kwargs['read_type'] == read.read_type
+
+
+def test_variant_fields_never_silently_falls_back_to_python():
+    read = _table_read()
+    read.read_type = with_variant_extractions(
+        [DataField(0, 'payload', AtomicType('VARIANT'))],
+        {'payload': {
+            'paths': ['$.ratio'],
+            'target_type': pa.float32(),
+            'fail_on_error': False,
+        }})
+    read.table.fields = read.read_type
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._scan_read_type = read._adapter_read_type
+    read._output_column_names = ['payload']
+    read.output_projection = OutputProjection([('ratio', ['payload', '0'])], True)
+    read.table.options.native_read_enabled.return_value = False
+
+    with pytest.raises(RuntimeError, match='read.native.enabled is false'):
+        read.to_arrow([_Split()])
+
+
 @pytest.mark.parametrize('type_', ['FLOAT', 'DOUBLE'])
-def test_floating_sequence_falls_back_before_native_read(type_):
+def test_floating_sequence_uses_native_read(type_):
     read = _table_read()
     read.table.is_primary_key_table = True
     read.table.options.sequence_field.return_value = ['seq']
     read.table.field_dict = {'seq': DataField(1, 'seq', AtomicType(type_))}
     split = _Split()
     split._native_split = object()
-    with patch('pypaimon.read.native_plan.native_read') as native:
-        assert read._try_native_batches([split], pa.schema([('id', pa.int32())])) is None
-        native.assert_not_called()
+    batch = _id_batch([1])
+    with patch('pypaimon.read.native_plan.native_read', return_value=[batch]) as native:
+        assert list(read._try_native_batches([split], pa.schema([('id', pa.int32())]))) == [batch]
+        native.assert_called_once()
 
 
 def test_native_read_consumes_retained_rust_splits_and_enforces_limit():
@@ -100,22 +192,44 @@ def test_native_read_consumes_retained_rust_splits_and_enforces_limit():
         [first._native_split, second._native_split],
         predicate=None,
         limit=2,
-        projection=['id'],
+        read_type=read.read_type,
         blob_parallelism=1,
     )
 
 
+def test_native_read_propagates_native_fork_safety_error():
+    class ForkSafetyError(RuntimeError):
+        pass
+
+    module = ModuleType('pypaimon_rust')
+    module.ForkSafetyError = ForkSafetyError
+    read = _table_read()
+    split = _Split()
+    split._native_split = object()
+    with patch.dict(sys.modules, {'pypaimon_rust': module}), patch(
+            'pypaimon.read.native_plan.native_read',
+            side_effect=ForkSafetyError('cannot reuse Jindo after fork')):
+        with pytest.raises(ForkSafetyError):
+            read._try_native_batches([split], pa.schema([('id', pa.int32())]))
+
+
 def test_native_read_flattens_nested_rows_and_map_keys_with_parent_nulls():
     read = _table_read()
-    read.read_type = [
-        DataField(2, 'payload_score', AtomicType('INT')),
-        DataField(3, 'attrs_selected', AtomicType('INT')),
+    read.table.fields = [
+        DataField(0, 'payload', RowType(True, [
+            DataField(1, 'details', RowType(True, [
+                DataField(2, 'score', AtomicType('INT')),
+                DataField(3, 'ignored', AtomicType('STRING'))])),
+            DataField(4, 'ignored', AtomicType('STRING'))])),
+        DataField(5, 'attrs', MapType(True, AtomicType('STRING'), AtomicType('INT'))),
     ]
-    read._output_column_names = [field.name for field in read.read_type]
-    read.nested_name_paths = [
-        ['payload', 'details', 'score'],
-        ['attrs', 'selected'],
-    ]
+    read.read_type = project_read_type(read.table.fields, [
+        ['payload', 'details', 'score'], ['attrs', 'selected']])
+    read._adapter_read_type, _ = reader_adapter(read.read_type, read.table.fields)
+    read._output_column_names = [field.name for field in read._adapter_read_type]
+    read.output_projection = OutputProjection([
+        ('payload_score', ['payload', 'details', 'score']),
+        ('attrs_selected', ['attrs', 'selected'])])
     split = _Split()
     split._native_split = object()
     payload_type = pa.struct([
@@ -143,7 +257,8 @@ def test_native_read_flattens_nested_rows_and_map_keys_with_parent_nulls():
         'payload_score': [7, None, None],
         'attrs_selected': [10, None, None],
     }
-    assert native.call_args.kwargs['nested_projection'] == read.nested_name_paths
+    assert native.call_args.kwargs['read_type'] == read.read_type
+    assert 'nested_projection' not in native.call_args.kwargs
 
 
 def test_native_read_preserves_physical_row_kinds():
@@ -196,7 +311,7 @@ def test_native_read_bridges_python_planned_split():
         [converted],
         predicate=None,
         limit=None,
-        projection=['id'],
+        read_type=read.read_type,
     )
 
 
@@ -565,6 +680,37 @@ def test_native_read_limit_close_reaches_capped_native_reader():
     assert native_reader.closed
 
 
+@pytest.mark.parametrize('managed_reader', [False, True])
+def test_pruning_pk_blob_limit_close_reaches_serial_native_reader(managed_reader):
+    read = _blob_table_read(limit=2)
+    read.table.is_primary_key_table = True
+    splits = [_Split(), _Split()]
+    for index, split in enumerate(splits):
+        split._native_split = index
+        split.merged_row_count = Mock(return_value=None)
+
+    class CloseTrackingReader:
+        closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return pa.record_batch([pa.array([b'payload'], type=pa.large_binary())], names=['payload'])
+
+        def close(self):
+            self.closed = True
+
+    native_reader = CloseTrackingReader()
+    method = read._to_managed_arrow_batch_reader if managed_reader else read.to_arrow_batch_reader
+    with patch('pypaimon.read.native_plan.native_read', return_value=native_reader):
+        reader = method(splits, parallelism=4)
+        assert reader.read_next_batch().column('payload').to_pylist() == [b'payload']
+        assert not native_reader.closed
+        reader.close()
+    assert native_reader.closed
+
+
 def test_filtered_native_read_limit_keeps_split_parallelism():
     read = _table_read(limit=1)
     read.predicate = Mock()
@@ -783,7 +929,7 @@ def test_native_avro_read_uses_native_path():
 def test_native_read_falls_back_for_unsupported_dedicated_file():
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
-    split = _Split('camera.video')
+    split = _Split('camera.unsupported')
     split._native_split = object()
 
     with patch('pypaimon.read.native_plan.native_read') as native:
@@ -792,10 +938,11 @@ def test_native_read_falls_back_for_unsupported_dedicated_file():
     native.assert_not_called()
 
 
-def test_native_read_supports_blob_file_and_forwards_parallelism():
+@pytest.mark.parametrize('file_name', ['picture.blob', 'camera.video'])
+def test_native_read_supports_blob_and_video_files_and_forwards_parallelism(file_name):
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
-    split = _Split('picture.blob')
+    split = _Split(file_name)
     split._native_split = object()
 
     with patch(
@@ -851,35 +998,24 @@ def test_native_read_preserves_parallel_large_binary_blob_schema():
     assert result.schema == pa.schema([('payload', pa.large_binary())])
 
 
-def test_native_read_defers_to_python_for_pruning_blob_limit():
+@pytest.mark.parametrize('descriptor', [False, True])
+def test_native_primary_key_blob_limit_passes_quota_to_rust(descriptor):
     read = _blob_table_read(limit=1)
-    read._deferred_blob_fields = {'payload'}
-    split = _Split('payload.blob')
-    split._native_split = object()
-    split.merged_row_count = Mock(return_value=2)
-
-    with patch(
-            'pypaimon.read.native_plan.native_read') as native:
-        assert read._try_native_batches(
-            [split], pa.schema([('payload', pa.large_binary())]),
-            blob_parallelism=1) is None
-
-    native.assert_not_called()
-
-
-def test_native_read_defers_to_python_for_pruning_descriptor_blob_limit():
-    read = _blob_table_read(limit=1)
-    read.table.options.blob_descriptor_fields.return_value = {'payload'}
+    read.table.is_primary_key_table = True
+    if descriptor:
+        read.table.options.blob_descriptor_fields.return_value = {'payload'}
     split = _Split('payload.parquet')
     split._native_split = object()
     split.merged_row_count = Mock(return_value=2)
 
-    with patch('pypaimon.read.native_plan.native_read') as native:
-        assert read._try_native_batches(
+    batch = pa.record_batch([pa.array([b'first'], type=pa.large_binary())], names=['payload'])
+    with patch('pypaimon.read.native_plan.native_read', return_value=[batch]) as native:
+        assert list(read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())]),
-            blob_parallelism=1) is None
-
-    native.assert_not_called()
+            blob_parallelism=1)) == [batch]
+    native.assert_called_once()
+    assert native.call_args.kwargs['limit'] == 1
+    assert not read._should_run_parallel([split, split], 2)
 
 
 @pytest.mark.parametrize('descriptor', [False, True])
@@ -981,6 +1117,8 @@ def test_native_read_pruning_descriptor_limit_allows_non_blob_predicate():
 def test_native_read_supports_precision_zero_timestamps(data_type, values):
     read = _table_read()
     read.read_type = [DataField(0, 'ts', AtomicType('TIMESTAMP(0)'))]
+    read._adapter_read_type = read.read_type
+    read.table.fields = read.read_type
     read._output_column_names = ['ts']
     split = _Split()
     split._native_split = object()

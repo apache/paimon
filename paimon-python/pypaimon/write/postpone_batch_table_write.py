@@ -50,6 +50,14 @@ class PostponeFixedBucketWriteBuilder(BatchWriteBuilder):
         return self
 
     def new_write(self):
+        # Automatic size estimation still belongs to the Python coordinator.
+        # Native direct writes accept a resolved plan or Java's explicit default.
+        if (self._bucket_plan is not None
+                or self.table.options.postpone_default_bucket_num() is not None):
+            native = self._native_write(
+                self.static_partition, fixed_bucket=True, bucket_plan=self._bucket_plan)
+            if native is not None:
+                return native
         return PostponeFixedBucketBatchTableWrite(
             self.table,
             self.commit_user,
@@ -71,7 +79,8 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         self._planner = PostponeBucketPlanner(
             table,
             known_num_buckets=(
-                bucket_plan.as_dict() if bucket_plan is not None else None
+                bucket_plan.as_dict() if bucket_plan is not None
+                else {} if static_partition is not None else None
             ),
         )
         self._bucket_plan = (
@@ -117,14 +126,18 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
             for partition in self._planner.input_partition_stats(data)
         )
 
-    def write_arrow(self, table: pa.Table):
+    def write_arrow(self, table: pa.Table, bucket=None):
+        if bucket is not None:
+            raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         table = self._prepare_arrow_data(table)
         if not self._buffer_input(table):
             return super().write_arrow(table)
         self._pending_inputs.extend(
             ("batch", batch) for batch in table.to_batches())
 
-    def write_arrow_batch(self, data: pa.RecordBatch):
+    def write_arrow_batch(self, data: pa.RecordBatch, bucket=None):
+        if bucket is not None:
+            raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         data = self._prepare_arrow_data(data)
         if not self._buffer_input(data):
             return super().write_arrow_batch(data)

@@ -92,6 +92,19 @@ class DLFSignerTest(unittest.TestCase):
         # Test identifier
         self.assertEqual("openapi", signer.identifier())
 
+    def test_openapi_signature_matches_java_for_encoded_prefixes(self):
+        signer = DLFOpenApiSigner()
+        token = DLFToken("AccessKeyId", "AccessKeySecret", "security-token", None)
+        now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
+        host = "dlfnext.cn-beijing.aliyuncs.com"
+        for prefix, java in (("catalog id", "acs AccessKeyId:KQN7BVdojufy1Y9Bm8cunx4NZ1E="),
+                             ("a+b", "acs AccessKeyId:ttllEDhpL4JgTDVm422r8qp9MZ4="),
+                             ("catalog/id", "acs AccessKeyId:YlBMkloyu6zbfnjd9qRYELW3+cc=")):
+            headers = signer.sign_headers(None, now, token.security_token, host)
+            headers["x-acs-signature-nonce"] = "fixed-nonce"
+            parameter = RESTAuthParameter("GET", ResourcePaths(prefix).permissions(), None, {})
+            self.assertEqual(java, signer.authorization(parameter, token, host, headers), prefix)
+
     def test_openapi_date_format_with_chinese_locale(self):
         """Date header must stay English RFC 1123 under zh_CN locale."""
         original = locale.setlocale(locale.LC_TIME, None)

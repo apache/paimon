@@ -52,7 +52,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: paimon-python/dev/requirements.txt
+          cache-dependency-path: paimon-python/pyproject.toml
 
       - name: Set package version
         id: package_version
@@ -62,7 +62,7 @@ jobs:
 
           source_version="$(
             sed -n 's/^VERSION = "\(.*\)"/\1/p' \
-              paimon-python/setup.py
+              paimon-python/pypaimon/_version.py
           )"
           release_version="${{ inputs.release_version }}"
           if [[ "${source_version}" != "${release_version}" ]]; then
@@ -74,19 +74,18 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/*-rc* ]]; then
             rc_number="${GITHUB_REF_NAME##*-rc}"
             package_version="${release_version}rc${rc_number}"
-            sed -i \
-              "s/^VERSION = \".*\"/VERSION = \"${package_version}\"/" \
-              paimon-python/setup.py
           fi
 
           echo "version=${package_version}" >> "${GITHUB_OUTPUT}"
+          echo "PYPAIMON_BUILD_VERSION=${package_version}" >> "${GITHUB_ENV}"
           echo "Building PyPaimon ${package_version}"
 
       - name: Build distributions
         working-directory: paimon-python
         run: |
-          python -m pip install --upgrade pip setuptools wheel twine
-          python setup.py sdist bdist_wheel
+          python -m pip install --upgrade pip
+          python -m pip install --group build
+          python -m build
           python -m twine check dist/*
 
       - name: Verify distribution contents
@@ -111,7 +110,8 @@ jobs:
           with tarfile.open(sdist, "r:gz") as archive:
               names = archive.getnames()
               prefix = "pypaimon-{}/".format(expected)
-              for required in ("LICENSE", "NOTICE", "README.md", "setup.py"):
+              for required in ("LICENSE", "NOTICE", "README.md", "setup.py", "pyproject.toml",
+                               "pypaimon/_version.py", "pypaimon/_full_version"):
                   if prefix + required not in names:
                       raise SystemExit("Missing {} from sdist".format(required))
               sample_data = "pypaimon/sample/data/data.jsonl"

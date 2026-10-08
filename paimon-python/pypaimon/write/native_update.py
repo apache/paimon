@@ -19,7 +19,8 @@
 
 import pyarrow as pa
 
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.file_store_table import FileStoreTable
@@ -27,7 +28,7 @@ from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
 from pypaimon.write.native_write import native_write_available, _native_partition_types_supported
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId, _RowIdUpdateFileWriter
+from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import value_for_arrow
 
 
@@ -37,7 +38,10 @@ def _native_row_id_table(table):
             or not table.options.native_write_enabled()
             or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()
-            or not _RowIdUpdateFileWriter.supports_table(table)
+            or table.is_primary_key_table
+            or table.options.file_format() != 'parquet'
+            or table.options.with_vector_format()
+            or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_write_available()):
         return None
@@ -79,6 +83,8 @@ def _native_update_paths_supported(table):
 
 def create_native_update(table, commit_user, columns):
     """Use the public core updater for direct and grouped row-ID updates."""
+    if not _native_update_columns_supported(table, columns):
+        return None
     native_table = _native_row_id_table(table)
     if native_table is None:
         return None
@@ -92,6 +98,11 @@ def create_native_update(table, commit_user, columns):
 
 def create_native_update_by_row_id(table, commit_user, commit_identifier):
     """Create a core updater sharing one snapshot across incremental calls."""
+    # Its columns are selected on each later call. Until core supports raw
+    # Blob updates, retain one Python updater for the whole operation on such
+    # tables rather than switching after some files have already been staged.
+    if not _native_update_columns_supported(table, None):
+        return None
     native_table = _native_row_id_table(table)
     if native_table is None:
         return None
@@ -111,11 +122,51 @@ def _supported_upsert_key_type(data_type):
         pa.types.is_large_string, pa.types.is_binary, pa.types.is_large_binary,
         pa.types.is_fixed_size_binary, pa.types.is_date, pa.types.is_decimal,
         pa.types.is_time, pa.types.is_timestamp,
+        pa.types.is_floating,
     ))
 
 
+def _native_update_columns_supported(table, columns):
+    """Java updatableBlobFields: descriptor and view fields are inline."""
+    if type(table) is not FileStoreTable:
+        return False
+    inline = table.options.blob_descriptor_fields() | table.options.blob_view_fields()
+    names = set(table.field_names if columns is None else columns)
+    return not any(field.name in names and is_blob_file_field(field)
+                   and field.name not in inline for field in table.fields)
+
+
+def _upsert_row_batches(rows, fields, schema):
+    """Encode consecutive row shapes without padding absent fields with NULL.
+
+    Keep source order, including duplicates across shapes. Key matching,
+    last-write-wins and matched/append column validation belong to Rust core.
+    """
+    batches = []
+    start = 0
+    while start < len(rows):
+        names = set(rows[start])
+        if not names <= set(schema.names):
+            raise ValueError('upsert row fields must be in the table schema')
+        end = start + 1
+        while end < len(rows) and set(rows[end]) == names:
+            end += 1
+        selected = [field for field in fields if field.name in names]
+        batch_schema = pa.schema([schema.field(field.name) for field in selected])
+        batches.append(pa.RecordBatch.from_pydict({
+            field.name: [value_for_arrow(row[field.name], field) for row in rows[start:end]]
+            for field in selected
+        }, schema=batch_schema))
+        start = end
+    return batches
+
+
 def create_native_upsert(table, commit_user, data, keys, columns):
-    """Prepare one core upsert from full Arrow rows or named row values."""
+    """Prepare one core upsert from Arrow columns or named row values."""
+    if table.options.video_frame_fields() or not _native_update_columns_supported(table, columns):
+        # An upsert can append unmatched rows; packed video writing is still
+        # provided by the Python writer.
+        return None
     native_table = _native_row_id_table(table)
     if native_table is None:
         return None
@@ -124,18 +175,13 @@ def create_native_upsert(table, commit_user, data, keys, columns):
     if any(not _supported_upsert_key_type(schema.field(key).type) for key in set(keys + table.partition_keys)):
         return None
     if not isinstance(data, pa.Table):
-        # Missing fields retain their row-object semantics on the fallback
-        # path; converting them to Arrow NULLs would change update behavior.
-        if not columns or any(set(values) != set(schema.names) for values in data):
+        if not columns or not data:
             return None
-        data = pa.Table.from_pydict({
-            field.name: [value_for_arrow(values[field.name], field) for values in data]
-            for field in fields
-        }, schema=schema)
-    if (len(data.column_names) != len(schema.names)
-            or set(data.column_names) != set(schema.names)
+        data = _upsert_row_batches(data, fields, schema)
+    elif (len(data.column_names) != len(set(data.column_names))
+            or not set(data.column_names) <= set(schema.names)
             or any(data.schema.field(name).type != schema.field(name).type
-                   for name in schema.names)):
+                   for name in data.column_names)):
         return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
@@ -144,8 +190,10 @@ def create_native_upsert(table, commit_user, data, keys, columns):
     return NativeTableUpsert(table, writer, keys, data)
 
 
-def create_native_predicate_update(table, commit_user, predicate):
+def create_native_predicate_update(table, commit_user, predicate, columns=None):
     """Prepare a public core operation before any assignment can run."""
+    if not _native_update_columns_supported(table, columns):
+        return None
     native_table = _native_row_id_table(table)
     if native_table is None:
         return None
@@ -256,12 +304,13 @@ class NativeTableUpdateByRowId(TableUpdateByRowId):
         return from_native_commit_messages(self.table, messages)
 
     def _write_row_columns(self, data, column_names, blob_object_columns):
-        # This adapter is selected only for plain Parquet tables without blobs.
+        # Row input normalization happens in the public Python API; physical
+        # field layouts and Blob references are handled by the core updater.
         return self.update_columns(data, column_names)
 
 
 class NativeTableUpsert:
-    """Submit full Arrow rows to the core Rust upsert writer."""
+    """Submit Arrow tables or row-shape batches to the core Rust upsert writer."""
 
     def __init__(self, table, writer, keys, data):
         self.table = table

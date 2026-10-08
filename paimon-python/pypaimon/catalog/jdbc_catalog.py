@@ -411,7 +411,9 @@ class JdbcCatalog(Catalog):
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
-        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
+        from pypaimon.common.options.options_utils import OptionsUtils
+        auto_create = schema.options.get(CoreOptions.AUTO_CREATE.key()) if schema.options else None
+        if auto_create is not None and OptionsUtils.convert_to_boolean(auto_create):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)

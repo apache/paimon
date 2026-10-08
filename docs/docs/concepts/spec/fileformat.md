@@ -401,9 +401,8 @@ Limitations:
 
 ### Video
 
-Video is an independent, versioned format with the `.video` extension. It packs one or more
-complete encoded-video payloads and logical frame runs. The payloads are raw byte ranges without
-the ordinary BLOB entry header, length trailer, or per-entry CRC:
+`.video` stores complete encoded videos and frame runs, without BLOB entry headers, length
+trailers, or per-entry CRC. On-disk order:
 
 ```
 +----------------------------+
@@ -413,7 +412,13 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 +----------------------------+
 | ...                        |
 +----------------------------+
+| Keyframe Index 1           |  Video metadata ranges and compressed keyframe entries
++----------------------------+
+| Keyframe Index 2           |
++----------------------------+
 | Physical Length Index      |  Delta-Varint video lengths
++----------------------------+
+| Keyframe-Index Length Index |  Delta-Varint block lengths per video (0 = scan fallback)
 +----------------------------+
 | Run Length Index           |  Delta-Varint logical row counts
 +----------------------------+
@@ -422,6 +427,7 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 | Run First-Frame Index      |  Delta-Varint frame ordinals
 +----------------------------+
 | Physical Index Length      |  4 bytes (Little Endian)
+| Keyframe Length-Index Size |  4 bytes (Little Endian)
 | Run-Length Index Length    |  4 bytes (Little Endian)
 | Run-Reference Index Length |  4 bytes (Little Endian)
 | First-Frame Index Length   |  4 bytes (Little Endian)
@@ -430,14 +436,18 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 +----------------------------+
 ```
 
-The run arrays have equal element counts. A non-negative run reference is an ordinal in the
-physical length index. For logical row `r` in a run beginning at logical row `s`, the returned
-`VideoFrameDescriptor` identifies the referenced raw video range and frame ordinal
-`run_first_frame + (r - s)`. `-1` is a NULL run and `-2` is a data-evolution placeholder run.
-Non-negative runs have fixed frame stride one in version 1; a discontinuity starts another run.
+Run arrays have equal lengths. Non-negative references select a video; `-1` means NULL and `-2`
+means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
+`run_first_frame + r - s`; gaps start new runs.
 
-The serialized `VideoFrameDescriptor` stored in an Arrow/data-file cell has its own versioned
-wire layout. All numeric values are little endian:
+A keyframe-index block contains a 17-byte header (version `1`: uint8; magic `0x564944454F4B4649`:
+uint64; metadata-range and keyframe counts: uint32 each), metadata `(offset, length)` pairs
+(int64 each), and zlib-compressed `(frame ordinal, PTS, packet position)` entries (int64 each).
+Numeric fields are little endian; offsets are payload-relative. Limits: 65,536 metadata ranges
+and 65,536 keyframes, 16 MiB per block, 64 MiB per file. The index covers the first video
+stream; its time base stays in the video.
+
+An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 
 | Field | Size | Description |
 | --- | ---: | --- |
@@ -448,14 +458,9 @@ wire layout. All numeric values are little endian:
 | Offset | 8 bytes | Start of the complete encoded-video payload |
 | Length | 8 bytes | Encoded-video payload length |
 | Frame index | 8 bytes | Zero-based presentation-order frame ordinal |
+| Keyframe-index offset | 8 bytes | Index offset in the `.video` file, or `-1` |
+| Keyframe-index length | 8 bytes | Index length, or `0` |
 
-Descriptor bytes are independently versioned from the `.video` container. Java and Python share
-canonical descriptor and container fixtures to keep both implementations byte-compatible.
-
-Readers validate footer and index bounds, positive physical lengths, full coverage of the payload
-region, equal run-index counts, positive run lengths, physical ordinals, and non-negative first
-frames. The format currently supports one scalar BLOB field per file. Physical video reuse uses
-exact input payload `BlobDescriptor` identity and is file-local; there are no cross-file payload
-references. Ordinary `.blob` files keep their existing version, wrappers, checksums, and layout.
+A `.video` file serves one scalar BLOB field; references are file-local. `.blob` is unchanged.
 
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).

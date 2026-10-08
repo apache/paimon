@@ -85,48 +85,6 @@ def _reject_compact_increment(messages: List[CommitMessage]):
                 'Committing a compact increment requires a separate COMPACT snapshot.')
 
 
-def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
-    """Delete files created by messages known to be uncommitted."""
-    for message in commit_messages:
-        for file in (list(message.new_files) + list(message.changelog_files)
-                     + list(message.compact_after)
-                     + list(message.compact_changelog_files)):
-            path = None
-            try:
-                bucket_path = None if file.physical_path() else table.path_factory().data_file_bucket_path(
-                    tuple(message.partition), message.bucket)
-                for path in file.collect_files(bucket_path):
-                    table.file_io.delete_quietly(path)
-            except Exception as error:
-                logger.warning(
-                    "Failed to clean up file %s during abort: %s",
-                    path,
-                    error,
-                )
-        for entry in message.index_adds + message.compact_index_adds:
-            file_name = None
-            try:
-                index_file = entry.index_file
-                file_name = index_file.file_name
-                if index_file.index_type == 'DELETION_VECTORS':
-                    path = table.path_factory().bucket_index_path(
-                        tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
-                else:
-                    path = (
-                        index_file.external_path
-                        or table.path_factory()
-                        .global_index_path_factory()
-                        .to_path(file_name)
-                    )
-                table.file_io.delete_quietly(path)
-            except Exception as error:
-                logger.warning(
-                    "Failed to clean up index file %s during abort: %s",
-                    file_name,
-                    error,
-                )
-
-
 class CommitResult:
     """Base class for commit results."""
 
@@ -222,6 +180,14 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
+    def _set_fixed_bucket_commit_check(self, messages):
+        from pypaimon.write.commit.fixed_bucket_commit_check import FixedBucketCommitCheck
+
+        self.conflict_detection.fixed_bucket_commit_check = (
+            FixedBucketCommitCheck(messages)
+            if any(message.total_buckets is not None for message in messages)
+            else None)
+
     def commit(
             self,
             commit_messages: List[CommitMessage],
@@ -234,6 +200,7 @@ class FileStoreCommit:
 
         _reject_compact_increment(commit_messages)
         check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
         # A committer can be reused; an untagged commit clears the prior baseline.
         self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
 
@@ -317,8 +284,9 @@ class FileStoreCommit:
             snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
         _reject_compact_increment(commit_messages)
-        self.conflict_detection._row_id_check_from_snapshot = (
-            _row_id_check_from_messages(commit_messages))
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
@@ -672,7 +640,8 @@ class FileStoreCommit:
         changelog_record_count = None
         try:
             new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
-            self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
+            delta_manifest_list_size = self.manifest_list_manager.write(
+                delta_manifest_list, new_manifest_file_metas)
 
             # Write changelog manifest if changelog entries exist
             if changelog_entries:
@@ -680,11 +649,8 @@ class FileStoreCommit:
                 changelog_manifest_file_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
-                self.manifest_list_manager.write(
+                changelog_manifest_list_size = self.manifest_list_manager.write(
                     changelog_manifest_list_name, changelog_manifest_file_metas)
-                manifest_path = self.manifest_list_manager.manifest_path
-                changelog_manifest_list_size = self.table.file_io.get_file_size(
-                    f"{manifest_path}/{changelog_manifest_list_name}")
                 # kind==0 means ADD; pypaimon producers only support additions currently
                 changelog_record_count = sum(
                     entry.file.row_count for entry in changelog_entries if entry.kind == 0)
@@ -699,7 +665,8 @@ class FileStoreCommit:
                 if previous_record_count:
                     total_record_count += previous_record_count
 
-            self.manifest_list_manager.write(base_manifest_list, existing_manifests)
+            base_manifest_list_size = self.manifest_list_manager.write(
+                base_manifest_list, existing_manifests)
 
             delta_record_count = 0
             for entry in commit_entries:
@@ -723,7 +690,9 @@ class FileStoreCommit:
                 id=new_snapshot_id,
                 schema_id=self.table.table_schema.id,
                 base_manifest_list=base_manifest_list,
+                base_manifest_list_size=base_manifest_list_size,
                 delta_manifest_list=delta_manifest_list,
+                delta_manifest_list_size=delta_manifest_list_size,
                 changelog_manifest_list=changelog_manifest_list_name,
                 changelog_manifest_list_size=changelog_manifest_list_size,
                 changelog_record_count=changelog_record_count,
@@ -890,14 +859,16 @@ class FileStoreCommit:
                         for manifest in self.manifest_list_manager.read_delta(
                                 snapshot):
                             entries.extend(self.manifest_file_manager.read(
-                                manifest.file_name, drop_stats=False))
+                                manifest.file_name, drop_stats=False,
+                                file_size=manifest.file_size))
                         path_factory = self.table.path_factory()
                         for entry in entries:
                             file = entry.file
                             file.file_path = file.physical_path() if file.external_path else "%s/%s" % (
-                                path_factory.data_file_bucket_path(
+                                path_factory.bucket_path(
                                     tuple(entry.partition.values),
                                     entry.bucket,
+                                    canonical_partition=True,
                                 ).rstrip("/"),
                                 file.file_name,
                             )
@@ -1050,8 +1021,51 @@ class FileStoreCommit:
             self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
 
     def abort(self, commit_messages: List[CommitMessage]):
-        """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
-        _abort_commit_messages(self.table, commit_messages)
+        """Delete files for an explicitly abandoned, known-uncommitted write.
+
+        Mirrors Java FileStoreCommitImpl.abort: delete new data, changelog,
+        compaction outputs and added indexes, preserving deleted inputs.
+        Never call after a commit whose outcome is unknown. Internal error
+        paths must preserve prepared files instead of calling this method.
+        """
+        for message in commit_messages:
+            for file in (list(message.new_files) + list(message.changelog_files)
+                         + list(message.compact_after)
+                         + list(message.compact_changelog_files)):
+                path = None
+                try:
+                    bucket_path = None if file.physical_path() else self.table.path_factory().bucket_path(
+                        tuple(message.partition), message.bucket)
+                    for path in file.collect_files(bucket_path):
+                        self.table.file_io.delete_quietly(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to clean up file %s during abort: %s",
+                        path,
+                        error,
+                    )
+            for entry in message.index_adds + message.compact_index_adds:
+                file_name = None
+                try:
+                    index_file = entry.index_file
+                    file_name = index_file.file_name
+                    if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
+                        path = self.table.path_factory().bucket_index_path(
+                            tuple(entry.partition.values), entry.bucket, index_file, self.table.file_io)
+                    else:
+                        path = (
+                            index_file.external_path
+                            or self.table.path_factory()
+                            .global_index_path_factory()
+                            .to_path(file_name)
+                        )
+                    self.table.file_io.delete_quietly(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to clean up index file %s during abort: %s",
+                        file_name,
+                        error,
+                    )
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
@@ -1155,11 +1169,14 @@ class FileStoreCommit:
         ]
 
     def _assign_snapshot_id(self, snapshot_id: int, commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
-        """Assign snapshot ID to delta entries whose minSequenceNumber is 0."""
+        """Replace pending sequence numbers as in Java RowTrackingCommitUtils."""
         result = []
         for entry in commit_entries:
             if entry.file.min_sequence_number == 0:
                 result.append(entry.assign_sequence_number(snapshot_id, snapshot_id))
+            elif entry.file.max_sequence_number == 0:
+                result.append(entry.assign_sequence_number(
+                    entry.file.min_sequence_number, snapshot_id))
             else:
                 result.append(entry)
         return result

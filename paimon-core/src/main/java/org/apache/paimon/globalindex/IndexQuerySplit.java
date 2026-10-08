@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
@@ -37,6 +38,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
@@ -89,9 +91,17 @@ public class IndexQuerySplit implements Split {
     public IndexedSplit evaluate(FileIO fileIO) throws IOException {
         List<Range> ranges =
                 GlobalIndexBuilderUtils.calcRowRanges(Collections.singletonList(dataSplit));
-        GlobalIndexResult matches =
-                indexQuery.evaluate(fileIO, Options.fromMap(indexOptions), ranges);
-        List<Range> candidates = new ArrayList<>(matches.results().toRangeList());
+        Options options = Options.fromMap(indexOptions);
+        if (new CoreOptions(options).scalarIndexSearchMode()
+                == CoreOptions.GlobalIndexSearchMode.FAST) {
+            ranges = Range.and(ranges, indexQuery.indexedRanges());
+        }
+        Optional<GlobalIndexResult> result = indexQuery.evaluateCandidates(fileIO, options, ranges);
+        if (!result.isPresent()) {
+            // No safe index query remains, including an OR with an unsupported branch.
+            return new IndexedSplit(dataSplit, ranges, null);
+        }
+        List<Range> candidates = new ArrayList<>(result.get().results().toRangeList());
         candidates.addAll(unindexedRanges);
         return new IndexedSplit(dataSplit, Range.sortAndMergeOverlap(candidates, true), null);
     }

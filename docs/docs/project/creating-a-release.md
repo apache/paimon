@@ -169,7 +169,7 @@ NEW_VERSION="${PAIMON_VERSION}" \
   ./tools/releasing/update_branch_version.sh
 ```
 
-Set `VERSION` in `paimon-python/setup.py` to the final
+Set `VERSION` in `paimon-python/pypaimon/_version.py` to the final
 `PAIMON_VERSION`, without `.dev` or an RC suffix. The release workflow
 derives the TestPyPI version by appending `rcRC_NUMBER`; the source candidate
 keeps the final version.
@@ -180,9 +180,9 @@ candidate contains no snapshot or development version:
 
 ```shell
 mvn -q -DforceStdout help:evaluate -Dexpression=project.version
-python3 paimon-python/setup.py --version
+python3 -c "import runpy; print(runpy.run_path('paimon-python/pypaimon/_version.py')['VERSION'])"
 rg --glob 'pom.xml' "<version>${PAIMON_VERSION}-SNAPSHOT</version>"
-rg '^VERSION = ".*\.dev' paimon-python/setup.py
+rg '^VERSION = ".*\.dev' paimon-python/pypaimon/_version.py
 git status --short
 ```
 
@@ -316,7 +316,8 @@ RELEASE_VERSION="${PAIMON_VERSION}" \
   ./tools/releasing/create_source_release.sh
 
 cd paimon-python
-python3 setup.py sdist
+python3 -m pip install --group build
+python3 -m build --sdist
 gpg --armor --detach-sig \
   "dist/pypaimon-${PAIMON_VERSION}.tar.gz"
 

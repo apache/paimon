@@ -16,7 +16,7 @@
 
 """End-to-end coverage of the optional native data writer bridge."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -80,8 +80,8 @@ def test_sequence_validation_precedes_native_selection(tmp_path, streaming, sequ
 @pytest.mark.parametrize('type_,order,supported', [
     (pa.int64(), 'ascending', True),
     (pa.int64(), 'descending', True),
-    (pa.float32(), 'ascending', False),
-    (pa.float64(), 'ascending', False),
+    (pa.float32(), 'ascending', True),
+    (pa.float64(), 'ascending', True),
 ])
 def test_native_sequence_write_capabilities(tmp_path, type_, order, supported):
     from pypaimon.write.native_write import create_native_write
@@ -258,13 +258,208 @@ def test_native_overwrite_and_empty_overwrite(tmp_path):
 
 
 @requires_native
-def test_advanced_api_switches_before_write_and_rejects_late_switch(tmp_path):
+@pytest.mark.parametrize('failure', [None, 'before-publication', 'after-publication'])
+def test_writer_abort_preserves_native_commit_files(native_rest_catalog, failure):
+    native_rest_catalog.create_table('default.abort_handoff', Schema.from_pyarrow_schema(
+        pa.schema([('id', pa.int64()), ('pt', pa.string())]), options={
+            'write.native.enabled': 'true', 'commit.native.enabled': 'true',
+        }), False)
+    table = native_rest_catalog.get_table('default.abort_handoff')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        assert isinstance(writer, NativeTableWrite)
+        writer.write_arrow_batch(_batch([1, 2], ['a', 'b']))
+        messages = writer.prepare_commit()
+        prepared = commit._prepare_native_commit(messages)
+        assert prepared is not None
+        native, native_messages = prepared
+        proxy = Mock(wraps=native)
+
+        def publish(*args):
+            if failure != 'before-publication':
+                native.commit(*args)
+            if failure:
+                raise RuntimeError('Native commit outcome is unknown')
+
+        proxy.commit.side_effect = publish
+        with patch.object(commit, '_prepare_native_commit', return_value=(proxy, native_messages)), \
+                patch.object(commit.file_store_commit, 'commit',
+                             side_effect=AssertionError('Python commit fallback')):
+            if failure:
+                with pytest.raises(RuntimeError, match='Native commit outcome is unknown'):
+                    commit.commit(messages)
+            else:
+                commit.commit(messages)
+        proxy.commit.assert_called_once()
+        writer.abort()
+        assert all(table.file_io.exists(file.file_path)
+                   for message in messages for file in message.new_files)
+        if failure != 'before-publication':
+            assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
+        else:
+            assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+        commit.close()
+
+
+@requires_native
+@pytest.mark.parametrize('evolution,omitted_type', [
+    (False, pa.string()), (True, pa.string()), (True, pa.large_binary()),
+])
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('input_kind', ['arrow', 'full-arrow', 'pandas', 'row'])
+def test_partial_native_write_preserves_write_columns(tmp_path, evolution, streaming, input_kind, omitted_type):
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.table.row.generic_row import GenericRow
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('omitted', omitted_type), ('pt', pa.string())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, partition_keys=['pt'], options={
+        'write.native.enabled': 'true', 'row-tracking.enabled': str(evolution).lower(),
+        'data-evolution.enabled': str(evolution).lower(),
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        assert writer.with_write_type(['pt', 'id']) is writer
+        assert writer._python_writer is None
+        partial = pa.schema([PyarrowFieldParser.from_paimon_schema(table.fields).field(name)
+                             for name in ['pt', 'id']])
+        data = pa.table({'pt': ['b', 'a', None], 'id': [1, 2, 3]}, schema=partial)
+        with patch.object(NativeTableWrite, '_switch_to_python',
+                          side_effect=AssertionError('Partial write fallback')):
+            if input_kind == 'arrow':
+                writer.write_arrow(data)
+            elif input_kind == 'full-arrow':
+                full_schema = PyarrowFieldParser.from_paimon_schema(table.fields)
+                # Invalid Blob descriptor bytes in an omitted field must never
+                # be parsed or copied by the core writer.
+                omitted = b'not a descriptor' if pa.types.is_large_binary(omitted_type) else 'ignored'
+                writer.write_arrow(pa.table({'id': [1, 2, 3], 'omitted': [omitted] * 3,
+                                             'pt': ['b', 'a', None]}, schema=full_schema))
+            elif input_kind == 'pandas':
+                writer.write_pandas(data.to_pandas())
+            else:
+                fields = [field for name in ['pt', 'id'] for field in table.fields if field.name == name]
+                for row in data.to_pylist():
+                    writer.write_row(GenericRow([row[field.name] for field in fields], fields))
+        messages = writer.prepare_commit(7) if streaming else writer.prepare_commit()
+        assert all(file.write_cols == ['pt', 'id'] for message in messages for file in message.new_files)
+        commit = builder.new_commit()
+        try:
+            commit.commit(messages, 7) if streaming else commit.commit(messages)
+        finally:
+            commit.close()
+    finally:
+        writer.close()
+    for native_read in (False, True):
+        copy = table.copy({'read.native.enabled': str(native_read).lower(),
+                           'scan.native-plan.enabled': str(native_read).lower()})
+        assert _rows(copy) == [
+            {'id': 1, 'omitted': None, 'pt': 'b'},
+            {'id': 2, 'omitted': None, 'pt': 'a'},
+            {'id': 3, 'omitted': None, 'pt': None},
+        ]
+
+
+@requires_native
+@pytest.mark.parametrize('arrow_groups', [False, True])
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('fixed_bucket', [False, True])
+def test_partial_write_routes_input_partition_and_bucket_columns(tmp_path, arrow_groups, native, fixed_bucket):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('keep', pa.string()), ('pt', pa.string())])
+    options = {'write.native.enabled': str(native).lower()}
+    if fixed_bucket:
+        options.update({'bucket': '4', 'bucket-key': 'id'})
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, partition_keys=['pt'], options=options), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write().with_write_type(['pt', 'id'])
+    try:
+        data = pa.table({'pt': ['b', 'a', None], 'id': [1, 2, 3]},
+                        schema=pa.schema([schema.field('pt'), schema.field('id')]))
+        with patch('pypaimon.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED', arrow_groups):
+            writer.write_arrow(data)
+        builder.new_commit().commit(writer.prepare_commit())
+    finally:
+        writer.close()
+    assert _rows(table) == [
+        {'id': 1, 'keep': None, 'pt': 'b'},
+        {'id': 2, 'keep': None, 'pt': 'a'},
+        {'id': 3, 'keep': None, 'pt': None},
+    ]
+
+
+@requires_native
+def test_blob_only_partial_write_uses_native_and_updates_existing_range(tmp_path):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'write.native.enabled': 'true', 'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write().with_write_type(['id'])
+    try:
+        writer.write_arrow(pa.table({'id': [1, 2, 3]}, schema=pa.schema([schema.field('id')])))
+        builder.new_commit().commit(writer.prepare_commit())
+    finally:
+        writer.close()
+    writer = builder.new_write().with_write_type(['payload'])
+    try:
+        with patch.object(NativeTableWrite, '_switch_to_python',
+                          side_effect=AssertionError('Blob-only write fallback')):
+            writer.write_arrow(pa.table(
+                {'payload': [b'first', None, b'third']},
+                schema=pa.schema([schema.field('payload')]),
+            ))
+        messages = writer.prepare_commit()
+        files = [file for message in messages for file in message.new_files]
+        assert len(files) == 1 and files[0].file_name.endswith('.blob')
+        assert files[0].row_count == 3 and files[0].write_cols == ['payload']
+        files[0].first_row_id = 0
+        builder.new_commit().commit(messages)
+    finally:
+        writer.close()
+    assert _rows(table) == [{'id': 1, 'payload': b'first'},
+                            {'id': 2, 'payload': None}, {'id': 3, 'payload': b'third'}]
+
+
+@requires_native
+@pytest.mark.parametrize('streaming', [False, True])
+def test_primary_key_full_write_type_selects_writer_before_staging(tmp_path, streaming):
+    table = _table(tmp_path, primary_key=True)
+    builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        assert writer.with_write_type(table.field_names) is writer._python_writer
+        writer.write_arrow_batch(_batch([1], ['a']))
+        messages = writer.prepare_commit(7) if streaming else writer.prepare_commit()
+        commit = builder.new_commit()
+        try:
+            commit.commit(messages, 7) if streaming else commit.commit(messages)
+        finally:
+            commit.close()
+    finally:
+        writer.close()
+    assert _rows(table) == [{'id': 1, 'pt': 'a'}]
+
+
+@requires_native
+def test_uri_reader_factory_none_keeps_native_and_rejects_late_change(tmp_path):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
     assert isinstance(writer, NativeTableWrite)
-    assert writer.with_write_type(['id', 'pt']) is writer._python_writer
-    assert writer._native_writer is None
+    assert writer.with_blob_uri_reader_factory(None) is writer
+    assert writer._python_writer is None
     writer.write_arrow_batch(_batch([1], ['a']))
     builder.new_commit().commit(writer.prepare_commit())
     writer.close()
@@ -272,6 +467,8 @@ def test_advanced_api_switches_before_write_and_rejects_late_switch(tmp_path):
 
     native = table.new_batch_write_builder().new_write()
     native.write_arrow_batch(_batch([2], ['a']))
+    with pytest.raises(RuntimeError, match='before any write'):
+        native.with_blob_uri_reader_factory(None)
     with pytest.raises(RuntimeError, match='after native data'):
         native.with_write_type(['id'])
     native.abort()
@@ -319,15 +516,8 @@ def test_external_data_paths_fall_back_before_native_write(tmp_path):
     writer.close()
 
 
-@pytest.mark.parametrize('options', [
-    {'bucket': '-1'},
-    {'changelog-file.format': 'orc'},
-])
-def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(
-        tmp_path, options):
-    table = (_table(tmp_path, primary_key=True, table_options=options)
-             if 'bucket' in options else
-             _table(tmp_path, primary_key=True).copy(options))
+def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(tmp_path):
+    table = _table(tmp_path, primary_key=True).copy({'changelog-file.format': 'orc'})
     with patch('pypaimon.write.native_write.native_write_available', return_value=True), \
             patch('pypaimon.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):

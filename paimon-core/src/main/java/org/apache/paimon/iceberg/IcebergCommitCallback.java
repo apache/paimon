@@ -280,6 +280,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     @Override
     public void retry(ManifestCommittable committable) {
+        // a retry runs no pre-commit validation and may republish metadata as it stands
+        SchemaValidation.validateHistoricalIcebergTypes(
+                table.schemaManager()::listAll, table.coreOptions());
         SnapshotManager snapshotManager = table.snapshotManager();
         Snapshot snapshot =
                 snapshotManager
@@ -1216,13 +1219,17 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
         Set<Long> snapshotIds =
                 snapshots.stream().map(IcebergSnapshot::snapshotId).collect(Collectors.toSet());
-        Map<String, IcebergRef> refs =
-                table.tagManager().tags().entrySet().stream()
-                        .filter(entry -> snapshotIds.contains(entry.getKey().id()))
-                        .collect(
-                                Collectors.toMap(
-                                        entry -> entry.getValue().get(0),
-                                        entry -> new IcebergRef(entry.getKey().id())));
+        // every tag of a snapshot becomes its own ref: dropping sibling tags would make
+        // them invisible in Iceberg and break VERSION AS OF for them
+        Map<String, IcebergRef> refs = new HashMap<>();
+        for (Map.Entry<Snapshot, List<String>> entry : table.tagManager().tags().entrySet()) {
+            long taggedSnapshotId = entry.getKey().id();
+            if (snapshotIds.contains(taggedSnapshotId)) {
+                for (String tagName : entry.getValue()) {
+                    refs.put(tagName, new IcebergRef(taggedSnapshotId));
+                }
+            }
+        }
 
         IcebergMetadata metadata =
                 new IcebergMetadata(

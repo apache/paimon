@@ -269,8 +269,8 @@ class KeyValueDataWriter(DataWriter):
         new_arrays.append(sequence_column)
         new_fields.append(pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False))
 
-        # TODO: support real row kind here
-        value_kind_column = pa.array([0] * num_rows, type=pa.int8())
+        from pypaimon.write.row_kind import row_kinds
+        value_kind_column = pa.array(row_kinds(self.options, data), type=pa.int8())
         new_arrays.append(value_kind_column)
         new_fields.append(pa.field('_VALUE_KIND', pa.int8(), nullable=False))
 

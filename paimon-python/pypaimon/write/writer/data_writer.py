@@ -99,8 +99,7 @@ class DataWriter(ABC):
         )
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
-                and self.options.variant_shredding_enabled():
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
             shredding_json = self.options.variant_shredding_schema()
             if shredding_json:
                 from pypaimon.data.variant_shredding import (
@@ -158,8 +157,10 @@ class DataWriter(ABC):
         Call only after all sidecars are prepared and validated. Until then, this
         writer retains its metadata for retry and its responsibility for cleanup.
         """
-        owned_files = self.committed_files.copy() if self.delete_file_upon_abort() else []
+        owned_files = (self.committed_files + self.committed_changelog_files
+                       if self.delete_file_upon_abort() else [])
         self.committed_files.clear()
+        self.committed_changelog_files.clear()
         return owned_files
 
     def delete_file_upon_abort(self) -> bool:
@@ -340,8 +341,15 @@ class DataWriter(ABC):
 
             # Read the range without advancing it: the advance belongs with the
             # append below, so a retried flush derives the same range.
-            min_seq = self.sequence_generator.start
-            max_seq = self.sequence_generator.current
+            if self.table.is_primary_key_table and '_SEQUENCE_NUMBER' in data.schema.names:
+                # PK files can contain a deduplicated or split subset of the
+                # buffer. Java records the range of the rows actually written.
+                sequences = data.column('_SEQUENCE_NUMBER')
+                min_seq = pc.min(sequences).as_py()
+                max_seq = pc.max(sequences).as_py()
+            else:
+                min_seq = self.sequence_generator.start
+                max_seq = self.sequence_generator.current
             creation_time = Timestamp.now()
             data_meta = self._create_data_file_meta(
                 file_name=file_name,

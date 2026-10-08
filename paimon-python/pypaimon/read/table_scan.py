@@ -171,7 +171,8 @@ class TableScan:
         by the reader. Snapshot metadata is preserved even when pruning removes
         every split.
         """
-        from pypaimon.read.native_plan import native_plan
+        from pypaimon.read.native_plan import (
+            _raise_if_native_fork_safety_error, native_plan)
 
         try:
             fs = self.file_scanner
@@ -185,9 +186,10 @@ class TableScan:
             chunk_shuffle = fs.chunk_shuffle
             if chunk_shuffle is not None:
                 extra_options['chunk_shuffle'] = chunk_shuffle
-                if fs.idx_of_this_subtask is not None:
-                    extra_options['shard'] = (
-                        fs.idx_of_this_subtask, fs.number_of_para_subtasks)
+            if (fs.idx_of_this_subtask is not None
+                    and (chunk_shuffle is not None or self.table.is_primary_key_table)):
+                extra_options['shard'] = (
+                    fs.idx_of_this_subtask, fs.number_of_para_subtasks)
             if (has_distribution and not self.table.is_primary_key_table
                     and chunk_shuffle is None):
                 if fs.idx_of_this_subtask is not None:
@@ -205,10 +207,15 @@ class TableScan:
                         self.file_scanner.partition_key_predicate,
                     ) if predicate is not None
                 ])
+            # Append positions and Python sorted-index refinement still precede
+            # LIMIT. Ordinary PK shards are selected inside Rust before LIMIT.
+            defer_limit = has_distribution and (
+                not self.table.is_primary_key_table
+                or self.table.options.global_index_enabled())
             plan = native_plan(
                 self.table,
                 predicate=native_predicate,
-                limit=None if has_distribution else self.limit,
+                limit=None if defer_limit else self.limit,
                 projection=(
                     [field.name for field in self._read_type]
                     if self._read_type is not None and chunk_shuffle is None else None),
@@ -235,10 +242,7 @@ class TableScan:
                     and plan.snapshot_id is not None):
                 snapshot = self.table.snapshot_manager().get_snapshot_by_id(plan.snapshot_id)
                 splits = fs._apply_primary_key_sorted_indexes(splits, snapshot)
-            if chunk_shuffle is None and has_distribution:
-                if self.table.is_primary_key_table:
-                    splits = [s for s in splits
-                              if s.bucket % fs.number_of_para_subtasks == fs.idx_of_this_subtask]
+            if chunk_shuffle is None and defer_limit:
                 # A partial IndexedSplit plus a file-wide DV cardinality cannot
                 # reveal how many deleted rows lie inside the selected range.
                 # Keep every selected split and let the reader enforce LIMIT.
@@ -256,6 +260,7 @@ class TableScan:
                 ) for split in splits]
             return Plan(splits, snapshot_id=plan.snapshot_id)
         except Exception as e:
+            _raise_if_native_fork_safety_error(e)
             # Any native construction/planning/pruning failure -> fall back.
             logger.warning(
                 "Native plan failed, falling back to the Python scanner: %s", e)

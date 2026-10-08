@@ -505,9 +505,10 @@ class DataTypeParser:
 
     @staticmethod
     def parse_nullability(type_string: str) -> bool:
-        if "NOT NULL" in type_string:
+        type_upper = type_string.upper()
+        if "NOT NULL" in type_upper:
             return False
-        elif "NULL" in type_string:
+        elif "NULL" in type_upper:
             return True
         return True
 
@@ -900,14 +901,16 @@ class PyarrowFieldParser:
         elif pyarrow.types.is_timestamp(field_type):
             unit = field_type.unit
             if field_type.tz is None:
-                if unit == 'ms':
+                if unit in ('s', 'ms'):
+                    # Avro's coarsest timestamp is millis; seconds map to it
+                    # losslessly, matching Java AvroSchemaConverter (precision<=3).
                     return {"type": "long", "logicalType": "timestamp-millis"}
                 elif unit == 'us':
                     return {"type": "long", "logicalType": "timestamp-micros"}
                 else:
                     raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
             else:
-                if unit == 'ms':
+                if unit in ('s', 'ms'):
                     return {"type": "long", "logicalType": "local-timestamp-millis"}
                 elif unit == 'us':
                     return {"type": "long", "logicalType": "local-timestamp-micros"}

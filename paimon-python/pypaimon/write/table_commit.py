@@ -66,6 +66,7 @@ class TableCommit:
             commit_messages: List[CommitMessage],
             commit_identifier: int = BATCH_COMMIT_IDENTIFIER,
             snapshot_properties: Optional[Dict[str, str]] = None):
+        """Publish prepared messages while preserving files on any failure."""
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
         commit_kwargs = {
             "commit_messages": non_empty_messages,
@@ -136,6 +137,12 @@ class TableCommit:
             return None
 
     def abort(self, commit_messages: List[CommitMessage]):
+        """Delete explicitly abandoned, known-uncommitted files.
+
+        Never call after a commit whose outcome is unknown. Publication may
+        have succeeded before its response failed. Internal failure paths
+        must preserve prepared files instead of calling this method.
+        """
         prepared = self._prepare_native_commit(commit_messages)
         if prepared is not None:
             native, messages = prepared

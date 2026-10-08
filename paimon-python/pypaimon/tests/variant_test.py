@@ -40,6 +40,7 @@ Sections
                                shredded VARIANT.
 """
 
+import asyncio
 import io
 import json
 import os
@@ -74,6 +75,7 @@ from pypaimon.data.variant_shredding import (
     rebuild_value,
     shredding_schema_to_arrow_type,
 )
+from pypaimon.read.native_plan import native_split_bridge_available
 from pypaimon.schema.data_types import (
     AtomicType,
     DataField,
@@ -99,6 +101,16 @@ def _variant_arrow_type() -> pa.StructType:
         pa.field('value', pa.binary(), nullable=False),
         pa.field('metadata', pa.binary(), nullable=False),
     ])
+
+
+def _native_variant_projection_available() -> bool:
+    if not native_split_bridge_available():
+        return False
+    try:
+        from pypaimon_rust.datafusion import ReadBuilder as NativeReadBuilder
+        return callable(getattr(NativeReadBuilder, 'with_read_type', None))
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return False
 
 
 def _make_metadata(*keys: str) -> bytes:
@@ -1193,6 +1205,224 @@ class TestVariantPaimonTable(unittest.TestCase):
             pa.field('id', pa.int64()),
             pa.field('payload', _variant_arrow_type()),
         ])
+
+    def test_native_variant_projection_rejects_row_readers(self):
+        for mode, options in (
+            ('append', {}),
+            ('lazy', {
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            }),
+        ):
+            with self.subTest(mode=mode):
+                identifier = 'default.variant_projection_row_' + mode
+                schema = Schema.from_pyarrow_schema(
+                    self._pa_schema(), options=options)
+                self.catalog.create_table(identifier, schema, False)
+                table = self.catalog.get_table(identifier)
+                data = pa.table({
+                    'id': [1],
+                    'payload': GenericVariant.to_arrow_array([
+                        GenericVariant.from_python({'ratio': 1.25})]),
+                }, schema=self._pa_schema())
+                write_builder = table.new_batch_write_builder()
+                writer = write_builder.new_write()
+                commit = write_builder.new_commit()
+                writer.write_arrow(data)
+                commit.commit(writer.prepare_commit())
+                writer.close()
+                commit.close()
+
+                builder = table.new_read_builder().with_projection(
+                    {'ratio': "try_variant_get(payload, '$.ratio', 'float')"})
+                splits = builder.new_scan().plan().splits()
+                self.assertTrue(splits)
+                read = builder.new_read()
+
+                with self.assertRaisesRegex(RuntimeError, 'to_iterator'):
+                    read.to_iterator(splits)
+                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
+                    read.to_torch(splits, streaming=True)
+                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
+                    read.to_torch(splits, streaming=False)
+
+    def _check_variant_projection_literal_top_level_names(
+            self, suffix, native_read):
+        pa_schema = pa.schema([
+            pa.field('id.dot', pa.int64()),
+            pa.field('payload', _variant_arrow_type()),
+            pa.field('payload.dot', _variant_arrow_type()),
+            pa.field('payload[raw]', _variant_arrow_type()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, options={'read.native.enabled': 'true'})
+        identifier = 'default.variant_projection_literal_names_' + suffix
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        values = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({'ratio': 1.25})])
+        data = pa.Table.from_arrays([
+            pa.array([1], type=pa.int64()), values, values, values,
+        ], schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        for expressions, projection, column in (
+            ({'ratio': 'try_variant_get("payload.dot", "$.ratio", "float")'},
+             ['payload.dot'], 'payload.dot'),
+            ({'ratio': 'try_variant_get("payload[raw]", "$.ratio", "float")'},
+             ['payload[raw]'], 'payload[raw]'),
+            ({'id': 'id.dot',
+              'ratio': 'try_variant_get(payload, "$.ratio", "float")'},
+             ['id.dot', 'payload'], 'payload'),
+        ):
+            with self.subTest(expressions=expressions):
+                builder = table.new_read_builder().with_projection(
+                    expressions)
+                splits = builder.new_scan().plan().splits()
+                self.assertTrue(splits)
+                read = builder.new_read()
+                kwargs = read._native_read_kwargs()
+                self.assertEqual(
+                    [field.name for field in kwargs['read_type']], projection)
+                self.assertNotIn('nested_projection', kwargs)
+                field = next(field for field in kwargs['read_type']
+                             if field.name == column)
+                self.assertEqual(
+                    field.type.fields[0].description,
+                    '__VARIANT_METADATA$.ratio;false;UTC')
+                self.assertEqual(
+                    read._output_arrow_schema().field('ratio').type,
+                    pa.float32())
+                if native_read:
+                    projected = read.to_arrow(splits)
+                    self.assertEqual(projected.column_names,
+                                     list(expressions))
+                    self.assertEqual(
+                        projected['ratio'].to_pylist(), [1.25])
+                plain = table.new_read_builder().with_projection(projection)
+                self.assertEqual(
+                    plain.new_read().to_arrow(splits).column_names,
+                    projection)
+
+    def test_variant_projection_literal_top_level_names_bridge(self):
+        self._check_variant_projection_literal_top_level_names(
+            'bridge', native_read=False)
+
+    @unittest.skipUnless(_native_variant_projection_available(),
+                         'compatible native Variant projection API not installed')
+    def test_variant_projection_literal_top_level_names_native(self):
+        self._check_variant_projection_literal_top_level_names(
+            'native', native_read=True)
+
+    @unittest.skipUnless(_native_variant_projection_available(),
+                         'compatible native Variant projection API not installed')
+    def test_named_variant_projection_sql_escaped_path(self):
+        schema = Schema.from_pyarrow_schema(
+            self._pa_schema(), options={'read.native.enabled': 'true'})
+        identifier = 'default.named_variant_escaped_path'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        data = pa.table({
+            'id': [1],
+            'payload': GenericVariant.to_arrow_array([
+                GenericVariant.from_python({"it's": 1.0, 'its': 2.0})]),
+        }, schema=self._pa_schema())
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        from pypaimon_rust.datafusion import SQLContext
+        context = SQLContext()
+        context.register_catalog(
+            'paimon', {'warehouse': os.path.join(self.tmpdir, 'warehouse')})
+        for function in ('variant_get', 'try_variant_get'):
+            expression = "%s(payload, '$[\"it''s\"]', 'float')" % function
+            builder = table.new_read_builder().with_projection({'x': expression})
+            splits = builder.new_scan().plan().splits()
+            actual = builder.new_read().to_arrow(splits)['x'].to_pylist()
+            sql = pa.Table.from_batches(context.sql(
+                'SELECT %s AS x FROM %s' % (expression, identifier)))
+            self.assertEqual([1.0], actual)
+            self.assertEqual(sql['x'].to_pylist(), actual)
+
+    @unittest.skipUnless(_native_variant_projection_available(),
+                         'compatible native Variant projection API not installed')
+    def test_named_variant_projection_batch_and_stream(self):
+        schema = Schema.from_pyarrow_schema(
+            self._pa_schema(), options={'read.native.enabled': 'true'})
+        identifier = 'default.named_variant_projection'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        data = pa.table({
+            'id': [1, 2],
+            'payload': GenericVariant.to_arrow_array([
+                GenericVariant.from_python({'x': 1.25, 'y': 2}), None]),
+        }, schema=self._pa_schema())
+        writer_builder = table.new_batch_write_builder()
+        writer = writer_builder.new_write()
+        commit = writer_builder.new_commit()
+        writer.write_arrow(data)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        expressions = {
+            'identifier': 'id',
+            'x': "try_variant_get(payload, '$.x', 'float')",
+            'y': "variant_get(payload, '$.y', 'float')",
+        }
+        batch_builder = table.new_read_builder().with_projection(expressions)
+        expected = {'identifier': [1, 2], 'x': [1.25, None], 'y': [2.0, None]}
+        result = batch_builder.new_read().to_arrow(
+            batch_builder.new_scan().plan().splits())
+        self.assertEqual(result.column_names, list(expressions))
+        self.assertEqual(result.to_pydict(), expected)
+
+        stream_builder = table.new_stream_read_builder().with_projection(
+            expressions)
+
+        async def first_plan():
+            stream = stream_builder.new_streaming_scan().stream()
+            try:
+                return await stream.__anext__()
+            finally:
+                await stream.aclose()
+
+        stream_result = stream_builder.new_read().to_arrow(
+            asyncio.run(first_plan()).splits())
+        self.assertEqual(stream_result.to_pydict(), expected)
+
+        bad = pa.table({
+            'id': [3],
+            'payload': GenericVariant.to_arrow_array([
+                GenericVariant.from_python({'x': 'bad'})]),
+        }, schema=self._pa_schema())
+        writer = writer_builder.new_write()
+        commit = writer_builder.new_commit()
+        writer.write_arrow(bad)
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        tolerant = table.new_read_builder().with_projection({
+            'x': "try_variant_get(payload, '$.x', 'float')"})
+        result = tolerant.new_read().to_arrow(
+            tolerant.new_scan().plan().splits())
+        self.assertEqual(result['x'].to_pylist(), [1.25, None, None])
+        strict = table.new_read_builder().with_projection({
+            'x': "variant_get(payload, '$.x', 'float')"})
+        with self.assertRaisesRegex(Exception, 'Cannot cast Variant'):
+            strict.new_read().to_arrow(strict.new_scan().plan().splits())
 
     def test_plain_variant_write_and_read(self):
         """Plain VARIANT: GenericVariant → write_arrow → to_arrow → GenericVariant."""

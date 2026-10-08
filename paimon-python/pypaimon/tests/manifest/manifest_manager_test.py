@@ -45,6 +45,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.commit.commit_scanner import CommitScanner
 
 _EMPTY_ROW = GenericRow([], [])
 _EMPTY_STATS = SimpleStats(min_values=_EMPTY_ROW, max_values=_EMPTY_ROW, null_counts=[])
@@ -428,13 +429,13 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
 
     def test_rolling_manifest_bucket_stats_are_per_file(self):
         manager = self._make_manager()
-        entries = [self._create_manifest_entry(str(i), bucket=i) for i in range(4)]
+        entries = [self._create_manifest_entry(str(i), bucket=i // 1000) for i in range(2001)]
         for entry in entries:
             entry.total_buckets = 8
         metas = manager.rolling_write(entries, 1, 'rolling-bucket-stats')
-        self.assertEqual(len(metas), len(entries))
+        self.assertEqual([m.num_added_files for m in metas], [1000, 1000, 1])
         self.assertEqual([(m.min_bucket, m.max_bucket, m.total_buckets) for m in metas],
-                         [(i, i, 8) for i in range(4)])
+                         [(i, i, 8) for i in range(3)])
 
     def test_filter_applied_after_read(self):
         manager = self._make_manager()
@@ -498,7 +499,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         self.assertEqual(read_stats.max_values.get_field(0), 10)
         self.assertEqual(read_stats.null_counts, [2])
 
-    def test_commit_manifest_exceeds_target_size(self):
+    def test_commit_manifest_waits_for_java_rolling_cadence(self):
         target_size = 16 * 1024
         pa_schema = pa.schema([
             ('pt', pa.string()),
@@ -527,17 +528,9 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
 
         snap = table.snapshot_manager().get_latest_snapshot()
         metas = ManifestListManager(table).read_all(snap)
-        max_allowed = target_size * 2
-        oversized = [m for m in metas if m.file_size > max_allowed]
-        self.assertEqual(
-            len(oversized), 0,
-            f"{len(oversized)} manifest file(s) exceed 2x target ({max_allowed} bytes): "
-            f"{[(m.file_name, m.file_size) for m in oversized]}. "
-            f"Java uses RollingFileWriter to split; Python writes one file.")
-        self.assertGreater(
-            len(metas), 1,
-            f"Expected multiple manifest files but got {len(metas)} "
-            f"with total {sum(m.file_size for m in metas)} bytes")
+        # Like Java, targets are approximate: no size check before 1000 records.
+        self.assertEqual(len(metas), 1)
+        self.assertGreater(metas[0].file_size, target_size)
 
         mfm = ManifestFileManager(table)
         all_entries = []
@@ -569,12 +562,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         entries = [big if i % 5 == 0 else small for i in range(300)]
         metas = manager.rolling_write(entries, target_size, "manifest-skew")
 
-        max_allowed = target_size * 2
-        oversized = [m for m in metas if m.file_size > max_allowed]
-        self.assertEqual(
-            len(oversized), 0,
-            f"Skewed entries: {len(oversized)} file(s) exceed 2x target: "
-            f"{[(m.file_name, m.file_size) for m in oversized]}")
+        self.assertEqual(len(metas), 1)
         total_entries = sum(m.num_added_files + m.num_deleted_files for m in metas)
         self.assertEqual(total_entries, 300)
 
@@ -737,6 +725,82 @@ class ManifestListManagerTest(_ManifestManagerSetup):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].file_name, "manifest-base.avro")
+
+    def test_scan_uses_manifest_sizes_without_file_status(self):
+        for disk in (False, True):
+            with self.subTest(disk=disk), tempfile.TemporaryDirectory() as warehouse:
+                options = {'warehouse': warehouse, 'local-cache.enabled': 'true',
+                           'local-cache.block-size': '64 b'}
+                if disk:
+                    options['local-cache.dir'] = os.path.join(warehouse, 'cache')
+
+                catalog = FileSystemCatalog(Options(options))
+                catalog.create_database('default', False)
+                schema = Schema.from_pyarrow_schema(pa.schema([('v', pa.int32())]))
+                catalog.create_table('default.t', schema, False)
+                table = catalog.get_table('default.t')
+                builder = table.new_batch_write_builder()
+                writer, commit = builder.new_write(), builder.new_commit()
+                try:
+                    writer.write_arrow(pa.table({'v': pa.array([1, 2, 3], type=pa.int32())}))
+                    commit.commit(writer.prepare_commit())
+                finally:
+                    writer.close()
+                    commit.close()
+
+                snapshot = table.snapshot_manager().get_latest_snapshot()
+                for name, size in ((snapshot.base_manifest_list,
+                                    snapshot.base_manifest_list_size),
+                                   (snapshot.delta_manifest_list,
+                                    snapshot.delta_manifest_list_size)):
+                    self.assertGreater(size, 0)
+                    self.assertEqual(size, table.file_io.get_file_size(
+                        '{}/manifest/{}'.format(table.table_path, name)))
+
+                # A fresh catalog has no in-process file-size cache.
+                fresh_catalog = FileSystemCatalog(Options(options))
+                fresh_table = fresh_catalog.get_table('default.t')
+                delegate = fresh_table.file_io._delegate
+                with mock.patch.object(delegate, 'get_file_size',
+                                       wraps=delegate.get_file_size) as get_size:
+                    splits = fresh_table.new_read_builder().new_scan().plan().splits()
+                self.assertTrue(splits)
+                self.assertEqual(
+                    fresh_table.new_read_builder().new_read().to_arrow(splits).column(
+                        'v').to_pylist(), [1, 2, 3])
+                self.assertFalse([call for call in get_size.call_args_list
+                                  if '/manifest/' in call[0][0]])
+
+                # Conflict retries read raw delta manifests through CommitScanner.
+                retry_catalog = FileSystemCatalog(Options(options))
+                retry_table = retry_catalog.get_table('default.t')
+                retry_delegate = retry_table.file_io._delegate
+                scanner = CommitScanner(retry_table, ManifestListManager(retry_table))
+                with mock.patch.object(retry_delegate, 'get_file_size',
+                                       wraps=retry_delegate.get_file_size) as get_size:
+                    entries = scanner.read_incremental_raw_entries_from_changed_partitions(
+                        snapshot, [])
+                self.assertTrue(entries)
+                self.assertFalse([call for call in get_size.call_args_list
+                                  if '/manifest/' in call[0][0]])
+
+                # Old snapshots without list sizes retain the status lookup.
+                legacy = replace(snapshot, base_manifest_list_size=None,
+                                 delta_manifest_list_size=None)
+                legacy_catalog = FileSystemCatalog(Options(options))
+                legacy_table = legacy_catalog.get_table('default.t')
+                delegate = legacy_table.file_io._delegate
+                with mock.patch.object(delegate, 'get_file_size',
+                                       wraps=delegate.get_file_size) as get_size:
+                    self.assertTrue(ManifestListManager(legacy_table).read_all(legacy))
+                self.assertEqual(len([call for call in get_size.call_args_list
+                                      if '/manifest/' in call[0][0]]), 2)
+
+                wrong_size_catalog = FileSystemCatalog(Options(options))
+                wrong_size_table = wrong_size_catalog.get_table('default.t')
+                with self.assertRaisesRegex(EOFError, 'Truncated manifest list'):
+                    ManifestListManager(wrong_size_table).read(
+                        snapshot.base_manifest_list, snapshot.base_manifest_list_size + 1)
 
     @unittest.skipIf(
         sys.version_info < (3, 9),

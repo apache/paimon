@@ -21,6 +21,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
+import pytest
 from ray.data._internal.execution.interfaces import TaskContext
 
 from pypaimon import CatalogFactory, Schema
@@ -361,7 +362,8 @@ class RaySinkTest(unittest.TestCase):
         self.assertEqual({0, 1}, {message.bucket for message in messages})
         self.assertEqual({2}, {message.total_buckets for message in messages})
 
-    def test_write_does_not_return_prepared_messages_when_dedicated_close_aborts(self):
+    @pytest.mark.python_write
+    def test_write_failure_preserves_prepared_dedicated_files(self):
         from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
         pa_schema = pa.schema([
@@ -398,7 +400,9 @@ class RaySinkTest(unittest.TestCase):
                 datasink.write([data_table], ctx)
 
         self.assertEqual(close_current_calls['count'], 2)
-        self.assertEqual([], self._data_files_under(table))
+        self.assertEqual({'.parquet', '.blob'},
+                         {os.path.splitext(path)[1] for path in self._data_files_under(table)})
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
 
     def test_on_write_complete(self):
         from ray.data.datasource.datasink import WriteResult

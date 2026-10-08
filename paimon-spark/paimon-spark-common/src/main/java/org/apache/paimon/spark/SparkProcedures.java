@@ -37,6 +37,7 @@ import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.DropFunctionProcedure;
 import org.apache.paimon.spark.procedure.DropGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.DropPolicyProcedure;
+import org.apache.paimon.spark.procedure.ExpireChangelogsProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
@@ -67,6 +68,7 @@ import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RevokePermissionProcedure;
 import org.apache.paimon.spark.procedure.RewriteFileIndexProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
+import org.apache.paimon.spark.procedure.RollbackToAsLatestProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
 import org.apache.paimon.spark.procedure.TriggerTagAutomaticCreationProcedure;
@@ -98,6 +100,7 @@ public class SparkProcedures {
         ImmutableMap.Builder<String, Supplier<ProcedureBuilder>> procedureBuilders =
                 ImmutableMap.builder();
         procedureBuilders.put("rollback", RollbackProcedure::builder);
+        procedureBuilders.put("rollback_to_as_latest", RollbackToAsLatestProcedure::builder);
         procedureBuilders.put("rollback_to_timestamp", RollbackToTimestampProcedure::builder);
         procedureBuilders.put("rollback_to_watermark", RollbackToWatermarkProcedure::builder);
         procedureBuilders.put("purge_files", PurgeFilesProcedure::builder);
@@ -127,6 +130,7 @@ public class SparkProcedures {
         procedureBuilders.put(
                 "remove_unexisting_manifests", RemoveUnexistingManifestsProcedure::builder);
         procedureBuilders.put("expire_snapshots", ExpireSnapshotsProcedure::builder);
+        procedureBuilders.put("expire_changelogs", ExpireChangelogsProcedure::builder);
         procedureBuilders.put("expire_partitions", ExpirePartitionsProcedure::builder);
         procedureBuilders.put("repair", RepairProcedure::builder);
         procedureBuilders.put("repair_earliest_snapshot", RepairEarliestSnapshotProcedure::builder);

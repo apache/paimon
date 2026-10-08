@@ -19,6 +19,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.rest_permission_management import RESTPermissionManagement
 from pypaimon.catalog.catalog_exception import IllegalArgumentError, IllegalStateError
 from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
                                          ForbiddenException, BadRequestException,
@@ -46,6 +47,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
+from pypaimon.management.permission_management import PermissionManagement
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
@@ -71,8 +73,7 @@ class RESTCatalog(Catalog):
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
         self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
         self.rest_api = RESTApi(context.options, config_required)
-        self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
-                                             context.prefer_io_loader, context.fallback_io_loader)
+        self.context = context.with_options(self.rest_api.options)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
         self._cache_manager = CachingFileIO.create_cache_manager(self.context.options)
 
@@ -92,6 +93,9 @@ class RESTCatalog(Catalog):
         """
         from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
         return RESTCatalogLoader(self.context)
+
+    def permission_management(self) -> PermissionManagement:
+        return RESTPermissionManagement(self.rest_api)
 
     def supports_version_management(self) -> bool:
         """
@@ -364,6 +368,27 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+        except NotImplementedException:
+            # The server does not implement the partition-listing endpoint.
+            # Mirror Java RESTCatalog#listPartitionsPaged and fall back to
+            # computing partitions from the table's own metadata.
+            #
+            # Scope: this Python fallback reads Paimon manifests, so it only
+            # supports data tables (FileStoreTable). Java re-raises solely for
+            # catalog-managed-partition tables (a FormatTable whose
+            # partitionManager is set) and otherwise scans the table's file
+            # system, including an unmanaged format table's directory layout
+            # (CatalogUtils.listPartitionsFromFileSystem). PyPaimon does not
+            # scan format/object tables here yet, so those still surface the
+            # server's NotImplemented error rather than being listed.
+            from pypaimon.catalog.catalog_utils import (
+                list_partitions_from_file_system)
+
+            table = self.get_table(identifier)
+            if not isinstance(table, FileStoreTable):
+                raise
+            return list_partitions_from_file_system(
+                table, max_results, page_token, partition_name_pattern)
 
     def alter_table(
         self,

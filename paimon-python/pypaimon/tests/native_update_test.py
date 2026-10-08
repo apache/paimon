@@ -355,7 +355,12 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
     with pytest.raises(RuntimeError, match='input generator failed'):
         table.new_batch_write_builder().new_update().update_by_arrow_batches_with_row_id(
             failed_input())
-    assert set(tmp_path.rglob('*.parquet')) == before
+    # Native update already returned the first table's prepared messages to
+    # the binding. A later iterator failure must not delete handed-off files.
+    assert before < set(tmp_path.rglob('*.parquet'))
+    read = table.new_read_builder()
+    assert read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').select(
+        ['id', 'age']).to_pydict() == {'id': [2, 3, 4, 10], 'age': [22, 33, 40, 11]}
 
     read_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
 
@@ -373,8 +378,9 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
                   .update_by_arrow_batches_with_row_id(interleaved_tables()))
     assert staged and all(message.check_from_snapshot == read_snapshot_id
                           for message in staged)
-    from pypaimon.write.file_store_commit import _abort_commit_messages
-    _abort_commit_messages(table, staged)
+    # Keep staged files: the outcome of a concurrent commit can be unknown.
+    assert all(table.file_io.exists(file.physical_path())
+               for message in staged for file in message.new_files)
 
 
 def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
@@ -735,7 +741,7 @@ def test_native_row_upsert_uses_public_operation_with_composite_null_keys(tmp_pa
 
 
 @pytest.mark.parametrize('case', ['partial', 'float-key', 'empty-columns'])
-def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
+def test_row_upsert_input_capabilities(tmp_path, case):
     from pypaimon.table.row.generic_row import GenericRow
     from pypaimon.write.native_update import NativeTableUpsert
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
@@ -776,8 +782,9 @@ def test_row_upsert_unsupported_inputs_keep_python_semantics(tmp_path, case):
             'id': [1, 2], 'age': [10, 20], 'region': ['east', 'west'],
         }
         return
-    with patch.object(NativeTableUpsert, 'upsert',
-                      side_effect=AssertionError('Unsupported native upsert selected')):
+    from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+                      side_effect=AssertionError('Python upsert fallback')):
         messages = builder.new_update().with_update_type(['age']).upsert_by_key(rows, ['id'])
     builder.new_commit().commit(messages)
     read = table.new_read_builder()

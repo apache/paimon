@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native upserts preserve temporal keys and read only input partitions."""
+"""Native upserts preserve typed keys, partial inputs and partition matching."""
 
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -30,6 +30,77 @@ from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
 pytestmark = pytest.mark.native_plan
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('row_input', [False, True])
+@pytest.mark.parametrize('key_type', [pa.int32(), pa.float32(), pa.float64()])
+def test_partial_upsert_keys_and_values(tmp_path, native, streaming, row_input, key_type):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('key', key_type), ('keep', pa.string()),
+                        ('pt', pa.string()), ('value', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, partition_keys=['pt'], options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'write.native.enabled': str(native).lower(),
+    }), False)
+    table = catalog.get_table('default.t')
+    schema = PyarrowFieldParser.from_paimon_schema(table.fields)
+    existing_key = 1 if pa.types.is_integer(key_type) else 1.25
+    new_key = 2 if pa.types.is_integer(key_type) else 2.5
+    seed = pa.table({'key': [existing_key] * 3 + [None], 'keep': ['a', 'b', 'c', 'd'],
+                     'pt': ['a', 'a', 'b', 'a'], 'value': [10, 11, 20, 30]}, schema=schema)
+    batch_builder = table.new_batch_write_builder()
+    writer = batch_builder.new_write()
+    try:
+        writer.write_arrow(seed)
+        batch_builder.new_commit().commit(writer.prepare_commit())
+    finally:
+        writer.close()
+    # Reordered subset, duplicate source key, NULL key, and a new key. The
+    # same key in another partition must retain its value.
+    partial_schema = pa.schema([schema.field(name) for name in ['value', 'pt', 'key']])
+    source = pa.table({'value': [12, 40, 31, 13], 'pt': ['a'] * 4,
+                       'key': [existing_key, new_key, None, existing_key]}, schema=partial_schema)
+    builder = table.new_stream_write_builder() if streaming else batch_builder
+    update = builder.new_update().with_update_type(['value'])
+    with ExitStack() as stack:
+        if native:
+            for method in ('_upsert_partition', '_upsert_row_partition'):
+                stack.enter_context(patch.object(TableUpsertByKey, method,
+                                                 side_effect=AssertionError('Python upsert fallback')))
+        if row_input:
+            fields = [field for field in table.fields if field.name in source.column_names]
+            rows = [GenericRow([row[field.name] for field in fields], fields)
+                    for row in source.to_pylist()]
+            messages = update.upsert_by_key(rows, ['key'], 7) if streaming else update.upsert_by_key(rows, ['key'])
+        else:
+            # Two chunks exercise core batch concatenation after normalization.
+            source = pa.concat_tables([source.slice(0, 2), source.slice(2)])
+            messages = (update.upsert_by_arrow_with_key(source, ['key'], 7) if streaming
+                        else update.upsert_by_arrow_with_key(source, ['key']))
+    for message in messages:
+        for file in message.new_files:
+            assert file.write_cols is not None and 'keep' not in file.write_cols
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages, 7) if streaming else commit.commit(messages)
+    finally:
+        commit.close()
+    expected = [
+        {'key': existing_key, 'keep': 'a', 'pt': 'a', 'value': 13},
+        {'key': existing_key, 'keep': 'b', 'pt': 'a', 'value': 13},
+        {'key': existing_key, 'keep': 'c', 'pt': 'b', 'value': 20},
+        {'key': None, 'keep': 'd', 'pt': 'a', 'value': 31},
+        {'key': new_key, 'keep': None, 'pt': 'a', 'value': 40},
+    ]
+    for native_read in (False, True):
+        copy = table.copy({'read.native.enabled': str(native_read).lower(),
+                           'scan.native-plan.enabled': str(native_read).lower()})
+        reader = copy.new_read_builder()
+        actual = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+        assert sorted(actual.to_pylist(), key=lambda row: row['keep'] or 'z') == expected
 
 
 @pytest.mark.parametrize('native', [False, True])

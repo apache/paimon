@@ -28,7 +28,7 @@ _native_plan_count = 0
 _native_read_count = 0
 _native_write_count = 0
 _native_commit_count = 0
-_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental'), 0)
+_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental', 'merge'), 0)
 _force_native_for_test = False
 _force_native_read_for_test = False
 _force_native_write_for_test = False
@@ -130,17 +130,20 @@ def pytest_configure(config):
     if _native_write_enabled():
         from pypaimon.write.native_write import NativeTableWrite
 
-        original_write = NativeTableWrite.write_arrow_batch
+        def track_write(method):
+            original_write = getattr(NativeTableWrite, method)
 
-        def tracked_write(self, data):
-            global _native_write_count
-            native = self._native_writer is not None
-            result = original_write(self, data)
-            if native and data.num_rows and _force_native_write_for_test:
-                _native_write_count += 1
-            return result
+            def tracked_write(self, data, *args, **kwargs):
+                global _native_write_count
+                native = self._native_writer is not None
+                result = original_write(self, data, *args, **kwargs)
+                if native and data.num_rows and _force_native_write_for_test:
+                    _native_write_count += 1
+                return result
 
-        NativeTableWrite.write_arrow_batch = tracked_write
+            setattr(NativeTableWrite, method, tracked_write)
+
+        track_write('write_arrow_batch')
 
     if _native_commit_enabled():
         from pypaimon.write.table_commit import TableCommit
@@ -157,6 +160,7 @@ def pytest_configure(config):
         TableCommit._prepare_native_commit = tracked_prepare
 
     if _native_update_enabled():
+        from pypaimon.write.native_merge_into import NativeTableMergeInto
         from pypaimon.write.native_update import (
             NativeBatchTableUpdate, NativePredicateTableUpdate,
             NativeTableUpdateByRowId, NativeTableUpsert,
@@ -178,6 +182,7 @@ def pytest_configure(config):
         track_update(NativePredicateTableUpdate, 'update', 'predicate')
         track_update(NativeTableUpsert, 'upsert', 'upsert')
         track_update(NativeTableUpdateByRowId, 'update_columns', 'incremental')
+        track_update(NativeTableMergeInto, 'prepare_commit', 'merge')
 
 
 def pytest_collection_modifyitems(items):
@@ -198,7 +203,8 @@ def enable_native_backends(request, monkeypatch):
     python_read = request.node.get_closest_marker("python_read") is not None
     python_write = request.node.get_closest_marker("python_write") is not None
     python_commit = request.node.get_closest_marker("python_commit") is not None
-    native_plan_test = request.path.name in (
+    # request.path requires pytest 7; Python 3.6 uses pytest 6.
+    native_plan_test = os.path.basename(request.node.location[0]) in (
         "native_plan_test.py", "native_plan_integration_test.py",
         "native_plan_capabilities_test.py")
     force_plan = _native_plan_enabled() and not python_plan and not native_plan_test

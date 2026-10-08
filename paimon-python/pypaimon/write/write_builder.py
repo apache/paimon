@@ -36,6 +36,7 @@ class WriteBuilder(ABC):
 
         self.table: FileStoreTable = table
         self.commit_user = self._create_commit_user()
+        self.restore_snapshot_id = None
 
     def new_write(self) -> TableWrite:
         """Returns a table write."""
@@ -45,6 +46,16 @@ class WriteBuilder(ABC):
 
     def new_commit(self) -> TableCommit:
         """Returns a table commit."""
+
+    def with_restore_snapshot(self, snapshot_id: int):
+        """Restore dynamic-bucket data and HASH state from a snapshot; 0 is empty."""
+        from pypaimon.table.bucket_mode import BucketMode
+        if self.table.bucket_mode() != BucketMode.HASH_DYNAMIC:
+            raise ValueError('Restore snapshots are only valid for HASH_DYNAMIC tables')
+        if isinstance(snapshot_id, bool) or not isinstance(snapshot_id, int) or snapshot_id < 0:
+            raise ValueError('Restore snapshot id must be a nonnegative integer')
+        self.restore_snapshot_id = snapshot_id
+        return self
 
     def _with_commit_user(self, commit_user: str):
         """Reuse the identity of an existing write or commit operation."""
@@ -58,7 +69,7 @@ class WriteBuilder(ABC):
         else:
             return str(uuid.uuid4())
 
-    def _native_write(self, static_partition=None, stream=False):
+    def _native_write(self, static_partition=None, stream=False, **kwargs):
         from pypaimon.read.merge_engine_support import check_sequence_field_supported
 
         # Keep invalid configurations outside the native fallback handler and
@@ -69,7 +80,8 @@ class WriteBuilder(ABC):
         try:
             from pypaimon.write.native_write import create_native_write
             return create_native_write(self.table, self.commit_user,
-                                       static_partition, stream)
+                                       static_partition, stream,
+                                       restore_snapshot_id=self.restore_snapshot_id, **kwargs)
         except Exception as error:
             # Construction has not written any data; the normal writer is safe.
             logger.debug('Native writer preparation failed; using Python: %s', error)
@@ -88,7 +100,8 @@ class BatchWriteBuilder(WriteBuilder):
 
     def new_write(self) -> BatchTableWrite:
         return (self._native_write(self.static_partition)
-                or BatchTableWrite(self.table, self.commit_user, self.static_partition))
+                or BatchTableWrite(self.table, self.commit_user, self.static_partition,
+                                   restore_snapshot_id=self.restore_snapshot_id))
 
     def new_update(self) -> BatchTableUpdate:
         return BatchTableUpdate(self.table, self.commit_user)
@@ -102,7 +115,8 @@ class StreamWriteBuilder(WriteBuilder):
 
     def new_write(self) -> StreamTableWrite:
         return (self._native_write(stream=True)
-                or StreamTableWrite(self.table, self.commit_user))
+                or StreamTableWrite(self.table, self.commit_user,
+                                    restore_snapshot_id=self.restore_snapshot_id))
 
     def new_update(self) -> StreamTableUpdate:
         return StreamTableUpdate(self.table, self.commit_user)

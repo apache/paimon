@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -26,10 +27,12 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.bitmap.ApplyBitmapIndexRecordReader;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
@@ -42,6 +45,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -65,6 +69,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -152,9 +157,44 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bloomOptions("f2", null));
         assertMergedGroup(table);
 
-        // a merged group is never row filtered, but the rows it returns must stay aligned
+        // A non-bitmap index cannot select rows, but the merged fields must stay aligned.
         List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)));
         assertThat(rows).hasSize(ROW_COUNT);
+        assertAligned(rows);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexSelectsMatchingRowsOnly() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)));
+        assertThat(rows).hasSize(1);
+        assertRow(rows.get(0), 50);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexIntersectsFieldSelections() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap_intersect", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        Predicate filter = PredicateBuilder.and(equalF1(f1(50)), equalF2(f2(50)));
+        List<InternalRow> rows = readWithFilter(table, filter);
+        assertThat(rows).hasSize(1);
+        assertRow(rows.get(0), 50);
+    }
+
+    @Test
+    public void testMergedGroupBitmapIndexPreservesOrSelection() throws Exception {
+        FileStoreTable table = createTable("merged_bitmap_or", Collections.emptyMap());
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        assertMergedGroup(table);
+
+        Predicate filter = PredicateBuilder.or(equalF2(f2(50)), equalF2(f2(51)));
+        List<InternalRow> rows = readWithFilter(table, filter);
+        assertThat(rows).extracting(row -> row.getInt(0)).containsExactlyInAnyOrder(50, 51);
         assertAligned(rows);
     }
 
@@ -522,6 +562,28 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testSingleFileIndexSkipsBeforeReadingDeletionVector() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_bitmap_before_dv", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 50);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit split = (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        Path deletionVectorPath =
+                split.deletionFiles().get().stream()
+                        .filter(Objects::nonNull)
+                        .map(file -> new Path(file.path()))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(latest.fileIO().delete(deletionVectorPath, false)).isTrue();
+
+        // The bitmap index already rejects this value, so the missing DV file must not be read.
+        assertThat(readWithFilter(table, equalF1(MISSING_F1))).isEmpty();
+    }
+
+    @Test
     public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
         FileStoreTable table = createTable("overwritten", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
@@ -579,16 +641,42 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertThat(latest.fileIO().delete(anchorPath, false)).isTrue();
 
         // The deleted row is the only bitmap hit in the second merged group. The missing anchor
-        // file therefore proves that the group was skipped before any union reader opened it.
+        // file therefore proves that the group was skipped before any union reader opened it;
+        // the first group contributes its matching row through the shared bitmap selection.
         RowType readType =
                 rowTypeWithRowId(rowType()).project(SpecialFields.ROW_ID.name(), "f1", "f2");
         List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
-        assertThat(rowIds(rows)).containsExactlyElementsOf(rowIds(0, ROW_COUNT));
+        assertThat(rowIds(rows)).containsExactly(50L);
 
         FileStoreTable neighbour = createTable("merged_bitmap_dv_neighbour", options);
         writeSplitColumns(neighbour, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
         deleteRows(neighbour, 51);
         assertRow(assertSingleRow(query(neighbour, equalF1(f1(50)))), 50);
+    }
+
+    @Test
+    public void testMergedGroupDvAwareBitmapSelectionIsPushedDown() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_dv_partial", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+
+        deleteRows(table, 51);
+
+        Predicate filter = PredicateBuilder.or(equalF1(f1(50)), equalF1(f1(51)));
+        FileStoreTable latest = getTable(identifier(table.name()));
+        ReadBuilder readBuilder = latest.newReadBuilder().withFilter(filter);
+        DataSplit split = (DataSplit) readBuilder.newScan().plan().splits().get(0);
+        InternalRowSerializer serializer = new InternalRowSerializer(latest.rowType());
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
+            // Bypass the final DV filter. The result is still correct only when the DV-aware bitmap
+            // {50} (rather than the original index bitmap {50, 51}) reached every field reader.
+            removeFinalDeletionVectorReaders(reader);
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+
+        assertRow(assertSingleRow(rows), 50);
     }
 
     @Test
@@ -1034,6 +1122,34 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
             reader.forEachRemaining(row -> rows.add(serializer.toBinaryRow(row).copy()));
         }
         return rows;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void removeFinalDeletionVectorReaders(RecordReader<InternalRow> reader)
+            throws Exception {
+        assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
+        RecordReader<InternalRow>[] fieldReaders =
+                (RecordReader<InternalRow>[]) readField(reader, "readers");
+        for (int i = 0; i < fieldReaders.length; i++) {
+            if (fieldReaders[i] == null) {
+                continue;
+            }
+
+            assertThat(fieldReaders[i]).isInstanceOf(ForceSingleBatchReader.class);
+            RecordReader<InternalRow> fieldReader =
+                    (RecordReader<InternalRow>) readField(fieldReaders[i], "multiBatchReader");
+            assertThat(fieldReader).isInstanceOf(ApplyDeletionVectorReader.class);
+            RecordReader<InternalRow> bitmapReader =
+                    ((ApplyDeletionVectorReader) fieldReader).reader();
+            assertThat(bitmapReader).isInstanceOf(ApplyBitmapIndexRecordReader.class);
+            fieldReaders[i] = new ForceSingleBatchReader(bitmapReader);
+        }
+    }
+
+    private static Object readField(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private void assertMergedGroup(FileStoreTable table) throws Exception {

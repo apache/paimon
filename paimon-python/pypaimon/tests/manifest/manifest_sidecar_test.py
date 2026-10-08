@@ -32,7 +32,7 @@ from unittest.mock import Mock, call, patch
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.filesystem.caching_file_io import CachingFileIO
+from pypaimon.filesystem.caching_file_io import CachingFileIO, LocalMemoryCacheManager
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.manifest import manifest_sidecar
 from pypaimon.manifest.manifest_sidecar import (
@@ -130,6 +130,19 @@ class FailingIndexInput(BytesIO):
 
 
 class ManifestSidecarReadTest(unittest.TestCase):
+
+    def test_selected_manifest_blocks_use_known_size(self):
+        data = b'headfoo'
+        delegate = SimpleNamespace(
+            new_input_stream=Mock(side_effect=lambda path: BytesIO(data)),
+            get_file_size=Mock(side_effect=AssertionError('source stat')))
+        file_io = CachingFileIO(delegate, LocalMemoryCacheManager(1024, block_size=4))
+        selection = Selection(b'head', (Block(4, 3, 0, 1),))
+
+        self.assertEqual(
+            read_selected_bytes(file_io, '/manifest/manifest-1', selection, len(data)),
+            data)
+        delegate.get_file_size.assert_not_called()
 
     def test_local_cache_shares_sidecar_bytes_across_queries_and_readers(self):
         data, meta = golden(), golden_meta()

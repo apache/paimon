@@ -20,7 +20,7 @@ from parameterized import parameterized
 import pyarrow as pa
 
 from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, MultisetType, MapType,
-                                        RowType, VectorType, PyarrowFieldParser,
+                                        RowType, VectorType, PyarrowFieldParser, DataTypeParser,
                                         is_blob_file_type)
 
 
@@ -82,6 +82,28 @@ class DataTypesTest(unittest.TestCase):
             # Round-trips stably and stays materializable as a PyArrow type.
             self.assertEqual(parsed.to_dict(), original.to_dict(), type_str)
             PyarrowFieldParser.from_paimon_type(parsed)
+
+    def test_parse_nullability_is_case_insensitive(self):
+        # The CLI ``table alter --type`` path feeds the user's raw declaration to
+        # the parser, and SQL type keywords are conventionally written lowercase.
+        # A lowercase "not null" must still be read as NOT NULL rather than being
+        # silently treated as nullable.
+        self.assertFalse(DataTypeParser.parse_nullability("bigint not null"))
+        self.assertFalse(DataTypeParser.parse_nullability("BIGINT NOT NULL"))
+        self.assertFalse(DataTypeParser.parse_nullability("Int Not Null"))
+        self.assertTrue(DataTypeParser.parse_nullability("bigint"))
+        self.assertTrue(DataTypeParser.parse_nullability("int null"))
+
+    def test_parse_atomic_type_lowercase_not_null(self):
+        # End to end: a lowercase declaration keeps NOT NULL through the atomic
+        # parser, for both plain and parameterized types.
+        parsed = DataTypeParser.parse_atomic_type_sql_string("bigint not null")
+        self.assertEqual(parsed.type, "BIGINT")
+        self.assertFalse(parsed.nullable)
+
+        parsed_decimal = DataTypeParser.parse_atomic_type_sql_string("decimal(12, 2) not null")
+        self.assertEqual(parsed_decimal.type, "DECIMAL(12, 2)")
+        self.assertFalse(parsed_decimal.nullable)
 
     @parameterized.expand([
         (ArrayType, AtomicType("TIMESTAMP(6)"), "ARRAY<TIMESTAMP(6)>", "ARRAY<ARRAY<TIMESTAMP(6)>>"),
@@ -336,3 +358,78 @@ class DataTypesTest(unittest.TestCase):
 
         paimon_type = PyarrowFieldParser.to_paimon_type(pa.time32('ms'), nullable=True)
         self.assertEqual(paimon_type.type, "TIME(0)")
+
+    def test_avro_timestamp_seconds_maps_and_roundtrips(self):
+        import datetime
+        import os
+        import tempfile
+
+        import fastavro
+
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        # TIMESTAMP(0) -> pyarrow 's'; Avro's coarsest timestamp is millis, which
+        # holds seconds losslessly and matches Java AvroSchemaConverter (precision<=3).
+        self.assertEqual(
+            PyarrowFieldParser.to_avro_type(pa.timestamp('s'), 'ts', 'r'),
+            {"type": "long", "logicalType": "timestamp-millis"})
+        self.assertEqual(
+            PyarrowFieldParser.to_avro_type(pa.timestamp('s', tz='UTC'), 'ts', 'r'),
+            {"type": "long", "logicalType": "local-timestamp-millis"})
+        # nanos stays rejected: Avro has no nanos logical type (matches Java precision>6).
+        with self.assertRaises(ValueError):
+            PyarrowFieldParser.to_avro_type(pa.timestamp('ns'), 'ts', 'r')
+
+        # A second-granularity value round-trips unchanged (no seconds/millis mixup).
+        ts = datetime.datetime(2024, 1, 2, 3, 4, 5)
+        table = pa.table({"ts": pa.array([ts], pa.timestamp('s'))})
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "data.avro")
+            LocalFileIO().write_avro(path, table)
+            with open(path, 'rb') as f:
+                rows = list(fastavro.reader(f))
+        self.assertEqual(rows[0]["ts"].replace(tzinfo=None), ts)
+
+    def test_avro_nested_timestamp_roundtrips_on_non_utc_host(self):
+        # A naive TIMESTAMP(0) nested in a ROW or ARRAY must survive a write on
+        # a non-UTC host. fastavro converts a naive datetime using the host
+        # timezone, so without recursive UTC normalization the nested values
+        # were persisted shifted by the host offset (reproduced by the review
+        # under TZ=Asia/Shanghai). The top-level value was already normalized.
+        import datetime
+        import os
+        import tempfile
+        import time
+
+        import fastavro
+
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        if not hasattr(time, "tzset"):
+            self.skipTest("time.tzset is unavailable on this platform")
+
+        ts = datetime.datetime(2024, 1, 2, 3, 4, 5)
+        table = pa.table({
+            "ts": pa.array([ts], pa.timestamp('s')),
+            "r": pa.array([{"ts": ts}], pa.struct([("ts", pa.timestamp('s'))])),
+            "arr": pa.array([[ts]], pa.list_(pa.timestamp('s'))),
+        })
+        previous_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Shanghai"
+        time.tzset()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "data.avro")
+                LocalFileIO().write_avro(path, table)
+                with open(path, 'rb') as f:
+                    rows = list(fastavro.reader(f))
+        finally:
+            if previous_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = previous_tz
+            time.tzset()
+
+        self.assertEqual(rows[0]["ts"].replace(tzinfo=None), ts)
+        self.assertEqual(rows[0]["r"]["ts"].replace(tzinfo=None), ts)
+        self.assertEqual(rows[0]["arr"][0].replace(tzinfo=None), ts)

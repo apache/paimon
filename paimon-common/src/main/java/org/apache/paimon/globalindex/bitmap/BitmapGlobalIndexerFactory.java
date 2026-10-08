@@ -41,16 +41,18 @@ public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public List<GlobalIndexIOMeta> selectFiles(
-            DataField indexField,
-            List<DataField> extraFields,
-            Predicate predicate,
-            List<GlobalIndexIOMeta> files) {
+            List<DataField> indexFields, Predicate predicate, List<GlobalIndexIOMeta> files) {
         return SortedFileMetaSelector.selectFiles(
-                predicate, files, KeySerializer.create(indexField.type()));
+                predicate, files, KeySerializer.create(indexFields.get(0).type()));
     }
 
     @Override
-    public GlobalIndexer create(DataField dataField, Options options) {
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() != 1) {
+            throw new UnsupportedOperationException(
+                    "Index type '" + identifier() + "' requires exactly one index field.");
+        }
+        DataField dataField = indexFields.get(0);
         return new BitmapGlobalIndexer(dataField, options);
     }
 }
