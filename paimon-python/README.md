@@ -174,7 +174,10 @@ Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
 Core pins the target snapshot, matches keys, selects the first satisfied clause
 and prepares updates, deletion vectors and inserts. SQL conditions, including
 subqueries, execute in the Rust DataFusion adapter; Python transports the
-normalized clauses and returned commit messages. NULL keys do not match.
+normalized clauses and returned commit messages. Conditional MERGE requires
+Python 3.10+ and the existing `pypaimon[sql]` extra, which installs both Python
+DataFusion and `pypaimon-rust`. Shared clause validation checks that dependency
+before native execution. NULL keys do not match.
 Multiple source rows matching a target are rejected before action conditions,
 except for a sole unconditional DELETE, following Paimon Spark MERGE.
 Non-self table sources and packed-video inserts use the Python path selected
