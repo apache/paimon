@@ -105,6 +105,7 @@ class FileSystemCatalog(Catalog):
             return
 
         db_path = self.get_database_path(name)
+        self.file_io.check_non_recursive_delete_supported(db_path)
 
         if cascade:
             for table_name in self.list_tables(name):
