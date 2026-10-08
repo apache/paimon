@@ -1241,7 +1241,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable FileIndexResult fileIndexResult,
             long maxSelectedRows,
             double maxSelectionRatio) {
-        if (file.rowCount() <= 0
+        if (isNullOrEmpty(rowRanges)
+                || file.rowCount() <= 0
                 || isBlobFile(file.fileName())
                 || isVectorStoreFile(file.fileName())
                 || rowSidecarFileName(file) == null) {

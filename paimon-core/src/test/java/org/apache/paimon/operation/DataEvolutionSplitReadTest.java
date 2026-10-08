@@ -236,6 +236,9 @@ class DataEvolutionSplitReadTest {
 
         assertTrue(DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.02d));
         assertFalse(
+                DataEvolutionSplitRead.shouldReadRowSidecar(
+                        file, null, bitmap, 2L, 0.02d));
+        assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 1L, 0.02d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.01d));
