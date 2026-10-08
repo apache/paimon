@@ -38,10 +38,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -49,12 +49,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class OSSRetryStrategyTest {
 
     private static final int PART_SIZE = 100 * 1024;
+    private static final String OBJECT = "object content";
 
     private HttpServer server;
     private final AtomicInteger completeCalls = new AtomicInteger();
     private final AtomicInteger deleteObjectsCalls = new AtomicInteger();
+    private final AtomicInteger getObjectCalls = new AtomicInteger();
     private volatile int throttledCompletes;
     private volatile int throttledDeletes;
+    private volatile int throttledGets;
 
     @BeforeEach
     public void startServer() throws IOException {
@@ -111,6 +114,14 @@ public class OSSRetryStrategyTest {
     }
 
     @Test
+    public void testThrottledReadWithUnparsableErrorBodyIsRetried() throws IOException {
+        throttledGets = 2;
+
+        assertThat(fileIO(10).readFileUtf8(new Path("oss://bucket/dir/object"))).isEqualTo(OBJECT);
+        assertThat(getObjectCalls).hasValue(3);
+    }
+
+    @Test
     public void testRetriesThrottlingAndServerErrorsOnly() {
         OSSRetryStrategy strategy = new OSSRetryStrategy();
         for (int status : new int[] {429, 500, 502, 503, 504}) {
@@ -126,6 +137,8 @@ public class OSSRetryStrategyTest {
                     .isFalse();
         }
         assertThat(strategy.shouldRetry(serverError("InvalidResponse"), null, status(503), 0))
+                .isTrue();
+        assertThat(strategy.shouldRetry(serverError("InvalidResponse"), null, status(403), 0))
                 .isFalse();
     }
 
@@ -199,9 +212,21 @@ public class OSSRetryStrategyTest {
         String method = exchange.getRequestMethod();
         String query = exchange.getRequestURI().getRawQuery();
         query = query == null ? "" : query;
+        boolean isObject = exchange.getRequestURI().getPath().endsWith("/dir/object");
         exchange.getResponseHeaders().add("x-oss-request-id", "fake-request-id");
-        if ("HEAD".equals(method)) {
+        if ("HEAD".equals(method) && isObject) {
+            exchange.getResponseHeaders().add("Content-Length", String.valueOf(OBJECT.length()));
+            exchange.getResponseHeaders().add("Last-Modified", "Thu, 01 Jan 2026 00:00:00 GMT");
+            exchange.sendResponseHeaders(200, -1);
+        } else if ("HEAD".equals(method)) {
             exchange.sendResponseHeaders(404, -1);
+        } else if ("GET".equals(method) && isObject) {
+            if (getObjectCalls.incrementAndGet() <= throttledGets) {
+                // A 503 body the SDK cannot parse, which it reports as InvalidResponse.
+                respond(exchange, 503, "Please reduce your request rate.".getBytes(UTF_8));
+            } else {
+                respond(exchange, 200, OBJECT.getBytes(UTF_8));
+            }
         } else if ("GET".equals(method)) {
             respond(
                     exchange,
@@ -251,10 +276,14 @@ public class OSSRetryStrategyTest {
     }
 
     private static void respond(HttpExchange exchange, int status, String xml) throws IOException {
-        byte[] body =
-                ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + xml)
-                        .getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/xml");
+        respond(
+                exchange,
+                status,
+                ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + xml).getBytes(UTF_8));
+    }
+
+    private static void respond(HttpExchange exchange, int status, byte[] body) throws IOException {
         exchange.sendResponseHeaders(status, body.length);
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(body);

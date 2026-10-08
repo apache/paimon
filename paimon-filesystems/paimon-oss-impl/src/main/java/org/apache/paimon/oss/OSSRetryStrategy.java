@@ -20,8 +20,6 @@ package org.apache.paimon.oss;
 
 import com.aliyun.oss.ClientErrorCode;
 import com.aliyun.oss.ClientException;
-import com.aliyun.oss.OSSErrorCode;
-import com.aliyun.oss.OSSException;
 import com.aliyun.oss.common.comm.RequestMessage;
 import com.aliyun.oss.common.comm.ResponseMessage;
 import com.aliyun.oss.common.comm.RetryStrategy;
@@ -59,10 +57,7 @@ class OSSRetryStrategy extends RetryStrategy {
         if (ex instanceof ClientException) {
             return RETRYABLE_CLIENT_ERRORS.contains(((ClientException) ex).getErrorCode());
         }
-        if (ex instanceof OSSException
-                && OSSErrorCode.INVALID_RESPONSE.equals(((OSSException) ex).getErrorCode())) {
-            return false;
-        }
+        // Decide by status alone, so throttling is retried even if its error body is unreadable.
         return response != null && RETRYABLE_STATUS.contains(response.getStatusCode());
     }
 
