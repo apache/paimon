@@ -985,9 +985,11 @@ public class FileStoreCommitTest {
                 globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
         IndexManifestEntry otherBucketDelete =
                 globalIndexDeleteEntry(partition, 1, "other-bucket-index");
-        ManifestEntryChanges changes = new ManifestEntryChanges(2);
-        changes.compactIndexFiles.add(materializedBucketDelete);
-        changes.compactIndexFiles.add(otherBucketDelete);
+        CommitChanges changes =
+                new CommitChanges(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Arrays.asList(materializedBucketDelete, otherBucketDelete));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             CommitChanges refreshed =

@@ -388,7 +388,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(changes, materializedBuckets),
+                                compactChangesProvider(
+                                        new CommitChanges(
+                                                changes.compactTableFiles,
+                                                changes.compactChangelog,
+                                                changes.compactIndexFiles),
+                                        materializedBuckets),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -572,10 +577,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                CommitChangesProvider.provider(
-                                        changes.compactTableFiles,
-                                        emptyList(),
-                                        changes.compactIndexFiles),
+                                compactChangesProvider(
+                                        new CommitChanges(
+                                                changes.compactTableFiles,
+                                                emptyList(),
+                                                changes.compactIndexFiles),
+                                        Collections.emptySet()),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -828,15 +835,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @VisibleForTesting
     CommitChangesProvider compactChangesProvider(
-            ManifestEntryChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
+            CommitChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
         if (materializedBuckets.isEmpty()) {
+            Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
+            if (options.dataEvolutionEnabled()
+                    && !conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
+                    && lastSafeSnapshot != null
+                    && lastSafeSnapshot >= 0
+                    && ReassignCompactChangesProvider.supports(changes)) {
+                return new ReassignCompactChangesProvider(
+                        fileIO, pathFactory, snapshotManager, lastSafeSnapshot, changes);
+            }
             return CommitChangesProvider.provider(
-                    changes.compactTableFiles, changes.compactChangelog, changes.compactIndexFiles);
+                    changes.tableFiles, changes.changelogFiles, changes.indexFiles);
         }
 
         return latestSnapshot -> {
             List<IndexManifestEntry> indexFiles =
-                    changes.compactIndexFiles.stream()
+                    changes.indexFiles.stream()
                             // Replace global-index deletions prepared against an older snapshot.
                             .filter(
                                     entry ->
@@ -862,8 +878,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
             }
 
-            return new CommitChanges(
-                    changes.compactTableFiles, changes.compactChangelog, indexFiles);
+            return new CommitChanges(changes.tableFiles, changes.changelogFiles, indexFiles);
         };
     }
 
@@ -876,19 +891,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             boolean detectConflicts,
             @Nullable String statsFileName) {
-        Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
-        if (commitKind == CommitKind.COMPACT
-                && options.dataEvolutionEnabled()
-                && !conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)
-                && lastSafeSnapshot != null
-                && lastSafeSnapshot >= 0) {
-            CommitChanges original = changesProvider.provide(null);
-            if (ReassignCompactChangesProvider.supports(original)) {
-                changesProvider =
-                        new ReassignCompactChangesProvider(
-                                fileIO, pathFactory, snapshotManager, lastSafeSnapshot, original);
-            }
-        }
         int retryCount = 0;
         RetryCommitResult retryResult = null;
         long startMillis = System.currentTimeMillis();

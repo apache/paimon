@@ -340,6 +340,39 @@ public class CompactReassignReuseTest extends TableTestBase {
     }
 
     @Test
+    void testReuseCompactAfterOverwriteOtherPartition() throws Exception {
+        FileStoreTable table = prepare();
+        CommitMessageImpl message = compact(table, false);
+        assertThat(new DataEvolutionRowIdReassigner(table).reassign().reassigned).isTrue();
+        long reassignedSnapshot = table.snapshotManager().latestSnapshotId();
+
+        BatchWriteBuilder builder =
+                table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
+                                        lastSafeSnapshots.get(message).toString()))
+                        .newBatchWriteBuilder()
+                        .withOverwrite(Collections.singletonMap("pt", "b"));
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("b"),
+                            9,
+                            new BlobData("image-9".getBytes(StandardCharsets.UTF_8))));
+            List<CommitMessage> messages = new ArrayList<>(write.prepareCommit());
+            messages.add(message);
+            commit.commit(messages);
+        }
+
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        assertThat(latest.id()).isEqualTo(reassignedSnapshot + 2);
+        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(message.compactIncrement().compactAfter().get(0).nonNullFirstRowId()).isZero();
+        checkRows(table, 0, 1, 3, 9);
+    }
+
+    @Test
     void testRealOverwriteStillConflicts() throws Exception {
         FileStoreTable table = prepare();
         CommitMessageImpl message = compact(table, false);
