@@ -791,8 +791,9 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                   checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
                 }
 
-                // Case 3: insert Decimal(20,18) to Decimal(38,18)
-                val df4 = Seq((99L, "df4", BigDecimal.decimal(4.0), Map("4" -> 4.1)))
+                // Case 3: insert Decimal(20,18) to Decimal(38,18). The primary key `a` stays INT so
+                // the key-type guard does not fire; only the non-key column `c` is widened.
+                val df4 = Seq((99, "df4", BigDecimal.decimal(4.0), Map("4" -> 4.1)))
                   .toDF("a", "b", "c", "d")
                   .selectExpr("a", "b", "cast(c as decimal(20,18)) as c", "d")
                 df4.write
@@ -802,7 +803,7 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                   .option("write.merge-schema.type-widening", "true")
                   .save(location)
                 val expected4 =
-                  expected3 ++ Seq(Row(99L, "df4", BigDecimal.decimal(4.0), Map("4" -> 4.1)))
+                  expected3 ++ Seq(Row(99, "df4", BigDecimal.decimal(4.0), Map("4" -> 4.1)))
                 checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected4)
                 val decimalType =
                   spark.table("T").schema.apply(2).dataType.asInstanceOf[DecimalType]
