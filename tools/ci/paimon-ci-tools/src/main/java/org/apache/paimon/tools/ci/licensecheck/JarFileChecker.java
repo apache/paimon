@@ -54,9 +54,10 @@ public class JarFileChecker {
     }
 
     private static List<Path> getBuildJars(Path path) throws IOException {
-        return Files.walk(path)
-                .filter(file -> file.toString().endsWith(".jar"))
-                .collect(Collectors.toList());
+        try (Stream<Path> files = Files.walk(path)) {
+            return files.filter(file -> file.toString().endsWith(".jar"))
+                    .collect(Collectors.toList());
+        }
     }
 
     static int checkJar(Path file) throws Exception {

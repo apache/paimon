@@ -351,15 +351,16 @@ public class NoticeFileChecker {
     }
 
     private static List<Path> findNoticeFiles(Path root) throws IOException {
-        return Files.walk(root)
-                .filter(
-                        file -> {
-                            int nameCount = file.getNameCount();
-                            return file.getName(nameCount - 3).toString().equals("resources")
-                                    && file.getName(nameCount - 2).toString().equals("META-INF")
-                                    && file.getName(nameCount - 1).toString().equals("NOTICE");
-                        })
-                .collect(Collectors.toList());
+        try (Stream<Path> files = Files.walk(root)) {
+            return files.filter(
+                            file -> {
+                                int nameCount = file.getNameCount();
+                                return file.getName(nameCount - 3).toString().equals("resources")
+                                        && file.getName(nameCount - 2).toString().equals("META-INF")
+                                        && file.getName(nameCount - 1).toString().equals("NOTICE");
+                            })
+                    .collect(Collectors.toList());
+        }
     }
 
     private static List<String> loadFromResources(String fileName) {
