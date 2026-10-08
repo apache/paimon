@@ -113,7 +113,10 @@ class FileSystemCatalog(Catalog):
 
         # Check if database still has tables
         remaining_tables = self.list_tables(name)
-        if remaining_tables and not cascade:
+        if remaining_tables:
+            if cascade:
+                raise OSError(f"Database {name} changed during drop; "
+                              f"remaining tables: {remaining_tables}")
             raise ValueError(
                 f"Database {name} is not empty. "
                 f"Use cascade=True to drop all tables first."
