@@ -378,3 +378,30 @@ batch_neighbors = (
     .to_list()
 )
 ```
+
+## Return search rows as a Ray Dataset
+
+Vector queries support `to_ray()` to run candidate search on Ray and fetch the
+selected columns on workers. Single queries return one Dataset; `search_vectors`
+returns one Dataset per input vector. Candidate IDs and scores are merged on the
+driver, while projected row data stays in Ray blocks.
+
+```python
+ds = (docs.search([0.1, 0.2, 0.3], column="embedding")
+      .select(["content", "image"])
+      .with_score().order_by_score().limit(100)
+      .to_ray(concurrency=4, override_num_blocks=4))
+```
+
+Search runs eagerly; row lookup is lazy and uses the same captured snapshot.
+Retain that snapshot's files until downstream Dataset actions finish. `where`
+filters the candidates during lookup without refilling top-k. `order_by_score`
+performs a distributed global sort, breaking ties by ascending row ID. Empty
+results retain their output schema, including the score column.
+
+BLOB values are serialized descriptors, as with `scan().to_ray()`. Pass the
+Dataset to `docs.map_with_blobs(...)` to resolve payloads on workers. Projections
+must be nonempty and have unique names. This API requires data evolution;
+`execution="local"` selects local candidate search while keeping distributed
+lookup. Batch queries share candidate-search work but have separate lazy lookup
+pipelines for each query.
