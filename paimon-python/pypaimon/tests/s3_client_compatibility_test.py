@@ -113,6 +113,20 @@ class S3ClientCompatibilityTest(unittest.TestCase):
         self.addCleanup(environment.stop)
         os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
 
+    def _expected_checksum_default(self):
+        return "WHEN_REQUIRED" if parse(pyarrow.__version__) >= parse("22.0.0") else None
+
+    def test_checksum_default_version_boundary(self):
+        for version in ("19.0.1", "20.0.0", "21.0.0", "22.0.0", "23.0.0"):
+            for scheme in ("oss", "s3", "s3a", "s3n"):
+                with self.subTest(version=version, scheme=scheme), \
+                        mock.patch.dict(os.environ), \
+                        mock.patch.object(pyarrow, "__version__", version):
+                    os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
+                    self._new_file_io(scheme)
+                    expected = "WHEN_REQUIRED" if version in ("22.0.0", "23.0.0") else None
+                    self.assertEqual(expected, os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"))
+
     def test_checksum_compatibility_can_be_disabled(self):
         with mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
             PyArrowFileIO("s3://test-bucket/", Options({
@@ -143,7 +157,8 @@ class S3ClientCompatibilityTest(unittest.TestCase):
                 with mock.patch("pyarrow.fs.S3FileSystem", side_effect=RuntimeError("failed")):
                     with self.assertRaisesRegex(RuntimeError, "failed"):
                         self._new_file_io_failure()
-                self.assertEqual(previous or "WHEN_REQUIRED", os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"))
+                self.assertEqual(previous or self._expected_checksum_default(),
+                                 os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"))
 
     def _new_file_io_failure(self):
         PyArrowFileIO("s3://test-bucket/", Options({"fs.s3.endpoint": "http://minio:9000"}))
@@ -165,7 +180,8 @@ class S3ClientCompatibilityTest(unittest.TestCase):
                     self.assertNotIn("filesystem", file_io.__getstate__())
                     parent.send_bytes(pickle.dumps(file_io))
                     self.assertTrue(parent.poll(20))
-                    self.assertEqual(("WHEN_REQUIRED", ["WHEN_REQUIRED"], 1, True), parent.recv())
+                    expected = self._expected_checksum_default()
+                    self.assertEqual((expected, [expected], 1, True), parent.recv())
                 finally:
                     parent.close()
                     process.join(20)
@@ -213,8 +229,9 @@ class S3ClientCompatibilityTest(unittest.TestCase):
                     mock.patch("pyarrow.fs.S3FileSystem", side_effect=create_client):
                 PyArrowFileIO(
                     "{}://test-bucket/warehouse".format(scheme), options)
-                self.assertEqual("WHEN_REQUIRED", os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
-            self.assertEqual(["WHEN_REQUIRED"], settings)
+                self.assertEqual(self._expected_checksum_default(),
+                                 os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"))
+            self.assertEqual([self._expected_checksum_default()], settings)
 
     def test_native_s3_does_not_change_checksum_setting(self):
         with mock.patch.dict("os.environ", {}, clear=True), \

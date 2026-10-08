@@ -30,17 +30,6 @@ python -m build
 
 Both produce a source archive and wheel in `dist/`.
 
-## PyArrow checksums with OSS and custom S3 endpoints
-
-PyArrow-backed OSS and custom S3 clients default
-`AWS_REQUEST_CHECKSUM_CALCULATION` to `WHEN_REQUIRED` for compatibility.
-No user configuration is needed; explicit environment settings take precedence.
-This affects subsequently created AWS SDK clients process-wide, including workers.
-Required checksums remain enabled.
-
-Set `fs.s3.checksum-compatibility.enabled=false` to disable this default.
-Disabling it does not undo a setting already applied to the process.
-
 # OSS metadata commits
 
 Install `pypaimon[oss]` (legacy PyArrow data access) or `pypaimon[jindo]`
