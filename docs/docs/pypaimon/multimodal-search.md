@@ -119,6 +119,50 @@ matches = (
 )
 ```
 
+## Maintain index coverage and rebuild indexes
+
+Keep the desired index definitions in your ingestion/backfill job and call
+`maintain_indexes` after committing data, or from a scheduled job:
+
+```python
+indexes = [{"column": "embedding", "type": "ivf-flat", "options": {
+    "ivf-flat.nlist": "128", "global-index.row-count-per-shard": "1000000",
+}}]
+added_files = docs.maintain_indexes(indexes)
+```
+
+Each pass automatically discovers uncovered ranges and builds them. Repeating a
+completed pass is a no-op. For embedding updates, configure the table with
+`global-index.column-update-action=DROP_PARTITION_INDEX`: the data commit removes
+stale coverage, and a later maintenance pass rebuilds the affected partitions.
+Keep query search mode `full` if queries must include rows before that rebuild.
+Definitions must remain in your job configuration because dropping the last
+index file also removes the manifest information needed to rediscover its type.
+
+To change build parameters or repair coverage left stale by `IGNORE`, use an
+explicit rebuild, optionally scoped to partitions:
+
+```python
+docs.maintain_indexes(indexes, rebuild=True, partitions={"date": "2026-10-08"})
+```
+
+All requested indexes are built against one captured snapshot and published in
+one commit. Rebuild deletes the matching old entries and adds replacements in
+that same commit; old files remain available to retained snapshots. Any
+concurrent snapshot commit causes publication to fail. Schedule another pass
+from the latest snapshot rather than reusing its commit messages. A failed build
+leaves existing coverage intact; ambiguous commit failures leave output files
+for normal orphan-file maintenance rather than risking deletion of published
+files.
+
+The API requires data evolution and a latest-table handle. It uses the Python
+committer for its strict snapshot check. This is an opt-in maintenance pass, not
+a background daemon: an application scheduler or Ray job owns its trigger,
+backoff, and retry policy. For example, a Ray task can load its catalog/table and
+run a pass after a completed backfill; serialize maintenance jobs for each table
+to avoid competing rebuilds. Continuous writers may require a quiet interval
+because this initial conservative guard rejects even unrelated appends.
+
 ## Scores and Result Ordering
 
 On data-evolution tables, use `with_score()` to append a `float64` relevance
@@ -378,47 +422,3 @@ batch_neighbors = (
     .to_list()
 )
 ```
-
-## Maintain index coverage and rebuild indexes
-
-Keep the desired index definitions in your ingestion/backfill job and call
-`maintain_indexes` after committing data, or from a scheduled job:
-
-```python
-indexes = [{"column": "embedding", "type": "ivf-flat", "options": {
-    "ivf-flat.nlist": "128", "global-index.row-count-per-shard": "1000000",
-}}]
-added_files = docs.maintain_indexes(indexes)
-```
-
-Each pass automatically discovers uncovered ranges and builds them. Repeating a
-completed pass is a no-op. For embedding updates, configure the table with
-`global-index.column-update-action=DROP_PARTITION_INDEX`: the data commit removes
-stale coverage, and a later maintenance pass rebuilds the affected partitions.
-Keep query search mode `full` if queries must include rows before that rebuild.
-Definitions must remain in your job configuration because dropping the last
-index file also removes the manifest information needed to rediscover its type.
-
-To change build parameters or repair coverage left stale by `IGNORE`, use an
-explicit rebuild, optionally scoped to partitions:
-
-```python
-docs.maintain_indexes(indexes, rebuild=True, partitions={"date": "2026-10-08"})
-```
-
-All requested indexes are built against one captured snapshot and published in
-one commit. Rebuild deletes the matching old entries and adds replacements in
-that same commit; old files remain available to retained snapshots. Any
-concurrent snapshot commit causes publication to fail. Schedule another pass
-from the latest snapshot rather than reusing its commit messages. A failed build
-leaves existing coverage intact; ambiguous commit failures leave output files
-for normal orphan-file maintenance rather than risking deletion of published
-files.
-
-The API requires data evolution and a latest-table handle. It uses the Python
-committer for its strict snapshot check. This is an opt-in maintenance pass, not
-a background daemon: an application scheduler or Ray job owns its trigger,
-backoff, and retry policy. For example, a Ray task can load its catalog/table and
-run a pass after a completed backfill; serialize maintenance jobs for each table
-to avoid competing rebuilds. Continuous writers may require a quiet interval
-because this initial conservative guard rejects even unrelated appends.
