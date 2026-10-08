@@ -78,6 +78,11 @@ def read_search_result(query, result, concurrency, remote_args, override_num_blo
         empty = empty.drop_columns([row_id])
     # Sort/map may discard every empty block. Restore the final typed schema.
     dataset = dataset.union(ray.data.from_arrow(empty))
+    if sort_by_score:
+        # Projection tasks after Sort can finish out of order. Preserve the
+        # sorted block order through the whole returned Dataset, without
+        # changing the process-wide DataContext or unrelated Datasets.
+        dataset.context.execution_options.preserve_order = True
     setattr(dataset, "_paimon_blob_file_io", lookup._table.file_io)
     setattr(dataset, "_paimon_blob_columns", query._readable_blob_columns())
     maps, arrays = query._nested_blob_columns()
