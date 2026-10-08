@@ -112,11 +112,22 @@ def _decode_modified_utf8(data: bytes) -> str:
             code = first
             offset += 1
         elif first & 0xE0 == 0xC0 and offset + 1 < len(data):
-            code = ((first & 0x1F) << 6) | (data[offset + 1] & 0x3F)
+            second = data[offset + 1]
+            # Java DataInputStream.readUTF requires continuation bytes to be 10xxxxxx.
+            if second & 0xC0 != 0x80:
+                raise UnicodeDecodeError(
+                    "modified-utf8", data, offset, offset + 2,
+                    "invalid continuation byte")
+            code = ((first & 0x1F) << 6) | (second & 0x3F)
             offset += 2
         elif first & 0xF0 == 0xE0 and offset + 2 < len(data):
-            code = ((first & 0x0F) << 12) | ((data[offset + 1] & 0x3F) << 6) \
-                | (data[offset + 2] & 0x3F)
+            second = data[offset + 1]
+            third = data[offset + 2]
+            if second & 0xC0 != 0x80 or third & 0xC0 != 0x80:
+                raise UnicodeDecodeError(
+                    "modified-utf8", data, offset, offset + 3,
+                    "invalid continuation byte")
+            code = ((first & 0x0F) << 12) | ((second & 0x3F) << 6) | (third & 0x3F)
             offset += 3
         else:
             raise UnicodeDecodeError("modified-utf8", data, offset, offset + 1,
