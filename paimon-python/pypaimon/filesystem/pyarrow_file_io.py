@@ -107,6 +107,11 @@ class PyArrowFileIO(FileIO):
         return (not self._use_jindo
                 and (self._is_oss or bool(self._s3_endpoint)))
 
+    def _configure_s3_checksums(self):
+        if self._uses_s3_compatibility() and self.properties.get(S3Options.CHECKSUM_COMPATIBILITY_ENABLED):
+            # Process-wide default; preserve explicit settings and do not restore it.
+            os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
+
     def __getstate__(self):
         state = self.__dict__.copy()
         # threading.Lock cannot be pickled; recreated in __setstate__.
@@ -223,6 +228,7 @@ class PyArrowFileIO(FileIO):
         return pafs.PyFileSystem(fs_handler)
 
     def _initialize_oss_fs(self, path) -> FileSystem:
+        self._configure_s3_checksums()
         if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
@@ -252,6 +258,7 @@ class PyArrowFileIO(FileIO):
         return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
+        self._configure_s3_checksums()
         access_key = self._get_property(
             S3Options.S3_ACCESS_KEY_ID.key(),
             *self._s3_key_variants("access-key", "access.key"))

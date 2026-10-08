@@ -40,6 +40,7 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 
 def _restore_s3_file_io(connection):
+    os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
     connection.send("ready")
     payload = connection.recv_bytes()
     client = object()
@@ -61,6 +62,7 @@ def _restore_s3_file_io(connection):
 
 
 def _write_in_worker(connection):
+    os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
     connection.send("ready")
     try:
         file_io = pickle.loads(connection.recv_bytes())
@@ -105,6 +107,20 @@ class _UploadHandler(BaseHTTPRequestHandler):
 
 
 class S3ClientCompatibilityTest(unittest.TestCase):
+    def setUp(self):
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
+
+    def test_checksum_compatibility_can_be_disabled(self):
+        with mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
+            PyArrowFileIO("s3://test-bucket/", Options({
+                "fs.s3.endpoint": "http://minio:9000",
+                "fs.s3.checksum-compatibility.enabled": "false",
+            }))
+        self.assertNotIn("AWS_REQUEST_CHECKSUM_CALCULATION", os.environ)
+
     def _new_file_io(self, scheme="s3"):
         if scheme == "oss":
             options = Options({
@@ -119,7 +135,7 @@ class S3ClientCompatibilityTest(unittest.TestCase):
             file_io = PyArrowFileIO(scheme + "://test-bucket/", options)
         return file_io
 
-    def test_environment_unchanged_after_client_creation_failure(self):
+    def test_process_default_retained_after_client_creation_failure(self):
         for previous in (None, "WHEN_SUPPORTED"):
             with self.subTest(previous=previous), mock.patch.dict(os.environ, {}, clear=True):
                 if previous is not None:
@@ -127,12 +143,11 @@ class S3ClientCompatibilityTest(unittest.TestCase):
                 with mock.patch("pyarrow.fs.S3FileSystem", side_effect=RuntimeError("failed")):
                     with self.assertRaisesRegex(RuntimeError, "failed"):
                         self._new_file_io_failure()
-                self.assertEqual(previous, os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"))
+                self.assertEqual(previous or "WHEN_REQUIRED", os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"))
 
     def _new_file_io_failure(self):
         PyArrowFileIO("s3://test-bucket/", Options({"fs.s3.endpoint": "http://minio:9000"}))
 
-    @mock.patch.dict(os.environ, {"AWS_REQUEST_CHECKSUM_CALCULATION": "WHEN_REQUIRED"})
     def test_pickle_rebuilds_client_in_started_worker(self):
         methods = [name for name in ("spawn", "fork")
                    if name in multiprocessing.get_all_start_methods()]
@@ -182,7 +197,7 @@ class S3ClientCompatibilityTest(unittest.TestCase):
                 os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
         self.assertEqual(["WHEN_SUPPORTED"], settings)
 
-    def test_initialization_preserves_environment_for_all_s3_schemes(self):
+    def test_initialization_sets_default_for_all_s3_schemes(self):
         options = Options({
             S3Options.S3_ENDPOINT.key(): "http://minio:9000",
         })
@@ -198,8 +213,8 @@ class S3ClientCompatibilityTest(unittest.TestCase):
                     mock.patch("pyarrow.fs.S3FileSystem", side_effect=create_client):
                 PyArrowFileIO(
                     "{}://test-bucket/warehouse".format(scheme), options)
-                self.assertNotIn("AWS_REQUEST_CHECKSUM_CALCULATION", os.environ)
-            self.assertEqual([None], settings)
+                self.assertEqual("WHEN_REQUIRED", os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
+            self.assertEqual(["WHEN_REQUIRED"], settings)
 
     def test_native_s3_does_not_change_checksum_setting(self):
         with mock.patch.dict("os.environ", {}, clear=True), \
@@ -250,7 +265,7 @@ class S3ClientCompatibilityTest(unittest.TestCase):
         parse(pyarrow.__version__) >= parse("22.0.0"),
         "requires PyArrow 22+ optional request checksums",
     )
-    def test_explicit_process_setting_applies_to_parent_and_worker(self):
+    def test_default_applies_to_parent_and_worker(self):
         server = _HTTPServer(
             ("127.0.0.1", 0), _UploadHandler)
         server.requests = []
@@ -268,14 +283,13 @@ class S3ClientCompatibilityTest(unittest.TestCase):
                 "fs.s3.path.style.access": "true",
             })
             with mock.patch.dict(os.environ, {
-                    "AWS_REQUEST_CHECKSUM_CALCULATION": "WHEN_REQUIRED",
                     "NO_PROXY": "127.0.0.1,localhost",
                     "no_proxy": "127.0.0.1,localhost",
             }):
+                compatible = PyArrowFileIO("s3://test-bucket/", options)
                 native = pafs.S3FileSystem(
                     access_key="ak", secret_key="sk", region="us-east-1",
                     endpoint_override=endpoint)
-                compatible = PyArrowFileIO("s3://test-bucket/", options)
                 self.assertEqual("WHEN_REQUIRED",
                                  os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
                 with native.open_output_stream("test-bucket/file") as stream:
@@ -287,8 +301,7 @@ class S3ClientCompatibilityTest(unittest.TestCase):
             context = multiprocessing.get_context("spawn")
             parent, child = context.Pipe()
             process = context.Process(target=_write_in_worker, args=(child,))
-            with mock.patch.dict(os.environ, {"AWS_REQUEST_CHECKSUM_CALCULATION": "WHEN_REQUIRED"}):
-                process.start()
+            process.start()
             child.close()
             try:
                 self.assertTrue(parent.poll(20))

@@ -46,6 +46,9 @@ class OssOptions:
 
 
 class S3Options:
+    CHECKSUM_COMPATIBILITY_ENABLED = (
+        ConfigOptions.key("fs.s3.checksum-compatibility.enabled").boolean_type().default_value(True)
+        .with_description("Apply a process-wide optional-checksum default for PyArrow OSS/custom S3 clients."))
     S3_ACCESS_KEY_ID = ConfigOptions.key("fs.s3.accessKeyId").string_type().no_default_value().with_description(
         "S3 access key ID")
     S3_ACCESS_KEY_SECRET = ConfigOptions.key("fs.s3.accessKeySecret").string_type().no_default_value().with_description(
