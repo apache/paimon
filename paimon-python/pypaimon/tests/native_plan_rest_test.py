@@ -158,6 +158,7 @@ def test_native_rest_reuses_python_data_token(
 
     from pypaimon.catalog.rest.rest_token import RESTToken
     from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
     from pypaimon.read.native_plan import _catalog_options, _resolved_rest_table_response
     from pypaimon_rust.datafusion import Table as NativeTable
 
@@ -174,11 +175,19 @@ def test_native_rest_reuses_python_data_token(
     reused_table = CatalogFactory.create(options).get_table(source.identifier)
     uncached_table = CatalogFactory.create(options).get_table(source.identifier)
 
+    def token_file_io(table):
+        file_io = table.file_io
+        assert (type(file_io) is CachingFileIO) == local_cache
+        if type(file_io) is CachingFileIO:
+            file_io = file_io._delegate
+        assert type(file_io) is RESTTokenFileIO
+        return file_io
+
     # The old bridge fetched a Python token and an independent Rust token.
     with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}):
         with patch.object(server, '_table_token_handle',
                           wraps=server._table_token_handle) as load:
-            table.file_io.valid_token()
+            token_file_io(table).valid_token()
             baseline = NativeTable.from_rest_response(
                 _resolved_rest_table_response(table), database='default', table='t',
                 rest_options=_catalog_options(table))
@@ -187,7 +196,7 @@ def test_native_rest_reuses_python_data_token(
             load.reset_mock()
             RESTTokenFileIO._TOKEN_CACHE.clear()
 
-            reused_table.file_io.token = table.file_io.token
+            token_file_io(reused_table).token = token_file_io(table).token
 
             for _ in range(2):
                 assert reused_table.new_read_builder().new_scan().plan().snapshot_id == 2
