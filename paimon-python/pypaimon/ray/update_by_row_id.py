@@ -85,12 +85,6 @@ def update_by_row_id(
     if not table.options.row_tracking_enabled():
         raise ValueError(
             f"update_by_row_id requires 'row-tracking.enabled'='true' on '{target}'.")
-    if table.options.deletion_vectors_enabled():
-        # A DV-deleted row still lives in its data file, so row-id ranges can't tell it
-        # apart without reading the target; refuse rather than update a deleted row.
-        raise ValueError(
-            f"update_by_row_id does not support deletion-vectors-enabled tables yet: "
-            f"'{target}'.")
 
     rid = SpecialFields.ROW_ID.name
     blob_cols = _blob_col_names(table)
@@ -139,9 +133,8 @@ def update_by_row_id(
     update_ds = source_ds.map_batches(_project_cast, batch_format="pyarrow")
 
     base = table.snapshot_manager().get_latest_snapshot()
-    # Without deletion vectors (rejected above), total_record_count is the live row
-    # count, so 0 means the target is empty (never written, or emptied by overwrite).
-    if base is None or base.total_record_count == 0:
+    if base is None or (base.total_record_count == 0
+                        and not table.options.deletion_vectors_enabled()):
         # Every source row id is foreign; don't silently no-op non-empty input.
         if update_ds.limit(1).count() > 0:
             raise ValueError(
