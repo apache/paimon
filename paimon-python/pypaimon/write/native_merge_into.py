@@ -24,6 +24,7 @@ from pypaimon.write.native_commit import create_native_write_table, from_native_
 from pypaimon.write.native_update import (
     _native_row_id_table, _native_update_columns_supported, _supported_upsert_key_type,
 )
+from pypaimon.write.native_write import _native_partition_types_supported
 
 
 def create_native_merge_into(table, source, on, matched, not_matched, commit_user, commit_identifier):
@@ -58,11 +59,13 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         if (source.options.scan_mode() not in ('default', 'from-snapshot', 'from-timestamp')
                 or any(str(key).startswith('incremental-') for key in source.table_schema.options)):
             return None
+        from pypaimon.schema.data_types import PyarrowFieldParser
+        source_schema = PyarrowFieldParser.from_paimon_schema(source.table_schema.fields)
+        if not _native_partition_types_supported(source_schema, source.partition_keys):
+            return None
         native_source = create_native_write_table(source)
         if native_source is None:
             return None
-        from pypaimon.schema.data_types import PyarrowFieldParser
-        source_schema = PyarrowFieldParser.from_paimon_schema(source.table_schema.fields)
     source, matched, not_matched, context = _prepare(
         table, source, list(matched), list(not_matched), on, source_schema=source_schema)
     if any(callable(value) for clause in matched + not_matched for value in clause.spec.values()):
