@@ -287,7 +287,7 @@ class _NativeRestTableCache:
     def __setstate__(self, state):
         self.__init__()
 
-    def get(self, response, database, table, options):
+    def get(self, response, database, table, options, token_loader=None):
         from pypaimon_rust.datafusion import Table
 
         pid = os.getpid()
@@ -300,10 +300,34 @@ class _NativeRestTableCache:
         key = (response, database, table, tuple(sorted(options.items())))
         with state.lock:
             if state.entry is None or state.entry[0] != key:
-                native_table = Table.from_rest_response(
-                    response, database=database, table=table, rest_options=options)
+                reuse_token = getattr(Table, 'from_rest_response_with_token', None)
+                token = token_loader() if callable(reuse_token) and token_loader else None
+                if token is None:
+                    native_table = Table.from_rest_response(
+                        response, database=database, table=table, rest_options=options)
+                else:
+                    native_table = reuse_token(
+                        response, database=database, table=table, rest_options=options,
+                        data_token=dict(token.token),
+                        expires_at_millis=token.expire_at_millis)
                 state.entry = (key, native_table)
             return state.entry[1]
+
+
+def _rest_data_token(table):
+    """Reuse only an existing valid token bound to this exact table."""
+    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+
+    file_io = table.file_io
+    if type(file_io) is CachingFileIO:
+        file_io = file_io._delegate
+    if (table.current_branch() != 'main'
+            or type(file_io) is not RESTTokenFileIO
+            or file_io.identifier != table.identifier
+            or file_io.path != table.table_path):
+        return None
+    return file_io._existing_valid_token()
 
 
 def _native_read_builder(table):
@@ -317,7 +341,8 @@ def _native_read_builder(table):
             rest_response,
             database=table.identifier.get_database_name(),
             table=table.identifier.get_object_name(),
-            options=_catalog_options(table))
+            options=_catalog_options(table),
+            token_loader=lambda: _rest_data_token(table))
         rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
