@@ -55,8 +55,9 @@ CALL sys.import_files('default.unpartitioned_table', 'oss://bucket/external-file
 
 Returns the number of registered files. Only files directly in the directory with a suffix matching
 the table's `file.format` are imported; hidden files and subdirectories are skipped. An empty
-directory returns zero without creating a snapshot. Files already referenced by the current table
-snapshot are rejected. Avoid concurrent imports of the same directory.
+directory returns zero without creating a snapshot. Repeated directory entries are deduplicated by
+their full external paths. Files already referenced by the current table snapshot are rejected before
+reading any source file. Avoid concurrent imports of the same directory.
 
 The target must be an append table with `bucket = -1`, without row tracking or data evolution.
 Source files must match the target format and non-partition columns. Partition values come from

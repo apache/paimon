@@ -21,6 +21,7 @@ package org.apache.paimon.migrate;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -59,6 +60,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -182,12 +185,43 @@ class ExternalFileImporterTest {
     }
 
     @Test
+    void testDuplicateDirectoryEntriesAreImportedOnce() throws Exception {
+        FileStoreTable table = createTable("parquet", Collections.emptyMap());
+        Path first = externalFile("parquet", "first.parquet", 1, 2);
+        Path second = externalFile("parquet", "second.parquet", 3);
+        doReturn(
+                        new FileStatus[] {
+                            fileIO.getFileStatus(first),
+                            fileIO.getFileStatus(second),
+                            fileIO.getFileStatus(first),
+                            fileIO.getFileStatus(second)
+                        })
+                .when(fileIO)
+                .listStatus(source);
+
+        assertThat(ExternalFileImporter.importFiles(table, source.toString(), "dt=p1,hour=1"))
+                .isEqualTo(2);
+        DataSplit split = splits(table).get(0);
+        assertThat(split.dataFiles().stream().map(f -> f.externalPath().get()))
+                .containsExactlyInAnyOrder(first.toString(), second.toString());
+        assertThat(split.rowCount()).isEqualTo(3);
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(3);
+        assertThat(table.newScan().listPartitionEntries().get(0).recordCount()).isEqualTo(3);
+        assertThat(fileIO.exists(first)).isTrue();
+        assertThat(fileIO.exists(second)).isTrue();
+    }
+
+    @Test
     void testDuplicateImportDoesNotCommit() throws Exception {
         FileStoreTable table = createTable("parquet", Collections.emptyMap());
-        externalFile("parquet", "first.parquet", 1);
+        Path imported = externalFile("parquet", "first.parquet", 1);
         ExternalFileImporter.importFiles(table, source.toString(), "dt=p1,hour=1");
         long snapshotId = table.snapshotManager().latestSnapshotId();
-        externalFile("parquet", "second.parquet", 2);
+        Path fresh = externalFile("parquet", "second.parquet", 2);
+        doReturn(new FileStatus[] {fileIO.getFileStatus(fresh), fileIO.getFileStatus(imported)})
+                .when(fileIO)
+                .listStatus(source);
+        clearInvocations(fileIO);
 
         assertThatThrownBy(
                         () ->
@@ -197,6 +231,9 @@ class ExternalFileImporterTest {
                 .hasMessageContaining("already been imported");
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
         assertThat(splits(table).get(0).dataFiles()).hasSize(1);
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(1);
+        verify(fileIO, never())
+                .newInputStream(argThat(path -> path.toString().startsWith(source.toString())));
     }
 
     @Test

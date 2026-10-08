@@ -38,6 +38,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -89,14 +90,14 @@ public class ExternalFileImporter {
         FileIO fileIO = table.fileIO();
         checkArgument(fileIO.getFileStatus(directory).isDir(), "Location must be a directory.");
 
-        List<FileStatus> files = new ArrayList<>();
+        Map<String, FileStatus> files = new LinkedHashMap<>();
         for (FileStatus status : fileIO.listStatus(directory)) {
             String name = status.getPath().getName();
             if (!status.isDir()
                     && !name.startsWith(".")
                     && !name.startsWith("_")
                     && name.endsWith("." + fileFormat)) {
-                files.add(status);
+                files.putIfAbsent(status.getPath().toString(), status);
             }
         }
         if (files.isEmpty()) {
@@ -109,15 +110,17 @@ public class ExternalFileImporter {
                 file.externalPath().ifPresent(existingPaths::add);
             }
         }
-        List<DataFileMeta> fileMetas = new ArrayList<>();
-        SimpleStatsExtractor statsExtractor =
-                FileMetaUtils.createSimpleStatsExtractor(table, fileFormat);
-        for (FileStatus file : files) {
-            String externalPath = file.getPath().toString();
+        for (String externalPath : files.keySet()) {
             checkArgument(
                     !existingPaths.contains(externalPath),
                     "File has already been imported: %s.",
                     externalPath);
+        }
+        List<DataFileMeta> fileMetas = new ArrayList<>();
+        SimpleStatsExtractor statsExtractor =
+                FileMetaUtils.createSimpleStatsExtractor(table, fileFormat);
+        for (FileStatus file : files.values()) {
+            String externalPath = file.getPath().toString();
             // Manifest identity is independent of the source name, which can collide across dirs.
             DataFileMeta fileMeta =
                     FileMetaUtils.constructFileMeta(

@@ -115,9 +115,9 @@ CALL sys.import_files(
 
 Returns `imported_files`, the number of registered files. An empty directory returns zero without
 creating a snapshot. Only files directly in the directory whose suffix matches the table's
-`file.format` are imported. Hidden files and subdirectories are skipped. Files already referenced
-by the current table snapshot are rejected; concurrent imports of the same directory must be
-avoided.
+`file.format` are imported. Hidden files and subdirectories are skipped. Repeated directory entries
+are deduplicated by their full external paths. Files already referenced by the current table snapshot
+are rejected before reading any source file. Concurrent imports of the same directory must be avoided.
 
 The target must be an append table with `bucket = -1`, without row tracking or data evolution.
 Source files must match the target's format and non-partition columns. Partition values come from
