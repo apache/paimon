@@ -248,6 +248,15 @@ filtering and final row lookup.
 In particular, `pre_filter` filters candidates before ranking; `where()` filters
 the selected rows and can return fewer than the requested number of results.
 
+For indexed vector searches, workers evaluate scalar predicates and build
+live-row filters at the query snapshot. Tasks using the same scalar index files
+share one Ray scalar-index evaluation; its result is passed directly to dependent
+tasks without materializing the bitmap on the driver. Candidate verification
+reads only filter columns and row IDs in the task's shard range, without scanning
+the scalar indexes again. The final shard filter is reused across a batch's query
+vectors. This lets expensive verification scale with search concurrency; partially
+overlapping scalar index inputs can still cause repeated index reads.
+
 Index search, raw scans, refinement, lookup, and task retries use the same read
 snapshot. The existing `snapshot_id` and `tag_name` arguments to `search()` also
 work with Ray execution. A failed task fails the query rather than returning
