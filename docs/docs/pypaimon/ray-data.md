@@ -263,11 +263,6 @@ Ray's `map_groups()` memory bound. Large append-only buckets or hot
 append-only partitions should use the default mode or
 `hash_fixed_precluster="off"`.
 
-Ray's group-by shuffle does not preserve source row order within a group.
-If multiple rows have the same primary key and their precedence matters,
-configure a `sequence.field` with a source version and tie-breaker instead
-of relying on the last source row to win.
-
 For non-HASH_FIXED append-only tables, the dataset is written as-is.
 Postpone-bucket tables (`bucket = -2`) follow
 `postpone.batch-write-fixed-bucket` (default: `true`). Existing partitions
