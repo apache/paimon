@@ -397,6 +397,10 @@ class MultimodalTable:
     def merge(self, on):
         return _MergeBuilder(self, on)
 
+    def maintain_indexes(self, indexes, *, rebuild=False, partitions=None):
+        """Catch up configured global indexes, or atomically rebuild them."""
+        return self.raw_table.maintain_global_indexes(indexes, rebuild=rebuild, partitions=partitions)
+
     def map_with_blobs(self, dataset, columns, fn, **kwargs):
         from pypaimon.ray import map_with_blobs
 
@@ -533,10 +537,6 @@ class MultimodalTable:
             route_limit=route_limit,
             pre_filter=pre_filter,
         )
-
-    def maintain_indexes(self, indexes, *, rebuild=False, partitions=None):
-        """Catch up configured global indexes, or atomically rebuild them."""
-        return self.raw_table.maintain_global_indexes(indexes, rebuild=rebuild, partitions=partitions)
 
     def create_index(self, column, index_type, options=None):
         return self.raw_table.create_global_index(
