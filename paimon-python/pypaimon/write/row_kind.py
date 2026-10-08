@@ -24,6 +24,8 @@ from pypaimon.table.row.row_kind import RowKind
 def row_kinds(options, data):
     name = options.options.to_map().get('rowkind.field')
     if name is None:
+        if '_VALUE_KIND' in data.schema.names:
+            return data.column('_VALUE_KIND').to_pylist()
         return [0] * data.num_rows
     if name not in data.schema.names:
         raise ValueError('Cannot find rowkind field %s in table schema' % name)
@@ -49,15 +51,26 @@ def filter_write_batch(table, data):
     return data.filter(pa.array(keep, type=pa.bool_()))
 
 
-def skip_write_row(table, values):
+def with_row_kind(table, data, row):
+    """Carry an InternalRow's kind through the internal Arrow write path.
+
+    A configured rowkind.field takes precedence, as in Java RowKindGenerator.
+    Public Arrow writes still accept only the declared table/write schema.
+    """
+    if table.is_primary_key_table and table.options.options.to_map().get('rowkind.field') is None:
+        return data.append_column(
+            pa.field('_VALUE_KIND', pa.int8(), nullable=False),
+            pa.array([row.get_row_kind().value] * data.num_rows, type=pa.int8()))
+    return data
+
+
+def skip_write_row(table, values, row_kind=RowKind.INSERT):
     if not table.is_primary_key_table:
         return False
     options = table.options
     raw = options.options.to_map()
     name = raw.get('rowkind.field')
-    if name is None:
-        return False
-    kind = RowKind.from_string(values[name]).value
+    kind = row_kind.value if name is None else RowKind.from_string(values[name]).value
     return _is_filtered(kind, options.ignore_delete(),
                         str(raw.get('ignore-update-before', 'false')).lower() == 'true')
 

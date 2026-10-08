@@ -121,6 +121,8 @@ class FileStoreWrite:
             self.table.table_schema.fields,
             column_names,
         )
+        from pypaimon.write.row_kind import with_row_kind
+        data = with_row_kind(self.table, data, row)
         writer.write(data.to_batches()[0])
 
     def roll_before_group_if_needed(self, row_count: int):

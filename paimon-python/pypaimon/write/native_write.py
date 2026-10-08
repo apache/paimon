@@ -206,6 +206,9 @@ class NativeTableWrite:
         if self._python_writer is not None:
             return self._python_writer.write_arrow_batch(data, bucket)
         data = self._prepare_native_arrow_data(data)
+        self._write_native_batch(data, bucket)
+
+    def _write_native_batch(self, data, bucket=None):
         if data.num_rows:
             # A failed native write may already have produced files. Never
             # retry that batch through Python after this point.
@@ -243,8 +246,10 @@ class NativeTableWrite:
             return self._switch_to_python().write_row(row)
         values = row_to_named_values(row, self.table.table_schema.fields)
         names = self._schema.names
-        self.write_arrow_batch(row_values_to_arrow_table(
+        data = self._prepare_native_arrow_data(row_values_to_arrow_table(
             values, self.table.table_schema.fields, names).to_batches()[0])
+        from pypaimon.write.row_kind import with_row_kind
+        self._write_native_batch(with_row_kind(self.table, data, row))
 
     def prepare_commit(self, commit_identifier=None):
         if self._python_writer is not None:
