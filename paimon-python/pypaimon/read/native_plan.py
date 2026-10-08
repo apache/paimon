@@ -449,7 +449,23 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    rust_plan = scan.plan()
+    return _from_native_plan(table, scan.plan())
+
+
+def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):
+    """Create Rust's stateful StreamTableScan with the canonical reader type."""
+    builder = _configure_native_read_builder(
+        _native_read_builder(table), predicate, None, None, read_type=read_type)
+    scan = builder.new_stream_scan()
+    if bucket_filter is not None:
+        scan.with_bucket_filter(bucket_filter)
+    if consumer_id is not None:
+        scan.with_consumer_id(consumer_id)
+    return scan
+
+
+def _from_native_plan(table, rust_plan) -> Plan:
+    """Keep one split/metadata bridge for batch and streaming planning."""
     rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
