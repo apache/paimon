@@ -29,6 +29,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
 from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
@@ -95,7 +96,7 @@ class DataWriter(ABC):
 
         self.path_factory = self.table.path_factory()
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
-            self.partition, self.bucket
+            self.partition, self.bucket, canonical_partition=True
         )
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
@@ -498,8 +499,9 @@ class DataWriter(ABC):
         if self.external_path_provider:
             return self.external_path_provider.get_next_external_data_path(file_name)
 
-        bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
-        return f"{bucket_path.rstrip('/')}/{file_name}"
+        # New files use Java's escaped partition names, including on the pure
+        # Python writer path. Never introduce another Python-specific layout.
+        return canonical_data_file_path(self.table, self.partition, self.bucket, file_name)
 
     def _should_write_row_sidecar(self) -> bool:
         return (

@@ -130,23 +130,15 @@ class AbstractSplitGenerator(ABC):
         return splits
 
     def _set_data_file_paths(self, files, partition: GenericRow, bucket: int):
-        """Resolve Java/Rust escaped paths and legacy Python partition paths."""
+        """Resolve Java's partition paths without probing the primary file.
+
+        A row-sidecar read may not open the primary file at all. Its aligned
+        path must still be correct when that primary file is unavailable.
+        """
         values = tuple(partition.values)
-        escaped_partition = False
-        if values:
-            path_factory = self.table.path_factory()
-            escaped_partition = (
-                path_factory.bucket_path(values, bucket, canonical_partition=True)
-                != path_factory.bucket_path(values, bucket))
         for data_file in files:
-            data_file.set_file_path(
-                self.table.table_path, partition, bucket, self.default_part_value,
-                self.table.options.data_file_path_directory())
-            if escaped_partition and not data_file.external_path:
-                canonical_path = canonical_data_file_path(
-                    self.table, values, bucket, data_file.file_name)
-                if self.table.file_io.exists(canonical_path):
-                    data_file.file_path = canonical_path
+            data_file.file_path = data_file.physical_path() if data_file.external_path else canonical_data_file_path(
+                self.table, values, bucket, data_file.file_name)
 
     def _get_deletion_files_for_split(
         self,

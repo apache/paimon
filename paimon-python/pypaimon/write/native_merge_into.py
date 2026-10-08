@@ -20,10 +20,11 @@
 import pyarrow as pa
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-from pypaimon.write.native_commit import from_native_commit_messages
+from pypaimon.write.native_commit import create_native_write_table, from_native_commit_messages
 from pypaimon.write.native_update import (
     _native_row_id_table, _native_update_columns_supported, _supported_upsert_key_type,
 )
+from pypaimon.write.native_write import _native_partition_types_supported
 
 
 def create_native_merge_into(table, source, on, matched, not_matched, commit_user, commit_identifier):
@@ -36,12 +37,37 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
     self_merge = _is_self_merge(table, source, target_keys, source_keys)
     if not_matched and table.options.video_frame_fields():
         return None
-    if _is_table_like(source) and not self_merge:
-        return None
     native_table = _native_row_id_table(table)
     if native_table is None:
         return None
-    source, matched, not_matched, context = _prepare(table, source, list(matched), list(not_matched), on)
+    source_schema = None
+    native_source = None
+    if _is_table_like(source) and not self_merge:
+        # The source can be an append or PK table; only the target requires DE.
+        from pypaimon.read.native_plan import _native_blob_view_supported
+        from pypaimon.table.file_store_table import FileStoreTable
+        if (type(source) is not FileStoreTable
+                or source.options.file_format() != 'parquet'
+                or source.options.video_frame_fields() or source.options.with_vector_format()
+                or (source.is_primary_key_table and not source.trimmed_primary_keys)):
+            return None
+        source.new_read_builder().new_scan()._validate_scan_mode()
+        if not _native_blob_view_supported(source, source.field_names):
+            return None
+        # This operation reads one full source snapshot. Incremental scans stay
+        # on the Python path, whose scanner applies the requested delta range.
+        if (source.options.scan_mode() not in ('default', 'from-snapshot', 'from-timestamp')
+                or any(str(key).startswith('incremental-') for key in source.table_schema.options)):
+            return None
+        from pypaimon.schema.data_types import PyarrowFieldParser
+        source_schema = PyarrowFieldParser.from_paimon_schema(source.table_schema.fields)
+        if not _native_partition_types_supported(source_schema, source.partition_keys):
+            return None
+        native_source = create_native_write_table(source)
+        if native_source is None:
+            return None
+    source, matched, not_matched, context = _prepare(
+        table, source, list(matched), list(not_matched), on, source_schema=source_schema)
     if any(callable(value) for clause in matched + not_matched for value in clause.spec.values()):
         return None
     if not _native_update_columns_supported(table, _union_update_cols(matched)):
@@ -74,7 +100,8 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
                if commit_identifier == BATCH_COMMIT_IDENTIFIER else
                native_table.new_stream_write_builder().with_commit_user(commit_user))
     writer = builder.new_update()
-    return NativeTableMergeInto(table, writer, source, list(zip(target_keys, source_keys)),
+    return NativeTableMergeInto(table, writer, native_source if native_source is not None else source,
+                                list(zip(target_keys, source_keys)),
                                 encoded_matched, encoded_not_matched, commit_identifier)
 
 

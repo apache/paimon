@@ -39,15 +39,12 @@ def native_commit_available() -> bool:
 
 
 def native_messages_supported(table, messages) -> bool:
-    path_factory = table.path_factory()
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
             return False
         partition = tuple(message.partition)
-        bucket_path = path_factory.bucket_path(
-            partition, message.bucket, canonical_partition=True)
         for file in message.new_files + message.changelog_files:
             if file.external_path:
                 continue
@@ -56,10 +53,6 @@ def native_messages_supported(table, messages) -> bool:
             if file.file_path:
                 if str(file.file_path) != expected:
                     return False
-            elif path_factory.bucket_path(partition, message.bucket) != bucket_path:
-                # The message does not say which of the two partition layouts
-                # contains the file. Use Python's path-aware commit and abort.
-                return False
     return True
 
 

@@ -332,22 +332,29 @@ def test_native_abort_removes_uncommitted_files(tmp_path, native_rest_catalog, o
 
 
 @requires_native
-def test_python_file_in_legacy_partition_uses_python_abort(
-        tmp_path, native_rest_catalog):
+@pytest.mark.parametrize('serialized', [False, True])
+def test_python_written_escaped_partition_supports_native_abort(
+        tmp_path, native_rest_catalog, serialized):
+    from pypaimon.write.commit_message_serializer import deserialize_commit_message, serialize_commit_message
+
     table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_batch_write_builder()
     messages = _prepare(builder, [{'id': 1, 'pt': 'a/b'}])
     file = messages[0].new_files[0]
     assert table.file_io.exists(file.file_path)
-    assert not native_messages_supported(table, messages)
+    assert '/pt=a%2Fb/' in file.file_path
+    if serialized:
+        messages = [deserialize_commit_message(serialize_commit_message(message, table.partition_keys_fields),
+                                               table.partition_keys_fields) for message in messages]
+    assert native_messages_supported(table, messages)
 
     commit = builder.new_commit()
     try:
         with patch.object(commit.file_store_commit, 'abort',
-                          wraps=commit.file_store_commit.abort) as python_abort:
+                          side_effect=AssertionError('Python fallback')):
             commit.abort(messages)
-        python_abort.assert_called_once_with(messages)
         assert not table.file_io.exists(file.file_path)
+        assert table.snapshot_manager().get_latest_snapshot() is None
     finally:
         commit.close()
 
