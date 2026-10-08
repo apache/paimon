@@ -92,7 +92,9 @@ class _Harness(KeyValueDataWriter):
         # trigger on its own in tests that don't care about rolling.
         self.target_file_size = target_file_size
         self._buffer = WriteBuffer(self._merge_data)
+        self._input_changelog_buffer = None
         self.committed_files = []
+        self.committed_changelog_files = []
         self.written_chunks = []
 
     def _write_data_to_file(self, data):

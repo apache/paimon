@@ -159,7 +159,7 @@ class TableWrite:
         require_columns(values_by_name, column_names, "write_row")
         require_columns(values_by_name, self.table.partition_keys, "write_row")
         from pypaimon.write.row_kind import skip_write_row
-        if skip_write_row(self.table, values_by_name):
+        if skip_write_row(self.table, values_by_name, row.get_row_kind()):
             return
         partition, bucket = (
             self.row_key_extractor.extract_partition_bucket_row(values_by_name)
@@ -314,8 +314,25 @@ class TableWrite:
         table = getattr(self, 'table', None)
         if table is None:
             return data
+        data = self._normalize_arrow_write_schema(data)
         from pypaimon.write.row_kind import filter_write_batch
         return filter_write_batch(table, data)
+
+    def _normalize_arrow_write_schema(self, data):
+        # Compatible input batches may differ in top-level nullability or
+        # metadata. Buffered writes and row-to-Arrow conversion must use the
+        # same declared fields, while keeping normalized Arrow array types.
+        fields = []
+        for field in data.schema:
+            declared = self.table_pyarrow_schema.field(field.name)
+            fields.append(pa.field(field.name, field.type, nullable=declared.nullable,
+                                   metadata=declared.metadata))
+        schema = pa.schema(fields, metadata=self.table_pyarrow_schema.metadata)
+        if data.schema.equals(schema, check_metadata=True):
+            return data
+        if isinstance(data, pa.RecordBatch):
+            return pa.RecordBatch.from_arrays(data.columns, schema=schema)
+        return pa.Table.from_arrays(data.columns, schema=schema)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
