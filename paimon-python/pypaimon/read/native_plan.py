@@ -452,23 +452,20 @@ def native_plan(
     return _from_native_plan(table, scan.plan())
 
 
-def native_snapshot_plan(table, snapshot_id: int, mode: str = 'all',
-                         predicate: Optional[Predicate] = None,
-                         read_type: Optional[List[DataField]] = None,
-                         bucket_filter=None, only_read_real_buckets=False) -> Plan:
-    """Plan one pinned streaming frame with Java SnapshotReader semantics."""
+def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):
+    """Create Rust's stateful StreamTableScan with the canonical reader type."""
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, None, None, read_type=read_type)
-    reader = builder.new_snapshot_reader().with_snapshot(snapshot_id).with_mode(mode)
-    if only_read_real_buckets:
-        reader.only_read_real_buckets()
+    scan = builder.new_stream_scan()
     if bucket_filter is not None:
-        reader.with_bucket_filter(bucket_filter)
-    return _from_native_plan(table, reader.read())
+        scan.with_bucket_filter(bucket_filter)
+    if consumer_id is not None:
+        scan.with_consumer_id(consumer_id)
+    return scan
 
 
 def _from_native_plan(table, rust_plan) -> Plan:
-    """Keep one split/metadata bridge for batch and per-snapshot planning."""
+    """Keep one split/metadata bridge for batch and streaming planning."""
     rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).

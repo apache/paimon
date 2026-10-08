@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native streaming frames follow Java's per-snapshot reader modes."""
+"""Native StreamTableScan follows Java's initial and follow-up semantics."""
 
 import asyncio
 from contextlib import ExitStack
@@ -61,6 +61,8 @@ def _write(table, rows, overwrite=False, schema=SCHEMA):
 
 
 def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, predicate=None):
+    if mode == 'delta':
+        table = table.copy({'changelog-producer': 'none'})
     builder = table.copy({
         'scan.native-plan.enabled': str(native).lower(),
         'read.native.enabled': str(native).lower(),
@@ -75,13 +77,22 @@ def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, p
     try:
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(
-                    scan, '_AsyncStreamingTableScan__create_initial_plan_raw',
+                stack.enter_context(patch(
+                    'pypaimon.read.streaming_table_scan.FileScanner',
                     side_effect=AssertionError('Python initial planning')))
-                stack.enter_context(patch.object(
-                    scan, '_create_plan_from_manifests',
+                stack.enter_context(patch(
+                    'pypaimon.read.streaming_table_scan.ManifestFileManager',
                     side_effect=AssertionError('Python incremental planning')))
-            plan = getattr(scan, '_create_{}_plan'.format(mode))(snapshot)
+            if native:
+                if mode != 'initial':
+                    scan.restore(snapshot.id)
+                plan = scan.plan()
+            else:
+                plan = getattr(scan, '_create_{}_plan'.format(mode))(snapshot)
+        if plan is None:
+            assert native and mode != 'initial'
+            assert scan.checkpoint() == snapshot.id + 1
+            return None, []
         reader = builder.new_read()
         with ExitStack() as stack:
             if native:
@@ -93,16 +104,15 @@ def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, p
             assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
         return plan, sorted(rows, key=lambda row: (row.get('id', 0), repr(row)))
     finally:
-        if scan._prefetch_executor is not None:
+        if getattr(scan, '_prefetch_executor', None) is not None:
             scan._prefetch_executor.shutdown(wait=True)
 
 
 @pytest.mark.parametrize('engine', ['deduplicate', 'first-row'])
-def test_initial_frame_includes_level_zero_and_pins_selected_snapshot(tmp_path, engine):
+def test_initial_frame_includes_level_zero_and_merges_latest_snapshot(tmp_path, engine):
     table = _table(tmp_path, engine)
     _write(table, [{'id': 1, 'value': 10}, {'id': 2, 'value': 20}])
     selected = _write(table, [{'id': 1, 'value': 11}, {'id': 3, 'value': 30}])
-    _write(table, [{'id': 4, 'value': 40}])
     expected = [
         {'_row_kind': '+I', 'id': 1, 'value': 10 if engine == 'first-row' else 11},
         {'_row_kind': '+I', 'id': 2, 'value': 20},
@@ -149,9 +159,10 @@ def test_bucket_filter_is_applied_to_every_streaming_frame(tmp_path, mode, selec
     python_plan, expected = _frame(table, snapshot, mode, False, callback, predicate=predicate)
     native_plan, actual = _frame(table, snapshot, mode, True, callback, predicate=predicate)
     assert actual == expected
-    assert all(split.bucket in selected for split in python_plan.splits() + native_plan.splits())
+    splits = python_plan.splits() + (native_plan.splits() if native_plan is not None else [])
+    assert all(split.bucket in selected for split in splits)
     if not selected:
-        assert not actual and not native_plan.splits()
+        assert not actual and (native_plan is None or not native_plan.splits())
     elif len(selected) == 4:
         assert len(actual) == 24
 
@@ -163,7 +174,7 @@ def test_empty_selection_retains_snapshot_and_reader_schema(tmp_path, mode):
     for native in (False, True):
         plan, rows = _frame(table, snapshot, mode, native,
                             bucket_filter=lambda bucket: False, projection=['value'])
-        assert plan.snapshot_id == snapshot.id
+        assert (plan is None and mode != 'initial') or plan.snapshot_id == snapshot.id
         assert rows == []
 
 
@@ -215,8 +226,8 @@ def test_initial_deletion_vector_table_keeps_uncompacted_level_zero(tmp_path, me
         assert rows == []
 
 
-@pytest.mark.parametrize('producer', ['none', 'input'])
-@pytest.mark.parametrize('mode', ['initial', 'delta', 'changelog'])
+@pytest.mark.parametrize('producer,mode', [
+    ('none', 'initial'), ('none', 'delta'), ('input', 'initial'), ('input', 'changelog')])
 def test_postpone_pending_visibility_matches_java_producer_rule(tmp_path, producer, mode):
     table = _table(tmp_path, producer=producer, buckets=-2)
     snapshot = _write(table, [{'id': 1, 'value': 10}])
@@ -260,6 +271,7 @@ def test_zero_column_projection_keeps_frame_row_count(tmp_path, mode):
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('initial', [False, True])
 def test_stream_callback_failure_does_not_advance_or_stage_consumer(tmp_path, native, initial):
+    from pypaimon.consumer.consumer_manager import ConsumerManager
     from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
 
     table = _table(tmp_path)
@@ -275,8 +287,11 @@ def test_stream_callback_failure_does_not_advance_or_stage_consumer(tmp_path, na
             raise failure
         return True
 
-    scan = AsyncStreamingTableScan(
-        table, bucket_filter=callback, prefetch_enabled=False, consumer_id='failed-frame')
+    scan = (table.new_stream_read_builder().with_bucket_filter(callback)
+            .with_consumer_id('failed-frame').new_streaming_scan() if native else
+            AsyncStreamingTableScan(table, bucket_filter=callback, prefetch_enabled=False,
+                                    consumer_id='failed-frame'))
+    consumers = ConsumerManager(table.file_io, table.table_path)
     if not initial:
         scan.next_snapshot_id = 1
 
@@ -287,7 +302,7 @@ def test_stream_callback_failure_does_not_advance_or_stage_consumer(tmp_path, na
         assert caught.value is failure
         assert scan.next_snapshot_id == (None if initial else 1)
         assert scan._pending_consumer_snapshot is None
-        assert scan._consumer_manager.consumer('failed-frame') is None
+        assert consumers.consumer('failed-frame') is None
         _write(table, [{'id': 2, 'value': 20}])
         retry = scan.stream()
         try:
@@ -303,9 +318,88 @@ def test_stream_callback_failure_does_not_advance_or_stage_consumer(tmp_path, na
             assert scan.next_snapshot_id == expected_id + 1
             assert scan._pending_consumer_snapshot == expected_id + 1
             # Consumer progress waits for the caller to process the yielded plan.
-            assert scan._consumer_manager.consumer('failed-frame') is None
+            assert consumers.consumer('failed-frame') is None
         finally:
             await retry.aclose()
             await failed_stream.aclose()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('producer', ['none', 'input'])
+def test_empty_follow_up_acknowledges_skipped_progress(tmp_path, producer):
+    from pypaimon.consumer.consumer_manager import ConsumerManager
+    table = _table(tmp_path, producer=producer)
+    for value in range(3):
+        _write(table, [{'id': 1, 'value': value}])
+    table = table.copy({'scan.native-plan.enabled': 'true'})
+    scan = (table.new_stream_read_builder().with_bucket_filter(lambda _: False)
+            .with_consumer_id('filtered').new_streaming_scan())
+    scan.restore(1)
+
+    async def stop_polling(_):
+        raise asyncio.CancelledError()
+
+    async def scenario():
+        iterator = scan.stream()
+        try:
+            with patch('pypaimon.read.streaming_table_scan.asyncio.sleep', new=stop_polling):
+                with pytest.raises(asyncio.CancelledError):
+                    await iterator.__anext__()
+        finally:
+            await iterator.aclose()
+    asyncio.run(scenario())
+    assert scan.checkpoint() == 4
+    consumers = ConsumerManager(table.file_io, table.table_path)
+    assert consumers.consumer('filtered').next_snapshot == 4
+
+
+def test_large_gap_keeps_all_native_changelog_frames(tmp_path):
+    table = _table(tmp_path, producer='input')
+    for value in range(12):
+        _write(table, [{'id': 1, 'value': value}])
+    builder = table.copy({'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true'})
+    builder = builder.new_stream_read_builder().with_include_row_kind()
+    scan = builder.new_streaming_scan()
+    scan.restore(1)
+    for value in range(12):
+        plan = scan.plan()
+        assert plan.snapshot_id == value + 1
+        assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [
+            {'_row_kind': '+I', 'id': 1, 'value': value}]
+    assert scan.plan() is None
+    assert scan.checkpoint() == 13
+
+
+def test_failed_empty_poll_acknowledgement_is_retryable(tmp_path):
+    from pypaimon.consumer.consumer_manager import ConsumerManager
+    table = _table(tmp_path)
+    _write(table, [{'id': 1, 'value': 10}])
+    scan = (table.copy({'scan.native-plan.enabled': 'true'}).new_stream_read_builder()
+            .with_bucket_filter(lambda _: False).with_consumer_id('retry-empty').new_streaming_scan())
+    scan.restore(1)
+    failure = IOError('retry consumer acknowledgement')
+
+    async def stop_polling(_):
+        raise asyncio.CancelledError()
+
+    async def scenario():
+        iterator = scan.stream()
+        try:
+            with patch.object(scan, 'notify_checkpoint_complete', side_effect=failure):
+                with pytest.raises(IOError) as caught:
+                    await iterator.__anext__()
+            assert caught.value is failure
+            assert scan._pending_consumer_snapshot == 2
+        finally:
+            await iterator.aclose()
+        iterator = scan.stream()
+        try:
+            with patch('pypaimon.read.streaming_table_scan.asyncio.sleep', new=stop_polling):
+                with pytest.raises(asyncio.CancelledError):
+                    await iterator.__anext__()
+        finally:
+            await iterator.aclose()
+    asyncio.run(scenario())
+    assert scan._pending_consumer_snapshot is None
+    assert ConsumerManager(table.file_io, table.table_path).consumer('retry-empty').next_snapshot == 2

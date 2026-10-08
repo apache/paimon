@@ -366,63 +366,16 @@ class AsyncStreamingTableScan:
     def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
         """Create a Plan for the initial full scan of the latest snapshot."""
         auth_result = self.__auth_query()
-        plan = None
-        if auth_result is None:
-            plan = self._try_native_plan(snapshot.id)
-        if plan is None:
-            plan = self.__create_initial_plan_raw(snapshot, auth_result)
+        plan = self.__create_initial_plan_raw(snapshot, auth_result)
         return wrap_plan_with_auth(auth_result, plan)
 
     def _create_delta_plan(self, snapshot: Snapshot) -> Plan:
         """Read new files from delta_manifest_list (changelog-producer=none)."""
-        plan = self._try_native_plan(snapshot.id, mode='delta')
-        if plan is not None:
-            return plan
         manifest_files = self._manifest_list_manager.read_delta(snapshot)
         return self._create_plan_from_manifests(manifest_files, snapshot.id)
 
-    def _try_native_plan(self, expected_snapshot_id: int, mode='all') -> Optional[Plan]:
-        """Plan an initial, delta or changelog frame at its selected snapshot.
-
-        SnapshotReader owns manifest selection, bucket filtering and split packing.
-        A failed bucket callback is a user error and must not be retried by fallback.
-        """
-        if not self.table.options.native_plan_enabled():
-            return None
-        callback_errors = []
-
-        def bucket_filter(bucket):
-            try:
-                return bool(self._bucket_filter(bucket))
-            except Exception as error:
-                callback_errors.append(error)
-                raise
-
-        try:
-            from pypaimon.read.native_plan import native_snapshot_plan
-            plan = native_snapshot_plan(
-                self.table, snapshot_id=expected_snapshot_id, mode=mode,
-                predicate=self.predicate, read_type=self._read_type,
-                bucket_filter=bucket_filter if self._bucket_filter is not None else None,
-                only_read_real_buckets=self._only_read_real_buckets())
-            if plan.snapshot_id != expected_snapshot_id:
-                raise RuntimeError(
-                    "Native streaming plan resolved snapshot {}, expected {}".format(
-                        plan.snapshot_id, expected_snapshot_id))
-            return plan
-        except Exception as error:
-            if callback_errors:
-                raise callback_errors[0]
-            _raise_if_native_fork_safety_error(error)
-            logging.warning(
-                "Native streaming plan failed, falling back to Python planning: %s", error)
-            return None
-
     def _create_changelog_plan(self, snapshot: Snapshot) -> Plan:
         """Java ChangelogFollowUpScanner consumes any snapshot with a changelog."""
-        plan = self._try_native_plan(snapshot.id, mode='changelog')
-        if plan is not None:
-            return plan
         manifest_files = self._manifest_list_manager.read_changelog(snapshot)
         return self._create_plan_from_manifests(manifest_files, snapshot.id)
 
@@ -508,3 +461,88 @@ class AsyncStreamingTableScan:
         else:
             plan = IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)
         return wrap_plan_with_auth(auth_result, plan)
+
+
+class StreamTableScan:
+    """Python iterator adapter for Rust's stateful StreamTableScan.
+
+    Rust owns snapshot selection, split planning, checkpoints and consumer
+    persistence. Python only polls, converts splits and acknowledges a yielded
+    plan when the caller resumes the iterator after processing it.
+    """
+
+    def __init__(self, table, predicate=None, read_type=None, poll_interval_ms=1000,
+                 bucket_filter=None, consumer_id=None):
+        from pypaimon.read.native_plan import native_stream_scan
+        self.table = table
+        self.poll_interval = poll_interval_ms / 1000.0
+        self._scan = native_stream_scan(
+            table, predicate=predicate, read_type=read_type,
+            bucket_filter=bucket_filter, consumer_id=consumer_id)
+        self._pending_consumer_snapshot = None
+
+    @property
+    def next_snapshot_id(self):
+        return self.checkpoint()
+
+    @next_snapshot_id.setter
+    def next_snapshot_id(self, next_snapshot_id):
+        self.restore(next_snapshot_id)
+
+    def checkpoint(self):
+        return self._scan.checkpoint()
+
+    def watermark(self):
+        return self._scan.watermark()
+
+    def restore(self, next_snapshot_id=None):
+        self._scan.restore(next_snapshot_id)
+        self._pending_consumer_snapshot = None
+
+    def notify_checkpoint_complete(self, next_snapshot):
+        self._scan.notify_checkpoint_complete(next_snapshot)
+
+    def plan(self):
+        from pypaimon.read.native_plan import _from_native_plan
+        # Decode before returning or acknowledging progress. A failed conversion
+        # must leave the selected frame available for retry.
+        checkpoint = self.checkpoint()
+        native_plan = self._scan.plan()
+        if native_plan is None:
+            return None
+        try:
+            return _from_native_plan(self.table, native_plan)
+        except Exception:
+            self._scan.restore(checkpoint)
+            raise
+
+    def _flush_pending_consumer(self):
+        if self._pending_consumer_snapshot is not None:
+            self.notify_checkpoint_complete(self._pending_consumer_snapshot)
+            self._pending_consumer_snapshot = None
+
+    async def stream(self):
+        while True:
+            self._flush_pending_consumer()
+            checkpoint = self.checkpoint()
+            plan = self.plan()
+            if plan is None:
+                next_snapshot = self.checkpoint()
+                if next_snapshot is not None and next_snapshot != checkpoint:
+                    # Skipped frames have no rows awaiting caller processing.
+                    self._pending_consumer_snapshot = next_snapshot
+                    self._flush_pending_consumer()
+                await asyncio.sleep(self.poll_interval)
+                continue
+            self._pending_consumer_snapshot = self.checkpoint()
+            yield plan
+
+    def stream_sync(self):
+        loop = asyncio.new_event_loop()
+        iterator = self.stream()
+        try:
+            while True:
+                yield loop.run_until_complete(iterator.__anext__())
+        finally:
+            loop.run_until_complete(iterator.aclose())
+            loop.close()

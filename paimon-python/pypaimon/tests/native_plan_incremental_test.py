@@ -406,12 +406,9 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
 
 
 @pytest.mark.native_plan
-@pytest.mark.skipif(
-    not native_method_available('ReadBuilder', 'with_nested_projection'),
-    reason='pypaimon_rust nested native reader API required')
 def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
         catalog):
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.read.streaming_table_scan import StreamTableScan
 
     schema = pa.schema([
         ('k', pa.int64()),
@@ -445,11 +442,12 @@ def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
     builder = (native_table.new_stream_read_builder()
                .with_projection(['payload.score', 'k'])
                .with_include_row_kind())
-    # Use the same delta-plan primitive as the streaming loop without polling.
+    # Restore the public stream scan to consume this snapshot as a delta.
     scan = builder.new_streaming_scan()
-    assert isinstance(scan, AsyncStreamingTableScan)
+    assert isinstance(scan, StreamTableScan)
     snapshot = native_table.snapshot_manager().get_latest_snapshot()
-    plan = scan._create_delta_plan(snapshot)
+    scan.restore(snapshot.id)
+    plan = scan.plan()
     with patch(
             'pypaimon.read.table_read.TableRead._create_split_read',
             side_effect=AssertionError('streaming nested native read fell back')):
@@ -494,8 +492,8 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
             if len(plans) == 2:
                 return plans
 
-    with patch.object(
-            scan, '_create_plan_from_manifests',
+    with patch(
+            'pypaimon.read.streaming_table_scan.ManifestFileManager',
             side_effect=AssertionError(
                 'streaming changelog native plan fell back to Python')):
         plans = asyncio.run(first_two_frames())
