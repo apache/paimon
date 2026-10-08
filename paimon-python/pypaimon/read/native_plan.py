@@ -34,7 +34,6 @@ from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.plan import Plan
-from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import (
     deserialize_split_v1, serialize_split_v1)
 from pypaimon.schema.data_types import DataField, RowType
@@ -249,37 +248,6 @@ def _predicate_to_native(predicate: Predicate) -> dict:
         'field': predicate.field,
         'literals': list(predicate.literals or []),
     }
-
-
-def _restore_python_partition_paths(table, splits: List[Split]) -> None:
-    """Restore legacy PyPaimon paths with one listing per bucket."""
-    if not table.partition_keys:
-        return
-    path_factory = table.path_factory()
-    bucket_files = {}
-    for split in splits:
-        bucket_path = path_factory.bucket_path(
-            tuple(split.partition.values), split.bucket)
-        candidates = []
-        for data_file in split.files:
-            python_path = "%s/%s" % (
-                bucket_path.rstrip('/'), data_file.file_name)
-            if (not data_file.external_path
-                    and python_path != data_file.file_path):
-                candidates.append((data_file, python_path))
-        if not candidates:
-            continue
-        if bucket_path not in bucket_files:
-            bucket_files[bucket_path] = {
-                status.base_name
-                for status in table.file_io.list_status(bucket_path)
-            }
-        for data_file, python_path in candidates:
-            if data_file.file_name in bucket_files[bucket_path]:
-                data_file.file_path = python_path
-                # The retained Rust split still points at its canonical path.
-                # Invalidate it so native reading cannot bypass this repair.
-                split._native_split = None
 
 
 def _resolved_rest_table_response(table):
@@ -498,7 +466,6 @@ def native_plan(
         # time from its current fields.
         for split, rust_split in zip(splits, rust_splits):
             split._native_split = rust_split
-    _restore_python_partition_paths(table, splits)
     snapshot_id = getattr(rust_plan, 'snapshot_id', None)
     if callable(snapshot_id):
         snapshot_id = snapshot_id()

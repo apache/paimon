@@ -35,6 +35,7 @@ from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import (
@@ -861,16 +862,10 @@ class FileStoreCommit:
                             entries.extend(self.manifest_file_manager.read(
                                 manifest.file_name, drop_stats=False,
                                 file_size=manifest.file_size))
-                        path_factory = self.table.path_factory()
                         for entry in entries:
                             file = entry.file
-                            file.file_path = file.physical_path() if file.external_path else "%s/%s" % (
-                                path_factory.bucket_path(
-                                    tuple(entry.partition.values),
-                                    entry.bucket,
-                                ).rstrip("/"),
-                                file.file_name,
-                            )
+                            file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
+                                self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
                         self._notify_commit_callbacks(
                             snapshot, entries, commit_identifier)
                     return True
@@ -1033,9 +1028,10 @@ class FileStoreCommit:
                          + list(message.compact_changelog_files)):
                 path = None
                 try:
-                    bucket_path = None if file.physical_path() else self.table.path_factory().bucket_path(
-                        tuple(message.partition), message.bucket)
-                    for path in file.collect_files(bucket_path):
+                    if not file.physical_path():
+                        file.file_path = canonical_data_file_path(
+                            self.table, tuple(message.partition), message.bucket, file.file_name)
+                    for path in file.collect_files():
                         self.table.file_io.delete_quietly(path)
                 except Exception as error:
                     logger.warning(

@@ -189,6 +189,12 @@ requiring catalog resolution, and packed-video inserts use the Python path
 selected before native execution starts. Native failures propagate without
 Python retry or deleting files from earlier prepared actions.
 
+Python and native writers use Java's escaped partition directories for data,
+changelog, Blob and row sidecar files, including external locations. Both
+planners, file-range metadata, commit callbacks and explicit aborts use the same
+path rules. Row sidecar reads resolve that path even when the primary file is
+unavailable.
+
 MAP columns configured with `fields.<name>.map.storage-layout=shared-shredding`
 also use native Parquet writes and data-evolution updates, including predicate
 updates and upserts. Rust applies Java's `plain`, `sequential` and `lru` column

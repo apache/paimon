@@ -62,7 +62,7 @@ def test_row_sidecar_options_keep_batch_and_stream_writes_native(tmp_path, strea
         writer.close()
 
 
-def _table(tmp_path, schema=None, options=None):
+def _table(tmp_path, schema=None, options=None, partition_keys=None):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     if schema is None:
@@ -72,7 +72,8 @@ def _table(tmp_path, schema=None, options=None):
                 'data-evolution.enabled': 'true', 'deletion-vectors.enabled': 'true',
                 'data-evolution.row-sidecar.enabled': 'true'}
     settings.update(options or {})
-    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options=settings), False)
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=partition_keys or [], options=settings), False)
     return catalog.get_table('default.t')
 
 
@@ -130,6 +131,62 @@ def test_row_sidecars_interoperate_between_python_and_rust(tmp_path, native_writ
                              'data-evolution.row-sidecar.enabled': 'false'})
     assert _read(read_table, ['id', 'value', '_ROW_ID'], 25, native_read).to_pydict() == {
         'id': [5], 'value': ['v5'], '_ROW_ID': [25]}
+
+
+@pytest.mark.python_write
+@pytest.mark.parametrize('native_read', [False, True])
+def test_escaped_partition_sidecar_reads_do_not_require_the_primary_file(tmp_path, native_read):
+    schema = pa.schema([('id', pa.int32()), ('value', pa.string()), ('p', pa.string())])
+    table = _table(tmp_path, schema=schema, partition_keys=['p'], options={
+        'write.native.enabled': 'false', 'read.native.enabled': str(native_read).lower(),
+        'scan.native-plan.enabled': 'false'})
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        writer.write_arrow(pa.table({'id': list(range(100)), 'value': ['v%d' % i for i in range(100)],
+                                    'p': ['a/b'] * 100}, schema=schema))
+        messages = writer.prepare_commit()
+        _commit(builder, messages)
+    finally:
+        writer.close()
+    _remove_primaries(messages)
+    assert _read(table, ['id', 'value', '_ROW_ID'], 25, native_read).to_pydict() == {
+        'id': [25], 'value': ['v25'], '_ROW_ID': [25]}
+
+
+@pytest.mark.python_write
+@pytest.mark.parametrize('file_uri', [False, True])
+def test_serialized_abort_deletes_escaped_data_and_sidecars_but_preserves_committed_files(tmp_path, file_uri):
+    from pypaimon.write.commit_message_serializer import deserialize_commit_message, serialize_commit_message
+
+    schema = pa.schema([('id', pa.int32()), ('value', pa.string()), ('p', pa.string())])
+    table = _table(tmp_path.as_uri() if file_uri else tmp_path, schema=schema, partition_keys=['p'], options={
+        'write.native.enabled': 'false', 'commit.native.enabled': 'false'})
+    paths = []
+    for row_id in [1, 2]:
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(pa.table({'id': [row_id], 'value': ['v'], 'p': ['a/b']}, schema=schema))
+            messages = writer.prepare_commit()
+            paths.append([path for message in messages for file in message.new_files for path in file.collect_files()])
+            if row_id == 1:
+                _commit(builder, messages)
+        finally:
+            writer.close()
+    partition_fields = [table.field_dict[name] for name in table.partition_keys]
+    restored = [deserialize_commit_message(serialize_commit_message(message, partition_fields), partition_fields)
+                for message in messages]
+    assert all(file.file_path is None for message in restored for file in message.new_files)
+    assert all(table.file_io.exists(path) for path in paths[0] + paths[1])
+    commit = builder.new_commit()
+    try:
+        # Only these never-submitted messages are explicitly abandoned.
+        commit.abort(restored)
+    finally:
+        commit.close()
+    assert all(table.file_io.exists(path) for path in paths[0])
+    assert all(not table.file_io.exists(path) for path in paths[1])
 
 
 @pytest.mark.parametrize('stream', [False, True])

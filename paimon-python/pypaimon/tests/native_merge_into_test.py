@@ -427,3 +427,79 @@ def test_native_table_source_keeps_its_selected_branch(tmp_path):
     builder.new_commit().commit(messages)
     assert _rows(target) == [dict(id=1, value=11, name='old'), dict(id=2, value=22, name='branch')]
     assert _rows(source) == [dict(id=1, value=11, name='base'), dict(id=3, value=33, name='main')]
+
+
+@pytest.mark.python_write
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('source_mode', ['append', 'pk', 'evolution'])
+@pytest.mark.parametrize('location', ['local', 'file-uri', 'directory', 'external'])
+def test_python_written_partition_source_uses_java_paths_for_native_merge(tmp_path, stream, source_mode, location):
+    from pathlib import Path
+    from pypaimon.write.native_write import NativeTableWrite
+
+    target = _table(tmp_path / 'target', [dict(id=1, value=10, name='old')])
+    warehouse = tmp_path / 'source'
+    catalog = CatalogFactory.create({'warehouse': warehouse.as_uri() if location == 'file-uri' else str(warehouse)})
+    catalog.create_database('db', True)
+    schema = pa.schema(list(_SCHEMA) + [pa.field('pa#rt', pa.string())])
+    options = {'write.native.enabled': 'false'}
+    if source_mode == 'pk':
+        options.update({'bucket': '1', 'changelog-producer': 'input'})
+    if source_mode == 'evolution':
+        schema = pa.schema(list(schema) + [pa.field('payload', pa.large_binary())])
+        options.update({'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+                        'data-evolution.row-sidecar.enabled': 'true'})
+    if location == 'directory':
+        options['data-file.path-directory'] = 'data/nested'
+    if location == 'external':
+        options.update({'data-file.external-paths': (tmp_path / 'external').as_uri(),
+                        'data-file.external-paths.strategy': 'round-robin'})
+    catalog.create_table('db.source', Schema.from_pyarrow_schema(
+        schema, primary_keys=['id', 'pa#rt'] if source_mode == 'pk' else [],
+        partition_keys=['pa#rt'], options=options), False)
+    source = catalog.get_table('db.source')
+    builder = source.new_batch_write_builder()
+    writer = builder.new_write()
+    assert not isinstance(writer, NativeTableWrite)
+    values = [dict(id=1, value=11, name='new', **{'pa#rt': 'a/b'}),
+              dict(id=2, value=22, name='insert', **{'pa#rt': 'a%b'})]
+    if source_mode == 'evolution':
+        for value in values:
+            value['payload'] = b'blob-payload'
+    try:
+        writer.write_arrow(pa.Table.from_pylist(values, schema=schema))
+        messages = writer.prepare_commit()
+        for message in messages:
+            component = 'pa%23rt=' + ('a%2Fb' if message.partition == ('a/b',) else 'a%25b')
+            for file in message.new_files + message.changelog_files:
+                assert component in file.file_path.split('/'), file.file_path
+                assert Path(file.file_path).is_file(), file.file_path
+                for extra_file in file.extra_files:
+                    assert Path(file.file_path).with_name(extra_file).is_file()
+        builder.new_commit().commit(messages)
+    finally:
+        writer.close()
+    # Java's path wins even if an incorrectly laid-out file has the same name.
+    for message in messages:
+        wrong_bucket = source.path_factory().bucket_path(tuple(message.partition), message.bucket)
+        for file in message.new_files:
+            if not file.external_path:
+                with source.file_io.new_output_stream(wrong_bucket + '/' + file.file_name) as output:
+                    output.write(b'wrong partition directory')
+    assert _rows(source) == values
+    ranges = catalog.get_table('db.source$file_key_ranges').new_read_builder()
+    reported = ranges.new_read().to_arrow(ranges.new_scan().plan().splits())['file_path'].to_pylist()
+    assert reported and all(source.file_io.exists(path) for path in reported)
+    assert all('pa%23rt=' in path for path in reported)
+    builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
+    kwargs = dict(commit_identifier=57) if stream else {}
+    with patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+               side_effect=AssertionError('Python source materialization')), \
+            patch('pypaimon.table.data_evolution_merge_into._build_tables',
+                  side_effect=AssertionError('Python merge orchestration')):
+        messages = builder.new_update().merge_into(
+            source, on=['id'], when_matched=[WhenMatched.update({'value': source_col('value')})],
+            when_not_matched=[WhenNotMatched('*')], **kwargs)
+    commit = builder.new_commit()
+    commit.commit(messages, 57) if stream else commit.commit(messages)
+    assert _rows(target) == [dict(id=1, value=11, name='old'), dict(id=2, value=22, name='insert')]
