@@ -113,6 +113,19 @@ def pytest_configure(config):
 
         TableScan._try_native_plan = tracked_plan
 
+        from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+
+        original_stream_plan = AsyncStreamingTableScan._try_native_plan
+
+        def tracked_stream_plan(self, *args, **kwargs):
+            global _native_plan_count
+            plan = original_stream_plan(self, *args, **kwargs)
+            if plan is not None and _force_native_for_test:
+                _native_plan_count += 1
+            return plan
+
+        AsyncStreamingTableScan._try_native_plan = tracked_stream_plan
+
     if _native_read_enabled():
         from pypaimon.read.table_read import TableRead
 

@@ -449,7 +449,26 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    rust_plan = scan.plan()
+    return _from_native_plan(table, scan.plan())
+
+
+def native_snapshot_plan(table, snapshot_id: int, mode: str = 'all',
+                         predicate: Optional[Predicate] = None,
+                         read_type: Optional[List[DataField]] = None,
+                         bucket_filter=None, only_read_real_buckets=False) -> Plan:
+    """Plan one pinned streaming frame with Java SnapshotReader semantics."""
+    builder = _configure_native_read_builder(
+        _native_read_builder(table), predicate, None, None, read_type=read_type)
+    reader = builder.new_snapshot_reader().with_snapshot(snapshot_id).with_mode(mode)
+    if only_read_real_buckets:
+        reader.only_read_real_buckets()
+    if bucket_filter is not None:
+        reader.with_bucket_filter(bucket_filter)
+    return _from_native_plan(table, reader.read())
+
+
+def _from_native_plan(table, rust_plan) -> Plan:
+    """Keep one split/metadata bridge for batch and per-snapshot planning."""
     rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
