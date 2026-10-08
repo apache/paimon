@@ -172,6 +172,7 @@ def test_native_rest_reuses_python_data_token(
         source.identifier, RESTToken({}, int(time.time() * 1000) + 7_200_000))
     table = CatalogFactory.create(options).get_table(source.identifier)
     reused_table = CatalogFactory.create(options).get_table(source.identifier)
+    uncached_table = CatalogFactory.create(options).get_table(source.identifier)
 
     # The old bridge fetched a Python token and an independent Rust token.
     with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}):
@@ -186,8 +187,14 @@ def test_native_rest_reuses_python_data_token(
             load.reset_mock()
             RESTTokenFileIO._TOKEN_CACHE.clear()
 
+            reused_table.file_io.token = table.file_io.token
+
             for _ in range(2):
                 assert reused_table.new_read_builder().new_scan().plan().snapshot_id == 2
+            assert load.call_count == 0
+
+            # No instance token: Rust obtains one instead of making Python refresh.
+            assert uncached_table.new_read_builder().new_scan().plan().snapshot_id == 2
             assert load.call_count == 1
 
 

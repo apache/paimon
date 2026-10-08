@@ -337,7 +337,7 @@ class _NativeRestTableCache:
 
 
 def _rest_data_token(table):
-    """Return only the REST token bound to this exact table, if available."""
+    """Reuse only an existing valid token bound to this exact table."""
     from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
     from pypaimon.filesystem.caching_file_io import CachingFileIO
 
@@ -349,7 +349,7 @@ def _rest_data_token(table):
             or file_io.identifier != table.identifier
             or file_io.path != table.table_path):
         return None
-    return file_io.valid_token()
+    return file_io._existing_valid_token()
 
 
 def _native_read_builder(table):
