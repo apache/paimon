@@ -886,12 +886,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (ReassignCompactChangesProvider.supports(original)) {
                 changesProvider =
                         new ReassignCompactChangesProvider(
-                                fileIO,
-                                pathFactory,
-                                snapshotManager,
-                                indexManifestFile,
-                                lastSafeSnapshot,
-                                original);
+                                fileIO, pathFactory, snapshotManager, lastSafeSnapshot, original);
             }
         }
         int retryCount = 0;
@@ -899,27 +894,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            if (changesProvider instanceof ReassignCompactChangesProvider
-                    && retryResult instanceof CommitFailRetryResult
-                    && latestSnapshot != null) {
-                Snapshot previous = ((CommitFailRetryResult) retryResult).latestSnapshot;
-                long first = previous == null ? Snapshot.FIRST_SNAPSHOT_ID : previous.id() + 1;
-                // Resolve an uncertain successful commit before checking inputs it already removed.
-                boolean committed = false;
-                for (long id = first; id <= latestSnapshot.id(); id++) {
-                    Snapshot candidate = snapshotManager.snapshot(id);
-                    if (candidate.commitUser().equals(commitUser)
-                            && candidate.commitIdentifier() == identifier
-                            && candidate.commitKind() == commitKind) {
-                        lastCommittedSnapshotId = candidate.id();
-                        committed = true;
-                        break;
-                    }
-                }
-                if (committed) {
-                    break;
-                }
-            }
             CommitChanges changes = changesProvider.provide(latestSnapshot);
             CommitResult result =
                     tryCommitOnce(

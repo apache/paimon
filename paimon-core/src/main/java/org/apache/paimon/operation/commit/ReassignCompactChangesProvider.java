@@ -24,9 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -39,10 +37,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -54,7 +50,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
     private final FileIO fileIO;
     private final FileStorePathFactory paths;
     private final SnapshotManager snapshots;
-    private final IndexManifestFile indexManifests;
     private final Set<Long> reassignments = new HashSet<>();
     private long checkedSnapshot;
     private CommitChanges changes;
@@ -63,13 +58,11 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             FileIO fileIO,
             FileStorePathFactory paths,
             SnapshotManager snapshots,
-            IndexManifestFile indexManifests,
             long scanSnapshotId,
             CommitChanges changes) {
         this.fileIO = fileIO;
         this.paths = paths;
         this.snapshots = snapshots;
-        this.indexManifests = indexManifests;
         this.checkedSnapshot = scanSnapshotId;
         this.changes = changes;
     }
@@ -132,7 +125,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             }
             checkedSnapshot = id;
         }
-        checkIndexInputs(latest);
         return changes;
     }
 
@@ -181,33 +173,5 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
                                     mapped)));
         }
         return new CommitChanges(files, changes.changelogFiles, indexes);
-    }
-
-    private void checkIndexInputs(Snapshot latest) {
-        Map<String, IndexManifestEntry> deletes = new HashMap<>();
-        for (IndexManifestEntry entry : changes.indexFiles) {
-            if (entry.kind() == FileKind.DELETE) {
-                deletes.put(entry.indexFile().fileName(), entry);
-            }
-        }
-        if (deletes.isEmpty()) {
-            return;
-        }
-        if (latest.indexManifest() != null) {
-            for (IndexManifestEntry entry : indexManifests.read(latest.indexManifest())) {
-                IndexManifestEntry expected = deletes.get(entry.indexFile().fileName());
-                if (expected != null) {
-                    checkState(
-                            entry.kind() == FileKind.ADD
-                                    && expected.partition().equals(entry.partition())
-                                    && expected.bucket() == entry.bucket()
-                                    && expected.indexFile().equals(entry.indexFile()),
-                            "Compaction index input %s was modified.",
-                            entry.indexFile().fileName());
-                    deletes.remove(entry.indexFile().fileName());
-                }
-            }
-        }
-        checkState(deletes.isEmpty(), "Compaction index inputs were removed: %s", deletes.keySet());
     }
 }

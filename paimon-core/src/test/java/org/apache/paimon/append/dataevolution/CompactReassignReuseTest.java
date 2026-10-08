@@ -217,8 +217,10 @@ public class CompactReassignReuseTest extends TableTestBase {
         checkRows(table, 0, 1, 2, 3, 4, 5);
     }
 
-    @Test
-    void testIndexReplacementKeepsPhysicalFilesAndPointLookup() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testIndexReplacementKeepsPhysicalFilesAndPointLookup(boolean loseSuccessfulResponse)
+            throws Exception {
         FileStoreTable table = prepare();
         List<CommitMessage> builds = new ArrayList<>();
         for (DataSplit split :
@@ -282,7 +284,43 @@ public class CompactReassignReuseTest extends TableTestBase {
                                         .collect(Collectors.toList())));
         lastSafeSnapshots.put(message, snapshot.id());
         assertThat(new DataEvolutionRowIdReassigner(table).reassign().reassigned).isTrue();
-        commit(table, message, false);
+        long reassignedSnapshot = table.snapshotManager().latestSnapshotId();
+        AtomicInteger attempts = new AtomicInteger();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public SnapshotCommit snapshotCommit(SnapshotManager manager) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit() {
+                            @Override
+                            public boolean commit(
+                                    String baseUuid,
+                                    Snapshot snapshot,
+                                    String branch,
+                                    List<PartitionStatistics> statistics)
+                                    throws Exception {
+                                boolean committed =
+                                        delegate.commit(baseUuid, snapshot, branch, statistics);
+                                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                                    attempts.incrementAndGet();
+                                    return committed && !loseSuccessfulResponse;
+                                }
+                                return committed;
+                            }
+
+                            @Override
+                            public void close() throws Exception {
+                                delegate.close();
+                            }
+                        };
+                    }
+                };
+        FileStoreTable committingTable =
+                FileStoreTableFactory.create(
+                        table.fileIO(), table.location(), table.schema(), environment);
+        commit(committingTable, message, false);
+        assertThat(attempts).hasValue(1);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(reassignedSnapshot + 1);
         List<IndexManifestEntry> current =
                 table.store()
                         .indexManifestFileFactory()
