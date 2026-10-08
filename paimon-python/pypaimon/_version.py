@@ -16,4 +16,4 @@
 # limitations under the License.
 ##########################################################################
 # Base version; development distributions append the Git commit date.
-VERSION = "2.1.dev"
+VERSION = "2.1.0"
