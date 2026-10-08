@@ -86,6 +86,18 @@ def _reject_compact_increment(messages: List[CommitMessage]):
                 'Committing a compact increment requires a separate COMPACT snapshot.')
 
 
+def _delete_abort_paths(table, paths):
+    for path_to_delete in paths:
+        try:
+            table.file_io.delete_quietly(str(path_to_delete))
+        except Exception as error:
+            logger.warning(
+                "Failed to clean up file %s during abort: %s",
+                path_to_delete,
+                error,
+            )
+
+
 class CommitResult:
     """Base class for commit results."""
 
@@ -1026,19 +1038,29 @@ class FileStoreCommit:
             for file in (list(message.new_files) + list(message.changelog_files)
                          + list(message.compact_after)
                          + list(message.compact_changelog_files)):
+                paths = []
                 path = None
+                data_path = None
                 try:
                     if not file.physical_path():
                         file.file_path = canonical_data_file_path(
                             self.table, tuple(message.partition), message.bucket, file.file_name)
+                    data_path = file.physical_path()
                     for path in file.collect_files():
-                        self.table.file_io.delete_quietly(path)
+                        paths.append(path)
                 except Exception as error:
+                    # Collection failed after the data path was resolved. Delete
+                    # that path before logging, then skip the rest of this file.
+                    if data_path and data_path not in paths:
+                        paths.append(data_path)
+                    _delete_abort_paths(self.table, paths)
                     logger.warning(
                         "Failed to clean up file %s during abort: %s",
-                        path,
+                        path or data_path,
                         error,
                     )
+                    continue
+                _delete_abort_paths(self.table, paths)
             for entry in message.index_adds + message.compact_index_adds:
                 file_name = None
                 try:

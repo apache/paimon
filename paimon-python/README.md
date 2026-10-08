@@ -280,9 +280,10 @@ mixing Arrow batches and Python `Blob` objects in one writer.
 
 A successful `prepare_commit()` transfers file ownership to the caller.
 Writer `abort()` and `close()` preserve those prepared files and may clean only
-outputs still owned by the writer. Explicit `commit.abort(messages)` deletes
-newly written data, changelog, sidecars and added indexes, matching Java's
-Paimon Table committer. Call it only when those messages are known to be
+outputs still owned by the writer. A BlobConsumer keeps that writer from
+deleting packs it has already exposed. Explicit `commit.abort(messages)` deletes
+newly written data, BLOB packs, changelog, sidecars and added indexes, matching
+Java's Paimon Table committer. Call it only when those messages are known to be
 uncommitted and will never be submitted. Never call it after a commit with an
 unknown outcome: publication may have succeeded before its response failed.
 Internal failure paths preserve prepared files instead of calling commit abort.
