@@ -50,6 +50,12 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
     }
 
     @Override
+    public boolean supportsUnknownRowCount() {
+        // Partition deltas are not sent to a catalog server by this backend.
+        return true;
+    }
+
+    @Override
     public boolean commit(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,

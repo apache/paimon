@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -132,6 +133,9 @@ public class RemoveUnexistingManifests {
         long total = 0L;
         for (ManifestEntry entry : entries) {
             if (entry.kind() == FileKind.ADD && !deleted.contains(entry.identifier())) {
+                if (entry.file().rowCount() < 0) {
+                    return DataFileMeta.UNKNOWN_ROW_COUNT;
+                }
                 total += entry.file().rowCount();
             }
         }

@@ -130,6 +130,9 @@ public class DataSplit implements Split {
     public long rowCount() {
         long rowCount = 0;
         for (DataFileMeta file : dataFiles) {
+            if (file.rowCount() < 0) {
+                return DataFileMeta.UNKNOWN_ROW_COUNT;
+            }
             rowCount += file.rowCount();
         }
         return rowCount;
@@ -137,6 +140,9 @@ public class DataSplit implements Split {
 
     @Override
     public OptionalLong mergedRowCount() {
+        if (dataFiles.stream().anyMatch(file -> file.rowCount() < 0)) {
+            return OptionalLong.empty();
+        }
         if (rawMergedRowCountAvailable()) {
             return OptionalLong.of(rawMergedRowCount());
         }

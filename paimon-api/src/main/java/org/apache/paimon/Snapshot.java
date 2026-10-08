@@ -43,6 +43,8 @@ import java.util.UUID;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot implements Serializable {
 
+    public static final String DELTA_RECORD_COUNT_UNKNOWN = "delta-record-count.unknown";
+
     private static final long serialVersionUID = 1L;
 
     public static final long FIRST_SNAPSHOT_ID = 1;
@@ -401,6 +403,12 @@ public class Snapshot implements Serializable {
     @JsonGetter(FIELD_DELTA_RECORD_COUNT)
     public long deltaRecordCount() {
         return deltaRecordCount;
+    }
+
+    /** A signed delta of -1 can be known; unknown deltas are marked explicitly in properties. */
+    public boolean deltaRecordCountKnown() {
+        return properties == null
+                || !Boolean.parseBoolean(properties.get(DELTA_RECORD_COUNT_UNKNOWN));
     }
 
     @JsonGetter(FIELD_CHANGELOG_RECORD_COUNT)

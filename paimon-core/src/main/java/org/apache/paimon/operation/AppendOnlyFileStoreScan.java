@@ -115,7 +115,9 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         while (result.hasNext()) {
             ManifestEntry next = result.next();
             filtered.add(next);
-            accumulatedRowCount += next.file().rowCount();
+            if (next.file().rowCount() >= 0) {
+                accumulatedRowCount += next.file().rowCount();
+            }
             if (accumulatedRowCount >= limit) {
                 break;
             }
@@ -126,6 +128,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
+        // Metadata-only imports have neither a row count nor column statistics. Schema evolution
+        // must not turn their unknown null counts into proof that a predicate cannot match.
+        if (entry.file().rowCount() < 0) {
+            return true;
+        }
         Predicate notEvolvedFilter =
                 notEvolvedFilterMapping.computeIfAbsent(
                         entry.file().schemaId(),

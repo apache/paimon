@@ -108,6 +108,22 @@ public class FileIndexEvaluatorTest {
     }
 
     @Test
+    public void testUnknownRowCountDoesNotBuildLimitSelection() throws Exception {
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        10,
+                        null,
+                        fileWithRowCount(DataFileMeta.UNKNOWN_ROW_COUNT),
+                        null);
+
+        assertThat(result).isSameAs(FileIndexResult.REMAIN);
+    }
+
+    @Test
     public void testDataFilterIntersectsDeletionVector() throws Exception {
         BitmapDeletionVector deletionVector = new BitmapDeletionVector();
         deletionVector.delete(0);

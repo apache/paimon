@@ -77,7 +77,9 @@ public class FileIndexEvaluator {
             throws IOException {
         // File index selections use 32-bit positions. Fall back when they cannot safely represent
         // the file or its deletion vector.
-        if (file.rowCount() > RoaringBitmap32.MAX_VALUE || dv instanceof Bitmap64DeletionVector) {
+        if (file.rowCount() < 0
+                || file.rowCount() > RoaringBitmap32.MAX_VALUE
+                || dv instanceof Bitmap64DeletionVector) {
             return FileIndexResult.REMAIN;
         }
 

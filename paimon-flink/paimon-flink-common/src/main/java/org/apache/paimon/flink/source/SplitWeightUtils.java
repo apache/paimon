@@ -45,7 +45,10 @@ final class SplitWeightUtils {
             case FILE_SIZE:
                 return SplitWeightUtils::splitFileSizeOrRowCount;
             case ROW_COUNT:
-                return split -> split.split().rowCount();
+                return split -> {
+                    long rowCount = split.split().rowCount();
+                    return rowCount < 0 ? Math.max(1, splitFileSizeOrRowCount(split)) : rowCount;
+                };
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported split weight mode "
@@ -77,6 +80,6 @@ final class SplitWeightUtils {
             return ((DataSplit) split)
                     .dataFiles().stream().mapToLong(file -> file.fileSize()).sum();
         }
-        return split.rowCount();
+        return Math.max(1, split.rowCount());
     }
 }

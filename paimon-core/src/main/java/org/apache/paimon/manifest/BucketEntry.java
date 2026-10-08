@@ -20,6 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.Pair;
 
 import java.util.Collection;
@@ -34,6 +35,7 @@ public class BucketEntry {
     private final BinaryRow partition;
     private final int bucket;
     private final long recordCount;
+    private final boolean unknownRowCount;
     private final long fileSizeInBytes;
     private final long fileCount;
     private final long lastFileCreationTime;
@@ -45,9 +47,28 @@ public class BucketEntry {
             long fileSizeInBytes,
             long fileCount,
             long lastFileCreationTime) {
+        this(
+                partition,
+                bucket,
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                lastFileCreationTime,
+                false);
+    }
+
+    private BucketEntry(
+            BinaryRow partition,
+            int bucket,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime,
+            boolean unknownRowCount) {
         this.partition = partition;
         this.bucket = bucket;
         this.recordCount = recordCount;
+        this.unknownRowCount = unknownRowCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
         this.lastFileCreationTime = lastFileCreationTime;
@@ -81,10 +102,13 @@ public class BucketEntry {
         return new BucketEntry(
                 partition,
                 bucket,
-                recordCount + entry.recordCount,
+                unknownRowCount || entry.unknownRowCount
+                        ? DataFileMeta.UNKNOWN_ROW_COUNT
+                        : recordCount + entry.recordCount,
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
-                Math.max(lastFileCreationTime, entry.lastFileCreationTime));
+                Math.max(lastFileCreationTime, entry.lastFileCreationTime),
+                unknownRowCount || entry.unknownRowCount);
     }
 
     public static BucketEntry fromManifestEntry(ManifestEntry entry) {
@@ -95,7 +119,8 @@ public class BucketEntry {
                 partitionEntry.recordCount(),
                 partitionEntry.fileSizeInBytes(),
                 partitionEntry.fileCount(),
-                partitionEntry.lastFileCreationTime());
+                partitionEntry.lastFileCreationTime(),
+                entry.file().rowCount() < 0);
     }
 
     public static Collection<BucketEntry> merge(Collection<ManifestEntry> fileEntries) {
@@ -128,6 +153,7 @@ public class BucketEntry {
         }
         BucketEntry that = (BucketEntry) o;
         return recordCount == that.recordCount
+                && unknownRowCount == that.unknownRowCount
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
@@ -138,6 +164,12 @@ public class BucketEntry {
     @Override
     public int hashCode() {
         return Objects.hash(
-                partition, bucket, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+                partition,
+                bucket,
+                recordCount,
+                unknownRowCount,
+                fileSizeInBytes,
+                fileCount,
+                lastFileCreationTime);
     }
 }

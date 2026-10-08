@@ -80,7 +80,11 @@ public class PartitionStatisticsReporter implements Closeable {
                 List<DataFileMeta> fileMetas = split.dataFiles();
                 fileCount += fileMetas.size();
                 for (DataFileMeta fileMeta : fileMetas) {
-                    rowCount += fileMeta.rowCount();
+                    if (fileMeta.rowCount() < 0 || rowCount < 0) {
+                        rowCount = DataFileMeta.UNKNOWN_ROW_COUNT;
+                    } else {
+                        rowCount += fileMeta.rowCount();
+                    }
                     totalSize += fileMeta.fileSize();
                 }
                 totalBuckets = Optional.ofNullable(split.totalBuckets()).orElse(0);

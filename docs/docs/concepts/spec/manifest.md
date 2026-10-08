@@ -350,7 +350,7 @@ The `_FILE` record includes file identity, statistics, and optional feature meta
 | --- | --- | --- |
 | `_FILE_NAME` | STRING | Data or changelog file name. |
 | `_FILE_SIZE` | BIGINT | File size in bytes. |
-| `_ROW_COUNT` | BIGINT | Physical record count, including row kinds that represent deletions. |
+| `_ROW_COUNT` | BIGINT | Physical record count, including row kinds that represent deletions; `-1` means unknown for supported bucket-unaware append tables. |
 | `_MIN_KEY`, `_MAX_KEY` | BYTES | Serialized BinaryRow key bounds, not SQL strings. |
 | `_KEY_STATS`, `_VALUE_STATS` | SimpleStats | Statistics for key and value fields. |
 | `_MIN_SEQUENCE_NUMBER`, `_MAX_SEQUENCE_NUMBER` | BIGINT | Sequence-number bounds. |
@@ -370,6 +370,20 @@ The `_FILE` record includes file identity, statistics, and optional feature meta
 These counts describe physical files; they need not equal the logical table row count. See
 [Snapshot record counts](./snapshot#interpreting-record-counts) and
 [Data Evolution](../../multimodal-table/data-evolution) for examples.
+
+An ordinary bucket-unaware append file may record `_ROW_COUNT = -1` when its row count is
+unavailable. Readers must preserve this uncertainty when combining files and must read records
+instead of using metadata-only count aggregation or position-based limit selections. Column
+statistics can be absent independently of the row count.
+
+Unknown file row counts currently require a renaming-based snapshot backend, with row tracking,
+data evolution and Iceberg metadata synchronization disabled. Catalog-managed snapshot commits
+do not opt in because their partition-statistics protocol interprets every negative record-count
+delta as a decrement. A known delta of `-1` still means deleting one physical record.
+
+Upgrade all readers and writers before producing unknown-count metadata. The binary manifest
+schema is unchanged, but older readers can deserialize `-1` and incorrectly use it as an exact
+count. This is a reader-semantics change, not compatibility with older readers.
 
 ### Index Manifest
 

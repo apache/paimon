@@ -28,6 +28,11 @@ import java.util.List;
 /** Interface to commit snapshot atomically. */
 public interface SnapshotCommit extends AutoCloseable {
 
+    /** Whether this backend can commit unknown file row counts without treating them as deltas. */
+    default boolean supportsUnknownRowCount() {
+        return false;
+    }
+
     boolean commit(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,

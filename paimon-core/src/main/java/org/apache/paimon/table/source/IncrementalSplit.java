@@ -127,9 +127,15 @@ public class IncrementalSplit implements Split {
     public long rowCount() {
         long rowCount = 0;
         for (DataFileMeta file : beforeFiles) {
+            if (file.rowCount() < 0) {
+                return DataFileMeta.UNKNOWN_ROW_COUNT;
+            }
             rowCount += file.rowCount();
         }
         for (DataFileMeta file : afterFiles) {
+            if (file.rowCount() < 0) {
+                return DataFileMeta.UNKNOWN_ROW_COUNT;
+            }
             rowCount += file.rowCount();
         }
         return rowCount;

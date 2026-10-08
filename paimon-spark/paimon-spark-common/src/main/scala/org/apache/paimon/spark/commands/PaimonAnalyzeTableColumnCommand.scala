@@ -68,7 +68,9 @@ case class PaimonAnalyzeTableColumnCommand(
     val (mergedRecordCount, colStats) =
       PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)
 
-    val totalRecordCount = currentSnapshot.totalRecordCount()
+    val snapshotRecordCount = currentSnapshot.totalRecordCount()
+    val totalRecordCount =
+      if (snapshotRecordCount < 0) mergedRecordCount else snapshotRecordCount
     checkState(totalRecordCount >= mergedRecordCount)
     val mergedRecordSize = (totalSize.toDouble * mergedRecordCount / totalRecordCount).toLong
 

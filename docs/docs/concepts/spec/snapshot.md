@@ -114,6 +114,16 @@ Dedicated Format table stores the regular columns and each dedicated BLOB column
 files. Appending `N` logical rows to a table with one dedicated BLOB column therefore increases the
 `deltaRecordCount` by `2 * N`. Use `COUNT(*)` when you need the logical row count.
 
+For supported append tables with unknown file row counts, `totalRecordCount = -1` means the total
+is unknown. Ordinary commits preserve this conservative total after removing unknown files;
+they do not rescan every live manifest to recover an exact count. Metadata repair can recompute
+the total from surviving known file counts, and rollback can inherit an exact target total.
+
+`deltaRecordCount` is signed: `-1` normally means one record was deleted. If a commit adds or
+removes an unknown-count file, it sets `properties['delta-record-count.unknown'] = 'true'` and
+records an unknown delta instead. Use `Snapshot.deltaRecordCountKnown()` to distinguish those
+cases; the numeric value alone is insufficient. Subsequent known deltas clear the marker.
+
 ## Inspect and Retain Snapshots
 
 Use the [snapshots system table](../system-tables#snapshots-table) to inspect commit history with

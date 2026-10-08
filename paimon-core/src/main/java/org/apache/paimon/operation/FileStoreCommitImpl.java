@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -1053,6 +1054,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        validateUnknownRowCounts(
+                deltaFiles, latestSnapshot != null && latestSnapshot.totalRecordCount() < 0);
         if (latestSnapshot == null) {
             conflictDetection.checkSameBucketWithinDelta(deltaFiles);
         }
@@ -1217,8 +1220,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // the added records subtract the deleted records from
-            long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
-            long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
+            long deltaRecordCount = deltaRecordCount(deltaFiles);
+            boolean unknownRowCount = deltaFiles.stream().anyMatch(e -> e.file().rowCount() < 0);
+            properties = recordCountProperties(properties, deltaFiles);
+            long totalRecordCount =
+                    unknownRowCount || previousTotalRecordCount < 0
+                            ? DataFileMeta.UNKNOWN_ROW_COUNT
+                            : previousTotalRecordCount + deltaRecordCount;
 
             // write new delta files into manifest files
             deltaPartitionEntries = new ArrayList<>(PartitionEntry.merge(deltaFiles));
@@ -1451,6 +1459,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
+        properties = recordCountProperties(properties, emptyList());
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1530,6 +1539,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        validateUnknownRowCounts(deltaFiles, targetSnapshot.totalRecordCount() < 0);
         Pair<String, Long> baseManifestList =
                 manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
         Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
@@ -1555,11 +1565,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         CommitKind.OVERWRITE,
                         System.currentTimeMillis(),
                         targetSnapshot.totalRecordCount(),
-                        recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles),
+                        deltaRecordCount(deltaFiles),
                         null,
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
-                        targetSnapshot.properties(),
+                        recordCountProperties(targetSnapshot.properties(), deltaFiles),
                         nextRowId,
                         null);
 
@@ -1709,7 +1719,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        latestSnapshot.properties(),
+                        recordCountProperties(latestSnapshot.properties(), emptyList()),
                         latestSnapshot.nextRowId(),
                         null);
 
@@ -1730,6 +1740,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Snapshot newSnapshot,
             List<PartitionEntry> deltaPartitionEntries) {
         try {
+            validateUnknownRowCounts(emptyList(), newSnapshot.totalRecordCount() < 0);
             List<PartitionStatistics> statistics = new ArrayList<>(deltaPartitionEntries.size());
             for (PartitionEntry entry : deltaPartitionEntries) {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
@@ -1754,6 +1765,49 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             newSnapshot.commitKind().name()),
                     e);
         }
+    }
+
+    private void validateUnknownRowCounts(List<ManifestEntry> entries, boolean unknownTotal) {
+        if (!unknownTotal && entries.stream().noneMatch(e -> e.file().rowCount() < 0)) {
+            return;
+        }
+        checkArgument(
+                snapshotCommit.supportsUnknownRowCount(),
+                "Snapshot backend does not support unknown row counts.");
+        checkArgument(
+                bucketMode == BucketMode.BUCKET_UNAWARE
+                        && !options.rowTrackingEnabled()
+                        && !options.dataEvolutionEnabled(),
+                "Unknown row counts only support bucket-unaware append tables without row tracking.");
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                        == IcebergOptions.StorageType.DISABLED,
+                "Unknown row counts do not support Iceberg metadata synchronization.");
+    }
+
+    private static long deltaRecordCount(List<ManifestEntry> entries) {
+        return entries.stream().anyMatch(e -> e.file().rowCount() < 0)
+                ? DataFileMeta.UNKNOWN_ROW_COUNT
+                : recordCountAdd(entries) - recordCountDelete(entries);
+    }
+
+    @Nullable
+    private static Map<String, String> recordCountProperties(
+            @Nullable Map<String, String> properties, List<ManifestEntry> entries) {
+        boolean unknown = entries.stream().anyMatch(e -> e.file().rowCount() < 0);
+        if (!unknown
+                && (properties == null
+                        || !properties.containsKey(Snapshot.DELTA_RECORD_COUNT_UNKNOWN))) {
+            return properties;
+        }
+        Map<String, String> result =
+                properties == null ? new HashMap<>() : new HashMap<>(properties);
+        if (unknown) {
+            result.put(Snapshot.DELTA_RECORD_COUNT_UNKNOWN, "true");
+        } else {
+            result.remove(Snapshot.DELTA_RECORD_COUNT_UNKNOWN);
+        }
+        return result;
     }
 
     @Override

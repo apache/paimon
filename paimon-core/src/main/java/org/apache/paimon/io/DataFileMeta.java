@@ -119,6 +119,7 @@ public interface DataFileMeta {
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
     int DUMMY_LEVEL = 0;
+    long UNKNOWN_ROW_COUNT = -1;
 
     static DataFileMeta forAppend(
             String fileName,
@@ -295,6 +296,7 @@ public interface DataFileMeta {
 
     long fileSize();
 
+    /** Returns the file row count, or {@link #UNKNOWN_ROW_COUNT} when it is unavailable. */
     long rowCount();
 
     Optional<Long> deleteRowCount();

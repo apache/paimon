@@ -38,6 +38,7 @@ public class PartitionEntry {
 
     private final BinaryRow partition;
     private final long recordCount;
+    private final boolean unknownRowCount;
     private final long fileSizeInBytes;
     private final long fileCount;
     private final long lastFileCreationTime;
@@ -50,8 +51,27 @@ public class PartitionEntry {
             long fileCount,
             long lastFileCreationTime,
             int totalBuckets) {
+        this(
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                lastFileCreationTime,
+                totalBuckets,
+                false);
+    }
+
+    private PartitionEntry(
+            BinaryRow partition,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime,
+            int totalBuckets,
+            boolean unknownRowCount) {
         this.partition = partition;
         this.recordCount = recordCount;
+        this.unknownRowCount = unknownRowCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
         this.lastFileCreationTime = lastFileCreationTime;
@@ -85,11 +105,14 @@ public class PartitionEntry {
     public PartitionEntry merge(PartitionEntry entry) {
         return new PartitionEntry(
                 partition,
-                recordCount + entry.recordCount,
+                unknownRowCount || entry.unknownRowCount
+                        ? DataFileMeta.UNKNOWN_ROW_COUNT
+                        : recordCount + entry.recordCount,
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
                 Math.max(lastFileCreationTime, entry.lastFileCreationTime),
-                entry.totalBuckets);
+                entry.totalBuckets,
+                unknownRowCount || entry.unknownRowCount);
     }
 
     public Partition toPartition(InternalRowPartitionComputer computer) {
@@ -120,10 +143,13 @@ public class PartitionEntry {
     public static PartitionEntry fromDataFile(
             BinaryRow partition, FileKind kind, DataFileMeta file, int totalBuckets) {
         long recordCount = file.rowCount();
+        boolean unknownRowCount = recordCount < 0;
         long fileSizeInBytes = file.fileSize();
         long fileCount = 1;
         if (kind == DELETE) {
-            recordCount = -recordCount;
+            if (!unknownRowCount) {
+                recordCount = -recordCount;
+            }
             fileSizeInBytes = -fileSizeInBytes;
             fileCount = -fileCount;
         }
@@ -133,7 +159,8 @@ public class PartitionEntry {
                 fileSizeInBytes,
                 fileCount,
                 file.creationTimeEpochMillis(),
-                totalBuckets);
+                totalBuckets,
+                unknownRowCount);
     }
 
     public static Collection<PartitionEntry> merge(Collection<ManifestEntry> fileEntries) {
@@ -163,6 +190,7 @@ public class PartitionEntry {
         }
         PartitionEntry that = (PartitionEntry) o;
         return recordCount == that.recordCount
+                && unknownRowCount == that.unknownRowCount
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
@@ -175,6 +203,7 @@ public class PartitionEntry {
         return Objects.hash(
                 partition,
                 recordCount,
+                unknownRowCount,
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime,
