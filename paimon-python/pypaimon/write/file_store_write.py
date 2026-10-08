@@ -332,6 +332,9 @@ class FileStoreWrite:
         """Collect files while their parent is still preparing the complete increment."""
         self.commit_identifier = commit_identifier
         commit_messages = []
+        # A BlobConsumer owns the pack bytes. prepare_commit then releases the
+        # writer's copies, so commit abort must leave those ``.blob`` files alone.
+        preserve_blob_files = self.blob_consumer is not None
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()
             changelog_files = writer.prepare_changelog_commit()
@@ -342,6 +345,7 @@ class FileStoreWrite:
                     new_files=committed_files,
                     changelog_files=changelog_files,
                     total_buckets=self._runtime_total_buckets.get(partition),
+                    preserve_blob_files_on_abort=preserve_blob_files,
                 )
                 commit_messages.append(commit_message)
         return commit_messages

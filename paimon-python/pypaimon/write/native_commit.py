@@ -40,6 +40,10 @@ def native_commit_available() -> bool:
 
 def native_messages_supported(table, messages) -> bool:
     for message in messages:
+        # Java v14 does not carry this flag, and native abort deletes every
+        # new file, including packs a BlobConsumer still owns.
+        if message.preserve_blob_files_on_abort:
+            return False
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
