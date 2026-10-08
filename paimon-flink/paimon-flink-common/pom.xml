@@ -38,6 +38,22 @@ under the License.
     </properties>
 
     <dependencies>
+        <!-- Keep Paimon's format classes ahead of Flink SQL Gateway's ORC dependencies
+             in reactor builds. Published connectors include them through paimon-bundle. -->
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-format</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <!-- Use the Hadoop implementation supplied by this module's parent. -->
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-client-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>${paimon-flinkx-common}</artifactId>

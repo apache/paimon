@@ -23,6 +23,8 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.FormatTable;
@@ -40,6 +42,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,23 +107,68 @@ public class FormatTablePartitionStatsCollector {
      * caller can send it straight to the catalog alongside the same specs.
      */
     public List<PartitionStatistics> collect(List<Map<String, String>> partitions) {
+        List<Partition> registered =
+                partitions.isEmpty() || table.partitionManager() == null
+                        ? Collections.emptyList()
+                        : table.partitionManager().listPartitionsByNames(partitions);
+        return collect(partitions, partitionFormats(registered));
+    }
+
+    /**
+     * Measures the same partition metadata that the caller planned, without reloading the catalog.
+     */
+    public List<PartitionStatistics> collectPartitions(List<Partition> partitions) {
+        List<Map<String, String>> specs = new ArrayList<>(partitions.size());
+        for (Partition partition : partitions) {
+            specs.add(partition.spec());
+        }
+        return collect(specs, partitionFormats(partitions));
+    }
+
+    private Map<Map<String, String>, String> partitionFormats(List<Partition> partitions) {
+        Map<Map<String, String>, String> formats = new HashMap<>();
+        for (Partition partition : partitions) {
+            if (FormatTablePartitionPathResolver.customLocation(partition) != null) {
+                throw new UnsupportedOperationException(
+                        "Cannot measure a Format Table partition with a custom location: "
+                                + partition.spec());
+            }
+            String format =
+                    FormatTablePartitionOptions.fileFormat(table.options(), partition.options());
+            String previous = formats.putIfAbsent(partition.spec(), format);
+            if (previous != null && !previous.equals(format)) {
+                throw new IllegalStateException(
+                        "Conflicting file formats for partition " + partition.spec());
+            }
+        }
+        return formats;
+    }
+
+    private List<PartitionStatistics> collect(
+            List<Map<String, String>> partitions, Map<Map<String, String>, String> formats) {
         if (partitions.isEmpty()) {
             return Collections.emptyList();
         }
-        SimpleStatsExtractor rowCounter = withRecordCount ? rowCounter() : null;
-        if (withRecordCount && rowCounter == null) {
-            LOG.info(
-                    "No row counter could be built for format {} of table {}, so the row counts of "
-                            + "the measured partitions stay unknown.",
-                    table.format(),
-                    table.fullName());
+        String defaultFormat = FormatTablePartitionOptions.fileFormat(table.options(), null);
+        Map<String, Optional<SimpleStatsExtractor>> counters = new HashMap<>();
+        List<SimpleStatsExtractor> rowCounters = new ArrayList<>(partitions.size());
+        for (Map<String, String> partition : partitions) {
+            String format = formats.getOrDefault(partition, defaultFormat);
+            rowCounters.add(
+                    withRecordCount
+                            ? counters.computeIfAbsent(
+                                            format, f -> Optional.ofNullable(rowCounter(f)))
+                                    .orElse(null)
+                            : null);
         }
         // A listing is one request per partition, a footer read one per file, so counting rows
         // leaves work to spread even when a single partition was asked for.
-        int threads = rowCounter == null ? Math.min(parallelism, partitions.size()) : parallelism;
+        int threads = withRecordCount ? parallelism : Math.min(parallelism, partitions.size());
         if (threads == 1) {
             List<PartitionStatistics> statistics = new ArrayList<>(partitions.size());
-            for (Map<String, String> partition : partitions) {
+            for (int i = 0; i < partitions.size(); i++) {
+                Map<String, String> partition = partitions.get(i);
+                SimpleStatsExtractor rowCounter = rowCounters.get(i);
                 List<FileStatus> files = listDataFiles(partition);
                 List<Long> rowCounts = new ArrayList<>(files.size());
                 for (FileStatus file : files) {
@@ -147,7 +195,9 @@ public class FormatTablePartitionStatsCollector {
             // Every file of every partition goes to the same pool, so one partition holding many
             // files is counted with all of it rather than with one thread of it.
             List<List<Future<Long>>> rowCounts = new ArrayList<>(partitions.size());
-            for (List<FileStatus> partitionFiles : files) {
+            for (int i = 0; i < files.size(); i++) {
+                List<FileStatus> partitionFiles = files.get(i);
+                SimpleStatsExtractor rowCounter = rowCounters.get(i);
                 List<Future<Long>> counts = new ArrayList<>(partitionFiles.size());
                 for (FileStatus file : partitionFiles) {
                     if (rowCounter != null) {
@@ -164,7 +214,9 @@ public class FormatTablePartitionStatsCollector {
                 }
                 statistics.add(
                         statistics(
-                                partitions.get(i), files.get(i), sum(counted, rowCounter != null)));
+                                partitions.get(i),
+                                files.get(i),
+                                sum(counted, rowCounters.get(i) != null)));
             }
             return statistics;
         } finally {
@@ -271,9 +323,11 @@ public class FormatTablePartitionStatsCollector {
      * table's.
      */
     @Nullable
-    private SimpleStatsExtractor rowCounter() {
+    private SimpleStatsExtractor rowCounter(String fileFormat) {
         try {
-            CoreOptions options = new CoreOptions(table.options());
+            Options fileOptions = new Options(table.options());
+            fileOptions.set(CoreOptions.FILE_FORMAT, fileFormat);
+            CoreOptions options = new CoreOptions(fileOptions);
             Optional<SimpleStatsExtractor> extractor =
                     FileFormat.fileFormat(options).createStatsExtractor(NO_COLUMNS, NO_COLLECTORS);
             return extractor.orElse(null);
@@ -281,7 +335,7 @@ public class FormatTablePartitionStatsCollector {
             LOG.warn(
                     "Failed to create a row counter for format {} of table {}; row counts stay "
                             + "unknown.",
-                    table.format(),
+                    fileFormat,
                     table.fullName(),
                     e);
             return null;
