@@ -63,6 +63,7 @@ def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
 
     path_factory = Mock()
     path_factory.bucket_path.return_value = '/tmp/interval-test/bucket-0'
+    path_factory.data_file_path.return_value = '/tmp/interval-test'
     table = SimpleNamespace(table_path='/tmp/interval-test', options=CoreOptions(Options({})),
                             path_factory=lambda: path_factory)
     entries = [ManifestEntry(0, GenericRow([], []), 0, 1, file) for file in files]

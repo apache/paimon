@@ -38,7 +38,6 @@ from pypaimon.read.native_plan import (
     _native_read_builder,
     _predicate_to_native,
     _resolved_schema_json,
-    _restore_python_partition_paths,
     native_family_search_modes_available,
     native_plan,
     native_version_at_least,
@@ -811,87 +810,6 @@ class NativePlanTest(unittest.TestCase):
                     'importlib.metadata.version', return_value=version):
                 self.assertEqual(
                     native_family_search_modes_available(), expected)
-
-    def test_partition_path_prefers_existing_python_legacy_path(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = [Mock(base_name='data.parquet')]
-        data_file = Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
-        )
-        split = Mock(
-            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-        split._native_split = object()
-
-        _restore_python_partition_paths(table, [split])
-
-        self.assertEqual(
-            data_file.file_path,
-            '/warehouse/t/p=a/b/bucket-0/data.parquet',
-        )
-        self.assertIsNone(split._native_split)
-
-    def test_partition_path_keeps_existing_rust_path(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = []
-        rust_path = '/warehouse/t/p=a%2Fb/bucket-0/data.parquet'
-        data_file = Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path=rust_path,
-        )
-        split = Mock(
-            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-
-        _restore_python_partition_paths(table, [split])
-
-        self.assertEqual(data_file.file_path, rust_path)
-
-    def test_partition_path_lists_each_bucket_once(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = [
-            Mock(base_name='a.parquet'), Mock(base_name='b.parquet')]
-        splits = [
-            Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
-                external_path=None,
-                file_name=name,
-                file_path='/warehouse/t/p=a%%2Fb/bucket-0/%s' % name,
-            )])
-            for name in ('a.parquet', 'b.parquet')
-        ]
-
-        _restore_python_partition_paths(table, splits)
-
-        table.file_io.list_status.assert_called_once_with(
-            '/warehouse/t/p=a/b/bucket-0')
-        self.assertEqual(
-            [split.files[0].file_path for split in splits],
-            [
-                '/warehouse/t/p=a/b/bucket-0/a.parquet',
-                '/warehouse/t/p=a/b/bucket-0/b.parquet',
-            ],
-        )
-
-    def test_partition_path_listing_failure_is_not_hidden(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.side_effect = PermissionError('denied')
-        split = Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
-        )])
-
-        with self.assertRaises(PermissionError):
-            _restore_python_partition_paths(table, [split])
 
     def test_rest_catalog_retains_response_for_native_reads(self):
         from pypaimon.api.api_response import GetTableResponse

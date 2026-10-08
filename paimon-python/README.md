@@ -170,7 +170,8 @@ propagate without retrying that batch through Python.
 
 Batch and stream `merge_into` also use Rust core for eligible data-evolution
 Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
-`WhenNotMatched` clauses accept Arrow/pandas input or self-merge on `_ROW_ID`.
+`WhenNotMatched` clauses accept Arrow/pandas input, Paimon table sources, or
+self-merge on `_ROW_ID`.
 Core pins the target snapshot, matches keys, selects the first satisfied clause
 and prepares updates, deletion vectors and inserts. SQL conditions, including
 subqueries, execute in the Rust DataFusion adapter; Python transports the
@@ -180,9 +181,19 @@ DataFusion and `pypaimon-rust`. Shared clause validation checks that dependency
 before native execution. NULL keys do not match.
 Multiple source rows matching a target are rejected before action conditions,
 except for a sole unconditional DELETE, following Paimon Spark MERGE.
-Non-self table sources and packed-video inserts use the Python path selected
-before native execution starts. Native failures propagate without Python retry
-or deleting files from earlier prepared actions.
+For table sources, core independently pins the selected source branch/snapshot
+and reads only keys and referenced columns. Append and primary-key sources do
+not require data evolution. Source scan options select the same point in time
+on Python and native paths. Incremental source scans, non-REST Blob views
+requiring catalog resolution, and packed-video inserts use the Python path
+selected before native execution starts. Native failures propagate without
+Python retry or deleting files from earlier prepared actions.
+
+Python and native writers use Java's escaped partition directories for data,
+changelog, Blob and row sidecar files, including external locations. Both
+planners, file-range metadata, commit callbacks and explicit aborts use the same
+path rules. Row sidecar reads resolve that path even when the primary file is
+unavailable.
 
 MAP columns configured with `fields.<name>.map.storage-layout=shared-shredding`
 also use native Parquet writes and data-evolution updates, including predicate

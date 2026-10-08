@@ -201,8 +201,9 @@ def test_pinned_dynamic_configuration_survives_early_python_selection(tmp_path, 
         second.write_arrow(_batch([2], ['later']), bucket=0)
         later.new_commit().commit(second.prepare_commit())
         second.close()
-        # This existing advanced API still selects Python before any write.
-        writer.with_blob_consumer(lambda field, blob: blob)
+        # BlobConsumer is native now; explicitly select the Python branch whose
+        # pinned snapshot transport this test exercises before any write.
+        writer._switch_to_python()
         assert writer._python_writer.row_key_extractor.base_snapshot_id == pinned_id
         writer.write_arrow(_batch([1], ['restored']), bucket=0)
         messages = writer.prepare_commit()
@@ -362,7 +363,7 @@ def test_empty_restore_ignores_existing_sequences_and_hashes(tmp_path, python_fa
     writer = builder.new_write()
     try:
         if python_fallback:
-            writer.with_blob_consumer(lambda field, blob: blob)
+            writer._switch_to_python()
         writer.write_arrow(_batch([3], ['empty-base']), bucket=0)
         messages = writer.prepare_commit()
         assert messages[0].new_files[0].min_sequence_number == 0
@@ -386,7 +387,7 @@ def test_empty_restore_preserves_python_write_authorization(tmp_path, overwrite)
         builder.overwrite()
     writer = builder.new_write()
     # Exercise the ordinary writer selected before any Native data is staged.
-    writer.with_blob_consumer(lambda field, blob: blob)
+    writer._switch_to_python()
     auth = TableQueryAuthResult(None, {'value': '{"name":"NULL"}'})
     try:
         with patch.object(type(table.catalog_environment), 'table_query_auth',
@@ -405,7 +406,7 @@ def test_python_pk_file_sequence_range_matches_deduplicated_rows(tmp_path):
     builder = table.new_batch_write_builder().with_restore_snapshot(0)
     writer = builder.new_write()
     try:
-        writer.with_blob_consumer(lambda field, blob: blob)
+        writer._switch_to_python()
         writer.write_arrow(_batch([1, 1], ['old', 'new']), bucket=0)
         messages = writer.prepare_commit()
         file = messages[0].new_files[0]
