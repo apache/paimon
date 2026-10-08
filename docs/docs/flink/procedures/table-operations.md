@@ -28,6 +28,47 @@ Merge records, migrate or clone tables, and manage defaults and partitions.
 
 See [Procedures](../procedures) for Flink version requirements, argument conventions, and catalog selection.
 
+## import_files
+
+Append existing files to one partition by recording their original paths in
+`DataFileMeta.externalPath`. The procedure opens source files to extract their actual row counts
+and available column statistics, using the same metadata extractors as `migrate_table`. It does not
+copy, rename, or restore files. Archived files must be restored and readable before import.
+
+**Arguments**
+
+- `table` (`STRING`, required): target Paimon table identifier.
+- `location` (`STRING`, required): absolute source directory path.
+- `partition` (`STRING`, optional): complete partition specification, such as `dt=2026-10-08,hour=12`.
+  Required for partitioned tables; omit it for an unpartitioned table.
+
+```sql
+CALL sys.import_files(
+  `table` => 'default.T',
+  location => 'oss://bucket/external-files/',
+  `partition` => 'dt=2026-10-08,hour=12'
+);
+
+-- Unpartitioned table.
+CALL sys.import_files('default.unpartitioned_table', 'oss://bucket/external-files/');
+```
+
+Returns the number of registered files. Only files directly in the directory with a suffix matching
+the table's `file.format` are imported; hidden files and subdirectories are skipped. An empty
+directory returns zero without creating a snapshot. Repeated directory entries are deduplicated by
+their full external paths. Files already referenced by the current table snapshot are rejected before
+reading any source file. Avoid concurrent imports of the same directory.
+
+The target must be an append table with `bucket = -1`, without row tracking or data evolution.
+Source files must match the target format and non-partition columns. Partition values come from
+the supplied specification, and source locations must be accessible through the table's FileIO.
+
+Metadata extraction respects the table's `metadata.stats-mode`; row counts are collected even when
+column statistics are disabled. If any selected file cannot be read or its metadata cannot be
+extracted, the import fails without committing a snapshot. Do not modify registered source files.
+Imported files participate in the normal Paimon lifecycle, including deletion after compaction or
+partition removal and snapshot expiration.
+
 ## merge_into
 
 To perform "MERGE INTO" syntax. See [merge_into action](../action-jars#merging-into-table) for details of arguments.
