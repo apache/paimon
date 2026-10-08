@@ -46,16 +46,25 @@ def _is_native_token_dns_error(error: Exception) -> bool:
 
 def _retry_native_token_dns(plan):
     """Retry a native plan only when its table-token DNS lookup fails."""
+    total_attempts = len(_NATIVE_TOKEN_DNS_RETRY_DELAYS) + 1
     for attempt, delay in enumerate(_NATIVE_TOKEN_DNS_RETRY_DELAYS, 1):
         try:
             return plan()
         except Exception as error:
             if not _is_native_token_dns_error(error):
                 raise
-            logger.warning('Native table-token DNS lookup failed; retrying (%s/%s)',
-                           attempt, len(_NATIVE_TOKEN_DNS_RETRY_DELAYS))
+            logger.warning(
+                'Native table-token DNS lookup failed (attempt %s/%s); retrying',
+                attempt, total_attempts)
             time.sleep(delay + random.uniform(0, delay))
-    return plan()
+    try:
+        return plan()
+    except Exception as error:
+        if _is_native_token_dns_error(error):
+            logger.warning(
+                'Native table-token DNS lookup failed (attempt %s/%s); '
+                'retries exhausted', total_attempts, total_attempts)
+        raise
 
 
 _NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
