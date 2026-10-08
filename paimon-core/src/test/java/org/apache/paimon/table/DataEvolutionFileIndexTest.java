@@ -62,6 +62,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -133,6 +134,37 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getString(0).toString()).isEqualTo(f2(50));
+
+        ReadBuilder rangeReadBuilder =
+                latest.newReadBuilder()
+                        .withReadType(projection)
+                        .withFilter(filter)
+                        .withRowRanges(Collections.singletonList(new Range(0L, ROW_COUNT - 1L)));
+        rows =
+                collect(
+                        rangeReadBuilder.newRead().executeFilter(),
+                        rangeReadBuilder.newScan().plan(),
+                        projection);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo(f2(50));
+
+        RowType rowIdType = rowTypeWithRowId(latest.rowType());
+        RowType rowIdProjection = rowIdType.project(SpecialFields.ROW_ID.name(), "f2");
+        PredicateBuilder rowIdBuilder = new PredicateBuilder(rowIdType);
+        Predicate rowIdFilter =
+                PredicateBuilder.and(
+                        rowIdBuilder.between(3, 0L, ROW_COUNT - 1L),
+                        rowIdBuilder.equal(2, BinaryString.fromString(f2(50))));
+        ReadBuilder rowIdReadBuilder =
+                latest.newReadBuilder().withReadType(rowIdProjection).withFilter(rowIdFilter);
+        rows =
+                collect(
+                        rowIdReadBuilder.newRead().executeFilter(),
+                        rowIdReadBuilder.newScan().plan(),
+                        rowIdProjection);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getLong(0)).isEqualTo(50L);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo(f2(50));
     }
 
     @Test
@@ -171,6 +203,38 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         for (int i = 0; i < 7; i++) {
             assertThat(row.getInt(i)).isEqualTo(50);
         }
+
+        ReadBuilder rangeReadBuilder =
+                table.newReadBuilder()
+                        .withFilter(filter)
+                        .withRowRanges(Collections.singletonList(new Range(0L, ROW_COUNT - 1L)));
+        rows =
+                collect(
+                        rangeReadBuilder.newRead().executeFilter(),
+                        rangeReadBuilder.newScan().plan(),
+                        table.rowType());
+        row = assertSingleRow(rows);
+        for (int i = 0; i < 7; i++) {
+            assertThat(row.getInt(i)).isEqualTo(50);
+        }
+
+        RowType rowIdType = rowTypeWithRowId(table.rowType());
+        PredicateBuilder rowIdBuilder = new PredicateBuilder(rowIdType);
+        Predicate rowIdFilter =
+                PredicateBuilder.and(
+                        rowIdBuilder.between(7, 0L, ROW_COUNT - 1L), rowIdBuilder.equal(6, 50));
+        ReadBuilder rowIdReadBuilder =
+                table.newReadBuilder().withReadType(rowIdType).withFilter(rowIdFilter);
+        rows =
+                collect(
+                        rowIdReadBuilder.newRead().executeFilter(),
+                        rowIdReadBuilder.newScan().plan(),
+                        rowIdType);
+        row = assertSingleRow(rows);
+        for (int i = 0; i < 7; i++) {
+            assertThat(row.getInt(i)).isEqualTo(50);
+        }
+        assertThat(row.getLong(7)).isEqualTo(50L);
     }
 
     @Test

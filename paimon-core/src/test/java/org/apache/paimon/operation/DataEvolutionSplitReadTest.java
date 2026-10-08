@@ -232,10 +232,21 @@ class DataEvolutionSplitReadTest {
         DataFileMeta file =
                 createFile("file1.parquet", 10L, 100, 1, Collections.singletonList("file1.row"));
         BitmapIndexResult bitmap = new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(0, 5, 20));
+        BitmapIndexResult singleRowBitmap =
+                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(50));
         List<Range> rowRanges = Collections.singletonList(new Range(10L, 19L));
 
         assertTrue(DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.02d));
-        assertFalse(DataEvolutionSplitRead.shouldReadRowSidecar(file, null, bitmap, 2L, 0.02d));
+        assertTrue(
+                DataEvolutionSplitRead.shouldReadRowSidecar(
+                        file, null, singleRowBitmap, 1L, 0.01d));
+        assertTrue(
+                DataEvolutionSplitRead.shouldReadRowSidecar(
+                        file,
+                        Collections.singletonList(new Range(10L, 109L)),
+                        singleRowBitmap,
+                        1L,
+                        0.01d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 1L, 0.02d));
         assertFalse(
