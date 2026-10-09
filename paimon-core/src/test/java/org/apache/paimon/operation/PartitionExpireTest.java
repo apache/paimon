@@ -135,7 +135,7 @@ public class PartitionExpireTest {
                         List<Map<String, String>> dataPartitions = new ArrayList<>();
                         for (Map<String, String> partition : partitions) {
                             // only record partitions that were created
-                            if (createdPartitions.contains(partition)) {
+                            if (createdPartitions.remove(partition)) {
                                 deletedPartitions.add(partition);
                                 dataPartitions.add(partition);
                             } else if (partition.values().stream()
@@ -373,6 +373,60 @@ public class PartitionExpireTest {
         if (metastorePartitionedTable) {
             assertThat(deletedPartitions).containsExactlyElementsOf(expectedExpired);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"update-time", "values-time"})
+    public void testExpireDefaultLegacyDateAndStringPartitionMetadata(String expirationStrategy)
+            throws Exception {
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        DataTypes.DATE(),
+                                        VarCharType.STRING_TYPE,
+                                        VarCharType.STRING_TYPE)
+                                .getFields(),
+                        Arrays.asList("f0", "f1"),
+                        emptyList(),
+                        Collections.singletonMap(METASTORE_PARTITIONED_TABLE.key(), "true"),
+                        ""));
+        newTable();
+        assertThat(table.coreOptions().legacyPartitionName()).isTrue();
+        int epochDay = (int) date(1).toLocalDate().toEpochDay();
+        write(
+                GenericRow.of(
+                        epochDay,
+                        BinaryString.fromString("west"),
+                        BinaryString.fromString("expired")));
+        Map<String, String> expectedPartition = new LinkedHashMap<>();
+        expectedPartition.put("f0", Integer.toString(epochDay));
+        expectedPartition.put("f1", "west");
+        assertThat(createdPartitions).containsExactly(expectedPartition);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(PARTITION_EXPIRATION_TIME.key(), "2 d");
+        options.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expirationStrategy);
+        options.put(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$f0");
+        table = table.copy(options);
+        NormalPartitionExpire expire =
+                (NormalPartitionExpire) table.store().newPartitionExpire("", table);
+        expire.setLastCheck(date(1));
+        LocalDateTime checkTime =
+                "update-time".equals(expirationStrategy)
+                        ? LocalDateTime.now().plusDays(3)
+                        : date(6);
+        List<Map<String, String>> expired = expire.expire(checkTime, Long.MAX_VALUE);
+
+        List<String> remaining = new ArrayList<>();
+        table.newRead()
+                .createReader(table.newScan().plan().splits())
+                .forEachRemaining(row -> remaining.add(row.getString(2).toString()));
+        assertThat(remaining).isEmpty();
+        assertThat(createdPartitions).isEmpty();
+        assertThat(deletedPartitions).containsExactly(expectedPartition);
+        assertThat(expired).containsExactly(expectedPartition);
     }
 
     @Test
