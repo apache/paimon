@@ -615,7 +615,7 @@ def test_native_row_blob_map_rejects_duplicate_null_keys_before_record_write(tmp
     assert set(tmp_path.rglob('*.blob')) == paths
 
 
-def test_raw_blob_row_upsert_keeps_streams_lazy_on_python_path(tmp_path):
+def test_raw_blob_row_upsert_keeps_streams_lazy_in_core(tmp_path):
     from pypaimon.tests.blob_table_test import _StreamingOnlyBlob
     table, _ = _table(tmp_path)
     first, shadowed, surviving = (_StreamingOnlyBlob(value) for value in (b'first', b'shadow', b'last'))
@@ -623,7 +623,8 @@ def test_raw_blob_row_upsert_keeps_streams_lazy_on_python_path(tmp_path):
               GenericRow([4, 'b', 400, shadowed], table.fields),
               GenericRow([4, 'b', 401, surviving], table.fields)]
     builder = table.new_batch_write_builder()
-    messages = builder.new_update().with_update_type(['payload']).upsert_by_key(source, ['id'])
+    with _native_only():
+        messages = builder.new_update().with_update_type(['payload']).upsert_by_key(source, ['id'])
     _commit(builder, messages, False)
     assert first.opened and surviving.opened and not shadowed.opened
     assert [row['payload'] for row in _read(table)] == [b'first', None, b'', b'last', b'last']

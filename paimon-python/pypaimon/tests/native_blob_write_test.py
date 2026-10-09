@@ -272,7 +272,7 @@ class _StreamingBlob(Blob):
         return io.BytesIO(self.data)
 
 
-def test_blob_object_selects_python_before_writing(tmp_path):
+def test_blob_object_rows_keep_native_writer(tmp_path):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
@@ -282,7 +282,7 @@ def test_blob_object_selects_python_before_writing(tmp_path):
         writer.write_row(GenericRow([0, b'bytes', None], table.fields))
         writer.write_row(GenericRow([1, blob, None], table.fields))
         writer.write_arrow(_data(2))
-        assert writer._python_writer is not None
+        assert writer._python_writer is None
         commit.commit(writer.prepare_commit())
         assert blob.opened
         expected = [{'id': 0, 'large': b'bytes', 'small': None},
@@ -293,18 +293,19 @@ def test_blob_object_selects_python_before_writing(tmp_path):
         commit.close()
 
 
-def test_blob_object_cannot_switch_after_native_write(tmp_path):
+def test_blob_object_rows_mix_with_native_arrow_writes(tmp_path):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     blob = _StreamingBlob(b'stream')
     try:
         writer.write_arrow(_data())
-        with pytest.raises(RuntimeError, match='after native data was written'):
-            writer.write_row(GenericRow([2, blob, None], table.fields))
-        assert not blob.opened
+        writer.write_row(GenericRow([2, blob, None], table.fields))
+        assert blob.opened
+        assert writer._python_writer is None
         commit.commit(writer.prepare_commit())
-        assert _read(table, True, True) == _data().to_pylist()
+        assert _read(table, True, True) == _data().to_pylist() + [
+            {'id': 2, 'large': b'stream', 'small': None}]
     finally:
         writer.close()
         commit.close()

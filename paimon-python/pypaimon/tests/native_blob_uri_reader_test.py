@@ -195,7 +195,7 @@ def test_custom_reader_exceptions_are_not_retried_and_streams_close(tmp_path, op
     assert not list(tmp_path.rglob('*.parquet'))
 
 
-def test_reader_factory_replacement_clear_and_row_fallback(tmp_path):
+def test_reader_factory_replacement_clear_and_native_rows(tmp_path):
     from pypaimon.table.row.generic_row import GenericRow
     table = _table(tmp_path)
     factory = Factory()
@@ -220,6 +220,7 @@ def test_reader_factory_replacement_clear_and_row_fallback(tmp_path):
         writer.with_blob_uri_reader_factory(factory)
         writer.write_row(GenericRow([
             2, BlobDescriptor('custom://source', 6, 7).serialize(), None], table.fields))
+        assert writer._python_writer is None
         commit.commit(writer.prepare_commit())
         assert factory.opened == factory.closed == ['custom://source']
         assert _read(table, True, True) == [{'id': 2, 'large': b'PAYLOAD', 'small': None}]
