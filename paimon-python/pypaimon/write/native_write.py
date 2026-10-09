@@ -20,7 +20,7 @@ from importlib import import_module
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import MergeEngine
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
@@ -39,11 +39,13 @@ def native_write_available() -> bool:
     return True
 
 
-def _native_partition_types_supported(schema, partition_keys):
+def _native_partition_types_supported(schema, partition_keys, legacy_partition_name=True):
     """Partition keys which Rust can encode and use to locate existing files."""
-    return not any(
+    # Java's legacy byte[].toString() contains an allocation identity, so binary
+    # partitions only have portable names with the cast-based option.
+    return not legacy_partition_name or not any(
         pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
-        or pa.types.is_fixed_size_binary(data_type) or pa.types.is_floating(data_type)
+        or pa.types.is_fixed_size_binary(data_type)
         for data_type in (schema.field(name).type for name in partition_keys))
 
 
@@ -62,8 +64,8 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                                                      MergeEngine.AGGREGATE))
             or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
-            # Rust cannot encode these partition keys yet.
-            or not _native_partition_types_supported(schema, table.partition_keys)
+            or not _native_partition_types_supported(
+                schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME))
             or table.options.video_frame_fields()):
         return None
     native_table = create_native_write_table(table)

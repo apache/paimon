@@ -65,7 +65,7 @@ class TestTableCommit(unittest.TestCase):
                 if mode == 'dynamic':
                     self.assertTrue(any(message.index_adds for message in messages))
                     paths.extend(table.path_factory().bucket_index_path(
-                        tuple(entry.partition.values), entry.bucket, entry.index_file, table.file_io)
+                        tuple(entry.partition.values), entry.bucket, entry.index_file)
                         for message in messages for entry in message.index_adds)
                 self.assertTrue(paths)
                 publish = commit.file_store_commit.commit

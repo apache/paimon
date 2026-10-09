@@ -283,7 +283,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             ('region', pa.string()),
             ('city', pa.string())
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['region', 'city'])
         self.rest_catalog.create_table('default.tb', schema, False)
         table = self.rest_catalog.get_table('default.tb')
         partition_fields = [
@@ -341,7 +341,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             ('region', pa.string()),
             ('city', pa.string())
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema)
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['region', 'city'])
         self.rest_catalog.create_table('default.tb1', schema, False)
         table = self.rest_catalog.get_table('default.tb1')
         partition_fields = [

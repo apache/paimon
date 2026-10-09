@@ -991,7 +991,7 @@ class FileScanner:
             return deletion_files
 
         dv_file_path = self.table.path_factory().bucket_index_path(
-            tuple(index_entry.partition.values), index_entry.bucket, index_file, self.table.file_io)
+            tuple(index_entry.partition.values), index_entry.bucket, index_file)
 
         # Convert each DeletionVectorMeta to DeletionFile
         for data_file_name, dv_meta in index_file.dv_ranges.items():

@@ -19,6 +19,8 @@
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import CoreOptions
+
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.native_commit import create_native_write_table, from_native_commit_messages
 from pypaimon.write.native_update import (
@@ -62,7 +64,9 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
             return None
         from pypaimon.schema.data_types import PyarrowFieldParser
         source_schema = PyarrowFieldParser.from_paimon_schema(source.table_schema.fields)
-        if not _native_partition_types_supported(source_schema, source.partition_keys):
+        if not _native_partition_types_supported(
+                source_schema, source.partition_keys,
+                source.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
             return None
         native_source = create_native_write_table(source)
         if native_source is None:

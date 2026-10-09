@@ -60,6 +60,13 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
     if not _rest_catalog_supported(table) or not native_commit_available():
         return None
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.write.native_write import _native_partition_types_supported
+    if not _native_partition_types_supported(
+            PyarrowFieldParser.from_paimon_schema(table.table_schema.fields), table.partition_keys,
+            table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
+        return None
     native_table = create_native_write_table(table)
     if native_table is None:
         return None
