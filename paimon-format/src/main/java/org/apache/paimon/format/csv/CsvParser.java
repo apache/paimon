@@ -111,10 +111,15 @@ public class CsvParser {
             // Only a quote at the start of a field enables CSV quoting and escaping.
             // Quotes and backslashes in an unquoted field (for example JSON in TSV)
             // belong to the field value and must not be interpreted as CSV syntax.
-            if (!inField && buffer.length() == 0 && quoteChar != '\0' && c == quoteChar) {
+            // A single NUL quote or escape is still used by the writer. Only disable
+            // quoting and escaping when both characters are NUL.
+            if (!inField
+                    && buffer.length() == 0
+                    && (quoteChar != '\0' || escapeChar != '\0')
+                    && c == quoteChar) {
                 rowQuoted[columnIndex] = true;
             }
-            if (rowQuoted[columnIndex] && escapeChar != '\0' && c == escapeChar) {
+            if (rowQuoted[columnIndex] && c == escapeChar) {
                 int nextCharacter = peekNextCharacter(line, position);
                 if ((inQuotes || inField)
                         && (nextCharacter == quoteChar || nextCharacter == escapeChar)) {

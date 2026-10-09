@@ -45,6 +45,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.Csv
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -380,6 +382,45 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             assertThat(result.get(1).getString(1).toString()).isEqualTo("Normal Value");
             assertThat(result.get(2).getInt(0)).isEqualTo(3);
             assertThat(result.get(2).getString(1).toString()).isEqualTo("Special\\Characters");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testSingleNulQuoteOrEscapeWriteRead(boolean nulQuote) throws IOException {
+        Options options = new Options();
+        options.set(CsvOptions.QUOTE_CHARACTER, nulQuote ? "\0" : "\"");
+        options.set(CsvOptions.ESCAPE_CHARACTER, nulQuote ? "\\" : "\0");
+        RowType rowType = DataTypes.ROW(DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING());
+        List<InternalRow> testData = new ArrayList<>();
+        for (String value :
+                new String[] {
+                    "a,b",
+                    "say \"hello\"",
+                    "C:\\Users\\test\\",
+                    "\0start",
+                    "middle\0value",
+                    "end\0",
+                    "plain"
+                }) {
+            testData.add(
+                    GenericRow.of(fromString(value), fromString("middle"), fromString("tail")));
+            testData.add(GenericRow.of(fromString("first"), fromString(value), fromString("tail")));
+            testData.add(
+                    GenericRow.of(fromString("first"), fromString("middle"), fromString(value)));
+        }
+
+        // Use the real writer and reader: a NUL quote/escape is still emitted when only
+        // one of the two characters is NUL. Read multiple rows to exercise parser reuse.
+        List<InternalRow> result =
+                writeThenRead(options, rowType, rowType, testData, "single_nul_" + nulQuote);
+        assertThat(result).hasSize(testData.size());
+        for (int i = 0; i < testData.size(); i++) {
+            for (int column = 0; column < rowType.getFieldCount(); column++) {
+                assertThat(result.get(i).getString(column))
+                        .as("row %s, column %s", i, column)
+                        .isEqualTo(testData.get(i).getString(column));
+            }
         }
     }
 
