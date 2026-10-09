@@ -2833,7 +2833,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         calls = []
 
-        def create_global_index(column, index_type, options=None):
+        def create_global_index(column, index_type, options=None, **kwargs):
             calls.append((column, index_type, options))
             return index_type
 
@@ -2863,7 +2863,7 @@ class MultimodalTableTest(unittest.TestCase):
             options=_PARQUET_OPTIONS,
         )
 
-        def create_global_index(column, index_type, options=None):
+        def create_global_index(column, index_type, options=None, **kwargs):
             return index_type
 
         docs.raw_table.create_global_index = create_global_index
