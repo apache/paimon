@@ -188,7 +188,8 @@ class FormatTableCommitStatisticsTest {
                 .containsExactly(returnsToDefault(tablePath, spec("2025", "10")));
         assertThat(fileIO.exists(oldWrittenPartitionData)).isFalse();
         verify(partitionManager, never()).listPartitions(any(), isNull());
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager)
+                .listPartitionsByNames(Collections.singletonList(spec("2025", "10")));
         assertThat(reported.statistics).hasSize(1);
         PartitionStatistics statistics = reported.statistics.get(0);
         assertThat(statistics.recordCount()).isEqualTo(3);
@@ -197,8 +198,7 @@ class FormatTableCommitStatisticsTest {
     }
 
     @Test
-    void testEmptyStaticOverwriteReportsZeroAndResetsLocationWithoutRegistryRead()
-            throws Exception {
+    void testEmptyStaticOverwriteReportsZeroAndResetsLocation() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
@@ -217,7 +217,7 @@ class FormatTableCommitStatisticsTest {
         assertThat(reported.partitionOptions)
                 .containsExactly(returnsToDefault(tablePath, spec("2025", "10")));
         verify(partitionManager, never()).listPartitions(any(), isNull());
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(target));
     }
 
     @Test

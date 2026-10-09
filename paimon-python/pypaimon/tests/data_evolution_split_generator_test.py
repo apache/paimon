@@ -23,6 +23,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.utils.range import Range
 
 
@@ -126,6 +127,11 @@ class SplitOrderTest(unittest.TestCase):
     class _Table:
         table_path = '/table'
         options = None
+
+        def path_factory(self):
+            return FileStorePathFactory(
+                self.table_path, [], '__DEFAULT_PARTITION__', 'parquet',
+                'data-', 'changelog-', False, False, 'zstd')
 
     _Table.options = _Options()
 

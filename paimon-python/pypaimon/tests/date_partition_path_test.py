@@ -93,6 +93,16 @@ def _write_legacy_composite_row(table, arrow_schema, row):
         _write_rows(table, arrow_schema, [row])
 
 
+def _write_legacy_date_row(table, arrow_schema, row):
+    historical_bucket = Path(table.table_path) / "day=1970-01-02" / "bucket-0"
+    with patch.object(
+        DataWriter,
+        "_generate_file_path",
+        lambda writer, file_name: str(historical_bucket / file_name),
+    ):
+        _write_rows(table, arrow_schema, [row])
+
+
 def _read_rows(table):
     builder = table.new_read_builder()
     splits = builder.new_scan().plan().splits()
@@ -114,12 +124,60 @@ def test_legacy_date_partition_write_uses_java_epoch_day(tmp_path):
 def test_legacy_python_date_partition_directory_remains_readable(tmp_path):
     table, arrow_schema = _create_table(tmp_path)
 
-    _write_one_row(table, arrow_schema)
-    canonical_directory = Path(table.table_path) / "day=1"
+    _write_legacy_date_row(
+        table, arrow_schema, {"id": 1, "day": date(1970, 1, 2)}
+    )
     historical_directory = Path(table.table_path) / "day=1970-01-02"
-    canonical_directory.rename(historical_directory)
+    assert historical_directory.joinpath("bucket-0").is_dir()
 
     assert _read_rows(table) == [{"id": 1, "day": date(1970, 1, 2)}]
+
+
+def test_abort_removes_serialized_date_partition_file(tmp_path):
+    from pypaimon.write.commit_message_serializer import (
+        deserialize_commit_message,
+        serialize_commit_message,
+    )
+
+    table, arrow_schema = _create_table(tmp_path)
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        writer.write_arrow(pa.Table.from_pylist(
+            [{"id": 1, "day": date(1970, 1, 2)}], schema=arrow_schema
+        ))
+        messages = writer.prepare_commit()
+    finally:
+        writer.close()
+
+    file_paths = [
+        file.file_path
+        for message in messages
+        for file in message.new_files
+    ]
+    assert file_paths
+    assert all(table.file_io.exists(path) for path in file_paths)
+
+    restored_messages = [
+        deserialize_commit_message(
+            serialize_commit_message(message, table.partition_keys_fields),
+            table.partition_keys_fields,
+        )
+        for message in messages
+    ]
+    assert all(
+        file.file_path is None
+        for message in restored_messages
+        for file in message.new_files
+    )
+
+    commit = builder.new_commit()
+    try:
+        commit.abort(restored_messages)
+    finally:
+        commit.close()
+
+    assert not any(table.file_io.exists(path) for path in file_paths)
 
 
 def test_non_legacy_date_partition_write_keeps_iso_name(tmp_path):

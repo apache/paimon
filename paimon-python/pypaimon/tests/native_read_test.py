@@ -25,7 +25,8 @@ import pytest
 
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.table_read import TableRead
-from pypaimon.read.read_type import OutputProjection, project_read_type, reader_adapter
+from pypaimon.read.read_type import (
+    OutputProjection, extract_array, project_read_type, reader_adapter)
 from pypaimon.read.variant_read_type import with_variant_extractions
 from pypaimon.schema.data_types import AtomicType, DataField, MapType, RowType
 
@@ -79,6 +80,30 @@ def _blob_table_read(limit=None):
 def _id_batch(values):
     return pa.record_batch(
         [pa.array(values, type=pa.int32())], names=['id'])
+
+
+def test_extract_array_skips_mask_for_valid_parent():
+    parent = pa.array([
+        {'value': 1},
+        {'value': None},
+        {'value': 3},
+    ], type=pa.struct([('value', pa.int32())]))
+    batch = pa.record_batch([parent.slice(1)], names=['payload'])
+
+    with patch('pypaimon.read.read_type.pc.is_null',
+               side_effect=AssertionError('unneeded parent null mask')):
+        assert extract_array(batch, ['payload', 'value']).to_pylist() == [None, 3]
+
+
+def test_extract_array_preserves_null_parent():
+    parent = pa.array([
+        {'value': 1},
+        None,
+        {'value': 3},
+    ], type=pa.struct([('value', pa.int32())]))
+    batch = pa.record_batch([parent], names=['payload'])
+
+    assert extract_array(batch, ['payload', 'value']).to_pylist() == [1, None, 3]
 
 
 def test_native_read_falls_back_before_opening_primary_file_with_row_sidecar():

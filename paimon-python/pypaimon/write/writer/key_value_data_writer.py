@@ -27,6 +27,7 @@ from pypaimon.read.reader.deduplicate_merge_function import \
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
 class KeyValueDataWriter(DataWriter):
@@ -50,6 +51,16 @@ class KeyValueDataWriter(DataWriter):
         # paths that don't go through FileStoreWrite) don't accidentally
         # skip the merge step entirely.
         self._merge_function = merge_function or DeduplicateMergeFunction()
+        # Java's INPUT producer records every accepted input before the merge
+        # engine folds equal keys. Changelog files have their own rolling and
+        # metadata, independent of the data files produced by that fold.
+        self._input_changelog_buffer = (
+            WriteBuffer(self._merge_data)
+            if changelog_producer == ChangelogProducer.INPUT
+            and self._writes_changelog_before_merge() else None)
+
+    def _writes_changelog_before_merge(self):
+        return True
 
     def _process_data(self, data: pa.RecordBatch) -> pa.Table:
         # No sort here: sorting once at flush is strictly cheaper than
@@ -57,7 +68,10 @@ class KeyValueDataWriter(DataWriter):
         # concat of unsorted batches; ``_flush_all`` sorts it exactly
         # once before folding.
         enhanced_data = self._add_system_fields(data)
-        return pa.Table.from_batches([enhanced_data])
+        result = pa.Table.from_batches([enhanced_data])
+        if self._input_changelog_buffer is not None:
+            self._input_changelog_buffer.append(result)
+        return result
 
     def _merge_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
         # Plain concat. Sort + fold both run inside ``_flush_all`` so
@@ -65,7 +79,7 @@ class KeyValueDataWriter(DataWriter):
         return pa.concat_tables([existing_data, new_data])
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        if self._buffer.num_rows > 0:
+        if self._buffer.num_rows > 0 or self._has_pending_input_changelog():
             self._flush_all()
         # ``_flush_all`` empties the buffer, so super's prepare_commit just
         # returns ``committed_files``.
@@ -88,7 +102,7 @@ class KeyValueDataWriter(DataWriter):
         # ``_flush_all`` so the contract holds even on the
         # close-without-prepare_commit path.
         try:
-            if self._buffer.num_rows > 0:
+            if self._buffer.num_rows > 0 or self._has_pending_input_changelog():
                 self._flush_all()
         except Exception as e:
             import logging
@@ -109,6 +123,7 @@ class KeyValueDataWriter(DataWriter):
         left holding exactly the rows no file has taken yet, so a retried
         flush neither loses nor duplicates them.
         """
+        self._flush_input_changelog()
         pending = self._buffer.materialize()
         if pending is None or pending.num_rows == 0:
             self._buffer.reset()
@@ -123,6 +138,34 @@ class KeyValueDataWriter(DataWriter):
         # unique once folded -- so a retry over what is left is still correct.
         self._buffer.reset(folded)
         self._roll_write(folded)
+
+    def _has_pending_input_changelog(self):
+        return self._input_changelog_buffer is not None and self._input_changelog_buffer.num_rows > 0
+
+    def _flush_input_changelog(self):
+        if not self._has_pending_input_changelog():
+            return
+        data = self._sort_by_primary_key(self._input_changelog_buffer.materialize())
+        while data.num_rows:
+            split_row = data.num_rows
+            if data.nbytes > self.target_file_size:
+                split_row = max(1, self._find_optimal_split_point(data, self.target_file_size))
+            logical_data = data.slice(0, split_row)
+            statistics = self._data_file_statistics(logical_data)
+            physical_data = (self._apply_variant_shredding(logical_data)
+                             if self._variant_shredding else logical_data)
+            meta = self._write_changelog_file(
+                physical_data, is_external=self.external_path_provider is not None, **statistics)
+            self.committed_changelog_files.append(meta)
+            # Advance only after file and metadata are complete. A data-file
+            # failure later must neither lose inputs nor write their logs twice.
+            data = data.slice(split_row)
+            self._input_changelog_buffer.reset(data if data.num_rows else None)
+
+    def abort(self):
+        super().abort()
+        if self._input_changelog_buffer is not None:
+            self._input_changelog_buffer.reset()
 
     def _roll_write(self, data: pa.Table) -> None:
         """Write ``data`` as one or more files, each <= target_file_size.
@@ -275,6 +318,8 @@ class KeyValueDataWriter(DataWriter):
         new_fields.append(pa.field('_VALUE_KIND', pa.int8(), nullable=False))
 
         for i in range(data.num_columns):
+            if data.schema.field(i).name == '_VALUE_KIND':
+                continue
             new_arrays.append(data.column(i))
             new_fields.append(data.schema.field(i))
 

@@ -36,6 +36,7 @@ class ResourcePaths:
     RENAME = "rename"
     FORWARD = "forward"
     PERMISSIONS = "permissions"
+    POLICIES = "policies"
 
     def __init__(self, prefix: str):
         # Java encodes the prefix once with URLEncoder, so it stays one path segment. '~' stays raw:
@@ -154,3 +155,10 @@ class ResourcePaths:
 
     def revoke_permission(self) -> str:
         return "{}/revoke".format(self.permissions())
+
+    def policies(self, resource) -> str:
+        resource.validate_policy_attachment()
+        return "{}/{}".format(self.table(resource.get_database(), resource.get_table()), self.POLICIES)
+
+    def drop_policy(self, resource) -> str:
+        return "{}/drop".format(self.policies(resource))

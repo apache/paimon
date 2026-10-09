@@ -714,8 +714,7 @@ public class JavaPyE2ETest {
             String suffix = legacyName ? "legacy" : "canonical";
             FileStoreTable table =
                     (FileStoreTable)
-                            catalog.getTable(
-                                    identifier("composite_date_java_to_python_" + suffix));
+                            catalog.getTable(identifier("composite_date_java_to_python_" + suffix));
             List<String> rows =
                     getResult(
                             table.newRead(),
@@ -726,8 +725,7 @@ public class JavaPyE2ETest {
                                             + row.getInt(1)
                                             + ":"
                                             + row.getString(2).toString());
-            assertThat(rows)
-                    .containsExactlyInAnyOrder("1:1:a/b", "2:1:a/b");
+            assertThat(rows).containsExactlyInAnyOrder("1:1:a/b", "2:1:a/b");
 
             table.rollbackTo(1L);
             List<String> rowsAfterRollback =

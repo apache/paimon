@@ -111,3 +111,4 @@ org.apache.paimon.flink.procedure.CreateGlobalIndexProcedure
 org.apache.paimon.flink.procedure.VectorSearchProcedure
 org.apache.paimon.flink.procedure.FullTextSearchProcedure
 org.apache.paimon.flink.procedure.DropGlobalIndexProcedure
+org.apache.paimon.flink.procedure.ImportFilesProcedure

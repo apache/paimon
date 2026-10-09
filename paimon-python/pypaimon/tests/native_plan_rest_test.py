@@ -149,6 +149,64 @@ def test_resolved_rest_table_keeps_refreshable_file_io(rest_source, rest_catalog
         refresh.assert_called()
 
 
+@pytest.mark.skipif(not native_method_available('Table', 'from_rest_response_with_token'),
+                    reason='REST data token reuse binding required')
+@pytest.mark.parametrize('local_cache', [False, True])
+def test_native_rest_reuses_python_data_token(
+        rest_source, rest_catalog, tmp_path, local_cache):
+    import time
+
+    from pypaimon.catalog.rest.rest_token import RESTToken
+    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    from pypaimon.read.native_plan import _catalog_options, _resolved_rest_table_response
+    from pypaimon_rust.datafusion import Table as NativeTable
+
+    source, server, _ = rest_source
+    catalog, _ = rest_catalog
+    options = dict(catalog.context.options.to_map())
+    options['data-token.enabled'] = 'true'
+    if local_cache:
+        options.update({'local-cache.enabled': 'true',
+                        'local-cache.dir': str(tmp_path / 'cache')})
+    server.set_table_token(
+        source.identifier, RESTToken({}, int(time.time() * 1000) + 7_200_000))
+    table = CatalogFactory.create(options).get_table(source.identifier)
+    reused_table = CatalogFactory.create(options).get_table(source.identifier)
+    uncached_table = CatalogFactory.create(options).get_table(source.identifier)
+
+    def token_file_io(table):
+        file_io = table.file_io
+        assert (type(file_io) is CachingFileIO) == local_cache
+        if type(file_io) is CachingFileIO:
+            file_io = file_io._delegate
+        assert type(file_io) is RESTTokenFileIO
+        return file_io
+
+    # The old bridge fetched a Python token and an independent Rust token.
+    with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}):
+        with patch.object(server, '_table_token_handle',
+                          wraps=server._table_token_handle) as load:
+            token_file_io(table).valid_token()
+            baseline = NativeTable.from_rest_response(
+                _resolved_rest_table_response(table), database='default', table='t',
+                rest_options=_catalog_options(table))
+            assert baseline.new_read_builder().new_scan().plan().snapshot_id() == 2
+            assert load.call_count == 2
+            load.reset_mock()
+            RESTTokenFileIO._TOKEN_CACHE.clear()
+
+            token_file_io(reused_table).token = token_file_io(table).token
+
+            for _ in range(2):
+                assert reused_table.new_read_builder().new_scan().plan().snapshot_id == 2
+            assert load.call_count == 0
+
+            # No instance token: Rust obtains one instead of making Python refresh.
+            assert uncached_table.new_read_builder().new_scan().plan().snapshot_id == 2
+            assert load.call_count == 1
+
+
 @pytest.mark.parametrize('branch', [None, 'dev'])
 def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch):
     from pypaimon.common.identifier import Identifier

@@ -28,6 +28,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.table.format.FormatTablePartitionOptions;
 import org.apache.paimon.table.format.FormatTablePartitionPathResolver;
 import org.apache.paimon.table.format.FormatTablePartitionRegistryValidator;
 import org.apache.paimon.utils.StringUtils;
@@ -94,6 +95,10 @@ final class RESTCatalogPartitionSupport {
         for (int i = 0; i < options.size(); i++) {
             Map<String, String> partitionOptions = options.get(i);
             Map<String, String> copied = new HashMap<>(partitionOptions);
+            String format = FormatTablePartitionOptions.fileFormatOverride(copied);
+            if (format != null) {
+                copied.put(CoreOptions.FILE_FORMAT.key(), format);
+            }
             String location = copied.get(PATH.key());
             if (location != null) {
                 // What a partition may own is judged once the location is known not to be the
@@ -166,6 +171,50 @@ final class RESTCatalogPartitionSupport {
             copied.add(copyPartition(partition, copyOptions(partition.options())));
         }
         return copied;
+    }
+
+    static void applyRequestedFormats(
+            List<Partition> stored,
+            CreatePartitionsRequest request,
+            @Nullable List<Map<String, String>> options,
+            TableMetadata metadata) {
+        if (options == null) {
+            return;
+        }
+        Map<Map<String, String>, String> formats = new HashMap<>();
+        for (int i = 0; i < options.size(); i++) {
+            String format = FormatTablePartitionOptions.fileFormatOverride(options.get(i));
+            if (format != null) {
+                formats.put(request.getPartitionSpecs().get(i), format);
+            }
+        }
+        Set<Map<String, String>> appended = new HashSet<>();
+        if (!Boolean.TRUE.equals(request.replaceStatistics())
+                && request.getPartitionStatistics() != null) {
+            for (PartitionStatistics statistic : request.getPartitionStatistics()) {
+                appended.add(statistic.spec());
+            }
+        }
+        for (int i = 0; i < stored.size(); i++) {
+            Partition partition = stored.get(i);
+            String format = formats.get(partition.spec());
+            if (format == null) {
+                continue;
+            }
+            if (appended.contains(partition.spec())
+                    && !format.equals(
+                            FormatTablePartitionOptions.fileFormat(
+                                    metadata.schema().options(), partition.options()))) {
+                throw new IllegalArgumentException(
+                        "Cannot append a different file format to partition " + partition.spec());
+            }
+            Map<String, String> updated =
+                    partition.options() == null
+                            ? new HashMap<>()
+                            : new HashMap<>(partition.options());
+            updated.put(CoreOptions.FILE_FORMAT.key(), format);
+            stored.set(i, copyPartition(partition, updated));
+        }
     }
 
     private static void validateNoAdditiveStatisticsForCustomPartitions(

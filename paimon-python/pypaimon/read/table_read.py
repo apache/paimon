@@ -976,18 +976,8 @@ class TableRead:
                 or self._deferred_blob_limit_may_prune(splits))
 
     def _native_blob_view_supported(self) -> bool:
-        """Use native view resolution only with the REST catalog environment."""
-        read_names = {field.name for field in self._scan_read_type}
-        view_fields = self.table.options.blob_view_fields() & read_names
-        if not view_fields or not self.table.options.blob_view_resolve_enabled():
-            return True
-        loader = getattr(getattr(self.table, 'catalog_environment', None),
-                         'catalog_loader', None)
-        if loader is None:
-            # Python also leaves view structs unresolved without a loader.
-            return True
-        from pypaimon.read.native_plan import _catalog_metastore
-        return _catalog_metastore(loader) == 'rest'
+        from pypaimon.read.native_plan import _native_blob_view_supported
+        return _native_blob_view_supported(self.table, (field.name for field in self._scan_read_type))
 
     def _native_resolved_blob_fields(self) -> set:
         """BLOB fields Rust resolves before emitting a batch."""

@@ -136,6 +136,8 @@ def _prepare(
     when_matched,
     when_not_matched,
     on,
+    *,
+    source_schema=None,
 ):
     if not when_matched and not when_not_matched:
         raise ValueError(
@@ -249,7 +251,8 @@ def _prepare(
         source_table = None
         source_col_names = set(full_target_field_names) | set(source_on_cols)
     else:
-        source_table = _normalize_source(source)
+        # Native table input needs schema validation without Python I/O.
+        source_table = source_schema.empty_table() if source_schema is not None else _normalize_source(source)
         _validate_source_on_cols(source_table, source_on_cols)
         source_col_names = set(source_table.schema.names)
 
@@ -751,9 +754,9 @@ def _normalize_source(source: Any) -> pa.Table:
     if isinstance(source, pa.Table):
         return source
     if _is_table_like(source):
-        snapshot = source.snapshot_manager().get_latest_snapshot()
-        snapshot_id = snapshot.id if snapshot is not None else None
-        return _read_table(source, snapshot_id=snapshot_id)
+        # Let the read resolve its branch and point-in-time selectors once.
+        # Pinning the latest snapshot here would override the source's options.
+        return _read_table(source)
     try:
         import pandas as pd
     except ImportError:

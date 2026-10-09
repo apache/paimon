@@ -38,7 +38,6 @@ from pypaimon.read.native_plan import (
     _native_read_builder,
     _predicate_to_native,
     _resolved_schema_json,
-    _restore_python_partition_paths,
     native_family_search_modes_available,
     native_plan,
     native_version_at_least,
@@ -812,87 +811,6 @@ class NativePlanTest(unittest.TestCase):
                 self.assertEqual(
                     native_family_search_modes_available(), expected)
 
-    def test_partition_path_prefers_existing_python_legacy_path(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = [Mock(base_name='data.parquet')]
-        data_file = Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
-        )
-        split = Mock(
-            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-        split._native_split = object()
-
-        _restore_python_partition_paths(table, [split])
-
-        self.assertEqual(
-            data_file.file_path,
-            '/warehouse/t/p=a/b/bucket-0/data.parquet',
-        )
-        self.assertIsNone(split._native_split)
-
-    def test_partition_path_keeps_existing_rust_path(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = []
-        rust_path = '/warehouse/t/p=a%2Fb/bucket-0/data.parquet'
-        data_file = Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path=rust_path,
-        )
-        split = Mock(
-            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-
-        _restore_python_partition_paths(table, [split])
-
-        self.assertEqual(data_file.file_path, rust_path)
-
-    def test_partition_path_lists_each_bucket_once(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = [
-            Mock(base_name='a.parquet'), Mock(base_name='b.parquet')]
-        splits = [
-            Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
-                external_path=None,
-                file_name=name,
-                file_path='/warehouse/t/p=a%%2Fb/bucket-0/%s' % name,
-            )])
-            for name in ('a.parquet', 'b.parquet')
-        ]
-
-        _restore_python_partition_paths(table, splits)
-
-        table.file_io.list_status.assert_called_once_with(
-            '/warehouse/t/p=a/b/bucket-0')
-        self.assertEqual(
-            [split.files[0].file_path for split in splits],
-            [
-                '/warehouse/t/p=a/b/bucket-0/a.parquet',
-                '/warehouse/t/p=a/b/bucket-0/b.parquet',
-            ],
-        )
-
-    def test_partition_path_listing_failure_is_not_hidden(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.side_effect = PermissionError('denied')
-        split = Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
-        )])
-
-        with self.assertRaises(PermissionError):
-            _restore_python_partition_paths(table, [split])
-
     def test_rest_catalog_retains_response_for_native_reads(self):
         from pypaimon.api.api_response import GetTableResponse
         from pypaimon.catalog.rest.rest_catalog import RESTCatalog
@@ -1114,6 +1032,104 @@ class NativePlanTest(unittest.TestCase):
                 sending.close()
                 release.set()
                 holder.join(5)
+
+    def test_native_rest_token_lookup_after_fork_avoids_inherited_lock(self):
+        import multiprocessing
+        from threading import Event, Thread
+
+        from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.read.native_plan import _NativeRestTableCache, _rest_data_token
+
+        if 'fork' not in multiprocessing.get_all_start_methods():
+            self.skipTest('fork required')
+        context = multiprocessing.get_context('fork')
+        identifier = Identifier('default', 't')
+        path = 'oss://bucket/table'
+        file_io = RESTTokenFileIO(identifier, path)
+        table = SimpleNamespace(file_io=file_io, identifier=identifier,
+                                table_path=path, current_branch=lambda: 'main')
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response.return_value = object()
+        cache = _NativeRestTableCache()
+        held, release = Event(), Event()
+
+        def hold_token_lock():
+            with RESTTokenFileIO._TOKEN_LOCKS_LOCK:
+                held.set()
+                release.wait()
+
+        def child(connection):
+            try:
+                native_table = cache.get(
+                    'response', 'default', 't', {},
+                    token_loader=lambda: _rest_data_token(table))
+                connection.send(('ok', native_table is not None))
+            except BaseException as exc:
+                connection.send(('error', repr(exc)))
+            finally:
+                connection.close()
+
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}), \
+                patch.object(file_io, '_build_cache_key', return_value='token-key'):
+            holder = Thread(target=hold_token_lock, daemon=True)
+            holder.start()
+            self.assertTrue(held.wait(5))
+            receiving, sending = context.Pipe(duplex=False)
+            process = context.Process(target=child, args=(sending,))
+            try:
+                process.start()
+                sending.close()
+                self.assertTrue(receiving.poll(3), 'child deadlocked on inherited token lock')
+                self.assertEqual(receiving.recv(), ('ok', True))
+                process.join(5)
+                self.assertEqual(process.exitcode, 0)
+            finally:
+                if process.is_alive():
+                    process.terminate()
+                    process.join(5)
+                receiving.close()
+                sending.close()
+                release.set()
+                holder.join(5)
+
+    def test_native_rest_cache_passes_only_existing_token(self):
+        import time
+
+        from pypaimon.catalog.rest.rest_token import RESTToken
+        from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.read.native_plan import _NativeRestTableCache, _rest_data_token
+
+        identifier = Identifier('default', 't')
+        path = 'oss://bucket/table'
+        file_io = RESTTokenFileIO(identifier, path)
+        token = RESTToken({'key': 'value'}, int(time.time() * 1000) + 7_200_000)
+        file_io.token = token
+        table = SimpleNamespace(file_io=file_io, identifier=identifier,
+                                table_path=path, current_branch=lambda: 'main')
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response_with_token.return_value = object()
+
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}), \
+                patch.object(file_io, 'valid_token',
+                             side_effect=AssertionError('must not refresh')):
+            cache = _NativeRestTableCache()
+            cache.get('response', 'default', 't', {},
+                      token_loader=lambda: _rest_data_token(table))
+            fake_df.Table.from_rest_response_with_token.assert_called_once_with(
+                'response', database='default', table='t', rest_options={},
+                data_token=token.token, expires_at_millis=token.expire_at_millis)
+            fake_df.Table.from_rest_response.assert_not_called()
+
+            file_io.token = None
+            cache = _NativeRestTableCache()
+            cache.get('response', 'default', 't', {},
+                      token_loader=lambda: _rest_data_token(table))
+            fake_df.Table.from_rest_response.assert_called_once_with(
+                'response', database='default', table='t', rest_options={})
 
     def test_native_rest_cache_retries_failed_construction(self):
         from pypaimon.read.native_plan import _NativeRestTableCache

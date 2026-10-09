@@ -24,6 +24,7 @@ import pytest
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
 
@@ -31,17 +32,6 @@ from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_opt
 class _FakeWriterOptions:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-
-
-class _PathFactory:
-    def __init__(self, bucket_path):
-        self._bucket_path = bucket_path
-
-    def create_external_path_provider(self, partition, bucket, canonical_partition=False):
-        return None
-
-    def bucket_path(self, partition, bucket, canonical_partition=False):
-        return self._bucket_path
 
 
 class _FileIO:
@@ -121,7 +111,8 @@ def test_data_writer_passes_mosaic_writer_options(monkeypatch, tmp_path):
         trimmed_primary_keys=["id"],
         trimmed_primary_keys_fields=[DataField(0, "id", AtomicType("INT"))],
         fields=[DataField(0, "id", AtomicType("INT"))],
-        path_factory=lambda: _PathFactory(str(tmp_path)),
+        path_factory=lambda: FileStorePathFactory(
+            str(tmp_path), [], '__DEFAULT_PARTITION__', 'mosaic', 'data-', 'changelog-', False, False, 'zstd'),
     )
     writer = AppendOnlyDataWriter(table, (), 0, 0, options)
 
