@@ -18,9 +18,9 @@
 
 package org.apache.paimon.spark.catalyst.optimizer
 
-import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.{PaimonScan, SparkConnectorOptions}
 import org.apache.paimon.spark.read.BinPackingSplits
-import org.apache.paimon.spark.util.SplitUtils
+import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.SparkSession
@@ -41,6 +41,14 @@ object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
   }
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
+    if (
+      !OptionUtils
+        .getOptionString(SparkConnectorOptions.READ_REPARTITION_LARGE_SCAN_ENABLED)
+        .toBoolean
+    ) {
+      return plan
+    }
+
     def rewrite(node: LogicalPlan): LogicalPlan = node match {
       // Preserve an explicit shuffle and make repeated applications of this rule idempotent.
       case repartition: RepartitionOperation

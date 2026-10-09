@@ -39,6 +39,26 @@ import scala.collection.JavaConverters._
 /** Rule tests with synthetic scan metadata; no source files or Spark data jobs are needed. */
 class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
 
+  private val enabledKey =
+    s"spark.paimon.${SparkConnectorOptions.READ_REPARTITION_LARGE_SCAN_ENABLED.key()}"
+
+  test("disabled by default without planning scan partitions") {
+    assert(spark.conf.getOption(enabledKey).isEmpty)
+    val scan = relation(Seq(Seq(80L)), failOnPlanning = true)
+    assert(RepartitionLargePaimonScan(scan) eq scan)
+  }
+
+  test("explicitly disabling the rule avoids planning scan partitions") {
+    withSplitConf {
+      withSparkSQLConf(enabledKey -> "false") {
+        val scan = relation(Seq(Seq(80L)), failOnPlanning = true)
+        assert(RepartitionLargePaimonScan(scan) eq scan)
+      }
+      val enabled = relation(Seq(Seq(80L), Seq(20L)))
+      assert(RepartitionLargePaimonScan(enabled).asInstanceOf[Repartition].numPartitions == 2)
+    }
+  }
+
   test("partition size includes all splits and exact threshold does not trigger") {
     withSplitConf {
       val fits = relation(Seq(Seq(25L, 25L), Seq(50L)))
@@ -136,12 +156,15 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
   }
 
   test("non-Paimon plans are unchanged") {
-    val plan = spark.range(10).queryExecution.optimizedPlan
-    assert(RepartitionLargePaimonScan(plan) eq plan)
+    withSplitConf {
+      val plan = spark.range(10).queryExecution.optimizedPlan
+      assert(RepartitionLargePaimonScan(plan) eq plan)
+    }
   }
 
   private def withSplitConf(f: => Unit): Unit = {
     withSparkSQLConf(
+      enabledKey -> "true",
       "spark.sql.files.maxPartitionBytes" -> "50b",
       "spark.sql.files.minPartitionNum" -> "1",
       "spark.sql.files.openCostInBytes" -> "0b")(f)
@@ -149,7 +172,8 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
 
   private def relation(
       partitionFileSizes: Seq[Seq[Long]],
-      options: Map[String, String] = Map.empty): DataSourceV2ScanRelation = {
+      options: Map[String, String] = Map.empty,
+      failOnPlanning: Boolean = false): DataSourceV2ScanRelation = {
     val schema = new StructType().add("a", IntegerType)
     val table = mock(classOf[InnerTable])
     when(table.options()).thenReturn(options.asJava)
@@ -190,9 +214,14 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
         PaimonInputPartition(splits)
     }
     val scan = new PaimonScan(table, schema, Seq.empty, Seq.empty, None, None, None) {
-      override protected def getInputSplits: Array[Split] = partitions.flatMap(_.splits).toArray
-      override protected def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] =
+      override protected def getInputSplits: Array[Split] = {
+        assert(!failOnPlanning, "Disabled rule must not plan scan splits")
+        partitions.flatMap(_.splits).toArray
+      }
+      override protected def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
+        assert(!failOnPlanning, "Disabled rule must not plan scan partitions")
         partitions
+      }
     }
     val sparkTable = new ConnectorTable {
       override def name(): String = "test_scan"

@@ -169,6 +169,15 @@ To inspect row kinds, including deletes, query the [`audit_log` system table](..
 
 ### Repartition Oversized Scan Output
 
+This optimization is disabled by default. Enable it for the Spark session with:
+
+```sql
+SET spark.paimon.read.repartition-large-scan.enabled = true;
+```
+
+Set it to `false` to disable `RepartitionLargePaimonScan`. When disabled, the rule
+returns the plan unchanged without planning scan splits or input partitions.
+
 When a Paimon batch scan has an input partition larger than the split size computed
 by `BinPackingSplits.computeMaxSplitBytes`, the optimizer inserts a shuffle immediately
 after the scan. The output partition count is `ceil(total input partition bytes / threshold)`,
