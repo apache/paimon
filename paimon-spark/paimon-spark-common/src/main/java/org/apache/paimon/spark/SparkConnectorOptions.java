@@ -173,9 +173,10 @@ public class SparkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to insert a shuffle after a batch scan with oversized input partitions. "
-                                    + "Uses the bin-packing split size to determine downstream parallelism "
-                                    + "without changing the number of scan tasks.");
+                            "Whether to insert a shuffle after a batch scan when any input partition "
+                                    + "exceeds twice filesMaxPartitionBytes. The shuffle partition count is "
+                                    + "the total input bytes divided by filesMaxPartitionBytes, rounded up. "
+                                    + "Does not change the number of scan tasks.");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_REPAIR_COLLECT_STATISTICS =
             key("format-table.repair.collect-statistics")

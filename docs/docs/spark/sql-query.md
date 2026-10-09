@@ -178,21 +178,20 @@ SET spark.paimon.read.repartition-large-scan.enabled = true;
 Set it to `false` to disable `RepartitionLargePaimonScan`. When disabled, the rule
 returns the plan unchanged without planning scan splits or input partitions.
 
-When a Paimon batch scan has an input partition larger than the split size computed
-by `BinPackingSplits.computeMaxSplitBytes`, the optimizer inserts a shuffle immediately
-after the scan. The output partition count is `ceil(total input partition bytes / threshold)`,
-including all input partitions. The threshold reuses the scan bin-packing calculation:
+When a Paimon batch scan has an input partition larger than twice `filesMaxPartitionBytes`,
+the optimizer inserts a shuffle immediately after the scan. The trigger threshold and
+output partition count are calculated separately:
 
 ```text
-min(maxPartitionBytes, max(openFileCost, estimatedInputBytes / minPartitionNum))
+threshold = 2 * filesMaxPartitionBytes
+output partition count = ceil(total input partition bytes / filesMaxPartitionBytes)
 ```
 
-`maxPartitionBytes` uses Paimon's `source.split.target-size`, falling back to an explicitly
+`filesMaxPartitionBytes` uses Paimon's `source.split.target-size`, falling back to an explicitly
 configured `spark.sql.files.maxPartitionBytes`, then Paimon's default split size.
-The open-file cost similarly uses `source.split.open-file-cost` or
-`spark.sql.files.openCostInBytes`. Estimated input bytes include file open costs.
-`minPartitionNum` uses `spark.sql.files.minPartitionNum`, falling back to
-`spark.sql.leafNodeDefaultParallelism` or Spark's default parallelism.
+All input partitions contribute to the total bytes. An input partition exactly at the
+threshold does not trigger repartitioning. File-open costs and minimum partition counts
+do not affect this rule's threshold or output partition count.
 
 Sizes are the sum of data file sizes reported by the splits in each input partition,
 including Blob file sizes. They are metadata estimates, not decoded row sizes or

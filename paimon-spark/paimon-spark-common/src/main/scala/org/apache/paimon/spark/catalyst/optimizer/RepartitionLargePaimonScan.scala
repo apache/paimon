@@ -21,12 +21,12 @@ package org.apache.paimon.spark.catalyst.optimizer
 import org.apache.paimon.spark.{PaimonScan, SparkConnectorOptions}
 import org.apache.paimon.spark.read.BinPackingSplits
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
-import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Repartition, RepartitionOperation}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+import org.apache.spark.sql.internal.SQLConf
 
 /** Redistributes oversized scan partitions for downstream operators, preserving the scan itself. */
 object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
@@ -58,18 +58,17 @@ object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
         relation.scan match {
           case scan: PaimonScan =>
             val partitions = scan.inputPartitions
-            val dataSplits = scan.inputSplits.collect { case split: DataSplit => split }
-            val targetSize = BinPackingSplits(scan.coreOptions, scan.readRowSizeRatio)
-              .computeMaxSplitBytes(dataSplits.toSeq)
+            val targetSize = BinPackingSplits.filesMaxPartitionBytes(scan.coreOptions, SQLConf.get)
+            val threshold = BigInt(targetSize) * 2
             val sizes = partitions.map {
               partition => partition.splits.map(split => BigInt(SplitUtils.splitSize(split))).sum
             }
-            if (targetSize > 0 && sizes.exists(_ > targetSize)) {
+            if (targetSize > 0 && sizes.exists(_ > threshold)) {
               val numPartitions = (sizes.sum + targetSize - 1) / targetSize
               require(
                 numPartitions <= Int.MaxValue,
                 s"Scan repartition count $numPartitions exceeds ${Int.MaxValue}; " +
-                  "increase the scan split size or reduce the configured minimum partition count"
+                  "increase the scan split target size"
               )
               Repartition(numPartitions.toInt, shuffle = true, relation)
             } else {

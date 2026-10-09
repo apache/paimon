@@ -44,28 +44,28 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
 
   test("disabled by default without planning scan partitions") {
     assert(spark.conf.getOption(enabledKey).isEmpty)
-    val scan = relation(Seq(Seq(80L)), failOnPlanning = true)
+    val scan = relation(Seq(Seq(120L)), failOnPlanning = true)
     assert(RepartitionLargePaimonScan(scan) eq scan)
   }
 
   test("explicitly disabling the rule avoids planning scan partitions") {
     withSplitConf {
       withSparkSQLConf(enabledKey -> "false") {
-        val scan = relation(Seq(Seq(80L)), failOnPlanning = true)
+        val scan = relation(Seq(Seq(120L)), failOnPlanning = true)
         assert(RepartitionLargePaimonScan(scan) eq scan)
       }
-      val enabled = relation(Seq(Seq(80L), Seq(20L)))
-      assert(RepartitionLargePaimonScan(enabled).asInstanceOf[Repartition].numPartitions == 2)
+      val enabled = relation(Seq(Seq(120L), Seq(30L)))
+      assert(RepartitionLargePaimonScan(enabled).asInstanceOf[Repartition].numPartitions == 3)
     }
   }
 
   test("partition size includes all splits and exact threshold does not trigger") {
     withSplitConf {
-      val fits = relation(Seq(Seq(25L, 25L), Seq(50L)))
+      val fits = relation(Seq(Seq(50L, 50L), Seq(80L)))
       assert(RepartitionLargePaimonScan(fits) eq fits)
-      val oversized = relation(Seq(Seq(40L, 40L), Seq(20L)))
+      val oversized = relation(Seq(Seq(60L, 60L), Seq(30L)))
       val result = RepartitionLargePaimonScan(oversized).asInstanceOf[Repartition]
-      assert(result.numPartitions == 2)
+      assert(result.numPartitions == 3)
       assert(result.shuffle)
       assert(result.child eq oversized)
       assert(RepartitionLargePaimonScan(result) eq result)
@@ -74,32 +74,30 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
 
   test("repartition count includes small partitions and rounds up") {
     withSplitConf {
-      val result = RepartitionLargePaimonScan(relation(Seq(Seq(80L), Seq(20L), Seq(20L))))
-      assert(result.asInstanceOf[Repartition].numPartitions == 3)
+      val result = RepartitionLargePaimonScan(relation(Seq(Seq(101L), Seq(25L), Seq(25L))))
+      assert(result.asInstanceOf[Repartition].numPartitions == 4)
     }
   }
 
-  test("minimum partition count controls bytes per core") {
+  test("minimum partition count does not lower the repartition threshold") {
     withSplitConf {
       withSparkSQLConf(
         "spark.sql.files.maxPartitionBytes" -> "1000b",
         "spark.sql.files.minPartitionNum" -> "4") {
-        val result = RepartitionLargePaimonScan(relation(Seq(Seq(80L), Seq(20L))))
-        // min(1000, max(0, 100 / 4)) = 25 bytes.
-        assert(result.asInstanceOf[Repartition].numPartitions == 4)
+        val scan = relation(Seq(Seq(80L), Seq(20L)))
+        assert(RepartitionLargePaimonScan(scan) eq scan)
       }
     }
   }
 
-  test("open file cost contributes to estimation and bounds the threshold") {
+  test("open file cost does not change the threshold or shuffle partition count") {
     withSplitConf {
       withSparkSQLConf(
-        "spark.sql.files.maxPartitionBytes" -> "1000b",
-        "spark.sql.files.openCostInBytes" -> "30b",
+        "spark.sql.files.openCostInBytes" -> "1000b",
         "spark.sql.files.minPartitionNum" -> "10") {
-        val result = RepartitionLargePaimonScan(relation(Seq(Seq(80L), Seq(20L))))
-        // min(1000, max(30, (100 + 2 * 30) / 10)) = 30 bytes.
-        // Repartition count uses data bytes, not the artificial file-open cost.
+        val fits = relation(Seq(Seq(80L), Seq(20L)))
+        assert(RepartitionLargePaimonScan(fits) eq fits)
+        val result = RepartitionLargePaimonScan(relation(Seq(Seq(101L), Seq(50L))))
         assert(result.asInstanceOf[Repartition].numPartitions == 4)
       }
     }
@@ -116,10 +114,21 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
 
   test("preserve an existing shuffle and leave empty scans unchanged") {
     withSplitConf {
-      val existing = Repartition(7, shuffle = true, relation(Seq(Seq(80L))))
+      val existing = Repartition(7, shuffle = true, relation(Seq(Seq(120L))))
       assert(RepartitionLargePaimonScan(existing) eq existing)
       val empty = relation(Seq.empty)
       assert(RepartitionLargePaimonScan(empty) eq empty)
+    }
+  }
+
+  test("doubling the threshold does not overflow Long") {
+    withSplitConf {
+      withSparkSQLConf("spark.sql.files.maxPartitionBytes" -> s"${Long.MaxValue}b") {
+        val fits = relation(Seq(Seq(Long.MaxValue, Long.MaxValue)))
+        assert(RepartitionLargePaimonScan(fits) eq fits)
+        val oversized = relation(Seq(Seq(Long.MaxValue, Long.MaxValue, Long.MaxValue)))
+        assert(RepartitionLargePaimonScan(oversized).asInstanceOf[Repartition].numPartitions == 3)
+      }
     }
   }
 
@@ -148,10 +157,10 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
     RepartitionLargePaimonScan.register(spark)
     assert(spark.experimental.extraOptimizations.count(_ == RepartitionLargePaimonScan) == 1)
     withSplitConf {
-      val scan = relation(Seq(Seq(80L), Seq(20L)))
+      val scan = relation(Seq(Seq(120L), Seq(30L)))
       val result = batches(lateIndex).rules.foldLeft(
         scan: org.apache.spark.sql.catalyst.plans.logical.LogicalPlan)((plan, rule) => rule(plan))
-      assert(result.asInstanceOf[Repartition].numPartitions == 2)
+      assert(result.asInstanceOf[Repartition].numPartitions == 3)
     }
   }
 
