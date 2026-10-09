@@ -37,6 +37,37 @@ class WriteBuilder(ABC):
         self.table: FileStoreTable = table
         self.commit_user = self._create_commit_user()
         self.restore_snapshot_id = None
+        self.dynamic_options = None
+
+    def with_options(self, options: Optional[dict] = None):
+        """Derive a new builder with the given dynamic options applied.
+
+        Returns a new builder with options applied through table.copy(), so
+        table.options stays the single source of truth. Because self is left
+        untouched, callers must use the return value.
+
+        Args:
+            options: Dynamic option key/value pairs. None or empty returns self.
+
+        Returns:
+            A new builder with the options applied, or self when nothing to apply.
+        """
+        if not options:
+            return self
+        new_builder = type(self)(self.table.copy(options))
+        new_builder.dynamic_options = options
+        self._carry_state_to(new_builder)
+        return new_builder
+
+    def _carry_state_to(self, new_builder) -> None:
+        """Copy builder state that must survive ``with_options``.
+
+        ``with_options`` rebuilds the builder from scratch, so anything already
+        configured on it is lost unless copied here. A subclass that adds its
+        own configuration overrides this and calls super, or that configuration
+        is silently dropped the moment a caller applies options.
+        """
+        new_builder.restore_snapshot_id = self.restore_snapshot_id
 
     def new_write(self) -> TableWrite:
         """Returns a table write."""
@@ -97,6 +128,10 @@ class BatchWriteBuilder(WriteBuilder):
     def overwrite(self, static_partition: Optional[dict] = None):
         self.static_partition = static_partition if static_partition is not None else {}
         return self
+
+    def _carry_state_to(self, new_builder) -> None:
+        super()._carry_state_to(new_builder)
+        new_builder.static_partition = self.static_partition
 
     def new_write(self) -> BatchTableWrite:
         return (self._native_write(self.static_partition)

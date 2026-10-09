@@ -246,6 +246,83 @@ class SnapshotManagerFilesystemHintTest(unittest.TestCase):
         manager = _build_manager(file_io)
         self.assertIsNone(manager._get_latest_snapshot_from_filesystem())
 
+    def test_relocates_when_resolved_snapshot_expires_before_the_read(self):
+        # The snapshot picked by the resolution is expired before the read that
+        # follows it: another writer committed snapshot 2 and retention dropped
+        # snapshot 1. The replacement is readable, so this is a recoverable
+        # race -- the vanished file must not reach the caller.
+        present = {self.SNAP_DIR, self.LATEST, self._snap(1)}
+        file_io = Mock()
+        file_io.exists.side_effect = lambda p: p in present
+
+        def _read(p):
+            if p == self.LATEST:
+                return "1"
+            if p == self._snap(1):
+                # Reading the resolved candidate is what races the cleanup:
+                # snapshot 1 goes away and snapshot 2 takes its place.
+                present.discard(self._snap(1))
+                present.add(self._snap(2))
+                raise FileNotFoundError(p)
+            return "content-" + p.rsplit("-", 1)[-1]
+
+        file_io.read_file_utf8.side_effect = _read
+        file_io.list_status.side_effect = lambda _: [
+            _file_info(p) for p in sorted(present) if "snapshot-" in p]
+        manager = _build_manager(file_io)
+        with patch(
+                'pypaimon.snapshot.snapshot_manager.JSON.from_json',
+                side_effect=lambda content, cls: content):
+            result = manager._get_latest_snapshot_from_filesystem()
+        self.assertEqual(result, "content-2")
+
+    def test_never_reports_empty_when_every_candidate_expires(self):
+        # Pathological case: each resolved candidate is gone by the time it is
+        # read. The table is not empty, so this must fail closed rather than
+        # return None, which a caller would read as "nothing was committed".
+        present = {self.SNAP_DIR, self.LATEST, self._snap(1)}
+        counter = [1]
+        file_io = Mock()
+        file_io.exists.side_effect = lambda p: p in present
+
+        def _read(p):
+            if p == self.LATEST:
+                return str(counter[0])
+            # Every candidate vanishes as it is read, replaced by a newer one.
+            present.discard(self._snap(counter[0]))
+            counter[0] += 1
+            present.add(self._snap(counter[0]))
+            raise FileNotFoundError(p)
+
+        file_io.read_file_utf8.side_effect = _read
+        file_io.list_status.side_effect = lambda _: [
+            _file_info(p) for p in sorted(present) if "snapshot-" in p]
+        manager = _build_manager(file_io)
+        from pypaimon.snapshot.snapshot_manager import SnapshotNotResolvable
+        with self.assertRaises(SnapshotNotResolvable):
+            manager._get_latest_snapshot_from_filesystem()
+
+    def test_a_read_error_that_retrying_cannot_fix_is_not_retried(self):
+        # Only a vanished file is a race. A permission error must surface as
+        # itself rather than be re-read as if the snapshot had merely moved.
+        present = {self.SNAP_DIR, self.LATEST, self._snap(1)}
+        reads = []
+        file_io = Mock()
+        file_io.exists.side_effect = lambda p: p in present
+
+        def _read(p):
+            if p == self.LATEST:
+                return "1"
+            reads.append(p)
+            raise PermissionError(p)
+
+        file_io.read_file_utf8.side_effect = _read
+        file_io.list_status.return_value = [_file_info(self._snap(1))]
+        manager = _build_manager(file_io)
+        with self.assertRaises(PermissionError):
+            manager._get_latest_snapshot_from_filesystem()
+        self.assertEqual(len(reads), 1, "a permission error must not be retried")
+
 
 if __name__ == '__main__':
     unittest.main()
