@@ -25,6 +25,7 @@ from contextlib import closing
 from threading import Lock
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -282,10 +283,15 @@ class AbstractVectorSearchReadImpl:
             if evaluation is None:
                 return None
             include_ranges = evaluation.result.results().to_range_list()
+            # Use the same effective mode as the scan so this optimization
+            # cannot remove raw ranges admitted by a query option override.
+            effective_options = dict(_table_options_map(self._table))
+            effective_options.update(self._options)
+            effective_core = CoreOptions(Options(effective_options))
             include_ranges.extend(
                 scanner.unindexed_ranges(
                     self._filter,
-                    search_mode=self._table.options.scalar_index_search_mode(),
+                    search_mode=effective_core.scalar_index_search_mode(),
                     contributing_field_ids=(
                         evaluation.contributing_field_ids),
                 ))

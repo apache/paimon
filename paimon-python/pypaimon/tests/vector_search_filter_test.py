@@ -1588,6 +1588,38 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertFalse(any(isinstance(split, RawVectorSearchSplit)
                              for split in splits))
 
+    def test_query_search_modes_override_table_modes_without_mutating_options(self):
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        for mode in ('full', 'detail'):
+            for table_mode, scalar_mode, vector_mode, vector_end, expected in [
+                ('fast', mode, 'fast', 9, [Range(5, 9)]),
+                ('fast', 'fast', mode, 4, [Range(5, 9)]),
+                (mode, 'fast', 'fast', 9, []),
+            ]:
+                with self.subTest(mode=mode, scalar=scalar_mode, vector=vector_mode, table=table_mode):
+                    entries = [
+                        _entry(None, field_id=1, index_type='lumina-vector-ann', file_name='vec.index',
+                               row_range_start=0, row_range_end=vector_end),
+                        _entry(None, field_id=0, index_type='btree', file_name='id.index',
+                               row_range_start=0, row_range_end=4),
+                    ]
+                    table = _StubTable(fields=[self.id_field, self.embedding_field], entries=entries)
+                    original_options = {'vector-index.search-mode': table_mode, 'scalar-index.search-mode': table_mode}
+                    table.options = CoreOptions(Options(dict(original_options)))
+                    table.data_ranges_for_data_evolution_global_index_coverage = (
+                        lambda snapshot, partition: [Range(0, 9)])
+                    _patch_snapshot(self, entries, types.SimpleNamespace(next_row_id=10))
+                    predicate = Predicate(method='equal', index=0, field='id', literals=[7])
+                    splits = (VectorSearchBuilderImpl(table).with_vector_column('embedding')
+                              .with_filter(predicate).with_options({
+                                  'scalar-index.search-mode': scalar_mode, 'vector-index.search-mode': vector_mode})
+                              .new_vector_search_scan().scan().splits())
+                    raw_ranges = [row_range for split in splits if isinstance(split, RawVectorSearchSplit)
+                                  for row_range in split.row_ranges]
+                    self.assertEqual(expected, raw_ranges)
+                    self.assertEqual(original_options, table.options.options.to_map())
+
     def test_fast_vector_mode_limits_scalar_fallback_to_vector_coverage(self):
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
 
@@ -1707,6 +1739,32 @@ class VectorSearchFilterTest(unittest.TestCase):
             search_mode=GlobalIndexSearchMode.DETAIL,
             contributing_field_ids=frozenset([0]),
         )
+
+    def test_raw_pre_filter_query_mode_overrides_table_mode(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        table = _StubTable(fields=[self.id_field, self.embedding_field], entries=[])
+        table.options = CoreOptions(Options({'scalar-index.search-mode': 'fast'}))
+        predicate = Predicate(method='equal', index=0, field='id', literals=[5])
+        scanner = mock.MagicMock()
+        scanner.scan_with_coverage.return_value = GlobalIndexEvaluation(
+            GlobalIndexResult.create_empty(), frozenset([0]))
+        scanner.unindexed_ranges.return_value = [Range(5, 9)]
+        for mode in ('full', 'detail'):
+            with self.subTest(mode=mode):
+                scanner.reset_mock()
+                reader = DataEvolutionVectorRead(table, limit=3, vector_column=self.embedding_field,
+                                                 query_vector=[1, 0, 0, 0], filter_=predicate,
+                                                 options={'scalar-index.search-mode': mode})
+                with mock.patch('pypaimon.globalindex.data_evolution_global_index_scanner.'
+                                'DataEvolutionGlobalIndexScanner.create', return_value=scanner):
+                    ranges = reader._raw_pre_filter([
+                        RawVectorSearchSplit([Range(5, 9)], [self.entries[2].index_file])])
+                self.assertEqual([Range(5, 9)], ranges)
+                scanner.unindexed_ranges.assert_called_once_with(
+                    predicate, search_mode=GlobalIndexSearchMode(mode), contributing_field_ids=frozenset([0]))
+                self.assertEqual(GlobalIndexSearchMode.FAST, table.options.scalar_index_search_mode())
 
     def test_raw_vector_pre_filter_keeps_full_fallback_as_ranges(self):
         from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
