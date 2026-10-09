@@ -178,7 +178,11 @@ SET spark.paimon.read.repartition-large-scan.enabled = true;
 Set it to `false` to disable `RepartitionLargePaimonScan`. When disabled, the rule
 returns the plan unchanged without planning scan splits or input partitions.
 
-When a Paimon batch scan has an input partition larger than twice `filesMaxPartitionBytes`,
+This rule only applies to tables whose full schema contains a `BLOB`, `ARRAY<BLOB>`,
+or `MAP<..., BLOB>` column, even if that column is pruned from the scan. Other tables
+are skipped without planning scan splits or input partitions.
+
+When an eligible Paimon batch scan has an input partition larger than twice `filesMaxPartitionBytes`,
 the optimizer inserts a shuffle immediately after the scan. The trigger threshold and
 output partition count are calculated separately:
 

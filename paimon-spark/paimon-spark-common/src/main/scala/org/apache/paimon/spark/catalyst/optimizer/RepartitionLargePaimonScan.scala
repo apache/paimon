@@ -21,12 +21,15 @@ package org.apache.paimon.spark.catalyst.optimizer
 import org.apache.paimon.spark.{PaimonScan, SparkConnectorOptions}
 import org.apache.paimon.spark.read.BinPackingSplits
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
+import org.apache.paimon.types.BlobType
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Repartition, RepartitionOperation}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.internal.SQLConf
+
+import scala.collection.JavaConverters._
 
 /** Redistributes oversized scan partitions for downstream operators, preserving the scan itself. */
 object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
@@ -56,7 +59,12 @@ object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
         repartition
       case relation: DataSourceV2ScanRelation if !relation.isStreaming =>
         relation.scan match {
-          case scan: PaimonScan =>
+          case scan: PaimonScan
+              if scan.table
+                .rowType()
+                .getFields
+                .asScala
+                .exists(field => BlobType.isBlobFileField(field.`type`())) =>
             val partitions = scan.inputPartitions
             val targetSize = BinPackingSplits.filesMaxPartitionBytes(scan.coreOptions, SQLConf.get)
             val threshold = BigInt(targetSize) * 2

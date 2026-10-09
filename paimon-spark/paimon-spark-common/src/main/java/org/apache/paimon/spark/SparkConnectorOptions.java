@@ -173,7 +173,8 @@ public class SparkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to insert a shuffle after a batch scan when any input partition "
+                            "Whether to insert a shuffle after a batch scan of a table with BLOB columns "
+                                    + "(including ARRAY<BLOB> and MAP values of BLOB) when any input partition "
                                     + "exceeds twice filesMaxPartitionBytes. The shuffle partition count is "
                                     + "the total input bytes divided by filesMaxPartitionBytes, rounded up. "
                                     + "Does not change the number of scan tasks.");

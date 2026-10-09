@@ -24,7 +24,7 @@ import org.apache.paimon.manifest.FileSource
 import org.apache.paimon.spark.catalyst.optimizer.RepartitionLargePaimonScan
 import org.apache.paimon.table.InnerTable
 import org.apache.paimon.table.source.{DataSplit, Split}
-import org.apache.paimon.types.{DataField, DataTypes, RowType}
+import org.apache.paimon.types.{DataField, DataType, DataTypes, RowType}
 
 import org.apache.spark.sql.catalyst.plans.logical.Repartition
 import org.apache.spark.sql.connector.catalog.{Table => ConnectorTable, TableCapability}
@@ -41,6 +41,30 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
 
   private val enabledKey =
     s"spark.paimon.${SparkConnectorOptions.READ_REPARTITION_LARGE_SCAN_ENABLED.key()}"
+
+  test("non-Blob tables are skipped without planning scan partitions") {
+    withSplitConf {
+      Seq(None, Some(DataTypes.BYTES())).foreach {
+        blobType =>
+          val scan = relation(Seq(Seq(120L)), failOnPlanning = true, blobType = blobType)
+          assert(RepartitionLargePaimonScan(scan) eq scan)
+      }
+    }
+  }
+
+  test("Blob tables remain eligible after Blob columns are pruned") {
+    withSplitConf {
+      Seq(
+        DataTypes.BLOB(),
+        DataTypes.ARRAY(DataTypes.BLOB()),
+        DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())).foreach {
+        blobType =>
+          val scan = relation(Seq(Seq(120L), Seq(30L)), blobType = Some(blobType))
+          assert(scan.scan.readSchema().fieldNames.toSeq == Seq("a"))
+          assert(RepartitionLargePaimonScan(scan).asInstanceOf[Repartition].numPartitions == 3)
+      }
+    }
+  }
 
   test("disabled by default without planning scan partitions") {
     assert(spark.conf.getOption(enabledKey).isEmpty)
@@ -182,12 +206,14 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
   private def relation(
       partitionFileSizes: Seq[Seq[Long]],
       options: Map[String, String] = Map.empty,
-      failOnPlanning: Boolean = false): DataSourceV2ScanRelation = {
+      failOnPlanning: Boolean = false,
+      blobType: Option[DataType] = Some(DataTypes.BLOB())): DataSourceV2ScanRelation = {
     val schema = new StructType().add("a", IntegerType)
     val table = mock(classOf[InnerTable])
     when(table.options()).thenReturn(options.asJava)
-    when(table.rowType())
-      .thenReturn(new RowType(Collections.singletonList(new DataField(0, "a", DataTypes.INT()))))
+    val fields = Seq(new DataField(0, "a", DataTypes.INT())) ++
+      blobType.map(dataType => new DataField(1, "payload", dataType))
+    when(table.rowType()).thenReturn(new RowType(fields.asJava))
     when(table.partitionKeys()).thenReturn(Collections.emptyList[String]())
     when(table.primaryKeys()).thenReturn(Collections.emptyList[String]())
 
@@ -224,11 +250,11 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
     }
     val scan = new PaimonScan(table, schema, Seq.empty, Seq.empty, None, None, None) {
       override protected def getInputSplits: Array[Split] = {
-        assert(!failOnPlanning, "Disabled rule must not plan scan splits")
+        assert(!failOnPlanning, "Skipped scans must not plan scan splits")
         partitions.flatMap(_.splits).toArray
       }
       override protected def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
-        assert(!failOnPlanning, "Disabled rule must not plan scan partitions")
+        assert(!failOnPlanning, "Skipped scans must not plan scan partitions")
         partitions
       }
     }
