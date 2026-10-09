@@ -433,7 +433,10 @@ class DataWriter(ABC):
 
     def _count_delete_rows(self, data: pa.Table) -> int:
         # Count the final file contents, after merging and rolling the buffer.
-        if not self.table.is_primary_key_table or SpecialFields.VALUE_KIND.name not in data.schema.names:
+        if (
+            not self.table.is_primary_key_table
+            or SpecialFields.VALUE_KIND.name not in data.schema.names
+        ):
             return 0
         kind_counts = pc.value_counts(data.column(SpecialFields.VALUE_KIND.name))
         return sum(entry['counts'].as_py() for entry in kind_counts
