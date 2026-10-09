@@ -712,7 +712,8 @@ class PyArrowFileIO(FileIO):
             # OSS requires Content-MD5; newer Botocore defaults to CRC32.
             def use_content_md5(request, **kwargs):
                 request.headers["Content-MD5"] = base64.b64encode(
-                    hashlib.md5(request.body).digest()).decode("ascii")
+                    hashlib.md5(request.body, usedforsecurity=False).digest()
+                ).decode("ascii")
                 for name in list(request.headers):
                     if (name.lower().startswith("x-amz-checksum-") or
                             name.lower() == "x-amz-sdk-checksum-algorithm"):

@@ -206,7 +206,8 @@ class _DeleteRequestHandler(BaseHTTPRequestHandler):
                for name in self.headers):
             return self._respond(
                 400, b"<Error><Code>InvalidRequest</Code></Error>")
-        content_md5 = base64.b64encode(hashlib.md5(body).digest()).decode()
+        content_md5 = base64.b64encode(
+            hashlib.md5(body, usedforsecurity=False).digest()).decode()
         if self.headers.get("Content-MD5") != content_md5:
             return self._respond(
                 400, b"<Error><Code>MissingArgument</Code></Error>")
@@ -557,7 +558,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         parse(pyarrow.__version__) >= parse("22.0.0"),
         "requires PyArrow 22+ and boto3",
     )
-    def test_delete_client_uses_pyarrow_resolved_region(self):
+    def test_delete_client_uses_pyarrow_region_with_fips_md5(self):
         server = _ThreadingHTTPServer(
             ("127.0.0.1", 0), _DeleteRequestHandler)
         server.requests = []
@@ -582,10 +583,20 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
                 file_io = PyArrowFileIO("s3://test-bucket/table", options)
                 self.assertEqual("eu-west-1", file_io.filesystem.region)
                 self.assertTrue(file_io.exists("s3://test-bucket/table"))
-                self.assertTrue(file_io.delete(
-                    "s3://test-bucket/table", recursive=True))
+                file_io._get_s3_delete_client()
+                real_md5 = hashlib.md5
+
+                def fips_md5(data=b"", *, usedforsecurity=True):
+                    if usedforsecurity:
+                        raise ValueError("md5 disabled for FIPS")
+                    return real_md5(data, usedforsecurity=False)
+
+                with mock.patch.object(hashlib, "md5", side_effect=fips_md5):
+                    self.assertTrue(file_io.delete(
+                        "s3://test-bucket/table", recursive=True))
                 file_io._s3_delete_client.close()
             self.assertEqual(set(), server.bucket_objects["test-bucket"])
+            self.assertTrue(any(method == "POST" for method, _ in server.requests))
         finally:
             server.shutdown()
             server.server_close()
