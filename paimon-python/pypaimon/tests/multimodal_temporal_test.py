@@ -122,6 +122,68 @@ class MultimodalTemporalTest(unittest.TestCase):
                 ).to_list()[0]
                 self.assertEqual(expected, row["value"])
 
+    def test_alignment_treats_signed_zero_as_one_group(self):
+        schema = {"group": pa.float64(), "event_time": pa.int64()}
+        anchors = self._table("zero_anchors", schema)
+        samples = self._table("zero_samples", {**schema, "value": pa.int32()})
+        anchors.add([{"group": 0.0, "event_time": time} for time in (1, 2)])
+        samples.add(
+            [
+                {"group": -0.0, "event_time": 1, "value": 7},
+                {"group": 0.0, "event_time": 2, "value": 8},
+            ]
+        )
+        rows = pmm.join_asof(
+            anchors.scan(),
+            samples.scan().select("value"),
+            on="event_time",
+            by="group",
+            tolerance=0,
+        ).to_list()
+        self.assertEqual({1: 7, 2: 8}, {row["event_time"]: row["value"] for row in rows})
+
+    def test_alignment_preserves_composite_group_boundaries(self):
+        schema = {"host": pa.string(), "sensor": pa.int32(), "event_time": pa.int64()}
+        anchors = self._table("composite_anchors", schema)
+        samples = self._table("composite_samples", {**schema, "value": pa.int32()})
+        keys = [("a", 1), ("a", 2), ("b", 1)]
+        anchors.add([{"host": host, "sensor": sensor, "event_time": 10} for host, sensor in keys])
+        samples.add(
+            [
+                {"host": host, "sensor": sensor, "event_time": 9, "value": index}
+                for index, (host, sensor) in enumerate(keys)
+            ]
+        )
+        rows = pmm.join_asof(
+            anchors.scan(),
+            samples.scan().select("value"),
+            on="event_time",
+            by=["host", "sensor"],
+        ).to_list()
+        self.assertEqual(dict(zip(keys, range(3))), {(row["host"], row["sensor"]): row["value"] for row in rows})
+
+    def test_alignment_without_run_end_kernel(self):
+        schema = {"group": pa.string(), "event_time": pa.int64()}
+        anchors = self._table("fallback_anchors", schema)
+        samples = self._table("fallback_samples", {**schema, "value": pa.int32()})
+        anchors.add([{"group": "a", "event_time": 1}])
+        samples.add(
+            [
+                {"group": "a", "event_time": 1, "value": 7},
+                {"group": "b", "event_time": 1, "value": 8},
+            ]
+        )
+        for kernel in (None, mock.Mock(side_effect=pa.ArrowNotImplementedError("No kernel"))):
+            with self.subTest(kernel=kernel), mock.patch.object(temporal.pc, "run_end_encode", kernel, create=True):
+                rows = pmm.join_asof(
+                    anchors.scan(),
+                    samples.scan().select("value"),
+                    on="event_time",
+                    by="group",
+                    tolerance=0,
+                ).to_list()
+                self.assertEqual([7], [row["value"] for row in rows])
+
     def test_asof_excludes_exact_matches_within_group(self):
         anchors = self._table("strict_anchors", {
             "episode_id": pa.int32(), "event_time": pa.int64(),
