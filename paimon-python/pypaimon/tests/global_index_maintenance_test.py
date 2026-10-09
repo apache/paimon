@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -97,6 +97,78 @@ def test_concurrent_commit_rejects_replacement(docs):
     assert names(docs) == old
     assert docs.scan().to_arrow().num_rows == 5
     assert docs.maintain_indexes([SPEC], rebuild=True) == 3
+
+
+@pytest.mark.parametrize("rebuild", [False, True])
+def test_concurrent_compaction_is_not_rolled_back(tmp_path, rebuild):
+    docs = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
+        "docs", schema=pa.schema([("id", pa.int64())]),
+        options={"file.format": "parquet", "commit.native.enabled": "false",
+                 "write.native.enabled": "false"})
+    docs.add([{"id": 0}, {"id": 1}])
+    spec = {"column": "id", "type": "btree"}
+    if rebuild:
+        docs.maintain_indexes([spec])
+    table = docs.raw_table
+    old_indexes = names(docs)
+    old_files = {file.file_name for split in table.new_read_builder().new_scan().plan().splits()
+                 for file in split.files}
+    original = GlobalIndexBuilder.build
+    compacted = []
+
+    def compact_after_build(builder):
+        messages = original(builder)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan_for_write().splits()
+        current = read_builder.new_read().to_arrow(splits).sort_by("id")
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        commit = wb.new_commit()
+        try:
+            writer.write_arrow(current)
+            compact_messages = writer.prepare_commit()
+            assert len(compact_messages) == 1
+            message = compact_messages[0]
+            assert len(message.new_files) == 1
+            message.new_files = [message.new_files[0].assign_first_row_id(0)]
+            message.deleted_files.extend(file for split in splits for file in split.files)
+            # There is no public compaction API; publish the physical file
+            # replacement through the production committer as a COMPACT snapshot.
+            store_commit = commit.file_store_commit
+            try_commit = store_commit._try_commit
+            with patch.object(store_commit, "_try_commit",
+                              side_effect=lambda commit_kind, **kwargs: try_commit("COMPACT", **kwargs)):
+                commit.commit(compact_messages)
+            compacted.append((table.snapshot_manager().get_latest_snapshot(), message.new_files[0].file_name))
+        finally:
+            writer.close()
+            commit.close()
+        return messages
+
+    def rollback_to(instant, from_snapshot):
+        assert table.snapshot_manager().get_latest_snapshot().id == from_snapshot
+        # Exercise real rollback if the regression returns: only the catalog
+        # endpoint is replaced, not conflict detection or the commit retry loop.
+        table.rollback_helper().clean_larger_than(
+            table.snapshot_manager().get_snapshot_by_id(instant.snapshot_id))
+
+    rollback = Mock()
+    rollback.rollback_to.side_effect = rollback_to
+    with patch.object(table.catalog_environment, "catalog_table_rollback", return_value=rollback), \
+            patch.object(GlobalIndexBuilder, "build", compact_after_build):
+        with pytest.raises(RuntimeError, match="Global index maintenance conflict"):
+            docs.maintain_indexes([spec], rebuild=rebuild)
+    rollback.rollback_to.assert_not_called()
+    snapshot, compacted_file = compacted[0]
+    latest = table.snapshot_manager().get_latest_snapshot()
+    assert (latest.id, latest.commit_kind) == (snapshot.id, "COMPACT")
+    assert compacted_file not in old_files
+    assert {file.file_name for split in table.new_read_builder().new_scan().plan().splits()
+            for file in split.files} == {compacted_file}
+    assert names(docs) == old_indexes
+    assert docs.scan().to_arrow().sort_by("id").to_pylist() == [{"id": 0}, {"id": 1}]
+    assert docs.maintain_indexes([spec], rebuild=rebuild) == 1
+    assert table.snapshot_manager().get_latest_snapshot().id == snapshot.id + 1
 
 
 def test_build_failure_keeps_indexes_and_cleans_completed_outputs(docs):
