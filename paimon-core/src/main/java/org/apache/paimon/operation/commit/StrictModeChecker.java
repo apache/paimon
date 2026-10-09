@@ -31,7 +31,6 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -63,11 +62,6 @@ public class StrictModeChecker {
         this.indexManifestFile = indexManifestFile;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
         this.lastSafeSnapshot = lastSafeSnapshot;
-    }
-
-    public void check(
-            long newSnapshotId, CommitKind newCommitKind, List<BinaryRow> newChangedPartitions) {
-        check(newSnapshotId, newCommitKind, newChangedPartitions, Collections.emptySet());
     }
 
     public void check(
