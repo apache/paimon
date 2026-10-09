@@ -17,6 +17,7 @@
 
 import sys
 from collections import namedtuple
+from concurrent.futures import Future
 from threading import Lock
 
 from cachetools import LRUCache
@@ -45,6 +46,7 @@ class BlobIndexCache:
             getsizeof=lambda entry: entry.size_bytes,
         )
         self._lock = Lock()
+        self._loading = {}
 
     def get(self, file_path):
         if self.max_size_bytes == 0:
@@ -71,6 +73,36 @@ class BlobIndexCache:
         entry = _CachedBlobIndex(blob_lengths, blob_offsets, size_bytes)
         with self._lock:
             self._cache[file_path] = entry
+
+    def get_or_load(self, file_path, loader):
+        """Share an in-flight load without holding the cache lock during I/O."""
+        if self.max_size_bytes == 0:
+            return loader()
+        with self._lock:
+            entry = self._cache.get(file_path)
+            if entry is not None:
+                return entry.blob_lengths, entry.blob_offsets
+            pending = self._loading.get(file_path)
+            owner = pending is None
+            if owner:
+                pending = Future()
+                self._loading[file_path] = pending
+
+        if not owner:
+            return pending.result()
+        try:
+            index = loader()
+            self.put(file_path, *index)
+        except BaseException as error:
+            # Unblock waiters even if the loading thread is interrupted.
+            pending.set_exception(error)
+            raise
+        else:
+            pending.set_result(index)
+            return index
+        finally:
+            with self._lock:
+                del self._loading[file_path]
 
     def __len__(self):
         with self._lock:
