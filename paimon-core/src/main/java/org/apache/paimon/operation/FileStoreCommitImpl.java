@@ -895,13 +895,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            CommitChanges changes = changesProvider.provide(latestSnapshot);
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
-                            changes.tableFiles,
-                            changes.changelogFiles,
-                            changes.indexFiles,
+                            changesProvider,
                             identifier,
                             watermark,
                             properties,
@@ -909,8 +906,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             allowRollback,
                             latestSnapshot,
                             detectConflicts,
-                            statsFileName,
-                            changesProvider.rebasedReassignments());
+                            statsFileName);
 
             if (result.isSuccess()) {
                 break;
@@ -1034,9 +1030,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String newStatsFileName) {
         return tryCommitOnce(
                 retryResult,
-                deltaFiles,
-                changelogFiles,
-                indexFiles,
+                CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
                 identifier,
                 watermark,
                 properties,
@@ -1044,15 +1038,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 allowRollback,
                 latestSnapshot,
                 detectConflicts,
-                newStatsFileName,
-                Collections.emptySet());
+                newStatsFileName);
     }
 
     private CommitResult tryCommitOnce(
             @Nullable RetryCommitResult retryResult,
-            List<ManifestEntry> deltaFiles,
-            List<ManifestEntry> changelogFiles,
-            List<IndexManifestEntry> indexFiles,
+            CommitChangesProvider changesProvider,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1060,12 +1051,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
-            @Nullable String newStatsFileName,
-            Set<Long> rebasedReassignments) {
+            @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
 
-        // Check if the commit has been completed. At this point, there will be no more repeated
-        // commits and just return success
+        // Resolve an uncertain successful commit before preparing changes, which may refer
+        // to inputs removed by that successful commit.
         boolean hasOverwriteSinceLastAttempt = false;
         if (retryResult instanceof CommitFailRetryResult && latestSnapshot != null) {
             CommitFailRetryResult commitFailRetry = (CommitFailRetryResult) retryResult;
@@ -1088,6 +1078,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
             }
         }
+
+        CommitChanges changes = changesProvider.provide(latestSnapshot);
+        List<ManifestEntry> deltaFiles = changes.tableFiles;
+        List<ManifestEntry> changelogFiles = changes.changelogFiles;
+        List<IndexManifestEntry> indexFiles = changes.indexFiles;
+        Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
