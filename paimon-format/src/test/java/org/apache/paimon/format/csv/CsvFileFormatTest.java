@@ -896,8 +896,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     @Test
     public void testFieldsContainingTheEscapeCharacterRoundTrip() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
-        // every one of these is written unquoted or half-quoted unless the escape character is
-        // itself escaped, and CsvParser then drops it
+        // Quoted fields must escape both quotes and the escape character to round-trip.
         String[] inputs = {
             "Special\\Characters", "trailing\\", "a,b\\", "\\\\double", "\\\"quoteAfterEscape"
         };
