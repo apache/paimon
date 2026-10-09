@@ -25,6 +25,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema import Schema
@@ -34,7 +35,9 @@ from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.write.writer.data_writer import DataWriter
 
 
-def _create_table(tmp_path, legacy_partition_name=True, composite_partition=False):
+def _create_table(
+    tmp_path, legacy_partition_name=True, composite_partition=False, table_options=None
+):
     table_path = str(tmp_path / "table")
     file_io = LocalFileIO()
     fields = [("id", pa.int64()), ("day", pa.date32())]
@@ -43,15 +46,17 @@ def _create_table(tmp_path, legacy_partition_name=True, composite_partition=Fals
         fields.append(("region", pa.string()))
         partition_keys.append("region")
     arrow_schema = pa.schema(fields)
+    options = {
+        "partition.legacy-name": str(legacy_partition_name).lower(),
+        "scan.native-plan.enabled": "false",
+        "write.native.enabled": "false",
+        "commit.native.enabled": "false",
+    }
+    options.update(table_options or {})
     schema = Schema.from_pyarrow_schema(
         arrow_schema,
         partition_keys=partition_keys,
-        options={
-            "partition.legacy-name": str(legacy_partition_name).lower(),
-            "scan.native-plan.enabled": "false",
-            "write.native.enabled": "false",
-            "commit.native.enabled": "false",
-        },
+        options=options,
     )
     table_schema = SchemaManager(file_io, table_path).create_table(schema)
     table = FileStoreTable(
@@ -248,6 +253,45 @@ def test_old_and_new_composite_partition_files_coexist_after_append(tmp_path):
     table.rollback_to(first_snapshot_id)
 
     assert [item["id"] for item in _read_rows(table)] == [1]
+
+
+@pytest.mark.parametrize("historical_layout", [False, True])
+def test_composite_date_path_lookups_are_batched_across_split_packs(
+    tmp_path, monkeypatch, historical_layout
+):
+    table, arrow_schema = _create_table(
+        tmp_path,
+        composite_partition=True,
+        table_options={
+            CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): "1b",
+            CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): "1b",
+        },
+    )
+    row = {"day": date(1970, 1, 2), "region": "a/b"}
+
+    for row_id in (1, 2):
+        data = {"id": row_id, **row}
+        if historical_layout:
+            _write_legacy_composite_row(table, arrow_schema, data)
+        else:
+            _write_rows(table, arrow_schema, [data])
+
+    lookup_batches = []
+    file_io = table.file_io
+    exists_batch = file_io.exists_batch
+
+    def track_exists_batch(paths):
+        lookup_batches.append(list(paths))
+        return exists_batch(paths)
+
+    monkeypatch.setattr(file_io, "exists_batch", track_exists_batch)
+    splits = table.new_read_builder().new_scan().plan().splits()
+
+    assert len(splits) == 2
+    assert sum(len(split.files) for split in splits) == 2
+    expected_batch_sizes = [2, 2] if historical_layout else [2]
+    assert [len(paths) for paths in lookup_batches] == expected_batch_sizes
+    assert {item["id"] for item in _read_rows(table)} == {1, 2}
 
 
 def test_non_legacy_composite_date_write_uses_canonical_escaping(tmp_path):

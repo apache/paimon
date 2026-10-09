@@ -97,6 +97,21 @@ class AbstractSplitGenerator(ABC):
         splits = []
         if not packed_files or not file_entries:
             return splits
+
+        # All packed groups are derived from the same partition and bucket.
+        # Resolve every file together so path compatibility needs at most one
+        # canonical lookup and one historical fallback per partition/bucket.
+        data_files = [
+            data_file
+            for file_group in packed_files
+            for data_file in file_group
+        ]
+        self._set_data_file_paths(
+            data_files,
+            file_entries[0].partition,
+            file_entries[0].bucket,
+        )
+
         for file_group in packed_files:
             if use_optimized_path:
                 raw_convertible = True
@@ -104,9 +119,6 @@ class AbstractSplitGenerator(ABC):
                 raw_convertible = len(file_group) == 1 and self._without_delete_row(file_group[0])
             else:
                 raw_convertible = True
-
-            self._set_data_file_paths(
-                file_group, file_entries[0].partition, file_entries[0].bucket)
 
             if file_group:
                 # Get deletion files for this split
