@@ -270,6 +270,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         file_io._s3_delete_client.delete_objects.side_effect = \
             _successful_batch_delete
         file_io._s3_delete_client.head_object.side_effect = _missing_marker
+        file_io._s3_delete_client.get_bucket_versioning.return_value = {}
         return file_io
 
     def test_delete_normalizes_oss_uri_before_selecting_bucket(self):
@@ -330,9 +331,32 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
 
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
-        client.head_object.assert_called_once_with(
-            Bucket="test-bucket", Key="db-uuid.db/")
+        self.assertEqual(
+            [mock.call(Bucket="test-bucket", Key="db-uuid.db/")] * 2,
+            client.head_object.call_args_list)
         client.put_object.assert_not_called()
+
+    def test_versioned_oss_rejects_missing_parent_before_deletion(self):
+        for status in ("Enabled", "Suspended"):
+            for recursive in (False, True):
+                with self.subTest(status=status, recursive=recursive):
+                    file_io = self._new_file_io(legacy=False)
+                    file_io._pyarrow_gte_22 = True
+                    directory = file_io.to_filesystem_path(TABLE_PATH)
+                    file_io.filesystem.get_file_info.side_effect = [
+                        [_file_info(directory, pafs.FileType.Directory)], []]
+                    if recursive:
+                        _set_listed_keys(
+                            file_io, ["db-uuid.db/tbl-uuid/data.parquet"], [])
+                    client = file_io._s3_delete_client
+                    client.get_bucket_versioning.return_value = {"Status": status}
+
+                    with self.assertRaisesRegex(OSError, "versioning status " + status):
+                        file_io.delete(TABLE_PATH, recursive=recursive)
+
+                    client.delete_objects.assert_not_called()
+                    client.delete_object.assert_not_called()
+                    client.put_object.assert_not_called()
 
     def test_pyarrow_22_recursive_delete_preserves_late_objects(self):
         file_io = self._new_file_io(legacy=False)

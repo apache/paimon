@@ -540,8 +540,8 @@ class PyArrowFileIO(FileIO):
                 bucket, key = self._split_s3_path(path_str)
                 if key:
                     client = self._get_s3_delete_client()
-                    client.delete_object(Bucket=bucket, Key=key.rstrip("/") + "/")
                     self._ensure_s3_parent_exists(client, bucket, key)
+                    client.delete_object(Bucket=bucket, Key=key.rstrip("/") + "/")
                 return True
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
@@ -572,6 +572,9 @@ class PyArrowFileIO(FileIO):
                 target = schemas if "/schema/schema-" in name else listed
                 target.write(json.dumps(name) + "\n")
 
+            self._check_s3_delete_deadline(deadline, path_str)
+            if self._is_oss:
+                self._s3_parent_marker_missing(client, bucket, key)
             listed.seek(0)
             self._delete_s3_objects(
                 client, bucket, (json.loads(line) for line in listed),
@@ -640,20 +643,35 @@ class PyArrowFileIO(FileIO):
             raise OSError(f"S3 listing returned a key outside prefix {prefix}")
         return keys
 
-    def _ensure_s3_parent_exists(self, client, bucket: str, key: str):
+    def _s3_parent_marker_missing(self, client, bucket: str, key: str) -> bool:
         parent, _, _ = key.rstrip("/").rpartition("/")
         if not parent:
-            return
+            return False
         marker = parent + "/"
         from botocore.exceptions import ClientError
 
         try:
             client.head_object(Bucket=bucket, Key=marker)
-            return
+            return False
         except ClientError as error:
             if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 404:
                 raise
 
+        if self._is_oss:
+            # OSS cannot protect conditional writes on versioned buckets.
+            status = client.get_bucket_versioning(Bucket=bucket).get("Status")
+            if status not in (None, ""):
+                raise OSError(
+                    f"Cannot safely create parent marker in OSS bucket {bucket} "
+                    f"with versioning status {status}")
+        return True
+
+    def _ensure_s3_parent_exists(self, client, bucket: str, key: str):
+        if not self._s3_parent_marker_missing(client, bucket, key):
+            return
+        parent, _, _ = key.rstrip("/").rpartition("/")
+        marker = parent + "/"
+        from botocore.exceptions import ClientError
         request = {"Bucket": bucket, "Key": marker, "Body": b"",
                    "ContentType": "application/x-directory"}
         if not self._is_oss:
