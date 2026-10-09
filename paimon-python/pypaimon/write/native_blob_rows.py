@@ -52,7 +52,13 @@ class NativeBlobRows:
     def _supports_uri(self, uri):
         # Ordinary descriptors retain the core FileIO/HTTP path. A configured
         # application factory owns other URIs and its errors must propagate.
-        return uri in self.readers or self.fallback is not None
+        if uri in self.readers:
+            return True
+        if self.fallback is None:
+            return False
+        if hasattr(self.fallback, '_supports_uri'):
+            return self.fallback._supports_uri(uri)
+        return True
 
     def create(self, uri):
         if uri in self.readers:
