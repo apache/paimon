@@ -92,10 +92,10 @@ class _DeleteRequestHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         self.server.requests.append((self.command, self.path))
-        if not hasattr(self.server, "bucket_objects"):
-            return self._respond(501)
         bucket, key = self._target()
-        exists = not key or key in self.server.bucket_objects.get(bucket, ())
+        objects = (self.server.bucket_objects.get(bucket, ())
+                   if hasattr(self.server, "bucket_objects") else self.server.objects)
+        exists = not key or key in objects
         self._respond(200 if exists else 404)
 
     def do_GET(self):
@@ -245,6 +245,12 @@ def _successful_batch_delete(**kwargs):
     return {"Deleted": kwargs["Delete"]["Objects"]}
 
 
+def _missing_marker(**kwargs):
+    from botocore.exceptions import ClientError
+    raise ClientError({"Error": {"Code": "404"},
+                       "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadObject")
+
+
 class OssDeleteCompatibilityTest(unittest.TestCase):
     def _new_file_io(self, legacy):
         options = Options({
@@ -263,6 +269,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         file_io._s3_delete_client = mock.Mock()
         file_io._s3_delete_client.delete_objects.side_effect = \
             _successful_batch_delete
+        file_io._s3_delete_client.head_object.side_effect = _missing_marker
         return file_io
 
     def test_delete_normalizes_oss_uri_before_selecting_bucket(self):
@@ -302,12 +309,30 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             client.delete_objects.call_args[1]["Delete"]["Objects"]])
         client.delete_object.assert_called_once_with(
             Bucket="test-bucket", Key="db-uuid.db/tbl-uuid/")
-        file_io._s3_delete_client.put_object.assert_called_once_with(
+        client.put_object.assert_called_once_with(
             Bucket="test-bucket", Key="db-uuid.db/", Body=b"",
             ContentType="application/x-directory")
         file_io.filesystem.delete_file.assert_not_called()
         file_io.filesystem.delete_dir_contents.assert_not_called()
         file_io.filesystem.delete_dir.assert_not_called()
+
+    def test_recursive_delete_preserves_existing_parent_marker(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info(directory, pafs.FileType.Directory)]
+        _set_listed_keys(file_io, ["db-uuid.db/tbl-uuid/data.parquet"], [])
+        client = file_io._s3_delete_client
+        client.head_object.side_effect = None
+        client.head_object.return_value = {"ContentLength": 15,
+                                           "Metadata": {"probe": "retained"}}
+
+        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
+
+        client.head_object.assert_called_once_with(
+            Bucket="test-bucket", Key="db-uuid.db/")
+        client.put_object.assert_not_called()
 
     def test_pyarrow_22_recursive_delete_preserves_late_objects(self):
         file_io = self._new_file_io(legacy=False)
@@ -691,6 +716,7 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io._s3_delete_client = mock.Mock()
         file_io._s3_delete_client.delete_objects.side_effect = \
             _successful_batch_delete
+        file_io._s3_delete_client.head_object.side_effect = _missing_marker
         return file_io
 
     def test_pickle_discards_cached_delete_client(self):
@@ -1186,7 +1212,7 @@ class CustomS3EndpointTest(unittest.TestCase):
             self.assertEqual({decoy, "ta/", server.prefix + "late.parquet"},
                              server.objects)
             self.assertEqual(
-                {"GET", "DELETE", "POST", "PUT"},
+                {"GET", "HEAD", "DELETE", "POST", "PUT"},
                 {method for method, _ in server.requests})
             self.assertEqual([
                 "/target-bucket/ta/ble/",

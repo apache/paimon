@@ -640,13 +640,31 @@ class PyArrowFileIO(FileIO):
             raise OSError(f"S3 listing returned a key outside prefix {prefix}")
         return keys
 
-    @staticmethod
-    def _ensure_s3_parent_exists(client, bucket: str, key: str):
+    def _ensure_s3_parent_exists(self, client, bucket: str, key: str):
         parent, _, _ = key.rstrip("/").rpartition("/")
-        if parent:
+        if not parent:
+            return
+        marker = parent + "/"
+        from botocore.exceptions import ClientError
+
+        try:
+            client.head_object(Bucket=bucket, Key=marker)
+            return
+        except ClientError as error:
+            if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 404:
+                raise
+
+        request = {"Bucket": bucket, "Key": marker, "Body": b"",
+                   "ContentType": "application/x-directory"}
+        if not self._is_oss:
+            request["IfNoneMatch"] = "*"
+        try:
             client.put_object(
-                Bucket=bucket, Key=parent + "/", Body=b"",
-                ContentType="application/x-directory")
+                **request)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") not in (
+                    "FileAlreadyExists", "PreconditionFailed"):
+                raise
 
     @staticmethod
     def _check_s3_delete_deadline(deadline: float, path_str: str):
@@ -755,6 +773,12 @@ class PyArrowFileIO(FileIO):
 
             client.meta.events.register(
                 "before-sign.s3.DeleteObjects", use_content_md5)
+        if self._is_oss:
+            def forbid_marker_overwrite(request, **kwargs):
+                request.headers["x-oss-forbid-overwrite"] = "true"
+
+            client.meta.events.register(
+                "before-sign.s3.PutObject", forbid_marker_overwrite)
         self._s3_delete_client = client
         return client
 
