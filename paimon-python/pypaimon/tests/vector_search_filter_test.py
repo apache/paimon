@@ -2950,7 +2950,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         self.assertEqual([1, 8], sorted(list(results[0].results())))
         self.assertEqual([2, 8], sorted(list(results[1].results())))
 
-    def test_read_uses_empty_index_prefilter_when_scalar_index_missing(self):
+    def test_read_routes_index_ranges_to_raw_when_scalar_index_missing(self):
         from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
         from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
 
@@ -2973,10 +2973,14 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             table, limit=2, vector_column=embedding_field,
             query_vector=[1.0], filter_=filter_pred)
 
-        pre_filters = reader._pre_filters([split])
-
-        self.assertEqual(1, len(pre_filters))
-        self.assertEqual(0, pre_filters[0].cardinality())
+        offset_reader = mock.Mock()
+        with mock.patch.object(reader, '_open_offset_reader', return_value=(None, offset_reader)):
+            indexed, raw = reader._prepare_search_splits([split], None)
+        self.assertEqual([], indexed)
+        self.assertEqual(1, len(raw))
+        self.assertEqual([Range(0, 4)], raw[0].row_ranges)
+        self.assertEqual('lumina-vector-ann', raw[0].index_type)
+        offset_reader.close.assert_called_once()
 
     def test_raw_search_uses_partition_filter_and_index_type_metric(self):
         import pyarrow as pa

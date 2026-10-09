@@ -764,6 +764,29 @@ the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
 
 
+# Native local vector search
+
+For REST tables, `read.native.enabled=true` also delegates local vector search
+execution to Rust. Single-vector searches support Data Evolution and configured
+PK vector indexes; batch searches use the existing Data Evolution result API.
+
+```python
+native_table = table.copy({'read.native.enabled': 'true'})
+result = (native_table.new_vector_search_builder()
+          .with_vector_column('embedding')
+          .with_query_vector([1.0, 0.0])
+          .with_limit(10)
+          .execute_local())
+```
+
+Rust plans one snapshot, applies scalar and partition filters before Top-K,
+searches indexes, scans uncovered rows and performs refinement. The returned
+Python result can be passed to `with_global_index_result` as usual, including
+scored physical-position splits for PK tables. An unavailable native backend
+falls back to the Python search reader. Distributed Ray searches keep their
+existing scan/read path.
+
+
 # Vector index range reads
 
 Native vector indexes (`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`)

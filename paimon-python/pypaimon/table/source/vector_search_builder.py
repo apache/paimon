@@ -250,6 +250,13 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
         self._query_vector = vector
         return self
 
+    def execute_local(self):
+        from pypaimon.table.source.native_vector_search import try_native_vector_search
+        result = try_native_vector_search(self, self._query_vector)
+        if result is not None:
+            return result
+        return super().execute_local()
+
     def new_vector_search_read(self):
         # type: () -> VectorSearchRead
         reject_search_under_query_auth(self._table)

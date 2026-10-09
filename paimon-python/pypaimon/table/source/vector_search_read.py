@@ -92,6 +92,7 @@ class AbstractVectorSearchReadImpl:
         self._partition_filter = partition_filter
         self._options = dict(options or {})
         self._index_metric = None
+        self._scalar_pre_filter = None
 
     def _search_metric(self, index_type=None):
         if self._index_metric is not None:
@@ -124,6 +125,32 @@ class AbstractVectorSearchReadImpl:
                 % (self._index_metric, metric, self._vector_column.name))
         self._index_metric = metric
 
+    def _prepare_search_splits(self, splits, snapshot):
+        """Route unevaluable scalar filters through raw scoring, as in Java."""
+        index_splits, raw_splits = _split_search_splits(splits)
+        self._scalar_pre_filter = None
+        if self._filter is None or not index_splits:
+            return index_splits, raw_splits
+        matched = self._scalar_matched_rows(index_splits, snapshot)
+        if matched is not None:
+            self._scalar_pre_filter = matched
+            return index_splits, raw_splits
+
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+        index_type = _vector_index_type(index_splits)
+        # Preserve the persisted metric even when these ANN segments are
+        # replaced by exact raw reads. Closing the wrapper closes its reader.
+        for split in index_splits:
+            if split.vector_index_files:
+                _, offset_reader = self._open_offset_reader(
+                    split.vector_index_files, split.row_range_start, split.row_range_end)
+                offset_reader.close()
+        raw_splits.append(RawVectorSearchSplit(
+            [Range(split.row_range_start, split.row_range_end) for split in index_splits],
+            [index_file for split in index_splits for index_file in split.scalar_index_files],
+            index_type))
+        return [], raw_splits
+
     def _pre_filters(self, splits, snapshot=None):
         # type: (list) -> List[RoaringBitmap64]
         """Evaluate live-row/scalar filters and return one bitmap per index split."""
@@ -132,7 +159,9 @@ class AbstractVectorSearchReadImpl:
 
         live_rows = global_index_live_row_filter.live_rows(
             self._table, self._partition_filter, snapshot)
-        matched_rows = self._scalar_matched_rows(splits, snapshot)
+        matched_rows = self._scalar_pre_filter
+        if matched_rows is None:
+            matched_rows = self._scalar_matched_rows(splits, snapshot)
         if live_rows is None and matched_rows is None:
             return []
 
@@ -169,7 +198,7 @@ class AbstractVectorSearchReadImpl:
                 scalar_files.append(index_file)
 
         if not scalar_files:
-            return RoaringBitmap64()
+            return None
 
         from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
         scanner = DataEvolutionGlobalIndexScanner.create(
@@ -179,12 +208,14 @@ class AbstractVectorSearchReadImpl:
             snapshot=snapshot,
         )
         if scanner is None:
-            return RoaringBitmap64()
+            return None
         try:
             result = scanner.scan(self._filter)
         finally:
             scanner.close()
-        if result is not None and result.is_exact():
+        if result is None:
+            return None
+        if result.is_exact():
             return result.results()
         if not self._table.options.global_index_filter_refine_from_data():
             logging.getLogger(__name__).warning(
@@ -660,7 +691,7 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
 
     def _read(self, splits, snapshot):
         self._index_metric = None
-        index_splits, raw_splits = _split_search_splits(splits)
+        index_splits, raw_splits = self._prepare_search_splits(splits, snapshot)
         if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
 
@@ -709,7 +740,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
     def _read_batch(self, splits, snapshot):
         self._index_metric = None
         n = len(self._query_vectors)
-        index_splits, raw_splits = _split_search_splits(splits)
+        index_splits, raw_splits = self._prepare_search_splits(splits, snapshot)
         if not index_splits and not raw_splits:
             return [GlobalIndexResult.create_empty() for _ in range(n)]
 
