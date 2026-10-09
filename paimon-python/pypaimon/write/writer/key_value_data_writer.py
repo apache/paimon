@@ -26,6 +26,7 @@ from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.row.key_value import KeyValue
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
@@ -313,12 +314,15 @@ class KeyValueDataWriter(DataWriter):
         new_fields.append(pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False))
 
         from pypaimon.write.row_kind import row_kinds
-        value_kind_column = pa.array(row_kinds(self.options, data), type=pa.int8())
+
+        value_kind_column = row_kinds(self.options, data)
         new_arrays.append(value_kind_column)
-        new_fields.append(pa.field('_VALUE_KIND', pa.int8(), nullable=False))
+        new_fields.append(
+            pa.field(SpecialFields.VALUE_KIND.name, pa.int8(), nullable=False)
+        )
 
         for i in range(data.num_columns):
-            if data.schema.field(i).name == '_VALUE_KIND':
+            if data.schema.field(i).name == SpecialFields.VALUE_KIND.name:
                 continue
             new_arrays.append(data.column(i))
             new_fields.append(data.schema.field(i))
