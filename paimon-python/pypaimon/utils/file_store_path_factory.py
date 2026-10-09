@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import math
 import struct
 from datetime import date, timezone
 from decimal import Decimal
@@ -87,6 +88,10 @@ def _floating_partition_string(value, single_precision: bool) -> str:
     encoding = '>f' if single_precision else '>d'
     bits = struct.pack(encoding, value)
     value = struct.unpack(encoding, bits)[0]
+    if math.isnan(value):
+        return 'NaN'
+    if math.isinf(value):
+        return '-Infinity' if value < 0 else 'Infinity'
     for precision in range(2, 10 if single_precision else 18):
         text = format(value, '.{}g'.format(precision))
         try:
@@ -96,8 +101,6 @@ def _floating_partition_string(value, single_precision: bool) -> str:
         if rounded != bits:
             continue
         decimal = Decimal(text)
-        if not decimal.is_finite():
-            return str(value)
         if decimal.is_zero() or Decimal('0.001') <= abs(decimal) < Decimal('1e7'):
             text = format(decimal, 'f')
             if '.' in text:

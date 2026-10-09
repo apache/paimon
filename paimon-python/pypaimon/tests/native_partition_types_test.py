@@ -16,6 +16,7 @@
 
 """Java partition values across native append, PK and data-evolution writes."""
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
@@ -127,6 +128,24 @@ def test_native_evolution_updates_use_typed_partition_values(tmp_path, partition
     assert _read(table) == [dict(row, value=99) for row in expected]
 
 
+@pytest.mark.native_plan
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.parametrize('partition_type', [pa.float32(), pa.float64()])
+@pytest.mark.parametrize('legacy', [False, True])
+def test_native_non_finite_partitions_use_java_names_for_python_reads(tmp_path, partition_type, legacy):
+    table, schema = _table(tmp_path, partition_type, extra_options={
+        'partition.legacy-name': str(legacy).lower(),
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'})
+    rows = [dict(id=i, p=value, value=i) for i, value in enumerate([float('inf'), float('-inf'), 1.5])]
+    messages = _write(table, schema, rows)
+    paths = [file.file_path for message in messages for file in message.new_files]
+    assert paths and all(table.file_io.exists(path) for path in paths)
+    for name in ['Infinity', '-Infinity', '1.5']:
+        assert any('/p=' + name + '/' in path for path in paths)
+    assert _read(table) == rows
+
+
 @pytest.mark.python_write
 @pytest.mark.native_plan
 @pytest.mark.parametrize('partition_type,values,names', _PARTITIONS[2:])
@@ -206,6 +225,30 @@ def test_python_partition_statistics_keep_java_values_and_typed_identity(tmp_pat
     assert [stat.spec for stat in statistics] == [
         {'p': '__DEFAULT_PARTITION__'}, {'p': '__DEFAULT_PARTITION__'}, {'p': 'a/b'}, {'p': '\ufffd'}]
     assert [stat.record_count for stat in statistics] == [2, 2, 6, 2]
+
+
+@pytest.mark.parametrize('partition_type,values,counts', [
+    (pa.float32(), [1.00000001, 1.0, 2.0], [4, 2]),
+    (pa.float64(), [1.00000001, 1.0, 2.0], [2, 2, 2]),
+    (pa.timestamp('ms', tz='UTC'), [
+        datetime(2024, 1, 1),
+        datetime(2024, 1, 1, 8, tzinfo=timezone(timedelta(hours=8))),
+        datetime(2024, 1, 2, tzinfo=timezone.utc)], [4, 2]),
+])
+def test_python_partition_statistics_group_by_schema_encoded_values(tmp_path, partition_type, values, counts):
+    from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.write.file_store_commit import FileStoreCommit
+
+    table, _ = _table(tmp_path, partition_type, native=False)
+    commit = FileStoreCommit.__new__(FileStoreCommit)
+    commit.table = table
+    entries = [ManifestEntry(0, GenericRow([value], table.partition_keys_fields), 0, 1,
+                             Mock(row_count=2, file_size=10, creation_time=None)) for value in values]
+    statistics = commit._generate_partition_statistics(entries)
+    assert [stat.record_count for stat in statistics] == counts
+    assert [stat.file_count for stat in statistics] == [count // 2 for count in counts]
+    assert [stat.file_size_in_bytes for stat in statistics] == [count * 5 for count in counts]
 
 
 @pytest.mark.parametrize('legacy', [False, True])

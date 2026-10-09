@@ -33,7 +33,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
-from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit.commit_rollback import CommitRollback
@@ -1094,11 +1094,10 @@ class FileStoreCommit:
             if len(partition_value) != len(self.table.partition_keys):
                 raise ValueError('Partition row does not match the table partition keys')
             # Java PartitionEntry.toPartitionStatistics reuses the path value
-            # computer, without path escaping. Group by typed partition values:
+            # computer, without path escaping. Group by serialized partition rows:
             # NULL and whitespace remain distinct even if their names coincide.
             partition_spec = dict(zip(self.table.partition_keys, path_factory._canonical_partition(partition_value)))
-            partition_key = tuple(bytes(value) if isinstance(value, (bytearray, memoryview)) else value
-                                  for value in partition_value)
+            partition_key = GenericRowSerializer.to_bytes(entry.partition)
 
             if partition_key not in partition_stats:
                 partition_stats[partition_key] = {

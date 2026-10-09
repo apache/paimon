@@ -30,6 +30,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
@@ -355,6 +356,10 @@ class TestFileStoreCommit(unittest.TestCase):
         # Mock table with required attributes
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
+        self.mock_table.partition_keys_fields = [
+            DataField(0, 'dt', AtomicType('STRING')),
+            DataField(1, 'region', AtomicType('STRING')),
+        ]
         self.mock_table.path_factory.return_value = FileStorePathFactory(
             '/test/table/path', ['dt', 'region'], '__DEFAULT_PARTITION__', 'parquet',
             'data-', 'changelog-', False, False, 'zstd')
@@ -731,7 +736,7 @@ class TestFileStoreCommit(unittest.TestCase):
 
         for old_buckets, new_buckets in [(-2, 2), (2, 3)]:
             with self.subTest(old=old_buckets, new=new_buckets):
-                partition = GenericRow(['2024-01-15', 'us-east-1'], None)
+                partition = GenericRow(['2024-01-15', 'us-east-1'], self.mock_table.partition_keys_fields)
                 entries = [
                     ManifestEntry(
                         kind=1,
@@ -846,6 +851,7 @@ class TestFileStoreCommit(unittest.TestCase):
         """Test partition statistics generation for unpartitioned table."""
         # Update mock table to have no partition keys
         self.mock_table.partition_keys = []
+        self.mock_table.partition_keys_fields = []
 
         # Create FileStoreCommit instance
         file_store_commit = self._create_file_store_commit()
@@ -1107,11 +1113,10 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(2, file_store_commit._try_commit_once.call_count)
         file_store_commit._commit_retry_wait.assert_called_once_with(0)
 
-    @staticmethod
-    def _to_entries(commit_messages):
+    def _to_entries(self, commit_messages):
         commit_entries = []
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), None)
+            partition = GenericRow(list(msg.partition), self.mock_table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
