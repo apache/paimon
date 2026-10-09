@@ -17,9 +17,11 @@
 
 """Ray execution of snapshot-pinned, single-vector queries."""
 
-from contextlib import closing
+from collections import Counter
+from contextlib import closing, contextmanager
 import math
 
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.table.source.vector_search_read import (
     DataEvolutionVectorRead,
@@ -27,6 +29,8 @@ from pypaimon.table.source.vector_search_read import (
     _offer_score,
     _scored_result,
 )
+from pypaimon.table.source import global_index_live_row_filter
+from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
@@ -74,14 +78,13 @@ class _RayVectorSearchRead(DataEvolutionVectorRead):
         self._concurrency = concurrency
         self._remote_args = remote_args
 
-    def _search_index_splits(self, splits, query, search_limit, pre_filters, batch=False):
-        # Filters are planned once on the driver, at the query snapshot. Each
-        # worker receives only its own include-row bitmap, not a table-wide set.
-        items = [(split, None if not pre_filters or pre_filters[i] is None
-                  else pre_filters[i].serialize()) for i, split in enumerate(splits)]
-        context = (self._table, self._vector_column, query, search_limit, self._options)
-        with closing(_map_tasks(
-                _search_index_split, context, items, self._concurrency, self._remote_args, True)) as tasks:
+    def _search_index_splits(self, splits, query, search_limit, snapshot, batch=False):
+        # Send predicates and metadata, leaving each worker to build and consume
+        # its own filter. Batch queries reuse the same filter for every vector.
+        context = (self._table, self._vector_column, query, search_limit, self._options,
+                   self._filter, self._partition_filter, snapshot)
+        with _shared_scalar_filters(splits, self._filter, self._remote_args) as prepare, closing(_map_tasks(
+                _search_index_split, context, splits, self._concurrency, self._remote_args, True, prepare)) as tasks:
             for _, (metric, scores) in tasks:
                 if metric is not None:
                     self._set_index_metric(metric)
@@ -114,11 +117,14 @@ class _RayVectorSearchRead(DataEvolutionVectorRead):
         return _scored_result(heap)
 
 
-def _search_index_split(context, item):
-    table, column, query, limit, options = context
-    split, include_bytes = item
-    reader = DataEvolutionVectorRead(table, limit, column, query, options=options)
-    include = None if include_bytes is None else RoaringBitmap64.deserialize(include_bytes)
+def _search_index_split(context, split, scalar_filter=None):
+    table, column, query, limit, options, filter_, partition_filter, snapshot = context
+    # Explicit shard indexes are evaluated below. Candidate verification must
+    # not rediscover and scan table-wide scalar indexes in every worker.
+    table = table.copy({"global-index.enabled": "false"})
+    reader = DataEvolutionVectorRead(
+        table, limit, column, query, filter_, partition_filter, options)
+    include = _worker_pre_filter(reader, split, snapshot, scalar_filter)
     result = reader._eval(
         split.row_range_start, split.row_range_end,
         split.vector_index_files, query, limit, include).result()
@@ -126,6 +132,62 @@ def _search_index_split(context, item):
     # Return metric even for zero hits, so inconsistent indexes cannot be hidden
     # by a scalar filter and raw fallback uses the persisted index metric.
     return reader._index_metric, _scores(result)
+
+
+def _worker_pre_filter(reader, split, snapshot, scalar_filter):
+    live_rows = global_index_live_row_filter.live_rows(
+        reader._table, reader._partition_filter, snapshot,
+        row_ranges=[Range(split.row_range_start, split.row_range_end)])
+    if scalar_filter is None:
+        matched = reader._scalar_matched_rows([split], snapshot)
+    else:
+        bitmap, exact = scalar_filter
+        result = None if bitmap is None else GlobalIndexResult.create(
+            RoaringBitmap64.deserialize(bitmap), is_exact=exact)
+        matched = reader._refine_scalar_result([split], result, snapshot)
+    filters = reader._combine_pre_filters([split], live_rows, matched)
+    return filters[0] if filters else None
+
+
+def _prepare_scalar_filter(context, split):
+    table, column, query, limit, options, filter_, partition_filter, snapshot = context
+    reader = DataEvolutionVectorRead(table, limit, column, query, filter_, partition_filter, options)
+    result = reader._scalar_index_result([split], snapshot)
+    return (None, False) if result is None else (result.results().serialize(), result.is_exact())
+
+
+@contextmanager
+def _shared_scalar_filters(splits, predicate, remote_args):
+    """Evaluate identical scalar-index inputs once, without fetching masks on the driver."""
+    import ray
+
+    def key(split):
+        return tuple(sorted(f.file_name for f in split.scalar_index_files))
+
+    counts = Counter(key(split) for split in splits) if predicate is not None else {}
+    shared = {files for files, count in counts.items() if files and count > 1}
+    pending = {}
+    remote = ray.remote(_prepare_scalar_filter).options(**remote_args) if shared else None
+
+    def prepare(context_ref, split):
+        files = key(split) if shared else None
+        if files not in shared:
+            return split, None
+        if files not in pending:
+            pending[files] = remote.remote(context_ref, split)
+        # A top-level ObjectRef dependency is resolved before allocating the
+        # search worker, so waiting searches cannot starve their filter tasks.
+        return split, pending[files]
+
+    try:
+        yield prepare
+    finally:
+        for ref in pending.values():
+            try:
+                ray.cancel(ref)
+            except Exception:
+                # Preserve the search failure if the cluster is already gone.
+                pass
 
 
 def _search_raw_split(context, split):
@@ -148,7 +210,7 @@ def _scores(result):
     return scores
 
 
-def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False):
+def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False, prepare_item=None):
     """Bound in-flight work and, optionally, completed results awaiting plan order."""
     import ray
 
@@ -168,7 +230,8 @@ def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False):
                 if item is None:
                     break
                 ordinal, split = item
-                pending[remote.remote(context_ref, split)] = ordinal
+                args = (split,) if prepare_item is None else prepare_item(context_ref, split)
+                pending[remote.remote(context_ref, *args)] = ordinal
             if not pending:
                 break
             ready, _ = ray.wait(list(pending), num_returns=1)
