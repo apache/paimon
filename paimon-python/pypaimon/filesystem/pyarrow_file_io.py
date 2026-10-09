@@ -72,9 +72,14 @@ class PyArrowFileIO(FileIO):
 
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
+            impl_key = OssOptions.OSS_IMPL.key()
+            if _oss_impl == "cpp":
+                # Keep the original properties for the native FileIO bridge.
+                _oss_impl = self.properties.get(OssOptions.OSS_PYTHON_IMPL)
+                impl_key = OssOptions.OSS_PYTHON_IMPL.key()
             if _oss_impl not in ("jindo", "legacy"):
                 raise ValueError(
-                    f"Unsupported fs.oss.impl value: '{_oss_impl}'. "
+                    f"Unsupported {impl_key} value: '{_oss_impl}'. "
                     f"Supported values are 'jindo' and 'legacy'.")
             if _oss_impl == "legacy":
                 self.filesystem = self._initialize_oss_fs(path)
@@ -82,7 +87,7 @@ class PyArrowFileIO(FileIO):
                 self.filesystem = self._initialize_jindo_fs(path)
             else:
                 self.logger.info(
-                    "fs.oss.impl is 'jindo' but pyjindosdk is not installed. "
+                    "Python OSS backend is 'jindo' but pyjindosdk is not installed. "
                     "Falling back to legacy PyArrow S3FileSystem implementation. "
                     "Install pyjindosdk for better performance: pip install pyjindosdk")
                 self.filesystem = self._initialize_oss_fs(path)
@@ -448,10 +453,13 @@ class PyArrowFileIO(FileIO):
 
     def list_status(self, path: str):
         if self._legacy_oss_mode():
+            impl_key = (OssOptions.OSS_PYTHON_IMPL.key()
+                        if self.properties.get(OssOptions.OSS_IMPL) == "cpp"
+                        else OssOptions.OSS_IMPL.key())
             raise LegacyOssDirectoryListingError(
                 "Listing OSS directories is not supported with PyArrow < 16 "
                 "(it parses the first key segment as a bucket). Upgrade to "
-                "pyarrow >= 16, or install pyjindosdk and set fs.oss.impl=jindo.")
+                f"pyarrow >= 16, or install pyjindosdk and set {impl_key}=jindo.")
         path_str = self.to_filesystem_path(path)
         selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
         return self.filesystem.get_file_info(selector)

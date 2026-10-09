@@ -719,6 +719,26 @@ class NativePlanTest(unittest.TestCase):
             'metastore': 'filesystem',
         })
 
+    def test_native_cpp_options_survive_python_backend_selection(self):
+        from pypaimon.filesystem.oss_file_io import OssFileIO
+        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+
+        options = Options({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'legacy',
+                           'fs.oss.cpp.library.path': '/test/libbridge.so',
+                           'fs.oss.cpp.max.concurrent.requests': '4'})
+        for loader_class in (FileSystemCatalogLoader, RESTCatalogLoader):
+            table = Mock(table_path='oss://bucket/table')
+            table.catalog_environment.catalog_loader = loader_class(
+                CatalogContext.create_from_options(options))
+            with patch.object(OssFileIO, '_initialize_oss_fs'), patch(
+                    'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True):
+                table.file_io = OssFileIO(table.table_path, options)
+                native_options = _catalog_options(table)
+            for key, value in options.to_map().items():
+                self.assertEqual(native_options[key], value)
+            if loader_class is FileSystemCatalogLoader:
+                self.assertEqual(_resolved_schema_file_io_options(table), options.to_map())
+
     def test_catalog_options_reject_loader_subclass(self):
         class RoutedFileSystemLoader(FileSystemCatalogLoader):
             pass
@@ -875,13 +895,15 @@ class NativePlanTest(unittest.TestCase):
         from pypaimon.common.identifier import Identifier
         from pypaimon.read.native_plan import _native_read_builder
 
-        response = json.dumps({'name': 't$branch_dev', 'path': '/warehouse/t',
+        response = json.dumps({'name': 't$branch_dev', 'path': 'oss://bucket/t',
                                'id': 'uuid', 'isExternal': False})
         loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({
-            'uri': 'http://localhost:1', 'warehouse': 'test', 'data-token.enabled': 'true'})))
+            'uri': 'http://localhost:1', 'warehouse': 'test', 'data-token.enabled': 'true',
+            'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'legacy',
+            'fs.oss.cpp.library.path': '/test/libbridge.so'})))
         table = Mock()
         table.identifier = Identifier('db', 't', branch='dev')
-        table.table_path = '/warehouse/t'
+        table.table_path = 'oss://bucket/t'
         table.current_branch.return_value = 'dev'
         table.catalog_environment = CatalogEnvironment(
             identifier=table.identifier, uuid='uuid', catalog_loader=loader,
@@ -906,6 +928,7 @@ class NativePlanTest(unittest.TestCase):
         fake_df.Table.from_rest_response.assert_called_once_with(
             response, database='db', table='t$branch_dev',
             rest_options=_catalog_options(table))
+        self.assertEqual(fake_df.Table.from_rest_response.call_args[1]['rest_options']['fs.oss.impl'], 'cpp')
         self.assertEqual(native_table.copy_with_resolved_schema.call_args_list,
                          [call(resolved, branch='dev')] * 3)
         self.assertEqual(native_table.new_read_builder.call_count, 3)

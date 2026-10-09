@@ -102,6 +102,19 @@ class JindoConfigTest(unittest.TestCase):
         stream = JindoInputFile(JindoStream())
         self.assertEqual(5, stream.seek(0, io.SEEK_END))
 
+    def test_cpp_options_are_not_forwarded_to_jindo(self):
+        options = Options({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'jindo',
+                           'fs.oss.cpp.library.path': '/test/libbridge.so',
+                           'fs.oss.cpp.max.concurrent.requests': '4',
+                           'fs.oss.endpoint': 'oss-cn-test.example.com'})
+        with mock.patch.object(jindo_module, 'JINDO_AVAILABLE', True), \
+                mock.patch.object(jindo_module, 'jutil', types.SimpleNamespace(Config=_RecordingConfig)):
+            config = jindo_module.build_jindo_config(options)
+        for key in options.to_map():
+            if key != 'fs.oss.endpoint':
+                self.assertNotIn(key, config.values)
+        self.assertEqual(config.values['fs.oss.endpoint'], 'oss-cn-test.example.com')
+
     def test_forwards_native_options_to_connect(self):
         created_config = _RecordingConfig()
         config_factory = mock.Mock(return_value=created_config)
