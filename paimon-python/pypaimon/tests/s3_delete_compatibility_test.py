@@ -533,19 +533,25 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         file_io._s3_delete_client.put_object.assert_not_called()
 
     def test_delete_rejects_bucket_root(self):
-        for legacy, jindo in ((False, False), (True, False), (False, True)):
-            file_io = self._new_file_io(legacy=legacy)
-            file_io._use_jindo = jindo
-            file_io._pyarrow_gte_22 = True
-            for recursive in (False, True):
-                with self.subTest(legacy=legacy, jindo=jindo,
-                                  recursive=recursive):
-                    with self.assertRaisesRegex(OSError, "bucket root"):
-                        file_io.delete("oss://test-bucket/", recursive)
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        for recursive in (False, True):
+            with self.subTest(recursive=recursive):
+                with self.assertRaisesRegex(OSError, "bucket root"):
+                    file_io.delete("oss://test-bucket/", recursive)
 
-            file_io.filesystem.get_file_info.assert_not_called()
-            file_io._s3_delete_client.delete_object.assert_not_called()
-            file_io._s3_delete_client.put_object.assert_not_called()
+        file_io.filesystem.get_file_info.assert_not_called()
+        file_io._s3_delete_client.delete_object.assert_not_called()
+
+    def test_old_pyarrow_delete_keeps_native_path(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = False
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("test-bucket/", pafs.FileType.NotFound)]
+
+        self.assertFalse(file_io.delete("oss://test-bucket/", recursive=True))
+        file_io.filesystem.get_file_info.assert_called_once()
+        file_io._s3_delete_client.delete_object.assert_not_called()
 
     @unittest.skipUnless(
         parse(pyarrow.__version__) >= parse("22.0.0"),
@@ -636,17 +642,26 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io._s3_endpoint = None
         self.assertFalse(file_io._uses_s3_delete_fallback())
 
-    def test_delete_rejects_bucket_root_with_native_or_fallback(self):
+    def test_delete_rejects_bucket_root_with_fallback(self):
         file_io = self._new_file_io()
-        for gte_22 in (False, True):
-            file_io._pyarrow_gte_22 = gte_22
-            for recursive in (False, True):
-                with self.subTest(gte_22=gte_22, recursive=recursive):
-                    with self.assertRaisesRegex(OSError, "bucket root"):
-                        file_io.delete("s3://test-bucket/", recursive)
+        file_io._pyarrow_gte_22 = True
+        for recursive in (False, True):
+            with self.subTest(recursive=recursive):
+                with self.assertRaisesRegex(OSError, "bucket root"):
+                    file_io.delete("s3://test-bucket/", recursive)
 
         file_io.filesystem.get_file_info.assert_not_called()
         file_io.filesystem.delete_dir_contents.assert_not_called()
+        file_io._s3_delete_client.delete_object.assert_not_called()
+
+    def test_old_pyarrow_delete_keeps_native_s3_path(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = False
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("test-bucket/", pafs.FileType.NotFound)]
+
+        self.assertFalse(file_io.delete("s3://test-bucket/", recursive=True))
+        file_io.filesystem.get_file_info.assert_called_once()
         file_io._s3_delete_client.delete_object.assert_not_called()
 
     def test_recursive_delete_rejects_listed_keys_outside_prefix(self):

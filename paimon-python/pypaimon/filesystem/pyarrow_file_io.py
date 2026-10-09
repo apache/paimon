@@ -277,9 +277,21 @@ class PyArrowFileIO(FileIO):
 
     def _initialize_s3_fs(self) -> FileSystem:
         self._configure_s3_checksums()
-        connection = self._s3_connection_options()
+        access_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_ID.key(),
+            *self._s3_key_variants("access-key", "access.key"))
+        secret_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_SECRET.key(),
+            *self._s3_key_variants("secret-key", "secret.key"))
+        session_token = self._get_property(
+            S3Options.S3_SECURITY_TOKEN.key(),
+            *self._s3_key_variants(
+                "session-token", "session.token",
+                "security-token", "security.token"))
+        endpoint = self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
+        region = self._get_s3_property("region", S3Options.S3_REGION.key())
 
-        if connection["access_key"]:
+        if access_key:
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
             # Uses setdefault so that an explicit user setting is never overridden.
@@ -287,14 +299,17 @@ class PyArrowFileIO(FileIO):
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
-            "endpoint_override": self._s3_endpoint,
-            "access_key": connection["access_key"],
-            "secret_key": connection["secret_key"],
-            "session_token": connection["session_token"],
-            "region": connection["region"],
+            "endpoint_override": endpoint,
+            "access_key": access_key,
+            "secret_key": secret_key,
+            "session_token": session_token,
+            "region": region,
         }
         if self._pyarrow_gte_16:
-            client_kwargs["force_virtual_addressing"] = not connection["path_style"]
+            path_style_access = (
+                self._get_s3_boolean_property("path-style-access") or
+                self._get_s3_boolean_property("path.style.access"))
+            client_kwargs["force_virtual_addressing"] = not path_style_access
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
@@ -506,7 +521,8 @@ class PyArrowFileIO(FileIO):
         }
 
     def delete(self, path: str, recursive: bool = False) -> bool:
-        if self._uses_s3_delete_fallback() and self._is_oss:
+        use_fallback = self._uses_s3_delete_fallback()
+        if use_fallback and self._is_oss:
             parsed = urlparse(path)
             if parsed.scheme == "oss" and parsed.netloc:
                 bucket = self._extract_oss_bucket(path)
@@ -515,22 +531,17 @@ class PyArrowFileIO(FileIO):
                     _, _, key = key.partition("/")
                 path = "oss://" + bucket + "/" + key
         path_str = self.to_filesystem_path(path)
-        if self._is_oss and (self._use_jindo or self._oss_bucket_in_endpoint):
-            bucket_root = path_str.strip("/") in ("", ".")
-        elif self._is_s3 or self._is_oss:
+        if use_fallback:
             bucket, key = self._split_s3_path(path_str)
-            bucket_root = not bucket or not key.strip("/")
-        else:
-            bucket_root = False
-        if bucket_root:
-            raise OSError(f"Refusing to delete bucket root: {path}")
+            if not bucket or not key.strip("/"):
+                raise OSError(f"Refusing to delete bucket root: {path}")
         file_info = self._get_file_info(path_str)
 
         if file_info.type == pafs.FileType.NotFound:
             return False
 
         if file_info.type == pafs.FileType.Directory:
-            if self._uses_s3_delete_fallback():
+            if use_fallback:
                 if recursive:
                     return self._delete_s3_compatible_directory(path_str)
                 selector = pafs.FileSelector(
