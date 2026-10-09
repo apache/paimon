@@ -181,6 +181,11 @@ precedence; required checksums and older PyArrow versions are unchanged.
 Set `fs.s3.checksum-compatibility.auto-configure=false` on all relevant catalogs before
 creating clients to disable this setup. Existing process settings are not cleared.
 
+On PyArrow 22+, directory deletion uses Boto3 with Content-MD5 for OSS and explicit
+S3 endpoints. Ordinary keys are deleted in batches; non-printable keys use individual
+requests. Set `fs.s3.delete.batch-enabled=true` for custom S3 endpoints that support
+native PyArrow batch deletion. Jindo and older PyArrow versions retain native deletion.
+
 ## Create Database
 
 Tables belong to a database. Create the database before creating its tables.
