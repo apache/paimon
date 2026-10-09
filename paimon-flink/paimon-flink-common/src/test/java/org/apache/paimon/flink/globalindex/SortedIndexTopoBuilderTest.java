@@ -20,25 +20,39 @@ package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTask;
+import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.api.transformations.StreamExchangeMode;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.Closeable;
 import java.lang.reflect.Constructor;
@@ -48,9 +62,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -160,29 +177,90 @@ public class SortedIndexTopoBuilderTest {
     }
 
     @Test
-    public void testBuildIndexStreamPreservesColumnGroups() throws Exception {
-        List<List<String>> definitions =
-                Arrays.asList(Collections.singletonList("a"), Arrays.asList("b", "c", "d"));
-        SortedGlobalIndexScanner scanner = mock(SortedGlobalIndexScanner.class);
-        for (List<String> definition : definitions) {
-            when(scanner.withIndexFields(definition)).thenReturn(scanner);
+    public void testBuildIndexStreamPreservesColumnGroups(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        new FileSystemSchemaManager(fileIO, tablePath)
+                .createTable(
+                        Schema.newBuilder()
+                                .column("a", DataTypes.INT())
+                                .column("b", DataTypes.INT())
+                                .column("c", DataTypes.INT())
+                                .column("d", DataTypes.INT())
+                                .column("e", DataTypes.INT())
+                                .option("bucket", "-1")
+                                .option("row-tracking.enabled", "true")
+                                .option("data-evolution.enabled", "true")
+                                .option("sorted-index.records-per-file", "3")
+                                .option("sorted-index.build.max-parallelism", "2")
+                                .build());
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < 12; i++) {
+                write.write(GenericRow.of(i, i % 4, i % 3, i % 5, i == 7 ? null : i));
+            }
+            commit.commit(write.prepareCommit());
         }
-        when(scanner.incrementalScan()).thenReturn(Optional.empty());
-        StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
+
+        // Preserve composite key order and distinguish definitions sharing their first column.
+        List<List<String>> definitions =
+                Arrays.asList(
+                        Collections.singletonList("a"),
+                        Arrays.asList("d", "b", "c"),
+                        Collections.singletonList("e"),
+                        Collections.singletonList("d"));
+        Options userOptions = new Options(table.options());
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment(2);
+        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        long snapshot = table.snapshotManager().latestSnapshot().id();
+        Optional<DataStream<Committable>> written =
+                SortedIndexTopoBuilder.buildIndexStream(
+                        env,
+                        () -> new SortedGlobalIndexScanner(table, "btree", userOptions),
+                        table,
+                        definitions,
+                        "btree",
+                        null,
+                        userOptions);
+        assertThat(written).isPresent();
+        List<CommitMessage> messages = new ArrayList<>();
+        try (CloseableIterator<Committable> committables = written.get().executeAndCollect()) {
+            committables.forEachRemaining(committable -> messages.add(committable.commitMessage()));
+        }
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshot);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshot + 1);
+        Map<List<Integer>, Long> rowCountsByFields =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        index ->
+                                                index.indexFile()
+                                                        .globalIndexMeta()
+                                                        .getIndexedFieldIds(),
+                                        Collectors.summingLong(
+                                                index -> index.indexFile().rowCount())));
+        assertThat(rowCountsByFields)
+                .containsOnly(
+                        entry(Collections.singletonList(0), 12L),
+                        entry(Arrays.asList(3, 1, 2), 12L),
+                        entry(Collections.singletonList(4), 12L),
+                        entry(Collections.singletonList(3), 12L));
         assertThat(
                         SortedIndexTopoBuilder.buildIndexStream(
-                                env,
-                                () -> scanner,
-                                mock(FileStoreTable.class),
+                                StreamExecutionEnvironment.createLocalEnvironment(2),
+                                () -> new SortedGlobalIndexScanner(table, "btree", userOptions),
+                                table,
                                 definitions,
                                 "btree",
                                 null,
-                                new Options()))
+                                userOptions))
                 .isEmpty();
-        for (List<String> definition : definitions) {
-            verify(scanner).withIndexFields(definition);
-        }
-        verifyNoInteractions(env);
     }
 
     @Test

@@ -22,14 +22,12 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -68,7 +66,6 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.entry;
 
 /** Test case for sorted global indexes. */
 public class SortedGlobalIndexITCase extends CatalogITCaseBase {
@@ -118,21 +115,11 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
         sql(
                 "INSERT INTO T_COMPOSITE VALUES "
                         + "(100, CAST(NULL AS STRING), 7), (101, 'category-a', CAST(NULL AS INT))");
+        buildBTreeIndexForTable("T_COMPOSITE", "category");
         // Reverse the schema order to verify the index preserves the requested key order.
-        List<List<String>> definitions =
-                Arrays.asList(
-                        Collections.singletonList("category"),
-                        Arrays.asList("item_number", "category"));
-        FileStoreTable table = paimonTable("T_COMPOSITE");
-        long beforeBuildSnapshot = table.snapshotManager().latestSnapshot().id();
-        buildBTreeIndexesForTable("T_COMPOSITE", definitions);
-        assertThat(table.snapshotManager().latestSnapshot().id())
-                .isEqualTo(beforeBuildSnapshot + 1);
-        assertThat(btreeRowCountsByFields(table))
-                .containsOnly(
-                        entry(Collections.singletonList(1), 42L), entry(Arrays.asList(2, 1), 42L));
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number, category");
         List<IndexManifestEntry> compositeEntries =
-                table.store().newIndexFileHandler().scanEntries().stream()
+                paimonTable("T_COMPOSITE").store().newIndexFileHandler().scanEntries().stream()
                         .filter(
                                 entry ->
                                         entry.indexFile()
@@ -205,22 +192,7 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
         }
         buildBTreeIndexForTable("T_COMPOSITE", "item_number");
         insertCompositeRows(40, 60);
-        beforeBuildSnapshot = table.snapshotManager().latestSnapshot().id();
-        Set<String> initialFiles = fileNames(indexEntries(table, "btree"));
-        buildBTreeIndexesForTable("T_COMPOSITE", definitions);
-        assertThat(table.snapshotManager().latestSnapshot().id())
-                .isEqualTo(beforeBuildSnapshot + 1);
-        assertThat(btreeRowCountsByFields(table))
-                .containsOnly(
-                        entry(Collections.singletonList(1), 62L),
-                        entry(Arrays.asList(2, 1), 62L),
-                        entry(Collections.singletonList(2), 42L));
-        assertThat(fileNames(indexEntries(table, "btree"))).containsAll(initialFiles);
-        Set<String> indexedFiles = fileNames(indexEntries(table, "btree"));
-        buildBTreeIndexesForTable("T_COMPOSITE", definitions);
-        assertThat(table.snapshotManager().latestSnapshot().id())
-                .isEqualTo(beforeBuildSnapshot + 1);
-        assertThat(fileNames(indexEntries(table, "btree"))).isEqualTo(indexedFiles);
+        buildBTreeIndexForTable("T_COMPOSITE", "item_number,category");
         assertThat(
                         sql(
                                 "SELECT id FROM T_COMPOSITE WHERE category = 'category-a' AND item_number = 7"))
@@ -776,26 +748,6 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.create_global_index(`table` => 'default.%s', index_column => '%s', index_type => 'btree')",
                 tableName, indexColumn);
-    }
-
-    private void buildBTreeIndexesForTable(String tableName, List<List<String>> definitions)
-            throws Exception {
-        FileStoreTable table = paimonTable(tableName);
-        SortedIndexTopoBuilder.buildIndexAndExecute(
-                streamExecutionEnvironmentBuilder().batchMode().build(),
-                table,
-                definitions,
-                "btree",
-                null,
-                new Options(table.options()));
-    }
-
-    private Map<List<Integer>, Long> btreeRowCountsByFields(FileStoreTable table) {
-        return indexEntries(table, "btree").stream()
-                .collect(
-                        Collectors.groupingBy(
-                                entry -> entry.indexFile().globalIndexMeta().getIndexedFieldIds(),
-                                Collectors.summingLong(entry -> entry.indexFile().rowCount())));
     }
 
     private void buildBitmapIndexForTable(String tableName, String indexColumn) {
