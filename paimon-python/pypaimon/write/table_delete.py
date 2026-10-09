@@ -327,4 +327,4 @@ class TableDeleteByRowId:
 
     def _index_file_path(self, index_file: IndexFileMeta, partition: GenericRow, bucket: int) -> str:
         return self.table.path_factory().bucket_index_path(
-            tuple(partition.values), bucket, index_file, self.file_io)
+            tuple(partition.values), bucket, index_file)

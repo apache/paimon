@@ -141,7 +141,7 @@ def test_python_binary_partitions_use_java_paths_and_native_reads(tmp_path, part
 
 
 @pytest.mark.native_plan
-def test_native_deletion_vector_restore_reads_java8_partition_directory(tmp_path):
+def test_native_deletion_vector_restore_uses_java_partition_path(tmp_path):
     table, schema = _table(tmp_path, pa.float64(), 'evolution', extra_options={
         'deletion-vectors.enabled': 'true', 'index-file-in-data-file-dir': 'true'})
     _write(table, schema, [dict(id=i, p=1e23, value=i) for i in range(3)])
@@ -156,9 +156,6 @@ def test_native_deletion_vector_restore_reads_java8_partition_directory(tmp_path
             commit.close()
 
     delete(0)
-    from pathlib import Path
-    directory = Path(table.table_path)
-    (directory / 'p=1.0E23').rename(directory / 'p=9.999999999999999E22')
     assert [row['id'] for row in _read(table)] == [1, 2]
     delete(1)
     assert [row['id'] for row in _read(table)] == [2]
@@ -166,14 +163,11 @@ def test_native_deletion_vector_restore_reads_java8_partition_directory(tmp_path
 
 @pytest.mark.native_plan
 @pytest.mark.parametrize('action', ['DELETE', 'UPDATE SET value = 99'])
-def test_native_cow_merge_preserves_java8_file_identity(tmp_path, action):
-    from pathlib import Path
+def test_native_cow_merge_uses_java_partition_path(tmp_path, action):
     from pypaimon_rust.datafusion import SQLContext
 
     table, schema = _table(tmp_path, pa.float64())
     _write(table, schema, [dict(id=i, p=1e23, value=i) for i in range(3)])
-    directory = Path(table.table_path)
-    (directory / 'p=1.0E23').rename(directory / 'p=9.999999999999999E22')
     context = SQLContext()
     context.register_catalog('paimon', {'warehouse': str(tmp_path / 'warehouse')})
     context.sql('MERGE INTO paimon.db.t t USING (SELECT CAST(1 AS INT) AS id) s '

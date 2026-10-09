@@ -1046,7 +1046,7 @@ class FileStoreCommit:
                     file_name = index_file.file_name
                     if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
                         path = self.table.path_factory().bucket_index_path(
-                            tuple(entry.partition.values), entry.bucket, index_file, self.table.file_io)
+                            tuple(entry.partition.values), entry.bucket, index_file)
                     else:
                         path = (
                             index_file.external_path

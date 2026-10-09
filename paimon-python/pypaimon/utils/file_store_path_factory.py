@@ -82,8 +82,8 @@ def canonical_data_file_path(table, partition, bucket, file_name):
 
 
 def _floating_partition_string(value, single_precision: bool) -> str:
-    # Use a shortest round-tripping form for the initial lookup. Older JVMs
-    # can use different digits; the read fallback matches their stored values.
+    # Java's JDK 19+ contract selects a shortest round-tripping form with at
+    # least two significant digits before applying its notation thresholds.
     encoding = '>f' if single_precision else '>d'
     bits = struct.pack(encoding, value)
     value = struct.unpack(encoding, bits)[0]
@@ -304,58 +304,13 @@ class FileStorePathFactory:
         factory = self.global_index_path_factory()
         return factory.to_path(file_name), factory.is_external_path()
 
-    def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
+    def bucket_index_path(self, partition: Tuple, bucket: int, index_file) -> str:
         """Resolve a bucket index using Java partition paths and explicit locations."""
         if index_file.external_path:
             return to_file_io_path(index_file.external_path)
         if not self.index_file_in_data_file_dir:
             return f"{self.index_path()}/{index_file.file_name}"
-        path = to_file_io_path(f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}")
-        # Java Float/Double.toString can produce different digits across JDK
-        # versions. Only these floating partition spellings need a lookup.
-        if file_io is not None and index_file.index_type in ('DELETION_VECTORS', 'HASH') and not file_io.exists(path):
-            python_path = to_file_io_path(f"{self.bucket_path(partition, bucket)}/{index_file.file_name}")
-            alternate = self._find_floating_bucket_index(partition, bucket, index_file.file_name, file_io, python_path)
-            if alternate is not None:
-                return alternate
-        return path
-
-    def _find_floating_bucket_index(self, partition, bucket, file_name, file_io, python_path):
-        floating = [str(data_type).split()[0] in ('FLOAT', 'REAL', 'DOUBLE')
-                    for data_type in self.partition_types or []]
-        if not any(is_float and value is not None for is_float, value in zip(floating, partition)):
-            return None
-        # Float/Double.toString changed across JDK releases. Only if the usual
-        # path is missing, inspect floating partition components and compare
-        # their exact encoded values (including the sign of zero).
-        paths = [to_file_io_path(resolve_path(self.data_file_path(), '.'))]
-        for i, text in enumerate(self._canonical_partition(partition)):
-            prefix = _escape_partition_component(self.partition_keys[i]) + '='
-            if not floating[i] or partition[i] is None:
-                paths = [path + '/' + prefix + _escape_partition_component(text) for path in paths]
-                continue
-            encoding = '>d' if str(self.partition_types[i]).split()[0] == 'DOUBLE' else '>f'
-            expected = struct.pack(encoding, partition[i])
-            matched = []
-            for path in paths:
-                if not file_io.exists(path):
-                    continue
-                for status in file_io.list_status(path):
-                    name = status.base_name
-                    if not name.startswith(prefix):
-                        continue
-                    try:
-                        if struct.pack(encoding, float(name[len(prefix):])) == expected:
-                            matched.append(path + '/' + name)
-                    except (ValueError, OverflowError):
-                        continue
-            paths = sorted(matched)
-        bucket_name = 'postpone' if bucket == BucketMode.POSTPONE_BUCKET.value else str(bucket)
-        for path in paths:
-            candidate = '{}/{}{}/{}'.format(path, self.BUCKET_PATH_PREFIX, bucket_name, file_name)
-            if candidate != python_path and file_io.exists(candidate):
-                return candidate
-        return None
+        return to_file_io_path(f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}")
 
 
 class IndexPathFactory:

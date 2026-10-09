@@ -157,7 +157,7 @@ def test_bucket_dv_requires_java_directory(tmp_path, planner, wrong_directory):
     file = entry.index_file
     assert file.external_path is None
     partition = tuple(entry.partition.values)
-    path = factory.bucket_index_path(partition, entry.bucket, file, table.file_io)
+    path = factory.bucket_index_path(partition, entry.bucket, file)
     wrong_parent = (factory.index_path() if wrong_directory == 'table-index'
                     else factory.bucket_path(partition, entry.bucket))
     wrong_path = wrong_parent + '/' + file.file_name
@@ -189,14 +189,14 @@ def test_floating_bucket_dv_does_not_search_python_directory(tmp_path, file_uri,
         factory._root = 'file://' + table.table_path
     partition = tuple(entry.partition.values)
     file = replace(entry.index_file, external_path=None)
-    canonical = factory.bucket_index_path(partition, entry.bucket, file, table.file_io)
+    canonical = factory.bucket_index_path(partition, entry.bucket, file)
     python_path = factory.bucket_path(partition, entry.bucket) + '/' + file.file_name
     with table.file_io.new_input_stream(canonical) as stream:
         data = stream.read()
     table.file_io.delete_quietly(canonical)
     with table.file_io.new_output_stream(python_path) as stream:
         stream.write(data)
-    assert factory.bucket_index_path(partition, entry.bucket, file, table.file_io) == canonical
+    assert factory.bucket_index_path(partition, entry.bucket, file) == canonical
     with patch.object(table, 'path_factory', return_value=factory):
         with pytest.raises(FileNotFoundError, match=file.file_name):
             _read(table, 'python', 2, [1, 2, 3])
@@ -276,6 +276,26 @@ def test_bucket_dv_writes_java_typed_partition_directory(tmp_path, planner, part
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)
+def test_floating_bucket_dv_requires_current_java_directory(tmp_path, planner):
+    table = _table(tmp_path, 'bucket', 1e23, pa.float64())
+    _delete(table, [0])
+    entry = _entries(table, 2)[0]
+    canonical = (Path(table.table_path) / 'p=1.0E23' /
+                 ('bucket-' + str(entry.bucket)) / entry.index_file.file_name)
+    alternate = (Path(table.table_path) / 'p=9.999999999999999E22' /
+                 ('bucket-' + str(entry.bucket)) / entry.index_file.file_name)
+    alternate.parent.mkdir(parents=True, exist_ok=True)
+    canonical.rename(alternate)
+    expected = table.path_factory().bucket_index_path(
+        tuple(entry.partition.values), entry.bucket, entry.index_file)
+    assert expected == str(canonical)
+    with pytest.raises((FileNotFoundError, ValueError)) as error:
+        _read(table, planner, 2, [1, 2, 3])
+    assert entry.index_file.file_name in str(error.value)
+    assert alternate.is_file()
+
+
+@pytest.mark.parametrize('planner', _PLANNERS)
 @pytest.mark.parametrize('value,partition_type,canonical_name', [
     ('a/b', None, 'a%2Fb'), (True, pa.bool_(), 'true'),
     (0.1, pa.float32(), '0.1'),
@@ -284,14 +304,11 @@ def test_bucket_dv_writes_java_typed_partition_directory(tmp_path, planner, part
     (-0.0, pa.float32(), '-0.0'),
     (1.4e-45, pa.float32(), '1.4E-45'),
     (3.4028234663852886e38, pa.float32(), '3.4028235E38'),
-    (1.17549435e-38, pa.float32(), '1.17549435E-38'),
     (1.17549435e-38, pa.float32(), '1.1754944E-38'),
-    (2.68873286e11, pa.float32(), '2.68873286E11'),
     (2.68873286e11, pa.float32(), '2.6887329E11'),
-    (9.64991956e24, pa.float32(), '9.6499195E24'),
-    (1e23, pa.float64(), '9.999999999999999E22'),
+    (9.64991956e24, pa.float32(), '9.6499196E24'),
     (1e23, pa.float64(), '1.0E23'),
-    (-2.3345394554987242e17, pa.float64(), '-2.33453945549872416E17'),
+    (-2.3345394554987242e17, pa.float64(), '-2.3345394554987242E17'),
     (5e-324, pa.float64(), '4.9E-324'),
     (datetime(2026, 9, 15, 12), pa.timestamp('s'), '2026-09-15 12%3A00%3A00'),
     (datetime(2026, 9, 15, 12), pa.timestamp('ms'), '2026-09-15 12%3A00%3A00.000'),
@@ -391,7 +408,7 @@ def _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_na
     # Model the persisted layout produced by Java: the bucket path is canonical
     # and no explicit index location is needed in its manifest metadata.
     old_path = table.path_factory().bucket_index_path(
-        tuple(old.partition.values), old.bucket, old.index_file, table.file_io)
+        tuple(old.partition.values), old.bucket, old.index_file)
     with table.file_io.new_input_stream(old_path) as stream:
         data = stream.read()
     with table.file_io.new_output_stream(canonical_path) as stream:
