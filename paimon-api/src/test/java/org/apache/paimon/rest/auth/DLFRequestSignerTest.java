@@ -166,6 +166,31 @@ public class DLFRequestSignerTest {
     }
 
     @Test
+    public void testDefaultSignerAsciiAuthorization() throws Exception {
+        assertDefaultSignerAuthorization(
+                "secret",
+                "cn-hangzhou",
+                "732e9db9eeb4ea707238324e6c9de13a7c780bcc6cd977e8427073774efced42");
+    }
+
+    @Test
+    public void testDefaultSignerAuthorizationWithNonAsciiSecret() throws Exception {
+        assertDefaultSignerAuthorization(
+                "secret\u5bc6\u94a5",
+                "cn-hangzhou",
+                "d242e1ee55bd9fc50de6793ace6e681b1edff5d25f7e158de3c84beb1c7f5410");
+    }
+
+    @Test
+    public void testDefaultSignerAuthorizationWithNonAsciiHmacInput() throws Exception {
+        // A synthetic region exercises HMAC input encoding independently of secret encoding.
+        assertDefaultSignerAuthorization(
+                "secret",
+                "region\u4e2d",
+                "993e26f338cc437fd838e508da5b0e0a022514c5661106bb63ca9172eccb1025");
+    }
+
+    @Test
     public void testIdentifier() {
         DLFDefaultSigner defaultSigner = new DLFDefaultSigner("region");
         assertEquals(DLFDefaultSigner.IDENTIFIER, defaultSigner.identifier());
@@ -346,5 +371,26 @@ public class DLFRequestSignerTest {
 
         // Verify all generated nonces are unique
         assertEquals((long) threadCount * iterationsPerThread, nonces.size());
+    }
+
+    private void assertDefaultSignerAuthorization(
+            String secret, String region, String expectedSignature) throws Exception {
+        DLFDefaultSigner signer = new DLFDefaultSigner(region);
+        DLFToken token = new DLFToken("id", secret, null, null);
+        String host = "example.com";
+        String body = "body";
+        Instant now = Instant.parse("2025-04-16T03:44:46Z");
+        RESTAuthParameter request =
+                new RESTAuthParameter(
+                        "/path", Collections.singletonMap("q", "value"), "POST", body);
+        Map<String, String> headers = signer.signHeaders(body, now, null, host);
+
+        // Fixed signatures were calculated independently using UTF-8 for all protocol strings.
+        assertEquals(
+                "DLF4-HMAC-SHA256 Credential=id/20250416/"
+                        + region
+                        + "/DlfNext/aliyun_v4_request,Signature="
+                        + expectedSignature,
+                signer.authorization(request, token, host, headers));
     }
 }
