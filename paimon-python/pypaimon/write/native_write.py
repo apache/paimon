@@ -27,7 +27,7 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.row_utils import row_to_named_values, row_values_to_arrow_table
+from pypaimon.write.row_utils import require_columns, row_to_named_values, row_values_to_arrow_table
 
 
 def native_write_available() -> bool:
@@ -112,6 +112,11 @@ class NativeTableWrite:
         self._blob_consumer = None
         self._blob_uri_reader_factory = None
         self._restore_snapshot_id = restore_snapshot_id
+        self._blob_rows = None
+        if any(is_blob_file_field(field) for field in table.table_schema.fields):
+            from pypaimon.write.native_blob_rows import NativeBlobRows
+            self._blob_rows = NativeBlobRows()
+            self._native_writer.with_blob_uri_reader_factory(self._blob_rows)
 
     def _switch_to_python(self):
         if self._python_writer is not None:
@@ -189,7 +194,12 @@ class NativeTableWrite:
             return self._python_writer.with_blob_uri_reader_factory(uri_reader_factory)
         if self._written:
             raise RuntimeError('with_blob_uri_reader_factory must be called before any write operation.')
-        self._native_writer.with_blob_uri_reader_factory(uri_reader_factory)
+        if self._blob_rows is not None:
+            if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
+                raise TypeError('URI reader factory must provide callable create')
+            self._blob_rows.fallback = uri_reader_factory
+        else:
+            self._native_writer.with_blob_uri_reader_factory(uri_reader_factory)
         self._blob_uri_reader_factory = uri_reader_factory
         return self
 
@@ -239,17 +249,24 @@ class NativeTableWrite:
     def write_row(self, row):
         if self._python_writer is not None:
             return self._python_writer.write_row(row)
-        if any(is_blob_file_field(field) and field.name in self._schema.names
-               for field in self.table.table_schema.fields):
-            # Select the row-aware writer from the first row, including byte
-            # values: later rows may provide custom Blob streams or URI readers.
-            return self._switch_to_python().write_row(row)
         values = row_to_named_values(row, self.table.table_schema.fields)
         names = self._schema.names
-        data = self._prepare_native_arrow_data(row_values_to_arrow_table(
-            values, self.table.table_schema.fields, names).to_batches()[0])
-        from pypaimon.write.row_kind import with_row_kind
-        self._write_native_batch(with_row_kind(self.table, data, row))
+        require_columns(values, names, 'write_row')
+        require_columns(values, self.table.partition_keys, 'write_row')
+        from pypaimon.write.row_kind import skip_write_row, with_row_kind
+        if skip_write_row(self.table, values, row.get_row_kind()):
+            return
+        try:
+            data = (self._blob_rows.to_batch(self.table, [values], names)
+                    if self._blob_rows is not None else
+                    self._prepare_native_arrow_data(row_values_to_arrow_table(
+                        values, self.table.table_schema.fields, names).to_batches()[0]))
+            self._write_native_batch(with_row_kind(self.table, data, row))
+        finally:
+            # Core externalizes Blob values during write, before buffering PK
+            # records. Their live Python objects need not survive the call.
+            if self._blob_rows is not None:
+                self._blob_rows.readers.clear()
 
     def prepare_commit(self, commit_identifier=None):
         if self._python_writer is not None:
@@ -272,6 +289,8 @@ class NativeTableWrite:
         elif self._native_writer is not None:
             self._native_writer.close()
             self._native_writer = None
+        if self._blob_rows is not None:
+            self._blob_rows.readers.clear()
 
     def abort(self):
         if self._python_writer is not None:

@@ -19,7 +19,7 @@
 
 import pyarrow as pa
 
-from pypaimon.schema.data_types import MapType, PyarrowFieldParser
+from pypaimon.schema.data_types import MapType, PyarrowFieldParser, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
@@ -103,7 +103,7 @@ def _native_update_columns_supported(table, columns):
     return not names.intersection(table.options.video_frame_fields())
 
 
-def _upsert_row_batches(rows, fields, schema):
+def _upsert_row_batches(rows, fields, schema, table=None, blob_rows=None):
     """Encode consecutive row shapes without padding absent fields with NULL.
 
     Keep source order, including duplicates across shapes. Key matching,
@@ -120,10 +120,13 @@ def _upsert_row_batches(rows, fields, schema):
             end += 1
         selected = [field for field in fields if field.name in names]
         batch_schema = pa.schema([schema.field(field.name) for field in selected])
-        batches.append(pa.RecordBatch.from_pydict({
-            field.name: [value_for_arrow(row[field.name], field) for row in rows[start:end]]
-            for field in selected
-        }, schema=batch_schema))
+        if blob_rows is not None:
+            batches.append(blob_rows.to_batch(table, rows[start:end], batch_schema.names))
+        else:
+            batches.append(pa.RecordBatch.from_pydict({
+                field.name: [value_for_arrow(row[field.name], field) for row in rows[start:end]]
+                for field in selected
+            }, schema=batch_schema))
         start = end
     return batches
 
@@ -139,16 +142,18 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         return None
     fields = table.table_schema.fields
     schema = PyarrowFieldParser.from_paimon_schema(fields)
+    blob_rows = None
     if any(not _supported_upsert_key_type(schema.field(key).type) for key in set(keys + table.partition_keys)):
         return None
     if not isinstance(data, pa.Table):
         if not columns or not data:
             return None
-        # Row upserts can append custom Blob streams. Select the row-aware
-        # writer before matching or opening any source, including shadowed rows.
-        if any(_contains_blob_value(value) for row in data for value in row.values()):
-            return None
-        data = _upsert_row_batches(data, fields, schema)
+        if any(_contains_blob_value(value) for row in data for value in row.values()) or any(
+                is_blob_file_field(field) and isinstance(field.type, MapType) and field.name in row
+                for field in fields for row in data):
+            from pypaimon.write.native_blob_rows import NativeBlobRows
+            blob_rows = NativeBlobRows()
+        data = _upsert_row_batches(data, fields, schema, table, blob_rows)
     elif (len(data.column_names) != len(set(data.column_names))
             or not set(data.column_names) <= set(schema.names)
             or any(data.schema.field(name).type != schema.field(name).type
@@ -158,7 +163,9 @@ def create_native_upsert(table, commit_user, data, keys, columns):
               ._with_commit_user(commit_user)
               .new_update()
               .with_update_type(columns))
-    return NativeTableUpsert(table, writer, keys, data)
+    if blob_rows is not None:
+        writer._with_blob_uri_reader_factory(blob_rows)
+    return NativeTableUpsert(table, writer, keys, data, blob_rows)
 
 
 def create_native_predicate_update(table, commit_user, predicate, columns=None):
@@ -280,7 +287,7 @@ class NativeTableUpdateByRowId(TableUpdateByRowId):
         if not blob_object_columns:
             return self.update_columns(data, column_names)
         from pypaimon.write.native_blob_rows import NativeBlobRows
-        blobs = NativeBlobRows(self.table.file_io)
+        blobs = NativeBlobRows()
         for name, values in blob_object_columns.items():
             field = self.table.field_dict[name]
             arrow_field = PyarrowFieldParser.from_paimon_field(field)
@@ -302,16 +309,21 @@ class NativeTableUpdateByRowId(TableUpdateByRowId):
 class NativeTableUpsert:
     """Submit Arrow tables or row-shape batches to the core Rust upsert writer."""
 
-    def __init__(self, table, writer, keys, data):
+    def __init__(self, table, writer, keys, data, blob_rows=None):
         self.table = table
         self.writer = writer
         self.keys = keys
         self.data = data
+        self.blob_rows = blob_rows
 
     def upsert(self):
-        return from_native_commit_messages(
-            self.table,
-            self.writer.upsert_by_arrow_with_key(self.data, self.keys))
+        try:
+            return from_native_commit_messages(
+                self.table,
+                self.writer.upsert_by_arrow_with_key(self.data, self.keys))
+        finally:
+            if self.blob_rows is not None:
+                self.blob_rows.readers.clear()
 
 
 class NativePredicateTableUpdate:

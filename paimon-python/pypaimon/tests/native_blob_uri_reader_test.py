@@ -103,6 +103,99 @@ def test_custom_uri_reader_keeps_native_writer(tmp_path):
         commit.close()
 
 
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('row_input', [False, True])
+def test_scoped_application_factory_preserves_native_and_live_row_sources(tmp_path, stream, row_input):
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.tests.native_blob_row_write_test import StreamBlob
+    table = _table(tmp_path, {'blob.copy-buffer-size': '3 B'})
+    source = tmp_path / 'source'
+    source.write_bytes(b'prefixFILEIO!suffix')
+    native_reference = BlobDescriptor(source.as_uri(), 6, 7).serialize()
+
+    class ScopedFactory(Factory):
+        def __init__(self):
+            super().__init__()
+            self.selected = []
+            self.created = []
+
+        def _supports_uri(self, uri):
+            self.selected.append(uri)
+            return uri.startswith('custom://')
+
+        def create(self, uri):
+            self.created.append(uri)
+            return super().create(uri)
+
+    factory = ScopedFactory()
+    blob = StreamBlob(b'OBJECT')
+    values = [[0, blob if row_input else b'BYTES', native_reference],
+              [1, BlobDescriptor('custom://source', 6, 7).serialize(), None]]
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.with_blob_uri_reader_factory(factory)
+        if row_input:
+            for value in values:
+                writer.write_row(GenericRow(value, table.fields))
+            assert blob.opened == 1 and all(source.closed for source in blob.streams)
+        else:
+            writer.write_arrow(pa.Table.from_pylist([
+                dict(zip(['id', 'large', 'small'], value)) for value in values],
+                schema=PyarrowFieldParser.from_paimon_schema(table.fields)))
+        messages = writer.prepare_commit(7) if stream else writer.prepare_commit()
+        commit.commit(messages, 7) if stream else commit.commit(messages)
+        assert writer._python_writer is None
+        assert sorted(factory.selected) == sorted([source.as_uri(), 'custom://source'])
+        assert factory.created == ['custom://source']
+        assert _read(table, True, True) == [
+            dict(id=0, large=b'OBJECT' if row_input else b'BYTES', small=b'FILEIO!'),
+            dict(id=1, large=b'PAYLOAD', small=None),
+        ]
+    finally:
+        writer.close()
+        commit.close()
+
+
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('row_input', [False, True])
+def test_application_factory_selection_errors_do_not_fall_back_to_native_io(tmp_path, stream, row_input):
+    from pypaimon.table.row.generic_row import GenericRow
+    table = _table(tmp_path)
+    source = tmp_path / 'source'
+    source.write_bytes(b'native readable')
+    reference = BlobDescriptor(source.as_uri(), 0, -1).serialize()
+    error = OSError('application selector failed')
+    selected = []
+
+    class FailedSelection:
+        def _supports_uri(self, uri):
+            selected.append(uri)
+            raise error
+
+        def create(self, uri):
+            pytest.fail('A selection error must not select any reader')
+
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        writer.with_blob_uri_reader_factory(FailedSelection())
+        with pytest.raises(OSError) as caught:
+            if row_input:
+                writer.write_row(GenericRow([0, reference, None], table.fields))
+            else:
+                writer.write_arrow(pa.Table.from_pylist([dict(id=0, large=reference, small=None)],
+                                   schema=PyarrowFieldParser.from_paimon_schema(table.fields)))
+        assert caught.value is error
+        assert selected == [source.as_uri()]
+        assert writer._python_writer is None
+        assert writer._blob_rows.readers == {}
+    finally:
+        writer.close()
+    assert not list(tmp_path.rglob('*.blob'))
+    assert not list(tmp_path.rglob('*.parquet'))
+
+
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('stream', [False, True])
 def test_custom_readers_copy_scalar_and_collection_windows(tmp_path, native, stream):
@@ -195,7 +288,7 @@ def test_custom_reader_exceptions_are_not_retried_and_streams_close(tmp_path, op
     assert not list(tmp_path.rglob('*.parquet'))
 
 
-def test_reader_factory_replacement_clear_and_row_fallback(tmp_path):
+def test_reader_factory_replacement_clear_and_native_rows(tmp_path):
     from pypaimon.table.row.generic_row import GenericRow
     table = _table(tmp_path)
     factory = Factory()
@@ -220,6 +313,7 @@ def test_reader_factory_replacement_clear_and_row_fallback(tmp_path):
         writer.with_blob_uri_reader_factory(factory)
         writer.write_row(GenericRow([
             2, BlobDescriptor('custom://source', 6, 7).serialize(), None], table.fields))
+        assert writer._python_writer is None
         commit.commit(writer.prepare_commit())
         assert factory.opened == factory.closed == ['custom://source']
         assert _read(table, True, True) == [{'id': 2, 'large': b'PAYLOAD', 'small': None}]
