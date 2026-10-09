@@ -255,6 +255,10 @@ def test_old_and_new_composite_partition_files_coexist_after_append(tmp_path):
     assert [item["id"] for item in _read_rows(table)] == [1]
 
 
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.python_commit
 @pytest.mark.parametrize("historical_layout", [False, True])
 def test_composite_date_path_lookups_are_batched_across_split_packs(
     tmp_path, monkeypatch, historical_layout
