@@ -24,12 +24,14 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -73,7 +75,15 @@ public abstract class PartitionExpireStrategy implements Serializable {
     }
 
     public Object[] convertPartition(BinaryRow partition) {
-        return toObjectArrayConverter.convert(partition);
+        Object[] values = toObjectArrayConverter.convert(partition);
+        RowType partitionType = toObjectArrayConverter.rowType();
+        for (int index = 0; index < values.length; index++) {
+            if (values[index] != null
+                    && partitionType.getTypeAt(index).getTypeRoot() == DataTypeRoot.DATE) {
+                values[index] = LocalDate.ofEpochDay((Integer) values[index]);
+            }
+        }
+        return values;
     }
 
     public abstract List<PartitionEntry> selectExpiredPartitions(

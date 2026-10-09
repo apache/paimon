@@ -80,6 +80,11 @@ CREATE TABLE t (...) PARTITIONED BY (other_key, dt) WITH (
 );
 ```
 
+For `DATE` partition columns, `values-time` uses the date value in `yyyy-MM-dd` format,
+not its internal epoch-day integer. Use the default timestamp formatter or a formatter
+that matches this representation, such as `yyyy-MM-dd` with the pattern `$dt`.
+Expiration is based on the partition value, not the partition creation time.
+
 `update-time` strategy.
 ```sql
 CREATE TABLE t (...) PARTITIONED BY (dt) WITH (

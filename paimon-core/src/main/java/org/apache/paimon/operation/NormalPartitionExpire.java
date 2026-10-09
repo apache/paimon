@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -160,6 +161,18 @@ public class NormalPartitionExpire implements PartitionExpire {
         List<List<String>> expiredPartValues = new ArrayList<>(partitionEntries.size());
         for (PartitionEntry partition : partitionEntries) {
             Object[] array = strategy.convertPartition(partition.partition());
+            // DATE values are normalized for time extraction; use the stored names for dropping.
+            Map<String, String> partitionSpec =
+                    commit.pathFactory()
+                            .partitionComputer()
+                            .generatePartValues(partition.partition());
+            int index = 0;
+            for (String value : partitionSpec.values()) {
+                if (array[index] instanceof LocalDate) {
+                    array[index] = value;
+                }
+                index++;
+            }
             expiredPartValues.add(strategy.toPartitionValue(array));
         }
 
