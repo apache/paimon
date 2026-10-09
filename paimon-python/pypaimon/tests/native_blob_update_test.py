@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native updates of Parquet columns preserve dedicated Blob files."""
+"""Native updates share the Java Blob placeholder and row-id layout."""
 
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -26,9 +26,10 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.native_write import NativeTableWrite
@@ -39,13 +40,13 @@ from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 pytestmark = pytest.mark.native_plan
 
 
-def _table(tmp_path, extra=None, catalog=None, payloads=None):
+def _table(tmp_path, extra=None, catalog=None, payloads=None, payload_type=None):
     catalog = catalog or CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('db', True)
     fields = [DataField(0, 'id', AtomicType('INT')),
               DataField(1, 'pt', AtomicType('STRING')),
               DataField(2, 'value', AtomicType('INT')),
-              DataField(3, 'payload', AtomicType('BLOB'))]
+              DataField(3, 'payload', payload_type or AtomicType('BLOB'))]
     options = {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
                'write.native.enabled': 'true', 'read.native.enabled': 'true',
                'scan.native-plan.enabled': 'true', 'deletion-vectors.enabled': 'true',
@@ -277,11 +278,355 @@ def test_native_inline_blob_updates_preserve_references(
 
 
 def test_raw_blob_incremental_updater_keeps_one_implementation(tmp_path):
-    # Later calls choose their columns independently. Keeping this operation
-    # on Python permits a scalar update followed by a raw Blob update.
+    # One snapshot/index covers scalar and raw Blob columns chosen per call.
     table, _ = _table(tmp_path)
     from pypaimon.write.native_update import create_native_update_by_row_id
-    assert create_native_update_by_row_id(table, 'test', 7) is None
+    row_ids = {row['id']: row['_ROW_ID']
+               for row in _read(table, projection=['id', '_ROW_ID'])}
+    with _native_only():
+        updater = create_native_update_by_row_id(table, 'test', 7)
+        assert isinstance(updater, NativeTableUpdateByRowId)
+        updater.update_columns(pa.table({
+            '_ROW_ID': [row_ids[1]], 'value': pa.array([111], type=pa.int32()),
+        }), ['value'])
+        updater.update_columns(pa.table({
+            '_ROW_ID': [row_ids[3]],
+            'payload': pa.array([b'replacement'], type=pa.large_binary()),
+        }), ['payload'])
+        messages = updater.commit_messages
+    assert {file.file_name.rsplit('.', 1)[-1]
+            for message in messages for file in message.new_files} == {'parquet', 'blob'}
+    _commit(table.new_stream_write_builder(), messages, True)
+    rows = _read(table)
+    assert [row['value'] for row in rows] == [10, 111, 12, 13]
+    assert [row['payload'] for row in rows] == [b'large' * 10, None, b'', b'replacement']
+
+
+def _blob_values(kind):
+    if kind == 'scalar':
+        return AtomicType('BLOB'), [b'old', None, b'', b'last'], b'new'
+    if kind == 'array':
+        return (ArrayType(True, AtomicType('BLOB')),
+                [[b'old', None, b''], None, [], [b'last']], [b'new', None, b''])
+    key = AtomicType('INT') if kind == 'int_map' else AtomicType('STRING')
+    keys = [1, 2, 3] if kind == 'int_map' else ['a', 'null', '']
+    return (MapType(True, key, AtomicType('BLOB')),
+            [[(keys[0], b'old'), (keys[1], None), (keys[2], b'')], None, [], [(keys[0], b'last')]],
+            [(keys[0], b'new'), (keys[1], None), (keys[2], b'')])
+
+
+@pytest.mark.parametrize('kind', ['scalar', 'array', 'map', 'int_map'])
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('operation', ['row_id', 'grouped', 'incremental', 'row', 'rows', 'predicate'])
+def test_native_raw_blob_updates_across_existing_update_apis(tmp_path, kind, stream, operation):
+    payload_type, original, replacement = _blob_values(kind)
+    table, schema = _table(tmp_path, payloads=original, payload_type=payload_type)
+    before = _read(table, descriptors=True)
+    ids = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    update = builder.new_update().with_update_type(['payload'])
+    data = pa.table({'_ROW_ID': [ids[1], ids[3]],
+                     'payload': pa.array([replacement, None], type=schema.field('payload').type)})
+    with _native_only():
+        if operation == 'row_id':
+            messages = (update.update_by_arrow_with_row_id(data, 7) if stream
+                        else update.update_by_arrow_with_row_id(data))
+        elif operation == 'grouped':
+            batches = iter([data.slice(0, 1), data.slice(1)])
+            # Grouped input is a batch API; stream updates use the shared
+            # incremental updater to transport multiple logical tables.
+            if stream:
+                updater = update.new_update_by_row_id(7)
+                for batch in batches:
+                    updater.update_columns(batch, ['payload'])
+                messages = updater.commit_messages
+            else:
+                messages = update.update_by_arrow_batches_with_row_id(batches)
+        elif operation == 'incremental':
+            updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
+            assert isinstance(updater, NativeTableUpdateByRowId)
+            updater.update_columns(data.slice(0, 1), ['payload'])
+            updater.update_columns(data.slice(1), ['payload'])
+            messages = updater.commit_messages
+        elif operation in ('row', 'rows'):
+            updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
+            assert isinstance(updater, NativeTableUpdateByRowId)
+            rows = [GenericRow([1, 'a', 999, replacement], table.fields),
+                    GenericRow([3, 'b', 999, None], table.fields)]
+            if operation == 'row':
+                updater.update_row_columns(rows[0], [ids[1]], ['payload'])
+                updater.update_row_columns(rows[1], [ids[3]], ['payload'])
+            else:
+                updater.update_rows_columns(rows, [[ids[1]], [ids[3]]], ['payload'])
+            messages = updater.commit_messages
+        else:
+            predicate = PredicateBuilder(table.fields).is_in('id', [1, 3])
+
+            def assignment(matched):
+                return pa.array([replacement if key == 1 else None
+                                 for key in matched['id'].to_pylist()], type=schema.field('payload').type)
+
+            args = (predicate, {'payload': assignment})
+            messages = (update.update_by_predicate(*args, 7, read_columns=['id']) if stream
+                        else update.update_by_predicate(*args, read_columns=['id']))
+    assert messages
+    assert all(file.file_name.endswith('.blob') and file.write_cols == ['payload']
+               and file.min_sequence_number == file.max_sequence_number == 0
+               for message in messages for file in message.new_files)
+    _commit(builder, messages, stream)
+    assert [row['payload'] for row in _read(table)] == [original[0], replacement, original[2], None]
+    assert [row['value'] for row in _read(table)] == [10, 11, 12, 13]
+    after = _read(table, descriptors=True)
+    assert after[0]['payload'] == before[0]['payload']
+    assert after[2]['payload'] == before[2]['payload']
+
+
+@pytest.mark.parametrize('kind', ['scalar', 'array', 'map', 'int_map'])
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('operation', ['upsert_arrow', 'upsert_rows', 'merge'])
+def test_native_raw_blob_matched_updates_and_unmatched_inserts(tmp_path, kind, stream, operation):
+    payload_type, original, replacement = _blob_values(kind)
+    table, schema = _table(tmp_path, payloads=original, payload_type=payload_type)
+    source = pa.table({'id': [0, 4], 'pt': ['a', 'b'], 'value': [100, 400],
+                       'payload': [replacement, None]}, schema=schema)
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    update = builder.new_update().with_update_type(['payload'])
+    with _native_only():
+        if operation == 'merge':
+            with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+                       side_effect=AssertionError('Python merge orchestration')):
+                kwargs = {'commit_identifier': 7} if stream else {}
+                messages = update.merge_into(source, on=['id'], when_matched=[
+                    WhenMatched.update({'payload': source_col('payload')})],
+                    when_not_matched=[WhenNotMatched('*')], **kwargs)
+        elif operation == 'upsert_rows':
+            source_rows = [GenericRow([row[field.name] for field in table.fields], table.fields)
+                           for row in source.to_pylist()]
+            messages = (update.upsert_by_key(source_rows, ['id'], 7) if stream
+                        else update.upsert_by_key(source_rows, ['id']))
+        else:
+            messages = (update.upsert_by_arrow_with_key(source, ['id'], 7) if stream
+                        else update.upsert_by_arrow_with_key(source, ['id']))
+    _commit(builder, messages, stream)
+    rows = _read(table)
+    assert [row['payload'] for row in rows] == [replacement, None, original[2], original[3], None]
+    assert [row['value'] for row in rows] == [10, 11, 12, 13, 400]
+
+
+@pytest.mark.parametrize('kind', ['scalar', 'array', 'map'])
+def test_native_blob_no_baseline_emits_null_for_unchanged_rows(tmp_path, kind):
+    payload_type, _, replacement = _blob_values(kind)
+    table, schema = _table(tmp_path, payloads=[None] * 4, payload_type=payload_type,
+                           extra={'target-file-row-num': '100'})
+    # Create a new logical column with no files in the older snapshot.
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    from pypaimon.schema.schema_change import SchemaChange
+    catalog.alter_table('db.t', [SchemaChange.add_column('extra', payload_type)])
+    table = catalog.get_table('db.t')
+    schema = PyarrowFieldParser.from_paimon_schema(table.fields)
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[1]
+    builder = table.new_batch_write_builder()
+    with _native_only():
+        messages = builder.new_update().update_by_arrow_with_row_id(pa.table({
+            '_ROW_ID': [row_id], 'extra': pa.array([replacement], type=schema.field('extra').type)}))
+    assert all(file.write_cols == ['extra'] and file.row_count == 2
+               for message in messages for file in message.new_files)
+    _commit(builder, messages, False)
+    assert [row['extra'] for row in _read(table)] == [None, replacement, None, None]
+
+
+def test_native_blob_drop_and_add_same_name_does_not_reuse_old_field_baseline(tmp_path):
+    from pypaimon.schema.schema_change import SchemaChange
+    table, _ = _table(tmp_path, extra={'target-file-row-num': '100'})
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.alter_table('db.t', [SchemaChange.drop_column('payload')])
+    catalog.alter_table('db.t', [SchemaChange.add_column('payload', AtomicType('BLOB'))])
+    table = catalog.get_table('db.t')
+    assert table.field_dict['payload'].id != 3
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[1]
+    builder = table.new_batch_write_builder()
+    with _native_only():
+        messages = builder.new_update().update_by_arrow_with_row_id(pa.table({
+            '_ROW_ID': [row_id], 'payload': pa.array([b'new column'], type=pa.large_binary())}))
+    assert all(file.row_count == 2 for message in messages for file in message.new_files)
+    _commit(builder, messages, False)
+    assert [row['payload'] for row in _read(table)] == [None, b'new column', None, None]
+
+
+def test_native_independent_blob_columns_share_a_pinned_update_snapshot(tmp_path):
+    from pypaimon.schema.schema_change import SchemaChange
+    table, _ = _table(tmp_path)
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.alter_table('db.t', [SchemaChange.add_column('items', ArrayType(True, AtomicType('BLOB')))])
+    table = catalog.get_table('db.t')
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[1]
+    builder = table.new_batch_write_builder()
+    with _native_only():
+        updater = builder.new_update().new_update_by_row_id()
+        updater.update_columns(pa.table({'_ROW_ID': [row_id],
+                                        'payload': pa.array([b'scalar'], type=pa.large_binary())}), ['payload'])
+        updater.update_columns(pa.table({'_ROW_ID': [row_id],
+                                        'items': pa.array([[b'array', None]], type=pa.list_(pa.large_binary()))}),
+                               ['items'])
+        paths = set(tmp_path.rglob('*.blob'))
+        with pytest.raises(ValueError, match='overlapping first_row_ids'):
+            updater.update_columns(pa.table({'_ROW_ID': [row_id],
+                                            'payload': pa.array([b'again'], type=pa.large_binary())}), ['payload'])
+        assert set(tmp_path.rglob('*.blob')) == paths
+        messages = updater.commit_messages
+    assert {tuple(file.write_cols) for message in messages for file in message.new_files} == {
+        ('payload',), ('items',)}
+    assert {message.check_from_snapshot for message in messages} == {1}
+    _commit(builder, messages, False)
+    rows = _read(table)
+    assert [row['items'] for row in rows] == [None, [b'array', None], None, None]
+    assert [row['payload'] for row in rows] == [b'large' * 10, b'scalar', b'', b'last']
+
+
+@pytest.mark.parametrize('published', [False, True])
+def test_raw_blob_abort_preserves_prepared_files(tmp_path, published):
+    table, _ = _table(tmp_path)
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[0]
+    builder = table.new_batch_write_builder()
+    with _native_only():
+        updater = builder.new_update().new_update_by_row_id()
+        updater.update_columns(pa.table({'_ROW_ID': [row_id],
+                                        'payload': pa.array([b'new'], type=pa.large_binary())}), ['payload'])
+        messages = list(updater.commit_messages)
+        paths = set(tmp_path.rglob('*.blob'))
+        if published:
+            _commit(builder, messages, False)
+        updater.writer._abort()
+        updater.writer._abort()
+    assert set(tmp_path.rglob('*.blob')) == paths
+    if not published:
+        assert _read(table)[0]['payload'] == b'large' * 10
+        _commit(builder, messages, False)
+    assert _read(table)[0]['payload'] == b'new'
+
+
+def test_raw_blob_updates_keep_previous_prepared_messages_after_generator_failure(tmp_path):
+    table, _ = _table(tmp_path)
+    old_paths = set(tmp_path.rglob('*.blob'))
+
+    def batches():
+        yield pa.table({'_ROW_ID': [0], 'payload': pa.array([b'new'], type=pa.large_binary())})
+        raise RuntimeError('source generator failed')
+
+    with _native_only(), pytest.raises(RuntimeError, match='source generator failed'):
+        table.new_batch_write_builder().new_update().update_by_arrow_batches_with_row_id(batches())
+    assert old_paths < set(tmp_path.rglob('*.blob'))
+    assert [row['payload'] for row in _read(table)] == [b'large' * 10, None, b'', b'last']
+
+
+@pytest.mark.parametrize('kind', ['scalar', 'array', 'map'])
+def test_native_row_update_streams_blob_objects_without_materializing(tmp_path, kind):
+    from pypaimon.tests.blob_table_test import _StreamingOnlyBlob
+    payload_type, original, _ = _blob_values(kind)
+    table, _ = _table(tmp_path, payloads=original, payload_type=payload_type)
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[1]
+    blob = _StreamingOnlyBlob(b'streamed')
+    value = blob if kind == 'scalar' else ([blob, None] if kind == 'array' else [('a', blob), ('null', None)])
+    builder = table.new_batch_write_builder()
+    with _native_only():
+        updater = builder.new_update().new_update_by_row_id()
+        updater.update_row_columns(GenericRow([1, 'a', 11, value], table.fields), [row_id], ['payload'])
+        messages = updater.commit_messages
+    assert blob.opened
+    _commit(builder, messages, False)
+    expected = b'streamed' if kind == 'scalar' else (
+        [b'streamed', None] if kind == 'array' else [('a', b'streamed'), ('null', None)])
+    assert [row['payload'] for row in _read(table)] == [original[0], expected, original[2], original[3]]
+
+
+def test_native_blob_row_failure_preserves_prepared_columns_and_can_retry(tmp_path):
+    from pypaimon.tests.blob_table_test import _StreamingOnlyBlob
+
+    class FailingBlob(_StreamingOnlyBlob):
+        def new_input_stream(self):
+            raise OSError('row stream failed')
+
+    table, _ = _table(tmp_path)
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[0]
+    builder = table.new_batch_write_builder()
+    with _native_only():
+        updater = builder.new_update().new_update_by_row_id()
+        updater.update_columns(pa.table({'_ROW_ID': [row_id], 'value': pa.array([99], type=pa.int32())}), ['value'])
+        prepared = list(updater.commit_messages)
+        paths = set(tmp_path.rglob('*.parquet'))
+        with pytest.raises(OSError, match='row stream failed'):
+            updater.update_row_columns(GenericRow([0, 'a', 99, FailingBlob(b'bad')], table.fields),
+                                       [row_id], ['payload'])
+        assert [file.file_name for message in updater.commit_messages for file in message.new_files] == [
+            file.file_name for message in prepared for file in message.new_files]
+        assert set(tmp_path.rglob('*.parquet')) == paths
+        updater.update_row_columns(GenericRow([0, 'a', 99, _StreamingOnlyBlob(b'retry')], table.fields),
+                                   [row_id], ['payload'])
+        messages = updater.commit_messages
+    _commit(builder, messages, False)
+    assert _read(table)[0] == {'id': 0, 'pt': 'a', 'value': 99, 'payload': b'retry'}
+
+
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('blob_object', [False, True])
+@pytest.mark.parametrize('kind', ['map', 'int_map'])
+def test_native_row_blob_maps_write_java_null_key_records(tmp_path, stream, blob_object, kind):
+    from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+    from pypaimon.tests.blob_table_test import _StreamingOnlyBlob
+    payload_type, original, _ = _blob_values(kind)
+    table, _ = _table(tmp_path, payloads=original, payload_type=payload_type,
+                      extra={'blob.target-file-size': '1 MB'})
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[1]
+    value = _StreamingOnlyBlob(b'null key') if blob_object else b'null key'
+    key = 7 if kind == 'int_map' else 'normal'
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    with _native_only():
+        update = builder.new_update()
+        updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
+        updater.update_row_columns(GenericRow([1, 'a', 11, [(None, value), (key, None)]], table.fields),
+                                   [row_id], ['payload'])
+        messages = updater.commit_messages
+    _commit(builder, messages, stream)
+    file = messages[0].new_files[0]
+    reader = FormatBlobReader(table.file_io, file.file_path, ['payload'], [table.field_dict['payload']],
+                              None, False)
+    try:
+        # Row iteration preserves the nullable keys which Arrow Map cannot
+        # represent. The independent Python decoder verifies Java's -1 tag.
+        row = reader.read_values_at([row_id - file.first_row_id])[0]
+        assert row[None].to_data() == b'null key'
+        assert row[key] is None
+        assert reader.blob_lengths[0] == -2
+    finally:
+        reader.close()
+    if blob_object:
+        assert value.opened
+
+
+def test_native_row_blob_map_rejects_duplicate_null_keys_before_record_write(tmp_path):
+    table, _ = _table(tmp_path, payloads=[[], None, [], []],
+                      payload_type=MapType(True, AtomicType('STRING'), AtomicType('BLOB')))
+    row_id = {row['id']: row['_ROW_ID'] for row in _read(table, projection=['id', '_ROW_ID'])}[1]
+    paths = set(tmp_path.rglob('*.blob'))
+    with _native_only(), pytest.raises(ValueError, match='unique'):
+        table.new_batch_write_builder().new_update().new_update_by_row_id().update_row_columns(
+            GenericRow([1, 'a', 11, [(None, b'first'), (None, b'second')]], table.fields),
+            [row_id], ['payload'])
+    assert set(tmp_path.rglob('*.blob')) == paths
+
+
+def test_raw_blob_row_upsert_keeps_streams_lazy_on_python_path(tmp_path):
+    from pypaimon.tests.blob_table_test import _StreamingOnlyBlob
+    table, _ = _table(tmp_path)
+    first, shadowed, surviving = (_StreamingOnlyBlob(value) for value in (b'first', b'shadow', b'last'))
+    source = [GenericRow([0, 'a', 100, first], table.fields),
+              GenericRow([4, 'b', 400, shadowed], table.fields),
+              GenericRow([4, 'b', 401, surviving], table.fields)]
+    builder = table.new_batch_write_builder()
+    messages = builder.new_update().with_update_type(['payload']).upsert_by_key(source, ['id'])
+    _commit(builder, messages, False)
+    assert first.opened and surviving.opened and not shadowed.opened
+    assert [row['payload'] for row in _read(table)] == [b'first', None, b'', b'last', b'last']
 
 
 def test_view_prescan_keeps_inline_descriptor_predicate(tmp_path, native_rest_catalog):
