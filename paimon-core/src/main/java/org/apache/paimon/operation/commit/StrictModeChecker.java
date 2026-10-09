@@ -65,9 +65,15 @@ public class StrictModeChecker {
     }
 
     public void check(
-            long newSnapshotId, CommitKind newCommitKind, List<BinaryRow> newChangedPartitions) {
+            long newSnapshotId,
+            CommitKind newCommitKind,
+            List<BinaryRow> newChangedPartitions,
+            Set<Long> rebasedReassignments) {
         Set<BinaryRow> newPartitions = new HashSet<>(newChangedPartitions);
         for (long id = lastSafeSnapshot + 1; id < newSnapshotId; id++) {
+            if (newCommitKind == CommitKind.COMPACT && rebasedReassignments.contains(id)) {
+                continue;
+            }
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitUser().equals(commitUser)) {
                 continue;
