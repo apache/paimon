@@ -778,23 +778,6 @@ class CustomS3EndpointTest(unittest.TestCase):
                 file_io._s3_delete_client.delete_object.assert_called_once_with(
                     Bucket="test-bucket", Key="table/")
 
-    def test_batch_delete_can_be_enabled_for_compatible_endpoint(self):
-        file_io = self._new_file_io()
-        file_io.properties.set(
-            S3Options.S3_DELETE_BATCH_ENABLED, "true")
-        file_io._pyarrow_gte_22 = True
-        directory = "test-bucket/table"
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory),
-        ]
-        file_io.to_filesystem_path = mock.Mock(return_value=directory)
-
-        self.assertTrue(file_io.delete("s3://test-bucket/table", recursive=True))
-
-        file_io.filesystem.delete_dir_contents.assert_called_once_with(directory)
-        file_io.filesystem.delete_dir.assert_called_once_with(directory)
-        file_io._s3_delete_client.delete_object.assert_not_called()
-
     def test_recursive_delete_uses_bucket_from_target_uri(self):
         file_io = self._new_file_io()
         file_io._pyarrow_gte_22 = True

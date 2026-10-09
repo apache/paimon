@@ -119,10 +119,7 @@ class PyArrowFileIO(FileIO):
                 and (self._is_oss or bool(self._s3_endpoint)))
 
     def _uses_s3_delete_fallback(self) -> bool:
-        return (self._uses_s3_compatibility()
-                and self._pyarrow_gte_22
-                and not (self._is_s3 and self._get_s3_boolean_property(
-                    "delete.batch-enabled")))
+        return self._uses_s3_compatibility() and self._pyarrow_gte_22
 
     def _configure_s3_checksums(self):
         if parse(pyarrow.__version__) < parse("22.0.0"):

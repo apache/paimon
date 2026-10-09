@@ -182,8 +182,7 @@ Set `fs.s3.checksum-compatibility.auto-configure=false` on all relevant catalogs
 creating clients to disable this setup. Existing process settings are not cleared.
 
 On PyArrow 22+, OSS and explicit S3 endpoints use Boto3 with Content-MD5 for
-directory deletion. Non-printable keys are deleted individually. Custom S3 endpoints
-can use native PyArrow deletion with `fs.s3.delete.batch-enabled=true`.
+directory deletion. Non-printable keys are deleted individually.
 
 ## Create Database
 

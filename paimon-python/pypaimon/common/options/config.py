@@ -46,9 +46,6 @@ class OssOptions:
 
 
 class S3Options:
-    S3_DELETE_BATCH_ENABLED = ConfigOptions.key(
-        "fs.s3.delete.batch-enabled").boolean_type().default_value(False).with_description(
-            "Use native PyArrow batch deletion for custom S3 endpoints")
     CHECKSUM_COMPATIBILITY_AUTO_CONFIGURE = (
         ConfigOptions.key("fs.s3.checksum-compatibility.auto-configure").boolean_type().default_value(True)
         .with_description("Apply a process-wide optional-checksum default for PyArrow OSS/custom S3 clients."))
