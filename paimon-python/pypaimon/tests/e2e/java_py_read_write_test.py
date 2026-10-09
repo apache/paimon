@@ -150,11 +150,11 @@ class JavaPyReadWriteTest(unittest.TestCase):
             read_builder = table.new_read_builder()
             result = read_builder.new_read().to_arrow(
                 read_builder.new_scan().plan().splits())
-            self.assertEqual(result.to_pylist(), [{
-                'id': 1,
-                'day': datetime.date(1970, 1, 2),
-                'region': 'a/b',
-            }])
+            self.assertEqual(result.to_pydict(), {
+                'id': [1],
+                'day': [datetime.date(1970, 1, 2)],
+                'region': ['a/b'],
+            })
 
     def test_py_write_composite_date_partition(self):
         arrow_schema = pa.schema([
@@ -169,11 +169,11 @@ class JavaPyReadWriteTest(unittest.TestCase):
             builder = table.new_batch_write_builder()
             writer, commit = builder.new_write(), builder.new_commit()
             try:
-                writer.write_arrow(pa.Table.from_pylist([{
-                    'id': 2,
-                    'day': datetime.date(1970, 1, 2),
-                    'region': 'a/b',
-                }], schema=arrow_schema))
+                writer.write_arrow(pa.table({
+                    'id': [2],
+                    'day': [datetime.date(1970, 1, 2)],
+                    'region': ['a/b'],
+                }, schema=arrow_schema))
                 commit.commit(writer.prepare_commit())
             finally:
                 writer.close()
@@ -183,7 +183,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             result = read_builder.new_read().to_arrow(
                 read_builder.new_scan().plan().splits())
             self.assertEqual(
-                {row['id'] for row in result.to_pylist()}, {1, 2})
+                set(result.to_pydict()['id']), {1, 2})
 
     @parameterized.expand([
         (type_name, order, grouping)

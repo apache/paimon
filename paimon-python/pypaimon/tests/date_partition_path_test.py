@@ -22,6 +22,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -66,7 +67,13 @@ def _write_rows(table, arrow_schema, rows):
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
-        writer.write_arrow(pa.Table.from_pylist(rows, schema=arrow_schema))
+        writer.write_arrow(pa.table(
+            {
+                name: [row[name] for row in rows]
+                for name in arrow_schema.names
+            },
+            schema=arrow_schema,
+        ))
         commit.commit(writer.prepare_commit())
     finally:
         writer.close()
@@ -106,7 +113,12 @@ def _write_legacy_date_row(table, arrow_schema, row):
 def _read_rows(table):
     builder = table.new_read_builder()
     splits = builder.new_scan().plan().splits()
-    return builder.new_read().to_arrow(splits).to_pylist()
+    result = builder.new_read().to_arrow(splits)
+    columns = result.to_pydict()
+    return [
+        {name: columns[name][index] for name in result.column_names}
+        for index in range(result.num_rows)
+    ]
 
 
 def test_legacy_date_partition_write_uses_java_epoch_day(tmp_path):
@@ -121,6 +133,10 @@ def test_legacy_date_partition_write_uses_java_epoch_day(tmp_path):
     assert _read_rows(table) == [{"id": 1, "day": date(1970, 1, 2)}]
 
 
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.python_commit
 def test_legacy_python_date_partition_directory_remains_readable(tmp_path):
     table, arrow_schema = _create_table(tmp_path)
 
@@ -204,6 +220,10 @@ def test_legacy_composite_date_write_reads_back_from_canonical_path(tmp_path):
     assert (Path(table.table_path) / "day=1" / "region=a%2Fb" / "bucket-0").is_dir()
 
 
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.python_commit
 def test_old_and_new_composite_partition_files_coexist_after_append(tmp_path):
     table, arrow_schema = _create_table(tmp_path, composite_partition=True)
     row = {"day": date(1970, 1, 2), "region": "a/b"}
