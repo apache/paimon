@@ -45,6 +45,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -127,7 +128,7 @@ public class SortedIndexTopoBuilderTest {
                                 env,
                                 () -> indexScanner,
                                 mock(FileStoreTable.class),
-                                Collections.singletonList("id"),
+                                Collections.singletonList(Collections.singletonList("id")),
                                 "btree",
                                 null,
                                 new Options()))
@@ -149,12 +150,38 @@ public class SortedIndexTopoBuilderTest {
                                 env,
                                 () -> indexScanner,
                                 mock(FileStoreTable.class),
-                                Collections.singletonList("id"),
+                                Collections.singletonList(Collections.singletonList("id")),
                                 "btree",
                                 null,
                                 new Options()))
                 .isEmpty();
         verify(indexScanner).incrementalScan();
+        verifyNoInteractions(env);
+    }
+
+    @Test
+    public void testBuildIndexStreamPreservesColumnGroups() throws Exception {
+        List<List<String>> definitions =
+                Arrays.asList(Collections.singletonList("a"), Arrays.asList("b", "c", "d"));
+        SortedGlobalIndexScanner scanner = mock(SortedGlobalIndexScanner.class);
+        for (List<String> definition : definitions) {
+            when(scanner.withIndexFields(definition)).thenReturn(scanner);
+        }
+        when(scanner.incrementalScan()).thenReturn(Optional.empty());
+        StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
+        assertThat(
+                        SortedIndexTopoBuilder.buildIndexStream(
+                                env,
+                                () -> scanner,
+                                mock(FileStoreTable.class),
+                                definitions,
+                                "btree",
+                                null,
+                                new Options()))
+                .isEmpty();
+        for (List<String> definition : definitions) {
+            verify(scanner).withIndexFields(definition);
+        }
         verifyNoInteractions(env);
     }
 
