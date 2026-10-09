@@ -78,6 +78,42 @@ import static org.mockito.Mockito.when;
 /** Tests for {@link DataEvolutionCompactCoordinator.CompactPlanner}. */
 public class DataEvolutionCompactCoordinatorTest {
 
+    @ParameterizedTest
+    @CsvSource({
+        "12,200,4,1,4",
+        "2,256,4,1,0",
+        "2,257,4,1,1",
+        "4,10,4,1,0",
+        "5,10,4,1,1",
+        "1,600,4,1,0",
+        "2,1,300,1,1",
+        "2,300,4,0,1",
+        "2,300,4,2,0"
+    })
+    public void testNormalFileSizeAndCountThresholds(
+            int fileCount, long fileSize, long openFileCost, long rowIdStep, int expectedTasks) {
+        long mib = 1024L * 1024L;
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < fileCount; i++) {
+            entries.add(makeEntry("file-" + i + ".parquet", i * rowIdStep, 1L, fileSize * mib));
+        }
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false, false, 512 * mib, openFileCost * mib, 5);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(expectedTasks);
+        if (expectedTasks > 0) {
+            assertThat(
+                            tasks.stream()
+                                    .flatMap(task -> task.compactBefore().stream())
+                                    .collect(Collectors.toList()))
+                    .containsExactlyElementsOf(
+                            entries.stream().map(ManifestEntry::file).collect(Collectors.toList()));
+        }
+    }
+
     @Test
     public void testRejectsRewriteRowIdsOption() {
         FileStoreTable table = mock(FileStoreTable.class);
@@ -165,9 +201,11 @@ public class DataEvolutionCompactCoordinatorTest {
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
-        assertThat(tasks).hasSize(1);
+        assertThat(tasks).hasSize(2);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(2).file(), entries.get(3).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(entries.get(4).file(), entries.get(5).file());
     }
 
     @Test
@@ -192,7 +230,8 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeEntryWithSize("below.parquet", 0L, 10L, 0, 199L),
                         makeEntryWithSize("boundary.parquet", 10L, 10L, 0, 200L),
                         makeEntryWithSize("large.parquet", 20L, 10L, 0, 201L),
-                        makeEntryWithSize("update.parquet", 20L, 10L, 1, 10L));
+                        makeEntryWithSize("update.parquet", 20L, 10L, 1, 10L),
+                        makeEntryWithSize("large-only.parquet", 30L, 10L, 0, 201L));
         for (boolean enabled : new boolean[] {false, true}) {
             DataEvolutionCompactCoordinator.CompactPlanner planner =
                     new DataEvolutionCompactCoordinator.CompactPlanner(
@@ -206,12 +245,11 @@ public class DataEvolutionCompactCoordinatorTest {
                             schemaId -> null,
                             null);
             List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+            assertThat(tasks).hasSize(enabled ? 2 : 1);
+            assertThat(tasks.get(0).compactBefore())
+                    .containsExactly(entries.get(2).file(), entries.get(3).file());
             if (enabled) {
-                assertThat(tasks).hasSize(1);
-                assertThat(tasks.get(0).compactBefore())
-                        .containsExactly(entries.get(2).file(), entries.get(3).file());
-            } else {
-                assertThat(tasks).isEmpty();
+                assertThat(tasks.get(1).compactBefore()).containsExactly(entries.get(4).file());
             }
         }
     }
@@ -489,14 +527,15 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeEntry("file2.parquet", 100L, 100L, 100));
         entries.add(makeBlobEntry("file2.blob", 100L, 100L, 100, "pic"));
 
+        // Keep normal files below the size threshold to isolate the file-count trigger.
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                blobPlanner(1024, 1024, 100, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+                blobPlanner(1024, 1, 100, rowType(new DataField(1, "pic", DataTypes.BLOB())));
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isEmpty();
 
-        planner = blobPlanner(1024, 1024, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+        planner = blobPlanner(1024, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
         tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(2);
@@ -514,14 +553,14 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeEntry("file2.parquet", 100L, 100L, 100));
         entries.add(makeVectorStoreEntry("file2.vector.json", 100L, 100L, 100));
 
-        DataEvolutionCompactCoordinator.CompactPlanner planner =
-                vectorStorePlanner(1024, 1024, 100);
+        // Keep normal files below the size threshold to isolate the file-count trigger.
+        DataEvolutionCompactCoordinator.CompactPlanner planner = vectorStorePlanner(1024, 1, 100);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isEmpty();
 
-        planner = vectorStorePlanner(1024, 1024, 2);
+        planner = vectorStorePlanner(1024, 1, 2);
         tasks = planner.compactPlan(entries);
 
         assertThat(tasks).hasSize(2);

@@ -69,6 +69,54 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
 
     private static final int ROW_COUNT = 100;
 
+    @Test
+    public void testSizeTriggeredCompactBelowMinimumFileCount() throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+        for (int i = 0; i < 2; i++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p0"),
+                                i,
+                                BinaryString.fromString("value-" + i)));
+                commit.commit(write.prepareCommit());
+            }
+        }
+        List<InternalRow> expected = read(table);
+        List<DataFileMeta> before = new ArrayList<>();
+        table.newSnapshotReader().readFileIterator().forEachRemaining(e -> before.add(e.file()));
+        assertThat(before).hasSize(2);
+        long targetSize = before.stream().mapToLong(DataFileMeta::fileSize).max().getAsLong();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), targetSize + " b");
+        options.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 b");
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "5");
+        table = table.copy(options);
+
+        List<DataEvolutionCompactTask> tasks =
+                new DataEvolutionCompactCoordinator(
+                                table, false, false, table.latestSnapshot().get())
+                        .plan();
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore()).containsExactlyInAnyOrderElementsOf(before);
+        CommitMessage message = tasks.get(0).doCompact(table, "test-size-triggered-compact");
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        List<DataFileMeta> after = new ArrayList<>();
+        table.newSnapshotReader().readFileIterator().forEachRemaining(e -> after.add(e.file()));
+        assertThat(after).hasSize(1);
+        assertThat(after.get(0).nonNullFirstRowId()).isEqualTo(0);
+        assertThat(after.get(0).rowCount()).isEqualTo(2);
+        assertThat(read(table)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
     @Override
     public Schema schemaDefault() {
         return Schema.newBuilder()
@@ -190,14 +238,15 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         long targetSize = table.coreOptions().targetFileSize(false);
         assertThat(original.fileSize()).isGreaterThan(3 * targetSize);
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        // Column versions can merge on size even when large-file splitting is disabled.
         assertThat(new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan())
-                .isEmpty();
+                .hasSize(updateColumn ? 1 : 0);
 
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key(), "1000.0");
         table = table.copy(options);
         assertThat(new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan())
-                .isEmpty();
+                .hasSize(updateColumn ? 1 : 0);
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key(), "3.0");
         table = table.copy(options);
         List<DataEvolutionCompactTask> tasks =

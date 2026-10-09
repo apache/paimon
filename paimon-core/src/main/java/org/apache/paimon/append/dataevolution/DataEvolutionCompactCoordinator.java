@@ -449,9 +449,13 @@ public class DataEvolutionCompactCoordinator {
             boolean hasUncompactedFiles =
                     dataFiles.stream()
                             .anyMatch(file -> !completedNormalFiles.contains(file.fileName()));
+            // A size-triggered bin can be ready to merge before reaching the minimum file count.
+            boolean mergeNormalFiles =
+                    dataFiles.size() >= compactMinFileNum
+                            || (dataFiles.size() > 1 && compactBin.enoughContent());
             boolean triggerNormalFile =
                     hasUncompactedFiles
-                            && (dataFiles.size() >= compactMinFileNum
+                            && (mergeNormalFiles
                                     || (canSplit(normalRange, protectedRanges)
                                             && dataFiles.stream()
                                                     .anyMatch(
@@ -519,8 +523,7 @@ public class DataEvolutionCompactCoordinator {
                 for (DataEvolutionCompactTask task : tasks) {
                     protectedRanges.add(checkContiguousRowRange(task.compactBefore()));
                 }
-                if (dataFiles.size() >= compactMinFileNum
-                        || canSplit(normalRange, protectedRanges)) {
+                if (mergeNormalFiles || canSplit(normalRange, protectedRanges)) {
                     tasks.add(
                             0,
                             new DataEvolutionNormalCompactTask(

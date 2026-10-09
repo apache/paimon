@@ -34,6 +34,35 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link CompactCandidateRangeCollector}. */
 class CompactCandidateRangeCollectorTest {
 
+    @ParameterizedTest
+    @CsvSource({
+        "12,200,4,1,4",
+        "2,256,4,1,0",
+        "2,257,4,1,1",
+        "4,10,4,1,0",
+        "5,10,4,1,1",
+        "1,600,4,1,0",
+        "2,1,300,1,1",
+        "2,300,4,0,1",
+        "2,300,4,2,0"
+    })
+    void testNormalFileSizeAndCountThresholds(
+            int fileCount, long fileSize, long openFileCost, long rowIdStep, int expectedRanges) {
+        long mib = 1024L * 1024L;
+        CompactCandidateRangeCollector collector =
+                new CompactCandidateRangeCollector(
+                        fileCount, 512 * mib, 1024 * mib, openFileCost * mib, 5, Long.MAX_VALUE);
+        for (int i = 0; i < fileCount; i++) {
+            collector.add(0, NORMAL_FILE, i * rowIdStep, 1L, fileSize * mib);
+        }
+        List<Integer> selectedCounts = new ArrayList<>();
+        collector.finish((start, end, count) -> selectedCounts.add(count));
+
+        assertThat(selectedCounts).hasSize(expectedRanges);
+        assertThat(selectedCounts.stream().mapToInt(Integer::intValue).sum())
+                .isEqualTo(expectedRanges == 0 ? 0 : fileCount);
+    }
+
     @Test
     void testSelectsOnlyNormalFileBinsWhichCanCompact() {
         CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 2L);
@@ -58,12 +87,13 @@ class CompactCandidateRangeCollectorTest {
             collector.add(0, NORMAL_FILE, 10L, 10L, 200L);
             collector.add(0, NORMAL_FILE, 20L, 10L, 201L);
             collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
+            collector.add(0, NORMAL_FILE, 30L, 10L, 201L);
             // Dedicated files never trigger normal-file splitting.
             collector.add(0, 3, 0L, 10L, 1000L);
             if (enabled) {
-                assertThat(finish(collector)).containsExactly("20-29:2");
+                assertThat(finish(collector)).containsExactly("20-29:2", "30-39:1");
             } else {
-                assertThat(finish(collector)).isEmpty();
+                assertThat(finish(collector)).containsExactly("20-29:2");
             }
         }
     }
@@ -78,12 +108,13 @@ class CompactCandidateRangeCollectorTest {
         collector.add(0, NORMAL_FILE, 10L, 10L, threshold);
         collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
         collector.add(0, NORMAL_FILE, 20L, 10L, threshold + 1);
-        // Neither the sum of versions nor dedicated-file sizes bypass the minimum file count.
+        // Versions can merge on combined weight; dedicated-file sizes do not trigger normal
+        // merging.
         collector.add(0, NORMAL_FILE, 30L, 10L, threshold * 3 / 4);
         collector.add(0, NORMAL_FILE, 30L, 10L, threshold * 3 / 4);
         collector.add(0, IGNORED_DEDICATED_FILE, 0L, 10L, 1000L);
 
-        assertThat(finish(collector)).containsExactly("20-29:2");
+        assertThat(finish(collector)).containsExactly("20-29:2", "30-39:2");
     }
 
     @Test
@@ -106,10 +137,10 @@ class CompactCandidateRangeCollectorTest {
 
     @Test
     void testDoesNotCompactNormalFilesAcrossPartitionsOrRowIdGaps() {
-        CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 2L);
-        collector.add(0, NORMAL_FILE, 0L, 10L, 10L);
-        collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
-        collector.add(1, NORMAL_FILE, 10L, 10L, 10L);
+        CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 5L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 60L);
+        collector.add(0, NORMAL_FILE, 20L, 10L, 60L);
+        collector.add(1, NORMAL_FILE, 10L, 10L, 60L);
 
         assertThat(finish(collector)).isEmpty();
     }
