@@ -79,7 +79,7 @@ def with_row_kind(table, data, row):
     """
     if (
         table.is_primary_key_table
-        and 'rowkind.field' not in table.options.options.to_map()
+        and table.options.options.to_map().get('rowkind.field') is None
     ):
         kind = row.get_row_kind()
         data = data.append_column(

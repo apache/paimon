@@ -45,7 +45,7 @@ def make_table(tmp_path, native, bucket='1', options=None, partition=False):
         pa.field('id', pa.int32(), nullable=False),
         pa.field('v', pa.int32()),
     ]
-    if options and 'rowkind.field' in options:
+    if options and options.get('rowkind.field') is not None:
         fields.append(pa.field('op', pa.string()))
     if partition:
         fields.append(pa.field('pt', pa.string(), nullable=False))
@@ -109,11 +109,23 @@ def read_merged_rows(table):
     return builder.new_read().to_arrow(splits).to_pylist()
 
 
-@pytest.mark.parametrize('bucket', ['1', '-1', '-2'])
-def test_object_delete_across_commits(tmp_path, native, bucket):
+@pytest.mark.parametrize(
+    'bucket,options',
+    [
+        ('1', {}),
+        ('-1', {}),
+        ('-2', {}),
+        pytest.param('1', {'rowkind.field': None}, id='null-rowkind-field'),
+    ],
+)
+def test_object_delete_across_commits(tmp_path, native, bucket, options):
     table, _ = make_table(
-        tmp_path, native, bucket, {'postpone.default-bucket-num': '1'}
+        tmp_path, native, bucket, {'postpone.default-bucket-num': '1', **options}
     )
+    if 'rowkind.field' in options:
+        # Creation retains explicit nulls; table.copy() would remove this key.
+        assert 'rowkind.field' in table.options.options.to_map()
+        assert table.options.options.to_map()['rowkind.field'] is None
     for kind in (RowKind.INSERT, RowKind.DELETE):
         builder = new_builder(table, fixed=bucket == '-2')
         writer, commit = builder.new_write(), builder.new_commit()
