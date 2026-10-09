@@ -1087,31 +1087,18 @@ class FileStoreCommit:
             List of PartitionStatistics for each unique partition
         """
         partition_stats = {}
+        path_factory = self.table.path_factory()
 
         for entry in commit_entries:
-            # Convert partition tuple to dictionary for PartitionStatistics
-            partition_value = tuple(entry.partition.values)  # Call the method to get partition value
-            if partition_value:
-                # Assuming partition is a tuple and we need to convert it to a dict
-                # This may need adjustment based on actual partition format
-                if isinstance(partition_value, tuple):
-                    # Create partition spec from partition tuple and table partition keys
-                    partition_spec = {}
-                    if len(partition_value) == len(self.table.partition_keys):
-                        for i, key in enumerate(self.table.partition_keys):
-                            partition_spec[key] = str(partition_value[i])
-                    else:
-                        # Fallback: use indices as keys
-                        for i, value in enumerate(partition_value):
-                            partition_spec[f"partition_{i}"] = str(value)
-                else:
-                    # If partition is already a dict or other format
-                    partition_spec = dict(partition_value) if partition_value else {}
-            else:
-                # Default partition for unpartitioned tables
-                partition_spec = {}
-
-            partition_key = tuple(sorted(partition_spec.items()))
+            partition_value = tuple(entry.partition.values)
+            if len(partition_value) != len(self.table.partition_keys):
+                raise ValueError('Partition row does not match the table partition keys')
+            # Java PartitionEntry.toPartitionStatistics reuses the path value
+            # computer, without path escaping. Group by typed partition values:
+            # NULL and whitespace remain distinct even if their names coincide.
+            partition_spec = dict(zip(self.table.partition_keys, path_factory._canonical_partition(partition_value)))
+            partition_key = tuple(bytes(value) if isinstance(value, (bytearray, memoryview)) else value
+                                  for value in partition_value)
 
             if partition_key not in partition_stats:
                 partition_stats[partition_key] = {

@@ -20,7 +20,7 @@
 import pyarrow as pa
 
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, is_blob_file_field
-from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.file_store_table import FileStoreTable
@@ -46,7 +46,8 @@ def _native_row_id_table(table):
             or not native_write_available()):
         return None
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    if not _native_partition_types_supported(schema, table.partition_keys):
+    if not _native_partition_types_supported(
+            schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
         return None
     return create_native_write_table(table)
 

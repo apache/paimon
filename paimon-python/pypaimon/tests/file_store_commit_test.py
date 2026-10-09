@@ -43,6 +43,7 @@ from pypaimon.write.file_store_commit import (
     _reject_compact_increment,
     _row_id_check_from_messages,
 )
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
 
 class TestRowIdCheckFromMessages(unittest.TestCase):
@@ -132,6 +133,9 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
     def setUp(self):
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
+        self.mock_table.path_factory.return_value = FileStorePathFactory(
+            '/test/table/path', ['dt', 'region'], '__DEFAULT_PARTITION__', 'parquet',
+            'data-', 'changelog-', False, False, 'zstd')
         self.mock_table.current_branch.return_value = 'main'
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
@@ -351,6 +355,9 @@ class TestFileStoreCommit(unittest.TestCase):
         # Mock table with required attributes
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
+        self.mock_table.path_factory.return_value = FileStorePathFactory(
+            '/test/table/path', ['dt', 'region'], '__DEFAULT_PARTITION__', 'parquet',
+            'data-', 'changelog-', False, False, 'zstd')
         self.mock_table.current_branch.return_value = 'main'
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
@@ -954,19 +961,8 @@ class TestFileStoreCommit(unittest.TestCase):
             new_files=[file_meta]
         )
 
-        # Test method
-        statistics = file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
-
-        # Verify results - should fallback to index-based naming
-        self.assertEqual(len(statistics), 1)
-
-        stat = statistics[0]
-        expected_spec = {
-            'partition_0': '2024-01-15',
-            'partition_1': 'us-east-1',
-            'partition_2': 'extra-value'
-        }
-        self.assertEqual(stat.spec, expected_spec)
+        with self.assertRaisesRegex(ValueError, 'Partition row does not match'):
+            file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
 
     def test_generate_partition_statistics_empty_commit_messages(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
