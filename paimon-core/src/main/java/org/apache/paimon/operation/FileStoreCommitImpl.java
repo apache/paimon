@@ -841,8 +841,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (options.dataEvolutionEnabled()
                     && !conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
                     && lastSafeSnapshot != null
-                    && lastSafeSnapshot >= 0
-                    && ReassignCompactChangesProvider.supports(changes)) {
+                    && lastSafeSnapshot >= 0) {
                 return new ReassignCompactChangesProvider(
                         fileIO, pathFactory, snapshotManager, lastSafeSnapshot, changes);
             }

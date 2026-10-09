@@ -67,28 +67,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         this.changes = changes;
     }
 
-    public static boolean supports(CommitChanges changes) {
-        if (!changes.changelogFiles.isEmpty()) {
-            return false;
-        }
-        for (ManifestEntry entry : changes.tableFiles) {
-            DataFileMeta file = entry.file();
-            // Materialized deletions and physical _ROW_ID columns require a data rewrite.
-            if (file.firstRowId() == null
-                    || (file.writeCols() != null
-                            && file.writeCols().contains(SpecialFields.ROW_ID.name()))) {
-                return false;
-            }
-        }
-        for (IndexManifestEntry entry : changes.indexFiles) {
-            if (entry.indexFile().globalIndexMeta() == null
-                    && entry.indexFile().dvRanges() == null) {
-                return false;
-            }
-        }
-        return !changes.tableFiles.isEmpty() || !changes.indexFiles.isEmpty();
-    }
-
     @Override
     public CommitChanges provide(@Nullable Snapshot latest) {
         checkState(
@@ -134,10 +112,23 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
     }
 
     private CommitChanges mapChanges(SerializationAssignment assignment) {
+        checkState(
+                changes.changelogFiles.isEmpty(),
+                "Cannot reuse compaction across reassignment with changelog files.");
         List<ManifestEntry> files = new ArrayList<>(changes.tableFiles.size());
         for (ManifestEntry entry : changes.tableFiles) {
-            Range range =
-                    assignment.mapRowRange(entry.partition(), entry.file().nonNullRowIdRange());
+            DataFileMeta file = entry.file();
+            checkState(
+                    file.firstRowId() != null,
+                    "Cannot reuse compaction across reassignment: file %s has no first row ID.",
+                    file.fileName());
+            checkState(
+                    file.writeCols() == null
+                            || !file.writeCols().contains(SpecialFields.ROW_ID.name()),
+                    "Cannot reuse compaction across reassignment: file %s physically stores %s.",
+                    file.fileName(),
+                    SpecialFields.ROW_ID.name());
+            Range range = assignment.mapRowRange(entry.partition(), file.nonNullRowIdRange());
             files.add(entry.assignFirstRowId(range.from));
         }
         List<IndexManifestEntry> indexes = new ArrayList<>(changes.indexFiles.size());
@@ -145,6 +136,11 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             IndexFileMeta file = entry.indexFile();
             GlobalIndexMeta meta = file.globalIndexMeta();
             if (meta == null) {
+                checkState(
+                        file.dvRanges() != null,
+                        "Cannot reuse compaction across reassignment: index file %s has unsupported index type %s.",
+                        file.fileName(),
+                        file.indexType());
                 // Deletion vectors use file-relative positions, not global row IDs.
                 indexes.add(entry);
                 continue;

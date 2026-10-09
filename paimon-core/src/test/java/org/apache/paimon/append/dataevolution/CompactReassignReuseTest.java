@@ -37,17 +37,22 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.commit.CommitChanges;
+import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -63,6 +68,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
@@ -515,6 +521,105 @@ public class CompactReassignReuseTest extends TableTestBase {
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(9);
         checkRows(table, 0, 1, 2, 3, 4, 5);
         assertThat(message.compactIncrement().compactAfter().get(0).nonNullFirstRowId()).isZero();
+    }
+
+    @Test
+    void testNoReassignmentDoesNotValidateMappingInputs() throws Exception {
+        FileStoreTable table = prepare();
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        ManifestEntry entry = table.store().newScan().plan().files().get(0);
+        IndexManifestEntry unsupported =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        entry.partition(),
+                        entry.bucket(),
+                        new IndexFileMeta("unknown", "unsupported.index", 1, 1, null, null, null));
+        CommitChanges changes =
+                new CommitChanges(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(unsupported));
+        ReassignCompactChangesProvider provider =
+                new ReassignCompactChangesProvider(
+                        table.fileIO(),
+                        table.store().pathFactory(),
+                        table.snapshotManager(),
+                        snapshot.id(),
+                        changes);
+
+        write(table, "b", 4, false);
+        assertThat(provider.provide(table.snapshotManager().latestSnapshot())).isSameAs(changes);
+        assertThat(provider.rebasedReassignments()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "missing-row-id, has no first row ID",
+        "physical-row-id, physically stores _ROW_ID",
+        "changelog, with changelog files",
+        "unknown-index, unsupported index type"
+    })
+    void testUnsafeMappingFailsBeforeCommit(String kind, String expectedMessage) throws Exception {
+        FileStoreTable table = prepare();
+        ManifestEntry entry =
+                table.store().newScan().plan().files().stream()
+                        .filter(e -> e.file().nonNullFirstRowId() == 0)
+                        .findFirst()
+                        .get();
+        DataFileMeta file =
+                DataFileMeta.forAppend(
+                        "unsupported.parquet",
+                        1,
+                        1,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        table.schema().id(),
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        kind.equals("missing-row-id") ? null : 0L,
+                        kind.equals("physical-row-id")
+                                ? Collections.singletonList(SpecialFields.ROW_ID.name())
+                                : null);
+        List<DataFileMeta> dataFiles =
+                kind.equals("missing-row-id") || kind.equals("physical-row-id")
+                        ? Collections.singletonList(file)
+                        : Collections.emptyList();
+        List<DataFileMeta> changelogFiles =
+                kind.equals("changelog")
+                        ? Collections.singletonList(file)
+                        : Collections.emptyList();
+        List<IndexFileMeta> indexFiles =
+                kind.equals("unknown-index")
+                        ? Collections.singletonList(
+                                new IndexFileMeta(
+                                        "unknown", "unsupported.index", 1, 1, null, null, null))
+                        : Collections.emptyList();
+        CommitMessageImpl message =
+                new CommitMessageImpl(
+                        entry.partition(),
+                        entry.bucket(),
+                        null,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                dataFiles,
+                                changelogFiles,
+                                indexFiles,
+                                Collections.emptyList()));
+        lastSafeSnapshots.put(message, table.snapshotManager().latestSnapshotId());
+        assertThat(new DataEvolutionRowIdReassigner(table).reassign().reassigned).isTrue();
+        long snapshot = table.snapshotManager().latestSnapshotId();
+
+        assertThatThrownBy(() -> commit(table, message, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Cannot reuse compaction across reassignment")
+                .hasMessageContaining(expectedMessage);
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
+        checkRows(table, 0, 1, 2, 3);
     }
 
     @Test
