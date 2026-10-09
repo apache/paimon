@@ -312,3 +312,195 @@ def test_custom_io_context_keeps_python_search(vector_table, option):
             patch.object(native_vector_search, '_native_table',
                          side_effect=AssertionError('Unsupported Native context')):
         _assert_scores(_scores(_single(table).execute_local()), expected)
+
+
+@pytest.mark.parametrize('mode', ['fast', 'full', 'detail'])
+def test_unevaluable_scalar_filter_scores_indexed_ranges_raw(vector_table, mode):
+    from pypaimon.globalindex.create_global_index import create_global_index
+    from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
+    # The matching vectors live outside the nearest IVF cluster. Sending a
+    # data-derived allow-list to ANN with nprobe=1 silently loses all matches.
+    _write(vector_table, [
+        {'id': i, 'embedding': [i / 1000, 0], 'pt': 2} for i in range(50)
+    ] + [
+        {'id': i, 'embedding': [float(i), 0], 'pt': 2} for i in range(100, 150)
+    ])
+    create_global_index(vector_table, 'embedding', 'ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '4', 'ivf-flat.distance.metric': 'l2'})
+    classic = vector_table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
+                                 'vector-index.search-mode': mode})
+    native = vector_table.copy({'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true',
+                                'vector-index.search-mode': mode})
+    predicates = classic.new_read_builder().new_predicate_builder()
+    predicate = predicates.greater_or_equal('id', 100)
+    partition = predicates.equal('pt', 2)
+
+    def configure(builder, direct=False):
+        return (builder.with_option('ivf.nprobe', '1')
+                .with_filter(_predicate_to_native(predicate) if direct else predicate)
+                .with_partition_filter(_predicate_to_native(partition) if direct else partition))
+
+    queries = [[0, 0], [1, 0]]
+    expected = [_scores(configure(_single(classic, query)).execute_local()) for query in queries]
+    assert all(len(scores) == 3 for scores in expected)
+    direct_table = _native_table(native)
+    direct = configure(direct_table.new_batch_vector_search_builder().with_vector_column('embedding')
+                       .with_query_vectors(queries).with_limit(3), direct=True).execute_batch_local()
+    for result, scores in zip(direct, expected):
+        _assert_scores(result.row_ids(), scores)
+    with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
+            patch.object(BatchVectorSearchReadImpl, 'read_batch_plan', side_effect=AssertionError('Python search ran')):
+        singles = [configure(_single(native, query)).execute_local() for query in queries]
+        batch = configure(native.new_batch_vector_search_builder().with_vector_column('embedding')
+                          .with_query_vectors(queries).with_limit(3)).execute_batch_local()
+    for single, batched, scores in zip(singles, batch, expected):
+        _assert_scores(_scores(single), scores)
+        _assert_scores(_scores(batched), scores)
+    assert sorted(_rows(native, singles[0]).column('id').to_pylist()) == [100, 101, 102]
+
+
+@pytest.mark.parametrize('mode', ['fast', 'full', 'detail'])
+@pytest.mark.parametrize('refine', [False, True])
+@pytest.mark.parametrize('unindexed_tail', [False, True])
+def test_scalar_candidates_obey_refinement_switch(rest_catalog, mode, refine, unindexed_tail):
+    from pypaimon.globalindex.create_global_index import create_global_index
+    from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
+    catalog, _ = rest_catalog
+    schema = pa.schema([('id', pa.int32()), ('name', pa.string()), ('embedding', pa.list_(pa.float32()))])
+    catalog.create_table('default.scalar_vectors', Schema.from_pyarrow_schema(schema, options={
+        'bucket': '-1', 'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'global-index.enabled': 'true', 'file.format': 'parquet'}), False)
+    table = catalog.get_table('default.scalar_vectors')
+
+    def write(rows):
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(rows, schema=schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+    write([{'id': i, 'name': name, 'embedding': [float(i), 0]}
+           for i, name in enumerate(['alpha', 'beta zeta', 'gamma'])])
+    create_global_index(table, 'embedding', 'ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
+    create_global_index(table, 'name', 'btree')
+    if unindexed_tail:
+        # Refinement=false excludes inexact indexed candidates, while an
+        # unindexed tail in FULL/DETAIL must still execute the row predicate.
+        write([{'id': 3, 'name': 'tail zeta', 'embedding': [3, 0]}])
+    options = {'vector-index.search-mode': mode, 'global-index.filter.refine-from-data': str(refine).lower()}
+    classic = table.copy(dict(options, **{'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'}))
+    native = table.copy(dict(options, **{'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'}))
+    predicate = classic.new_read_builder().new_predicate_builder().like('name', '%zeta%')
+
+    def configure(builder, direct=False):
+        return builder.with_filter(_predicate_to_native(predicate) if direct else predicate)
+
+    queries = [[0, 0], [1, 0]]
+    expected = [_scores(configure(_single(classic, query, 1)).execute_local()) for query in queries]
+    count = 1 if refine or (unindexed_tail and mode != 'fast') else 0
+    assert [len(scores) for scores in expected] == [count, count]
+    direct_table = _native_table(native)
+    for query, scores in zip(queries, expected):
+        result = configure(direct_table.new_vector_search_builder().with_vector_column('embedding')
+                           .with_query_vector(vector=query).with_limit(1), direct=True).execute_local()
+        _assert_scores(result.row_ids(), scores)
+    with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
+            patch.object(BatchVectorSearchReadImpl, 'read_batch_plan', side_effect=AssertionError('Python search ran')):
+        singles = [configure(_single(native, query, 1)).execute_local() for query in queries]
+        batch = configure(native.new_batch_vector_search_builder().with_vector_column('embedding')
+                          .with_query_vectors(queries).with_limit(1)).execute_batch_local()
+    for single, batched, scores in zip(singles, batch, expected):
+        _assert_scores(_scores(single), scores)
+        _assert_scores(_scores(batched), scores)
+
+
+@pytest.mark.parametrize('mode', ['fast', 'full', 'detail'])
+def test_partition_filter_does_not_make_exact_scalar_index_inexact(vector_table, mode):
+    from pypaimon.globalindex.create_global_index import create_global_index
+    from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
+    create_global_index(vector_table, 'embedding', 'ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
+    create_global_index(vector_table, 'id', 'btree')
+    options = {'vector-index.search-mode': mode, 'global-index.filter.refine-from-data': 'false'}
+    classic = vector_table.copy(dict(options, **{'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'}))
+    native = vector_table.copy(dict(options, **{'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'}))
+    predicates = classic.new_read_builder().new_predicate_builder()
+    predicate, partition = predicates.equal('id', 4), predicates.equal('pt', 1)
+
+    def configure(builder, direct=False):
+        return (builder.with_filter(_predicate_to_native(predicate) if direct else predicate)
+                .with_partition_filter(_predicate_to_native(partition) if direct else partition))
+
+    expected = _scores(configure(_single(classic)).execute_local())
+    assert len(expected) == 1
+    direct = configure(_native_table(native).new_vector_search_builder().with_vector_column('embedding')
+                       .with_query_vector(vector=[1, 0]).with_limit(3), direct=True).execute_local()
+    _assert_scores(direct.row_ids(), expected)
+    with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
+            patch.object(BatchVectorSearchReadImpl, 'read_batch_plan', side_effect=AssertionError('Python search ran')):
+        single = configure(_single(native)).execute_local()
+        batch = configure(native.new_batch_vector_search_builder().with_vector_column('embedding')
+                          .with_query_vectors([[1, 0], [1, 0]]).with_limit(3)).execute_batch_local()
+    _assert_scores(_scores(single), expected)
+    for result in batch:
+        _assert_scores(_scores(result), expected)
+
+
+@pytest.mark.parametrize('mode', ['fast', 'full', 'detail'])
+@pytest.mark.parametrize('refine', [False, True])
+def test_unsupported_conjunct_on_same_indexed_field_is_not_exact(rest_catalog, mode, refine):
+    from pypaimon.globalindex.create_global_index import create_global_index
+    from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
+    catalog, server = rest_catalog
+    schema = pa.schema([('id', pa.int32()), ('name', pa.string()), ('embedding', pa.list_(pa.float32()))])
+    catalog.create_table('default.fm_vectors', Schema.from_pyarrow_schema(schema, options={
+        'bucket': '-1', 'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'global-index.enabled': 'true', 'file.format': 'parquet'}), False)
+    table = catalog.get_table('default.fm_vectors')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pylist([
+            {'id': 1, 'name': None, 'embedding': [1, 0]},
+            {'id': 2, 'name': 'alpha', 'embedding': [0, 1]},
+        ], schema=schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    create_global_index(table, 'embedding', 'ivf-flat', options={
+        'ivf-flat.dimension': '2', 'ivf-flat.nlist': '1', 'ivf-flat.distance.metric': 'l2'})
+    # Build FM through Rust's existing procedure; PyPaimon can read this index
+    # but its Python index-building API does not create FM definitions.
+    from pypaimon_rust.datafusion import SQLContext
+    context = SQLContext()
+    context.register_catalog('paimon', {
+        'metastore': 'rest', 'uri': server.get_url(), 'warehouse': 'warehouse',
+        'token.provider': 'bear', 'token': 'test-token', 'data-token.enabled': 'false'})
+    context.sql("CALL sys.create_global_index(table => 'default.fm_vectors', index_column => 'name', index_type => 'fm')")
+    native = table.copy({'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true',
+                         'vector-index.search-mode': mode,
+                         'global-index.filter.refine-from-data': str(refine).lower()})
+    predicates = native.new_read_builder().new_predicate_builder()
+    is_null = predicates.is_null('name')
+    # FM can evaluate isNull but declines startsWith on the SAME field.
+    # Its contributing field ID must not mark this conjunction exact.
+    impossible = predicates.and_predicates([is_null, predicates.startswith('name', 'a')])
+    direct_table = _native_table(native)
+    for predicate, count in [(is_null, 1), (impossible, 0)]:
+        direct = (direct_table.new_vector_search_builder().with_vector_column('embedding')
+                  .with_query_vector(vector=[1, 0]).with_limit(2)
+                  .with_filter(_predicate_to_native(predicate)).execute_local())
+        assert len(direct) == count
+        with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
+                patch.object(BatchVectorSearchReadImpl, 'read_batch_plan', side_effect=AssertionError('Python search ran')):
+            single = _single(native, limit=2).with_filter(predicate).execute_local()
+            batch = (native.new_batch_vector_search_builder().with_vector_column('embedding')
+                     .with_query_vectors([[1, 0], [0, 1]]).with_limit(2).with_filter(predicate).execute_batch_local())
+        assert len(single.results()) == count
+        assert [len(result.results()) for result in batch] == [count, count]
+    assert len(_rows(native, _single(native, limit=2).with_filter(is_null).execute_local())) == 1
