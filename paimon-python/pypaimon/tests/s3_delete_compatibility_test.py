@@ -36,15 +36,12 @@ import pyarrow
 import pyarrow.fs as pafs
 from packaging.version import parse
 
-from pypaimon import CatalogFactory, Schema
-from pypaimon.common.json_util import JSON
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.filesystem.pyarrow_file_io import (
     PyArrowFileIO,
 )
-from pypaimon.schema.table_schema import TableSchema
 
 TABLE_PATH = "oss://test-bucket/db-uuid.db/tbl-uuid"
 
@@ -245,12 +242,6 @@ def _successful_batch_delete(**kwargs):
     return {"Deleted": kwargs["Delete"]["Objects"]}
 
 
-def _missing_marker(**kwargs):
-    from botocore.exceptions import ClientError
-    raise ClientError({"Error": {"Code": "404"},
-                       "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadObject")
-
-
 class OssDeleteCompatibilityTest(unittest.TestCase):
     def _new_file_io(self, legacy):
         options = Options({
@@ -269,8 +260,6 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         file_io._s3_delete_client = mock.Mock()
         file_io._s3_delete_client.delete_objects.side_effect = \
             _successful_batch_delete
-        file_io._s3_delete_client.head_object.side_effect = _missing_marker
-        file_io._s3_delete_client.get_bucket_versioning.return_value = {}
         return file_io
 
     def test_delete_normalizes_oss_uri_before_selecting_bucket(self):
@@ -287,7 +276,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
                 client = file_io._s3_delete_client
                 self.assertTrue(all(call[1]["Bucket"] == "other-bucket"
                                     for call in client.delete_objects.call_args_list))
-                client.delete_object.assert_called_once_with(Bucket="other-bucket", Key="table/")
+                client.delete_object.assert_not_called()
 
     def test_pyarrow_22_recursive_delete_batches_objects(self):
         file_io = self._new_file_io(legacy=False)
@@ -308,16 +297,13 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             "db-uuid.db/tbl-uuid/data/",
         ], [item["Key"] for item in
             client.delete_objects.call_args[1]["Delete"]["Objects"]])
-        client.delete_object.assert_called_once_with(
-            Bucket="test-bucket", Key="db-uuid.db/tbl-uuid/")
-        client.put_object.assert_called_once_with(
-            Bucket="test-bucket", Key="db-uuid.db/", Body=b"",
-            ContentType="application/x-directory")
+        client.delete_object.assert_not_called()
+        client.put_object.assert_not_called()
         file_io.filesystem.delete_file.assert_not_called()
         file_io.filesystem.delete_dir_contents.assert_not_called()
         file_io.filesystem.delete_dir.assert_not_called()
 
-    def test_recursive_delete_preserves_existing_parent_marker(self):
+    def test_recursive_delete_does_not_modify_parent_marker(self):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = True
         directory = file_io.to_filesystem_path(TABLE_PATH)
@@ -325,38 +311,10 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             _file_info(directory, pafs.FileType.Directory)]
         _set_listed_keys(file_io, ["db-uuid.db/tbl-uuid/data.parquet"], [])
         client = file_io._s3_delete_client
-        client.head_object.side_effect = None
-        client.head_object.return_value = {"ContentLength": 15,
-                                           "Metadata": {"probe": "retained"}}
-
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
-        self.assertEqual(
-            [mock.call(Bucket="test-bucket", Key="db-uuid.db/")] * 2,
-            client.head_object.call_args_list)
+        client.head_object.assert_not_called()
         client.put_object.assert_not_called()
-
-    def test_versioned_oss_rejects_missing_parent_before_deletion(self):
-        for status in ("Enabled", "Suspended"):
-            for recursive in (False, True):
-                with self.subTest(status=status, recursive=recursive):
-                    file_io = self._new_file_io(legacy=False)
-                    file_io._pyarrow_gte_22 = True
-                    directory = file_io.to_filesystem_path(TABLE_PATH)
-                    file_io.filesystem.get_file_info.side_effect = [
-                        [_file_info(directory, pafs.FileType.Directory)], []]
-                    if recursive:
-                        _set_listed_keys(
-                            file_io, ["db-uuid.db/tbl-uuid/data.parquet"], [])
-                    client = file_io._s3_delete_client
-                    client.get_bucket_versioning.return_value = {"Status": status}
-
-                    with self.assertRaisesRegex(OSError, "versioning status " + status):
-                        file_io.delete(TABLE_PATH, recursive=recursive)
-
-                    client.delete_objects.assert_not_called()
-                    client.delete_object.assert_not_called()
-                    client.put_object.assert_not_called()
 
     def test_pyarrow_22_recursive_delete_preserves_late_objects(self):
         file_io = self._new_file_io(legacy=False)
@@ -399,11 +357,11 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
         self.assertCountEqual(
             ["db-uuid.db/tbl-uuid/a", "db-uuid.db/tbl-uuid/b"],
-            _all_deleted_keys(client)[:-1])
+            _all_deleted_keys(client))
         self.assertEqual("next", client.list_objects_v2.call_args_list[1][1][
             "ContinuationToken"])
 
-    def test_recursive_delete_keeps_schema_zero_until_last(self):
+    def test_recursive_delete_treats_schema_as_regular_key(self):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = True
         directory = file_io.to_filesystem_path(TABLE_PATH)
@@ -420,91 +378,12 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
         calls = _all_deleted_keys(file_io._s3_delete_client)
-        self.assertCountEqual(
-            [prefix + "snapshot/snapshot-1", prefix + "data/file.parquet"],
-            calls[:2])
-        self.assertEqual([
-            prefix, prefix + "schema/schema-1", prefix + "schema/schema-0",
-        ], calls[2:])
-
-    def test_recursive_delete_preserves_schema_zero_when_new_table_appears(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        directory = file_io.to_filesystem_path(TABLE_PATH)
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory)]
-        prefix = "db-uuid.db/tbl-uuid/"
-        schema_zero = prefix + "schema/schema-0"
-        data = prefix + "data/file.parquet"
-        new_schema_zero = prefix + "new-table/schema/schema-0"
-        _set_listed_keys(
-            file_io, [schema_zero, data], [schema_zero, new_schema_zero])
-
-        with self.assertRaisesRegex(OSError, "changed during deletion"):
-            file_io.delete(TABLE_PATH, recursive=True)
-
-        self.assertEqual([data], _all_deleted_keys(file_io._s3_delete_client))
-
-    def test_recursive_delete_preserves_only_schema_one_for_retry(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        directory = file_io.to_filesystem_path(TABLE_PATH)
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory)]
-        prefix = "db-uuid.db/tbl-uuid/"
-        schema_one = prefix + "schema/schema-1"
-        data = prefix + "data/file.parquet"
-        late = prefix + "data/late.parquet"
-        _set_listed_keys(file_io,
-                         [schema_one, data], [schema_one, late],
-                         [schema_one, late], [schema_one])
-
-        with self.assertRaisesRegex(OSError, "changed during deletion"):
-            file_io.delete(TABLE_PATH, recursive=True)
-
-        client = file_io._s3_delete_client
-        self.assertEqual([data], _all_deleted_keys(client))
-        client.put_object.assert_not_called()
-
-        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
-        self.assertEqual([data, late, prefix, schema_one],
-                         _all_deleted_keys(client))
-
-    def test_recursive_delete_preserves_only_schema_one_on_marker_error(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        directory = file_io.to_filesystem_path(TABLE_PATH)
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory)]
-        prefix = "db-uuid.db/tbl-uuid/"
-        schema_one = prefix + "schema/schema-1"
-        _set_listed_keys(file_io, [schema_one], [schema_one])
-        client = file_io._s3_delete_client
-        client.delete_object.side_effect = OSError("marker deletion failed")
-
-        with self.assertRaisesRegex(OSError, "marker deletion failed"):
-            file_io.delete(TABLE_PATH, recursive=True)
-
-        client.delete_objects.assert_not_called()
-        client.delete_object.assert_called_once_with(
-            Bucket="test-bucket", Key=prefix)
-
-    def test_recursive_delete_allows_known_schema_zeros(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        path = "oss://test-bucket/db-uuid.db"
-        directory = file_io.to_filesystem_path(path)
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory)]
-        first = "db-uuid.db/a/schema/schema-0"
-        second = "db-uuid.db/b/schema/schema-0"
-        _set_listed_keys(file_io, [first, second], [second])
-
-        self.assertTrue(file_io.delete(path, recursive=True))
-
-        calls = _all_deleted_keys(file_io._s3_delete_client)
-        self.assertEqual("db-uuid.db/", calls[0])
-        self.assertCountEqual([first, second], calls[1:])
+        self.assertCountEqual([
+            prefix + "schema/schema-0",
+            prefix + "snapshot/snapshot-1",
+            prefix + "schema/schema-1",
+            prefix + "data/file.parquet",
+        ], calls)
 
     def test_recursive_delete_times_out_when_directory_keeps_changing(self):
         file_io = self._new_file_io(legacy=False)
@@ -597,7 +476,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             item["Key"] for call in calls
             for item in call[1]["Delete"]["Objects"]])
 
-    def test_recursive_delete_preserves_schema_zero_on_batch_error(self):
+    def test_recursive_delete_reports_batch_error(self):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = True
         directory = file_io.to_filesystem_path(TABLE_PATH)
@@ -605,8 +484,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             _file_info(directory, pafs.FileType.Directory)]
         prefix = "db-uuid.db/tbl-uuid/"
         data = prefix + "data/file.parquet"
-        schema_zero = prefix + "schema/schema-0"
-        _set_listed_keys(file_io, [data, schema_zero])
+        _set_listed_keys(file_io, [data])
         client = file_io._s3_delete_client
         client.delete_objects.side_effect = None
         client.delete_objects.return_value = {
@@ -652,9 +530,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         file_io.filesystem.delete_dir.assert_not_called()
         file_io._s3_delete_client.delete_object.assert_called_once_with(
             Bucket="test-bucket", Key="db-uuid.db/tbl-uuid/")
-        file_io._s3_delete_client.put_object.assert_called_once_with(
-            Bucket="test-bucket", Key="db-uuid.db/", Body=b"",
-            ContentType="application/x-directory")
+        file_io._s3_delete_client.put_object.assert_not_called()
 
     def test_delete_rejects_bucket_root(self):
         for legacy, jindo in ((False, False), (True, False), (False, True)):
@@ -740,7 +616,6 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io._s3_delete_client = mock.Mock()
         file_io._s3_delete_client.delete_objects.side_effect = \
             _successful_batch_delete
-        file_io._s3_delete_client.head_object.side_effect = _missing_marker
         return file_io
 
     def test_pickle_discards_cached_delete_client(self):
@@ -825,8 +700,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                     Bucket="test-bucket", Delete={
                         "Objects": [{"Key": "table/data.parquet"}],
                         "Quiet": False})
-                file_io._s3_delete_client.delete_object.assert_called_once_with(
-                    Bucket="test-bucket", Key="table/")
+                file_io._s3_delete_client.delete_object.assert_not_called()
 
     def test_recursive_delete_uses_bucket_from_target_uri(self):
         file_io = self._new_file_io()
@@ -843,8 +717,7 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io._s3_delete_client.delete_objects.assert_called_once_with(
             Bucket="target-bucket", Delete={
                 "Objects": [{"Key": "table/data.parquet"}], "Quiet": False})
-        file_io._s3_delete_client.delete_object.assert_called_once_with(
-            Bucket="target-bucket", Key="table/")
+        file_io._s3_delete_client.delete_object.assert_not_called()
 
     def test_recursive_delete_uses_bucket_from_target_filesystem_path(self):
         file_io = self._new_file_io()
@@ -859,8 +732,7 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io._s3_delete_client.delete_objects.assert_called_once_with(
             Bucket="target-bucket", Delete={
                 "Objects": [{"Key": "table/data.parquet"}], "Quiet": False})
-        file_io._s3_delete_client.delete_object.assert_called_once_with(
-            Bucket="target-bucket", Key="table/")
+        file_io._s3_delete_client.delete_object.assert_not_called()
 
     def test_pre_pyarrow_22_cross_bucket_delete_keeps_native_path(self):
         file_io = self._new_file_io()
@@ -908,7 +780,7 @@ class CustomS3EndpointTest(unittest.TestCase):
         server.bucket_objects = {
             "source-bucket": set(source_objects),
             "target-bucket": {
-                "parent/child/", "parent/child/delete.parquet",
+                "parent/", "parent/child/", "parent/child/delete.parquet",
                 "parent-other/keep.parquet"},
         }
         server_thread = threading.Thread(target=server.serve_forever)
@@ -966,7 +838,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                     for recursive in (False, True):
                         with self.subTest(path=path, recursive=recursive):
                             server.bucket_objects["target-bucket"] = {
-                                "parent/child/"}
+                                "parent/", "parent/child/"}
                             if recursive:
                                 server.bucket_objects["target-bucket"].add(
                                     "parent/child/delete.parquet")
@@ -994,11 +866,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                 ["/target-bucket"] * 4,
                 [urlsplit(path).path for method, path in server.requests
                  if method == "POST"])
-            self.assertTrue(all(
-                path == "/target-bucket/parent/"
-                and not any(key.lower().startswith("x-amz-checksum-")
-                            for key in headers)
-                for path, headers in server.put_headers))
+            self.assertEqual([], server.put_headers)
         finally:
             server.shutdown()
             server.server_close()
@@ -1017,7 +885,7 @@ class CustomS3EndpointTest(unittest.TestCase):
         carriage_return = server.prefix + "data/part\rfile.parquet"
         control = server.prefix + "data/part\x01file.parquet"
         server.objects = {
-            server.prefix, carriage_return, control,
+            "parent/", server.prefix, carriage_return, control,
             server.prefix + "schema/schema-0",
         }
         server.late_object_added = False
@@ -1073,7 +941,7 @@ class CustomS3EndpointTest(unittest.TestCase):
         deleted = server.prefix + "data/deleted.parquet"
         failed = server.prefix + "data/failed.parquet"
         schema_zero = server.prefix + "schema/schema-0"
-        server.objects = {server.prefix, deleted, failed, schema_zero}
+        server.objects = {"parent/", server.prefix, deleted, failed, schema_zero}
         server.fail_delete_key_once = failed
         server.late_object_added = False
         server.missing_object_removed = False
@@ -1103,14 +971,13 @@ class CustomS3EndpointTest(unittest.TestCase):
                     file_io.delete(
                         "s3://test-bucket/parent/table", recursive=True)
                 self.assertIn(failed, str(error.exception))
-                self.assertEqual(
-                    {server.prefix, failed, schema_zero}, server.objects)
+                self.assertEqual({"parent/", failed}, server.objects)
                 self.assertTrue(file_io.delete(
                     "s3://test-bucket/parent/table", recursive=True))
                 file_io._s3_delete_client.close()
 
             self.assertEqual({"parent/"}, server.objects)
-            self.assertEqual(3, sum(
+            self.assertEqual(2, sum(
                 method == "POST" for method, _ in server.requests))
         finally:
             server.shutdown()
@@ -1121,87 +988,15 @@ class CustomS3EndpointTest(unittest.TestCase):
         parse(pyarrow.__version__) >= parse("22.0.0"),
         "requires PyArrow 22+ and boto3",
     )
-    def test_catalog_can_retry_delete_with_only_schema_one(self):
-        server = _ThreadingHTTPServer(
-            ("127.0.0.1", 0), _DeleteRequestHandler)
-        server.requests = []
-        server.prefix = "db.db/t/"
-        schema_one = server.prefix + "schema/schema-1"
-        first = server.prefix + "first.parquet"
-        late = server.prefix + "late.parquet"
-        server.objects = {server.prefix, schema_one, first}
-        server.inject_late_after_delete = first
-        server.late_object_added = False
-        server.missing_object_removed = False
-        server_thread = threading.Thread(target=server.serve_forever)
-        server_thread.start()
-        try:
-            options = {
-                "warehouse": "s3://test-bucket/",
-                S3Options.S3_ACCESS_KEY_ID.key(): "ak",
-                S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
-                S3Options.S3_ENDPOINT.key():
-                    "http://127.0.0.1:{}".format(server.server_port),
-                S3Options.S3_REGION.key(): "us-east-1",
-                "fs.s3.path.style.access": "true",
-            }
-            schema = Schema.from_pyarrow_schema(
-                pyarrow.schema([("value", pyarrow.int32())]))
-            schema_json = JSON.to_json(TableSchema.from_schema(1, schema))
-            with mock.patch.object(
-                    PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()), \
-                    mock.patch.dict(os.environ, {
-                        "NO_PROXY": "127.0.0.1,localhost",
-                        "no_proxy": "127.0.0.1,localhost",
-                    }):
-                catalog = CatalogFactory.create(options)
-                file_io = catalog.file_io
-                file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
-                file_io.filesystem.get_file_info.return_value = [
-                    _file_info("test-bucket/db.db/t", pafs.FileType.Directory)]
-
-                def exists(path):
-                    key = file_io.to_filesystem_path(path).partition("/")[2]
-                    return any(item == key or item.startswith(key.rstrip("/") + "/")
-                               for item in server.objects)
-
-                def list_status(path):
-                    return [_file_info("test-bucket/" + schema_one,
-                                       pafs.FileType.File)] \
-                        if schema_one in server.objects else []
-
-                with mock.patch.object(file_io, "exists", side_effect=exists), \
-                        mock.patch.object(file_io, "list_status",
-                                          side_effect=list_status), \
-                        mock.patch.object(file_io, "read_file_utf8",
-                                          return_value=schema_json):
-                    self.assertEqual(1, catalog.get_table("db.t").table_schema.id)
-                    with self.assertRaisesRegex(OSError, "changed during deletion"):
-                        catalog.drop_table("db.t", ignore_if_not_exists=True)
-                    self.assertEqual(1, catalog.get_table("db.t").table_schema.id)
-                    self.assertEqual({server.prefix, schema_one, late}, server.objects)
-
-                    catalog.drop_table("db.t", ignore_if_not_exists=True)
-                    self.assertNotIn(schema_one, server.objects)
-                    self.assertNotIn(late, server.objects)
-                file_io._s3_delete_client.close()
-        finally:
-            server.shutdown()
-            server.server_close()
-            server_thread.join()
-
-    @unittest.skipUnless(
-        parse(pyarrow.__version__) >= parse("22.0.0"),
-        "requires PyArrow 22+ and boto3",
-    )
-    def test_recursive_delete_preserves_late_objects_during_races(self):
+    def test_recursive_delete_reports_late_objects_during_races(self):
         server = _ThreadingHTTPServer(
             ("127.0.0.1", 0), _DeleteRequestHandler)
         server.requests = []
         server.prefix = "ta/ble/"
         decoy = "ta/ble-other/keep.parquet"
         server.objects = {
-            server.prefix, server.prefix + "first.parquet", decoy}
+            "ta/", server.prefix, server.prefix + "first.parquet", decoy}
+        server.inject_late_after_delete = server.prefix + "first.parquet"
         server.late_object_added = False
         server.missing_object_removed = False
         server_thread = threading.Thread(target=server.serve_forever)
@@ -1227,21 +1022,16 @@ class CustomS3EndpointTest(unittest.TestCase):
                 file_io.filesystem.get_file_info.return_value = [
                     _file_info("/ta/ble", pafs.FileType.Directory)]
 
-                self.assertTrue(file_io.delete(
-                    "s3://target-bucket/ta//ble", recursive=True))
+                with self.assertRaisesRegex(OSError, "changed during deletion"):
+                    file_io.delete("s3://target-bucket/ta//ble", recursive=True)
                 file_io._s3_delete_client.close()
 
-            self.assertTrue(server.late_object_added)
             self.assertTrue(server.missing_object_removed)
             self.assertEqual({decoy, "ta/", server.prefix + "late.parquet"},
                              server.objects)
             self.assertEqual(
-                {"GET", "HEAD", "DELETE", "POST", "PUT"},
+                {"GET", "POST"},
                 {method for method, _ in server.requests})
-            self.assertEqual([
-                "/target-bucket/ta/ble/",
-            ], [path for method, path in server.requests
-                if method == "DELETE"])
             self.assertEqual(
                 ["/target-bucket"],
                 [urlsplit(path).path for method, path in server.requests
