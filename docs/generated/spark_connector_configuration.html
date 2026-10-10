@@ -57,6 +57,12 @@ under the License.
             <td>Whether to read row in the form of changelog (add rowkind column in row to represent its change type).</td>
         </tr>
         <tr>
+            <td><h5>read.repartition-large-scan.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to insert a shuffle after a batch scan of a table with BLOB columns (including ARRAY&lt;BLOB&gt; and MAP values of BLOB) when any input partition exceeds twice filesMaxPartitionBytes. The shuffle partition count is the total input bytes divided by filesMaxPartitionBytes, rounded up. Skips the shuffle if this count is no greater than the existing input partition count. Does not change the number of scan tasks.</td>
+        </tr>
+        <tr>
             <td><h5>read.stream.maxBytesPerTrigger</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>

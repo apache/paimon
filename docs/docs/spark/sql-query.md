@@ -167,6 +167,55 @@ To inspect row kinds, including deletes, query the [`audit_log` system table](..
 
 ## Query Optimization
 
+### Repartition Oversized Scan Output
+
+This optimization is disabled by default. Enable it for the Spark session with:
+
+```sql
+SET spark.paimon.read.repartition-large-scan.enabled = true;
+```
+
+Set it to `false` to disable `RepartitionLargePaimonScan`. When disabled, the rule
+returns the plan unchanged without planning scan splits or input partitions.
+
+This rule only applies to tables whose full schema contains a `BLOB`, `ARRAY<BLOB>`,
+or `MAP<..., BLOB>` column, even if that column is pruned from the scan. Other tables
+are skipped without planning scan splits or input partitions.
+
+When an eligible Paimon batch scan has an input partition larger than twice `filesMaxPartitionBytes`,
+the optimizer inserts a shuffle immediately after the scan. The trigger threshold and
+output partition count are calculated separately:
+
+```text
+threshold = 2 * filesMaxPartitionBytes
+output partition count = ceil(total input partition bytes / filesMaxPartitionBytes)
+```
+
+If the computed output partition count is less than or equal to the existing input partition
+count, the rule keeps the scan unchanged without adding a shuffle. A shuffle is inserted only
+when the computed count increases parallelism.
+
+`filesMaxPartitionBytes` uses Paimon's `source.split.target-size`, falling back to an explicitly
+configured `spark.sql.files.maxPartitionBytes`, then Paimon's default split size.
+All input partitions contribute to the total bytes. An input partition exactly at the
+threshold does not trigger repartitioning. File-open costs and minimum partition counts
+do not affect this rule's threshold or output partition count.
+
+Sizes are the sum of data file sizes reported by the splits in each input partition,
+including Blob file sizes. They are metadata estimates, not decoded row sizes or
+measured shuffle bytes. The rule increases parallelism for downstream operators;
+it does not split source scan tasks. It leaves streaming scans and an existing
+shuffle directly above the scan unchanged. Runtime filtering can subsequently
+reduce the scan input without changing this statically planned repartition count.
+
+The shuffle is placed above an existing dynamic partition pruning filter, keeping the
+filter adjacent to its scan operation so Spark can pass runtime filters to Paimon.
+Scans below expressions using `input_file_name()`, `input_file_block_start()`, or
+`input_file_block_length()` are skipped: these functions need the source reader's
+task-local file context, which is not carried through a shuffle.
+
+### Filter Pushdown
+
 It is highly recommended to specify partition and primary key filters
 along with the query, which will speed up the data skipping of the query.
 

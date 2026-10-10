@@ -168,6 +168,18 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to allow full scan when reading a partitioned table.");
 
+    public static final ConfigOption<Boolean> READ_REPARTITION_LARGE_SCAN_ENABLED =
+            key("read.repartition-large-scan.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to insert a shuffle after a batch scan of a table with BLOB columns "
+                                    + "(including ARRAY<BLOB> and MAP values of BLOB) when any input partition "
+                                    + "exceeds twice filesMaxPartitionBytes. The shuffle partition count is "
+                                    + "the total input bytes divided by filesMaxPartitionBytes, rounded up. "
+                                    + "Skips the shuffle if this count is no greater than the existing input partition count. "
+                                    + "Does not change the number of scan tasks.");
+
     public static final ConfigOption<Boolean> FORMAT_TABLE_REPAIR_COLLECT_STATISTICS =
             key("format-table.repair.collect-statistics")
                     .booleanType()
