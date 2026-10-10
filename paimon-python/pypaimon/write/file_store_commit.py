@@ -256,6 +256,12 @@ class FileStoreCommit:
         if self.conflict_detection.has_row_id_check_from_snapshot():
             detect_conflicts = True
             allow_rollback = True
+        if not commit_entries and any(
+                entry.index_file.global_index_meta is not None
+                for entry in index_adds + index_deletes):
+            # An index-only plan must not undo a completed compaction to make
+            # its snapshot baseline current again. The caller must replan.
+            allow_rollback = False
         if self.conflict_detection.has_global_index_additions(index_adds):
             detect_conflicts = True
         if self.conflict_detection.has_hash_index_changes(

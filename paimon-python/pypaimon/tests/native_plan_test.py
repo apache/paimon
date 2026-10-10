@@ -1367,7 +1367,7 @@ class NativePlanTest(unittest.TestCase):
         fs._apply_push_down_limit.assert_not_called()
         fs.scan.assert_not_called()
 
-    def test_primary_key_shard_defers_limit_until_python_index_refinement(self):
+    def test_primary_key_shard_index_refinement_and_limit_are_planned_in_rust(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.is_primary_key_table = True
@@ -1376,14 +1376,17 @@ class NativePlanTest(unittest.TestCase):
         fs.idx_of_this_subtask, fs.number_of_para_subtasks = 1, 2
         scan.predicate = Mock()
         splits = [Mock(bucket=0), Mock(bucket=0)]
-        fs._apply_primary_key_sorted_indexes.return_value = splits[1:]
-        fs._apply_push_down_limit.side_effect = lambda selected: selected
+        # Native planning owns sorted-index refinement before LIMIT. Python
+        # must preserve its selected splits instead of refining them again.
         with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits, 3)) as native:
-            self.assertEqual(scan.plan().splits(), splits[1:])
+            plan = scan.plan()
+        self.assertEqual(plan.splits(), splits)
+        self.assertEqual(plan.snapshot_id, 3)
         self.assertEqual(native.call_args[1]['shard'], (1, 2))
-        self.assertIsNone(native.call_args[1]['limit'])
-        fs._apply_primary_key_sorted_indexes.assert_called_once()
-        fs._apply_push_down_limit.assert_called_once_with(splits[1:])
+        self.assertEqual(native.call_args[1]['limit'], 1)
+        self.assertIs(native.call_args[1]['predicate'], scan.predicate)
+        fs._apply_primary_key_sorted_indexes.assert_not_called()
+        fs._apply_push_down_limit.assert_not_called()
         fs.scan.assert_not_called()
 
     def test_native_plan_requires_split_api(self):

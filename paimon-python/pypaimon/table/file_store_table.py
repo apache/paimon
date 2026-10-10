@@ -459,6 +459,11 @@ class FileStoreTable(Table):
             BatchVectorSearchBuilderImpl
         return BatchVectorSearchBuilderImpl(self)
 
+    def maintain_global_indexes(self, indexes, *, rebuild=False, partitions=None):
+        """Publish one snapshot-consistent catch-up or replacement maintenance pass."""
+        from pypaimon.globalindex.maintain_global_indexes import maintain_global_indexes
+        return maintain_global_indexes(self, indexes, rebuild=rebuild, partitions=partitions)
+
     def create_global_index(self, index_column, index_type: str = "btree",
                             partition_filter=None, partitions=None,
                             options: Optional[dict] = None, *, execution="local",
