@@ -42,6 +42,7 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 import pypaimon.multimodal as pmm
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.connection import MultimodalConnection
 from pypaimon.multimodal.lerobot import load_from_lerobot
@@ -704,7 +705,7 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.subTest(configured=configured):
                 options = {} if configured is None else {option: configured}
                 frames = SimpleNamespace(
-                    options=SimpleNamespace(options=Options(options)))
+                    options=CoreOptions(Options(options)))
                 with patch(module + "_load_dataset", return_value=(frames, metadata)), \
                         patch(module + "_target_schema",
                               return_value=_schema_from_info(info)), \
@@ -719,8 +720,8 @@ class LeRobotValidationTest(unittest.TestCase):
 
         for configured in ("0", "bad", True, 1.5):
             with self.subTest(configured=configured):
-                frames = SimpleNamespace(options=SimpleNamespace(
-                    options=Options({option: configured})))
+                frames = SimpleNamespace(
+                    options=CoreOptions(Options({option: configured})))
                 with patch(module + "_load_dataset", return_value=(frames, metadata)), \
                         patch(module + "_target_schema",
                               return_value=_schema_from_info(info)), \

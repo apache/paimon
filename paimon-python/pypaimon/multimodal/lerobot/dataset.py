@@ -34,7 +34,7 @@ from types import SimpleNamespace
 
 import pyarrow as pa
 
-from pypaimon.common.options.config_options import ConfigOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
     _companion_table_identifiers,
     _restore_pandas_metadata,
@@ -52,13 +52,6 @@ from pypaimon.multimodal.lerobot.schema import (
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
-
-
-_VIDEO_DECODER_CACHE_SIZE = (
-    ConfigOptions.key("read.video.max-open-decoders")
-    .int_type()
-    .default_value(16)
-)
 
 
 _TORCH_DTYPE_NAMES = {
@@ -293,7 +286,7 @@ class PaimonDatasetReader(ABC):
         self._init_delta_projection(validation_context, subtasks)
 
     def _video_decoder_cache_size(self):
-        return _VIDEO_DECODER_CACHE_SIZE.default_value()
+        return CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.default_value()
 
     def _init_frame_contract(self, target_schema, info, validate_metadata):
         tasks = _metadata_member(self.meta, "tasks")
@@ -622,13 +615,12 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
         return self._frame_rows.read_indices(indices, columns)
 
     def _video_decoder_cache_size(self):
-        key = _VIDEO_DECODER_CACHE_SIZE.key()
+        key = CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.key()
         raw = self._frames_table.options.options.to_map().get(key)
         if isinstance(raw, (bool, float)):
             raise ValueError("%s must be a positive integer." % key)
         try:
-            size = self._frames_table.options.options.get(
-                _VIDEO_DECODER_CACHE_SIZE)
+            size = self._frames_table.options.read_video_max_open_decoders()
         except (TypeError, ValueError) as error:
             raise ValueError("%s must be a positive integer." % key) from error
         return _positive_int(size, key)

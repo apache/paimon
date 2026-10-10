@@ -1163,6 +1163,15 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
+    READ_VIDEO_MAX_OPEN_DECODERS: ConfigOption[int] = (
+        ConfigOptions.key("read.video.max-open-decoders")
+        .int_type()
+        .default_value(16)
+        .with_description(
+            "Maximum cached video decoders per video feature in a PyPaimon "
+            "LeRobot DataLoader worker.")
+    )
+
     PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("parquet.filter.columnindex.enabled")
         .boolean_type()
@@ -1926,6 +1935,9 @@ class CoreOptions:
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+
+    def read_video_max_open_decoders(self) -> int:
+        return self.options.get(CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS)
 
     def parquet_column_index_enabled(self) -> bool:
         return self.options.get(CoreOptions.PARQUET_COLUMN_INDEX_ENABLED)
