@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.utils.ExceptionUtils
 
 import org.apache.spark.sql.Row
 
@@ -223,6 +224,113 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       assertThrows[RuntimeException] {
         sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')")
       }
+    }
+  }
+
+  test("Paimon copy files procedure: rows written after the copy get new row ids") {
+    withTable("src", "dst") {
+      sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO src VALUES (1, 'a')")
+      sql("INSERT INTO src VALUES (2, 'b')")
+
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      // the copied rows keep their row ids
+      checkAnswer(sql("SELECT id, _ROW_ID FROM dst"), Seq(Row(1, 0), Row(2, 1)))
+
+      // rows written afterwards continue after them instead of reusing them
+      sql("INSERT INTO dst VALUES (3, 'c'), (4, 'd')")
+      checkAnswer(
+        sql("SELECT id, _ROW_ID FROM dst"),
+        Seq(Row(1, 0), Row(2, 1), Row(3, 2), Row(4, 3)))
+    }
+  }
+
+  test("Paimon copy files procedure: copied rows follow the row ids of rows the copy keeps") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT, v STRING, pt STRING) PARTITIONED BY (pt)
+            |TBLPROPERTIES ('row-tracking.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO src VALUES (1, 'a', 'p1'), (2, 'b', 'p1')")
+      sql("""
+            |CREATE TABLE dst (id INT, v STRING, pt STRING) PARTITIONED BY (pt)
+            |TBLPROPERTIES ('row-tracking.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO dst VALUES (10, 'x', 'p2'), (11, 'y', 'p2')")
+
+      // only partition p1 is overwritten: the rows of p2 keep row ids 0 and 1
+      checkAnswer(
+        sql(
+          """CALL sys.copy(source_table => 'src', target_table => 'dst', where => "pt = 'p1'")"""),
+        Row(true) :: Nil)
+      checkAnswer(
+        sql("SELECT id, v, _ROW_ID FROM dst"),
+        Seq(Row(1, "a", 2), Row(2, "b", 3), Row(10, "x", 0), Row(11, "y", 1)))
+
+      sql("INSERT INTO dst VALUES (3, 'c', 'p1')")
+      checkAnswer(sql("SELECT _ROW_ID FROM dst WHERE id = 3"), Row(4) :: Nil)
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID), count(*) FROM dst"), Row(5, 5) :: Nil)
+    }
+  }
+
+  test("Paimon copy files procedure: updates after copying a data-evolution table take effect") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT, v STRING) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      // many snapshots: the source files carry sequence numbers above the snapshots of dst
+      (1 to 10).foreach(i => sql(s"INSERT INTO src VALUES ($i, 'v$i')"))
+      sql("UPDATE src SET v = 'u1' WHERE id = 1")
+
+      // the update is a file holding the same rows as another one, which cannot be copied
+      val error = intercept[Exception] {
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')")
+      }
+      val trace = ExceptionUtils.stringifyException(error)
+      assert(trace.contains("Compact the source table first"), trace)
+      checkAnswer(sql("SELECT count(*) FROM dst"), Row(0) :: Nil)
+
+      sql("CALL sys.compact(table => 'src')")
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      checkAnswer(sql("SELECT id, v FROM dst"), sql("SELECT id, v FROM src"))
+      checkAnswer(sql("SELECT v FROM dst WHERE id = 1"), Row("u1") :: Nil)
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID), count(*) FROM dst"), Row(10, 10) :: Nil)
+
+      sql("UPDATE dst SET v = 'u2' WHERE id = 2")
+      sql("""
+            |MERGE INTO dst USING (SELECT _ROW_ID AS rid FROM dst WHERE id IN (1, 10)) s
+            |ON dst._ROW_ID = s.rid
+            |WHEN MATCHED THEN UPDATE SET v = 'm'
+            |""".stripMargin)
+      checkAnswer(
+        sql("SELECT id, v FROM dst WHERE id IN (1, 2, 3, 10) ORDER BY id"),
+        Seq(Row(1, "m"), Row(2, "u2"), Row(3, "v3"), Row(10, "m")))
+    }
+  }
+
+  test("Paimon copy files procedure: files that store their row ids are refused") {
+    withTable("src", "dst") {
+      sql("CREATE TABLE src (id INT, v STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO src VALUES (1, 'a'), (2, 'b')")
+      // a copy-on-write update stores the row ids of the rewritten rows in the new file
+      sql("UPDATE src SET v = 'A' WHERE id = 1")
+      assert(
+        sql("SELECT write_cols FROM `src$files`")
+          .collect()
+          .exists(row => !row.isNullAt(0) && row.getSeq[String](0).contains("_ROW_ID")))
+
+      val error = intercept[Exception] {
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')")
+      }
+      val trace = ExceptionUtils.stringifyException(error)
+      assert(trace.contains("its rows store their row ids"), trace)
     }
   }
 }
