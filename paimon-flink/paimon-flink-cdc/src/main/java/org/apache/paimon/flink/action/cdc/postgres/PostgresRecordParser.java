@@ -56,6 +56,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -274,7 +275,7 @@ public class PostgresRecordParser
                 }
             } else if (("bytes".equals(postgresSqlType) && className == null)) {
                 // binary, varbinary
-                newValue = new String(Base64.getDecoder().decode(oldValue));
+                newValue = new String(Base64.getDecoder().decode(oldValue), StandardCharsets.UTF_8);
             } else if ("bytes".equals(postgresSqlType)
                     && className.endsWith(decimalLogicalName())) {
                 // numeric, decimal

@@ -51,6 +51,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -123,7 +124,8 @@ public class DebeziumSchemaUtils {
             ZoneId serverTimeZone) {
 
         if (rawValue != null && "bytes".equals(debeziumType) && className == null) {
-            return new String(((ByteBuffer) origin).array());
+            // Decode only the readable bytes, without moving the position of the record's buffer.
+            return StandardCharsets.UTF_8.decode(((ByteBuffer) origin).duplicate()).toString();
         }
 
         return transformRawValue(
@@ -166,7 +168,7 @@ public class DebeziumSchemaUtils {
             }
         } else if (("bytes".equals(debeziumType) && className == null)) {
             // MySQL binary, varbinary, blob
-            transformed = new String(Base64.getDecoder().decode(rawValue));
+            transformed = new String(Base64.getDecoder().decode(rawValue), StandardCharsets.UTF_8);
         } else if ("bytes".equals(debeziumType) && className.endsWith(decimalLogicalName())) {
             // MySQL numeric, fixed, decimal
             try {
