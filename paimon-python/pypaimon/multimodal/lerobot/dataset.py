@@ -55,7 +55,7 @@ from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 _VIDEO_DECODER_CACHE_SIZE = (
-    ConfigOptions.key("pypaimon.lerobot.max-open-videos")
+    ConfigOptions.key("read.video.max-open-decoders")
     .int_type()
     .default_value(16)
 )

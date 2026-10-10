@@ -698,7 +698,7 @@ class LeRobotValidationTest(unittest.TestCase):
         rows = SimpleNamespace(
             num_rows=1, file_io=LocalFileIO(), close=lambda: None)
         module = "pypaimon.multimodal.lerobot.dataset."
-        option = "pypaimon.lerobot.max-open-videos"
+        option = "read.video.max-open-decoders"
 
         for configured, expected in ((None, 16), ("2", 2)):
             with self.subTest(configured=configured):

@@ -102,16 +102,16 @@ class MultimodalTableTest(unittest.TestCase):
         table = self.conn.create_table(
             "frames", schema=_schema({"id": pa.int32()}),
             options=_PARQUET_OPTIONS)
-        copied = table.copy({"pypaimon.lerobot.max-open-videos": "8"})
+        copied = table.copy({"read.video.max-open-decoders": "8"})
 
         self.assertEqual(table.identifier, copied.identifier)
         self.assertIs(table.catalog, copied.catalog)
         self.assertNotIn(
-            "pypaimon.lerobot.max-open-videos",
+            "read.video.max-open-decoders",
             table.raw_table.table_schema.options)
         self.assertEqual(
             "8", copied.raw_table.table_schema.options[
-                "pypaimon.lerobot.max-open-videos"])
+                "read.video.max-open-decoders"])
 
         table.add([{"id": 1}])
         snapshot_id = table.raw_table.snapshot_manager().get_latest_snapshot().id
@@ -119,7 +119,7 @@ class MultimodalTableTest(unittest.TestCase):
         tagged = copied.raw_table.copy({"scan.tag-name": "training"})
         self.assertEqual(
             "8", tagged.table_schema.options[
-                "pypaimon.lerobot.max-open-videos"])
+                "read.video.max-open-decoders"])
 
     def test_create_table_defaults_data_evolution_options(self):
         table = self.conn.create_table(
