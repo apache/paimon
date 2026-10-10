@@ -151,9 +151,9 @@ class CatalogCommitLeaseTest {
         Options options = options();
         options.set(CoreOptions.COMMIT_TIMEOUT, Duration.ZERO);
         assertThatThrownBy(() -> begin(options, 1)).hasMessageContaining("Timed out");
-        options.set(CoreOptions.COMMIT_LOCK_ENABLED, false);
+        options.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, false);
         assertThatThrownBy(() -> begin(options, 0))
-                .hasMessageContaining("requires commit.lock-enabled");
+                .hasMessageContaining("requires rest.commit.lock-enabled");
     }
 
     private void grant(Snapshot head) throws Exception {
@@ -176,8 +176,8 @@ class CatalogCommitLeaseTest {
 
     private static Options options() {
         Options options = new Options();
-        options.set(CoreOptions.COMMIT_LOCK_ENABLED, true);
-        options.set(CoreOptions.COMMIT_LOCK_ON_RETRY, true);
+        options.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
+        options.set(CoreOptions.REST_COMMIT_LOCK_ON_RETRY, true);
         options.set(CoreOptions.COMMIT_MIN_RETRY_WAIT, Duration.ZERO);
         options.set(CoreOptions.COMMIT_MAX_RETRY_WAIT, Duration.ZERO);
         return options;

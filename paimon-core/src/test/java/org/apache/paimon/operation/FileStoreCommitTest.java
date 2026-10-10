@@ -1781,8 +1781,8 @@ public class FileStoreCommitTest {
                                         invocation.getArgument(2),
                                         invocation.getArgument(3)));
         Map<String, String> retryOptions = new HashMap<>(store.options().toMap());
-        retryOptions.put("commit.lock-enabled", "true");
-        retryOptions.put("commit.lock-on-retry", "true");
+        retryOptions.put("rest.commit.lock-enabled", "true");
+        retryOptions.put("rest.commit.lock-on-retry", "true");
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(
                         store, "morax-job", publisher, new CoreOptions(retryOptions), false)) {

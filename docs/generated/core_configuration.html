@@ -333,18 +333,6 @@ under the License.
             <td>Snapshot preceding the earliest snapshot to inspect when committing. Only later snapshots are searched for this commit user's previous commits. This also provides the starting point for strict-mode checks when enabled. Keep this bound unchanged across retries and recovery.</td>
         </tr>
         <tr>
-            <td><h5>commit.lock-enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Enable the catalog's table commit lease capability.</td>
-        </tr>
-        <tr>
-            <td><h5>commit.lock-on-retry</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Acquire a catalog commit lease before preparing a retried snapshot. Requires commit.lock-enabled=true.</td>
-        </tr>
-        <tr>
             <td><h5>commit.max-retries</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
@@ -1481,6 +1469,18 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.</td>
+        </tr>
+        <tr>
+            <td><h5>rest.commit.lock-enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable the REST catalog's table commit lease capability.</td>
+        </tr>
+        <tr>
+            <td><h5>rest.commit.lock-on-retry</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Acquire a REST catalog commit lease before preparing a retried snapshot. Requires rest.commit.lock-enabled=true.</td>
         </tr>
         <tr>
             <td><h5>row-tracking.enabled</h5></td>

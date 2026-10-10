@@ -638,7 +638,7 @@ paths:
           schema:
             type: string
       description: >-
-        Requires commit.lock-enabled=true and the same permission as committing snapshots.
+        Requires rest.commit.lock-enabled=true and the same permission as committing snapshots.
         Ownership is the exact commitUser together with the authenticated caller. Contention
         returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
         Renewal never revives an expired lease. Publication retains snapshot CAS validation
@@ -687,7 +687,7 @@ paths:
           schema:
             type: string
       description: >-
-        Requires commit.lock-enabled=true and the same permission as committing snapshots.
+        Requires rest.commit.lock-enabled=true and the same permission as committing snapshots.
         Ownership is the exact commitUser together with the authenticated caller. Contention
         returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
         Renewal never revives an expired lease. Publication retains snapshot CAS validation

@@ -74,11 +74,14 @@ configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
 ## Catalog Commit Leases on Retry
 
-A REST catalog can expose optional table commit leases. Set `commit.lock-enabled = true`
-on the table to allow acquisition, and `commit.lock-on-retry = true` for a writer that should
+A REST catalog can expose optional table commit leases. Set `rest.commit.lock-enabled = true`
+on the table to allow acquisition, and `rest.commit.lock-on-retry = true` for a writer that should
 acquire a lease after an optimistic publication conflict. Both options default to `false`.
 The first attempt remains optimistic; lock contention does not consume the publication retry
 count, but waiting is bounded by `commit.timeout`.
+
+These REST table options are independent of the catalog options `lock.enabled` and `lock.type`,
+which configure the catalog lock used for filesystem publication.
 
 The client supplies its exact `commitUser` when acquiring and renewing. A grant includes the
 server's current snapshot; the client uses that head to rebuild and validate its retry while

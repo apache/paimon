@@ -54,11 +54,11 @@ public abstract class CommitAttempt implements AutoCloseable {
             String commitUser,
             int retryCount,
             long startedMillis) {
-        if (options.commitLockOnRetry() && !options.commitLockEnabled()) {
+        if (options.restCommitLockOnRetry() && !options.restCommitLockEnabled()) {
             throw new IllegalArgumentException(
-                    "commit.lock-on-retry requires commit.lock-enabled=true.");
+                    "rest.commit.lock-on-retry requires rest.commit.lock-enabled=true.");
         }
-        boolean locked = options.commitLockOnRetry() && retryCount > 0;
+        boolean locked = options.restCommitLockOnRetry() && retryCount > 0;
         if (!locked) {
             return unlocked(commit);
         }
