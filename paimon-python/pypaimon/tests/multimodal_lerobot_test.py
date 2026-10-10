@@ -56,6 +56,7 @@ from pypaimon.multimodal.lerobot.dataset import (
     _image_tensor,
     _index_names,
     _open_video_decoder,
+    _reader_metadata,
     _selected_episodes,
     _stack_visual_windows,
     _torch_row,
@@ -669,60 +670,64 @@ class LeRobotValidationTest(unittest.TestCase):
             self.assertIs(expected, decoder.get_frames_at(indices=[3]))
             stream.seek.assert_called_once_with(0)
 
-    def test_video_decoder_cache_capacity(self):
-        metadata = {
-            "repo_id": "test/cache-capacity",
-            "info": {
-                "codebase_version": "v3.0", "fps": 10,
-                "total_frames": 1, "total_episodes": 1, "total_tasks": 1,
-                "features": {
-                    "index": {"dtype": "int64", "shape": [1]},
-                    "episode_index": {"dtype": "int64", "shape": [1]},
-                    "frame_index": {"dtype": "int64", "shape": [1]},
-                    "timestamp": {"dtype": "float32", "shape": [1]},
-                    "task_index": {"dtype": "int64", "shape": [1]},
-                    "camera": {"dtype": "video", "shape": [2, 2, 3],
-                               "names": ["height", "width", "channels"]},
-                    "camera_b": {"dtype": "video", "shape": [2, 2, 3],
-                                 "names": ["height", "width", "channels"]},
-                },
+    def test_table_option_limits_video_decoders(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        info = {
+            "codebase_version": "v3.0", "fps": 10,
+            "total_frames": 1, "total_episodes": 1, "total_tasks": 1,
+            "features": {
+                "index": {"dtype": "int64", "shape": [1]},
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "task_index": {"dtype": "int64", "shape": [1]},
+                "camera": {"dtype": "video", "shape": [2, 2, 3],
+                           "names": ["height", "width", "channels"]},
+                "camera_b": {"dtype": "video", "shape": [2, 2, 3],
+                             "names": ["height", "width", "channels"]},
             },
+        }
+        metadata = _reader_metadata({
+            "repo_id": "test/video-cache-option", "info": info,
             "episodes": [{"episode_index": 0, "dataset_from_index": 0,
                           "dataset_to_index": 1, "length": 1,
                           "tasks": ["pick"]}],
             "tasks": ["pick"],
-        }
-        from pypaimon.filesystem.local_file_io import LocalFileIO
-
-        for options, expected in (({}, 16), ({"max_open_videos": 2}, 2)):
-            with self.subTest(options=options):
-                reader = _ManualDatasetReader(
-                    metadata, file_io=LocalFileIO(), **options)
-                self.assertEqual(2, len(reader._video_collators))
-                self.assertEqual([expected, expected], [
-                    c.max_open_videos for c in reader._video_collators])
-                restored = pickle.loads(pickle.dumps(reader))
-                self.assertEqual([expected, expected], [
-                    c.max_open_videos for c in restored._video_collators])
-                dataset = pmm.PaimonLeRobotDataset(reader)
-                self.assertIs(reader, dataset.reader)
-                with self.assertRaisesRegex(ValueError, "Configure Dataset options"):
-                    pmm.PaimonLeRobotDataset(reader, max_open_videos=3)
-                reader.close()
-                restored.close()
-
-        for value in (0, -1, True, 1.5, None):
-            with self.subTest(value=value):
-                with self.assertRaisesRegex(ValueError, "max_open_videos"):
-                    _ManualDatasetReader(
-                        metadata, file_io=LocalFileIO(), max_open_videos=value)
-
-    def test_table_dataset_forwards_video_cache_capacity(self):
+        })
+        rows = SimpleNamespace(
+            num_rows=1, file_io=LocalFileIO(), close=lambda: None)
         module = "pypaimon.multimodal.lerobot.dataset."
-        table = Mock()
-        with patch(module + "_PaimonTableDatasetReader") as reader:
-            pmm.PaimonLeRobotDataset(table, max_open_videos=3)
-            self.assertEqual(3, reader.call_args.kwargs["max_open_videos"])
+        option = "pypaimon.lerobot.max-open-videos"
+
+        for configured, expected in ((None, 16), ("2", 2)):
+            with self.subTest(configured=configured):
+                options = {} if configured is None else {option: configured}
+                frames = SimpleNamespace(
+                    options=SimpleNamespace(options=Options(options)))
+                with patch(module + "_load_dataset", return_value=(frames, metadata)), \
+                        patch(module + "_target_schema",
+                              return_value=_schema_from_info(info)), \
+                        patch(module + "_PaimonTableFrameReader",
+                              return_value=rows):
+                    dataset = pmm.PaimonLeRobotDataset(Mock())
+                try:
+                    self.assertEqual([expected, expected], [
+                        c.max_open_videos for c in dataset.reader._video_collators])
+                finally:
+                    dataset.reader.close()
+
+        for configured in ("0", "bad", True, 1.5):
+            with self.subTest(configured=configured):
+                frames = SimpleNamespace(options=SimpleNamespace(
+                    options=Options({option: configured})))
+                with patch(module + "_load_dataset", return_value=(frames, metadata)), \
+                        patch(module + "_target_schema",
+                              return_value=_schema_from_info(info)), \
+                        patch(module + "_PaimonTableFrameReader",
+                              return_value=rows):
+                    with self.assertRaisesRegex(ValueError, option):
+                        pmm.PaimonLeRobotDataset(Mock())
 
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:
