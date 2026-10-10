@@ -20,6 +20,9 @@ package org.apache.paimon.flink.action.cdc.format.canal;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link CanalFieldParser}. */
@@ -33,5 +36,25 @@ public class CanalFieldParserTest {
         // Valid 1-based indices still resolve to their members.
         assertThat(CanalFieldParser.getEnumValueByIndex("enum('a','b','c')", 1)).isEqualTo("a");
         assertThat(CanalFieldParser.getEnumValueByIndex("enum('a','b','c')", 3)).isEqualTo("c");
+    }
+
+    @Test
+    public void testSetValuesBeyondIntRange() {
+        String mysqlType =
+                IntStream.range(0, 64)
+                        .mapToObj(i -> "'m" + i + "'")
+                        .collect(Collectors.joining(",", "set(", ")"));
+
+        assertThat(CanalFieldParser.convertSet("5", "set('a','b','c')")).isEqualTo("[a,c]");
+        // the 32nd member is bit 31, which no longer fits into an int
+        assertThat(CanalFieldParser.convertSet("2147483648", mysqlType)).isEqualTo("[m31]");
+        // the bitmap of a set with 64 members is an unsigned 64-bit value
+        assertThat(CanalFieldParser.convertSet("9223372036854775809", mysqlType))
+                .isEqualTo("[m0,m63]");
+        assertThat(CanalFieldParser.convertSet("18446744073709551615", mysqlType))
+                .isEqualTo(
+                        IntStream.range(0, 64)
+                                .mapToObj(i -> "m" + i)
+                                .collect(Collectors.joining(",", "[", "]")));
     }
 }

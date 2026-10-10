@@ -56,8 +56,8 @@ public class AliyunFieldParser {
 
     protected static String convertSet(String value, String mysqlType) {
         // mysql set type value can be filled with more than one, value is a bit string conversion
-        // from the long
-        int indexes = Integer.parseInt(value);
+        // from the long. A set has up to 64 members, so the bitmap is an unsigned 64-bit value.
+        long indexes = Long.parseUnsignedLong(value);
         return getSetValuesByIndex(mysqlType, indexes);
     }
 
@@ -78,7 +78,7 @@ public class AliyunFieldParser {
         return options[elementIndex - 1];
     }
 
-    protected static String getSetValuesByIndex(String mysqlType, int indexes) {
+    protected static String getSetValuesByIndex(String mysqlType, long indexes) {
         String[] options = extractSetValuesByIndex(mysqlType);
 
         StringBuilder sb = new StringBuilder();
