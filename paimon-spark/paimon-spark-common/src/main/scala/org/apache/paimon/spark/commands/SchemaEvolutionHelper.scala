@@ -99,7 +99,7 @@ private[spark] object SchemaEvolutionHelper {
       table: FileStoreTable,
       dataSchema: StructType,
       flags: SchemaEvolutionFlags): Option[TableSchema] = {
-    val filtered = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
+    val filtered = SparkSystemColumns.filterSparkSystemColumns(dataSchema, table)
     val dataRowType = SparkTypeUtils.toPaimonType(filtered).asInstanceOf[RowType]
     val current = table.schema()
     val merged =
@@ -122,7 +122,7 @@ private[spark] object SchemaEvolutionHelper {
       dataSchema: StructType,
       sparkSession: SparkSession,
       options: Options = new Options()): Boolean = {
-    val filtered = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
+    val filtered = SparkSystemColumns.filterSparkSystemColumns(dataSchema, table)
     val flags = readFlags(sparkSession, options)
     val dataRowType = SparkTypeUtils.toPaimonType(filtered).asInstanceOf[RowType]
     table
@@ -177,14 +177,20 @@ private[spark] object SchemaEvolutionHelper {
       isByName: Boolean,
       sparkSession: SparkSession): Seq[Attribute] = {
     val flags = readFlags(sparkSession, options)
-    if (!isByName || !mergeSchemaEnabled(options) || !flags.typeWidening) return table.output
+    val physicalOutput =
+      table.table.asInstanceOf[SparkTable].getTable match {
+        case fileStoreTable: FileStoreTable =>
+          SparkSystemColumns.filterChangelogMetadataColumns(table.output, fileStoreTable)
+        case _ => table.output
+      }
+    if (!isByName || !mergeSchemaEnabled(options) || !flags.typeWidening) return physicalOutput
 
     table.table.asInstanceOf[SparkTable].getTable match {
       case fst: FileStoreTable =>
         computeMergedSchema(fst, querySchema, flags)
           .map(s => PaimonUtils.toAttributes(SparkTypeUtils.fromPaimonRowType(s.logicalRowType())))
-          .getOrElse(table.output)
-      case _ => table.output
+          .getOrElse(physicalOutput)
+      case _ => physicalOutput
     }
   }
 

@@ -81,6 +81,7 @@ import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -1907,5 +1908,92 @@ public class SchemaManagerTest {
                     .as("%s", option.key())
                     .doesNotThrowAnyException();
         }
+    }
+
+    @Test
+    public void testChangelogMetadataFieldPrefixIsImmutable() {
+        String key = CoreOptions.CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX.key();
+        Map<String, String> options = new HashMap<>();
+        options.put(key, "__internal__");
+
+        assertThatThrownBy(
+                        () ->
+                                SchemaManager.checkAlterTableOption(
+                                        options, key, "__internal__", "__event__"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(key);
+        assertThatThrownBy(() -> SchemaManager.checkResetTableOption(options, key))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(key);
+    }
+
+    @Test
+    public void testRenameChangelogMetadataSourceColumn() throws Exception {
+        Map<String, String> metadataOptions = new HashMap<>();
+        metadataOptions.put(
+                CoreOptions.CHANGELOG_PRODUCER.key(),
+                CoreOptions.ChangelogProducer.LOOKUP.toString());
+        metadataOptions.put(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(), "f2, f1");
+        Schema metadataSchema =
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, metadataOptions, "");
+        retryArtificialException(() -> manager.createTable(metadataSchema));
+
+        // The metadata name is derived from the source column and referenced downstream, so a
+        // rename of the source column must be rejected rather than silently changing that name.
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.renameColumn(
+                                                                "f2", "renamed_f2"))))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot rename column [f2] because it is used by "
+                                        + "'changelog-producer.event-metadata-fields'"));
+
+        // Other columns can still be renamed and the option is left untouched.
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.addColumn("f3", DataTypes.INT())));
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.renameColumn("f3", "renamed_f3")));
+        TableSchema latest = retryArtificialException(() -> manager.latest()).get();
+        assertThat(latest.options())
+                .containsEntry(
+                        CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(), "f2, f1");
+        assertThat(latest.fieldNames()).contains("f2", "renamed_f3");
+    }
+
+    @Test
+    public void testDropChangelogMetadataSourceColumn() throws Exception {
+        Map<String, String> metadataOptions = new HashMap<>();
+        metadataOptions.put(
+                CoreOptions.CHANGELOG_PRODUCER.key(),
+                CoreOptions.ChangelogProducer.LOOKUP.toString());
+        metadataOptions.put(CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(), "f2, f1");
+        Schema metadataSchema =
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, metadataOptions, "");
+        retryArtificialException(() -> manager.createTable(metadataSchema));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () -> manager.commitChanges(SchemaChange.dropColumn("f2"))))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot drop column [f2] because it is used by "
+                                        + "'changelog-producer.event-metadata-fields'"));
+
+        // Other columns can still be dropped and the option is left untouched.
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.addColumn("f3", DataTypes.INT())));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("f3")));
+        TableSchema latest = retryArtificialException(() -> manager.latest()).get();
+        assertThat(latest.options())
+                .containsEntry(
+                        CoreOptions.CHANGELOG_PRODUCER_EVENT_METADATA_FIELDS.key(), "f2, f1");
+        assertThat(latest.fieldNames()).contains("f2").doesNotContain("f3");
     }
 }
