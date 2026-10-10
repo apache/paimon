@@ -3540,10 +3540,18 @@ class LeRobotImportTest(unittest.TestCase):
         import torch
 
         self.connection.load_from_lerobot("worker_pickle", self.image_source)
-        table = self.connection.get_table("worker_pickle")
-        dataset = pmm.PaimonLeRobotDataset(table, return_uint8=True)
+        snapshots = self.connection.create_lerobot_tag(
+            "worker_pickle", "training")
+        table = self.connection.get_table("worker_pickle").copy({
+            "read.video.max-open-decoders": "2"})
+        dataset = pmm.PaimonLeRobotDataset(
+            table, tag_name="training", return_uint8=True)
         restored = pickle.loads(pickle.dumps(dataset))
 
+        for reader in (dataset.reader, restored.reader):
+            self.assertEqual(snapshots["frames"], reader._snapshot_id)
+            self.assertEqual(
+                2, reader._read_table.options.read_video_max_open_decoders())
         self.assertEqual(dataset.meta.episodes[:], restored.meta.episodes[:])
         self.assertEqual(
             dataset.meta.episodes._fingerprint,
