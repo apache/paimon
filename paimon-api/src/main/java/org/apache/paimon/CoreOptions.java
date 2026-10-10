@@ -979,13 +979,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Enable the REST catalog's table commit lease capability.");
 
-    public static final ConfigOption<Boolean> REST_COMMIT_LOCK_ON_RETRY =
-            key("rest.commit.lock-on-retry")
+    public static final ConfigOption<Boolean> COMMIT_LOCK_ON_RETRY =
+            key("commit.lock-on-retry")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Acquire a REST catalog commit lease before preparing a retried snapshot. "
-                                    + "Requires rest.commit.lock-enabled=true.");
+                            "Acquire a commit lock before preparing a retried snapshot. "
+                                    + "Requires lock support from the snapshot committer.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
             key("commit.timeout")
@@ -3918,8 +3918,8 @@ public class CoreOptions implements Serializable {
         return options.get(REST_COMMIT_LOCK_ENABLED);
     }
 
-    public boolean restCommitLockOnRetry() {
-        return options.get(REST_COMMIT_LOCK_ON_RETRY);
+    public boolean commitLockOnRetry() {
+        return options.get(COMMIT_LOCK_ON_RETRY);
     }
 
     public long commitTimeout() {

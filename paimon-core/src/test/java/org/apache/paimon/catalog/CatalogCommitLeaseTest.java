@@ -20,7 +20,9 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -145,15 +147,68 @@ class CatalogCommitLeaseTest {
     }
 
     @Test
-    void busyTimeoutAndInvalidConfigurationFailClearly() throws Exception {
+    void busyTimeoutFailsClearly() throws Exception {
         when(catalog.acquireCommitLock(branch, "table-id", "morax-job"))
                 .thenReturn(Optional.empty());
         Options options = options();
         options.set(CoreOptions.COMMIT_TIMEOUT, Duration.ZERO);
         assertThatThrownBy(() -> begin(options, 1)).hasMessageContaining("Timed out");
-        options.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, false);
-        assertThatThrownBy(() -> begin(options, 0))
-                .hasMessageContaining("requires rest.commit.lock-enabled");
+    }
+
+    @Test
+    void retryPolicyWorksWithOtherCommittersWithoutRestOptions() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.COMMIT_LOCK_ON_RETRY, true);
+        CoreOptions coreOptions = new CoreOptions(options);
+        assertThat(coreOptions.restCommitLockEnabled()).isFalse();
+        SnapshotCommit publisher = mock(SnapshotCommit.class);
+        CommitAttempt guarded = mock(CommitAttempt.class);
+        Snapshot head = mock(Snapshot.class);
+        Snapshot next = ownedSnapshot();
+        when(publisher.beginCommit("main", "morax-job", true)).thenReturn(Optional.of(guarded));
+        when(guarded.latestSnapshot(any())).thenReturn(head);
+        when(guarded.commit("base", next, "main", Collections.emptyList())).thenReturn(true);
+        try (CommitAttempt attempt =
+                CommitAttempt.begin(
+                        publisher, coreOptions, "morax-job", 1, System.currentTimeMillis())) {
+            assertThat(
+                            attempt.latestSnapshot(
+                                    () -> {
+                                        throw new AssertionError("Cached head used");
+                                    }))
+                    .isSameAs(head);
+            assertThat(attempt.commit("base", next, "main", Collections.emptyList())).isTrue();
+        }
+        verify(guarded).close();
+        verifyNoInteractions(catalog, renewer);
+    }
+
+    @Test
+    void unsupportedCommitterRejectsLockedRetryAfterOptimisticFirstAttempt() {
+        Options options = new Options();
+        options.set(CoreOptions.COMMIT_LOCK_ON_RETRY, true);
+        SnapshotCommit publisher =
+                new RenamingSnapshotCommit(mock(SnapshotManager.class), Lock.empty());
+        Snapshot head = mock(Snapshot.class);
+        try (CommitAttempt attempt =
+                CommitAttempt.begin(
+                        publisher,
+                        new CoreOptions(options),
+                        "morax-job",
+                        0,
+                        System.currentTimeMillis())) {
+            assertThat(attempt.latestSnapshot(() -> head)).isSameAs(head);
+        }
+        assertThatThrownBy(
+                        () ->
+                                CommitAttempt.begin(
+                                        publisher,
+                                        new CoreOptions(options),
+                                        "morax-job",
+                                        1,
+                                        System.currentTimeMillis()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support locks");
     }
 
     private void grant(Snapshot head) throws Exception {
@@ -177,7 +232,7 @@ class CatalogCommitLeaseTest {
     private static Options options() {
         Options options = new Options();
         options.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
-        options.set(CoreOptions.REST_COMMIT_LOCK_ON_RETRY, true);
+        options.set(CoreOptions.COMMIT_LOCK_ON_RETRY, true);
         options.set(CoreOptions.COMMIT_MIN_RETRY_WAIT, Duration.ZERO);
         options.set(CoreOptions.COMMIT_MAX_RETRY_WAIT, Duration.ZERO);
         return options;

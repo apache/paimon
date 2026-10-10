@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-/** A single snapshot preparation and publication, optionally protected by a catalog lease. */
+/** A single snapshot preparation and publication, optionally protected by a commit lock. */
 public abstract class CommitAttempt implements AutoCloseable {
 
     /** Use the granted head for a locked attempt, or load the head for an optimistic attempt. */
@@ -43,22 +43,21 @@ public abstract class CommitAttempt implements AutoCloseable {
             List<PartitionStatistics> statistics)
             throws Exception;
 
-    /** Stops renewal idempotently; the server releases a lease on publication or expiry. */
+    /**
+     * End this attempt idempotently. Catalog lease implementations stop renewal and let the server
+     * release the lease on publication or expiry.
+     */
     @Override
     public abstract void close();
 
-    /** Wait for a lease separately from the number of snapshot publication attempts. */
+    /** Wait for a commit lock separately from the number of snapshot publication attempts. */
     public static CommitAttempt begin(
             SnapshotCommit commit,
             CoreOptions options,
             String commitUser,
             int retryCount,
             long startedMillis) {
-        if (options.restCommitLockOnRetry() && !options.restCommitLockEnabled()) {
-            throw new IllegalArgumentException(
-                    "rest.commit.lock-on-retry requires rest.commit.lock-enabled=true.");
-        }
-        boolean locked = options.restCommitLockOnRetry() && retryCount > 0;
+        boolean locked = options.commitLockOnRetry() && retryCount > 0;
         if (!locked) {
             return unlocked(commit);
         }

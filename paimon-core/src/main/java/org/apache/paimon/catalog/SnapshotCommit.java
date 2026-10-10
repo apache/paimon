@@ -29,7 +29,11 @@ import java.util.Optional;
 /** Interface to commit snapshot atomically. */
 public interface SnapshotCommit extends AutoCloseable {
 
-    /** An empty result means that another writer currently holds the lease. */
+    /**
+     * Begin snapshot preparation and publication, optionally acquiring a commit lock. The returned
+     * locked attempt protects head refresh, validation, preparation and publication. An empty
+     * result means that another writer currently holds the lock.
+     */
     default Optional<CommitAttempt> beginCommit(
             String branch, String commitUser, boolean acquireLock) throws Exception {
         if (acquireLock) {

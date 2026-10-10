@@ -72,16 +72,21 @@ The commit mechanism depends on the catalog and storage:
 All writers of the same table must use a compatible commit mechanism and shared locking
 configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
-## Catalog Commit Leases on Retry
+## Commit Locks on Retry
 
-A REST catalog can expose optional table commit leases. Set `rest.commit.lock-enabled = true`
-on the table to allow acquisition, and `rest.commit.lock-on-retry = true` for a writer that should
-acquire a lease after an optimistic publication conflict. Both options default to `false`.
-The first attempt remains optimistic; lock contention does not consume the publication retry
-count, but waiting is bounded by `commit.timeout`.
+`commit.lock-on-retry = true` is a writer policy that asks the snapshot committer to acquire a
+lock before preparing a retried snapshot. The policy defaults to `false` and requires a snapshot
+committer that implements retry locking. The first attempt does not acquire a retry lock;
+contention does not consume the publication retry count, but waiting is bounded by `commit.timeout`.
 
-These REST table options are independent of the catalog options `lock.enabled` and `lock.type`,
-which configure the catalog lock used for filesystem publication.
+The REST catalog provides an implementation using table commit leases. Set
+`rest.commit.lock-enabled = true` on the table to allow lease acquisition; this capability option
+also defaults to `false`. Other snapshot committers can provide their own retry lock implementation
+without requiring REST options. Unsupported committers reject locked retries explicitly.
+
+These options are independent of the catalog options `lock.enabled` and `lock.type`, which configure
+the existing catalog lock used for filesystem publication. The retry policy does not change those
+locks or automatically add retry locking to Hive or JDBC catalogs.
 
 The client supplies its exact `commitUser` when acquiring and renewing. A grant includes the
 server's current snapshot; the client uses that head to rebuild and validate its retry while
