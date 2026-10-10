@@ -84,6 +84,14 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         self._limit = limit
         return self
 
+    def execute_local(self) -> GlobalIndexResult:
+        from pypaimon.table.source.native_full_text_search import try_native_full_text_search
+
+        result = try_native_full_text_search(self)
+        if result is not None:
+            return result
+        return super().execute_local()
+
     def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
         self._field_name = field_name
         self._query = query
@@ -149,6 +157,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             self._table,
             self._text_columns(),
             partition_filter=self._partition_filter,
+            filter_=self._filter,
         )
 
     def new_full_text_read(self) -> FullTextRead:

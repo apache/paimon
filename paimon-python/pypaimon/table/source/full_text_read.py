@@ -79,6 +79,7 @@ class DataEvolutionFullTextRead(FullTextRead):
     def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
         reader = copy(self)
         reader._table = global_index_live_row_filter.table_at_snapshot(self._table, plan.snapshot())
+        reader._snapshot = plan.snapshot()
         return reader.read(plan.splits())
 
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
@@ -91,26 +92,70 @@ class DataEvolutionFullTextRead(FullTextRead):
             splits_by_column.setdefault(split.column_name, []).append(split)
         live_rows = global_index_live_row_filter.live_rows(
             self._table, self._partition_filter)
-        if self._filter is not None:
-            from pypaimon.table.source.global_index_row_filter import matching_rows
-
-            candidates = RoaringBitmap64()
-            for split in index_splits:
-                candidates.add_range(split.row_range_start, split.row_range_end)
-            for row_range in _raw_row_ranges(raw_splits):
-                candidates.add_range(row_range.from_, row_range.to)
-            # Scalar indexes may prune this read, but incomplete scalar coverage
-            # must not exclude rows covered by the full-text search plan.
-            table = self._table.copy({"scalar-index.search-mode": "full"})
-            matched = matching_rows(table, self._filter, candidates, self._partition_filter)
-            live_rows = matched if live_rows is None else RoaringBitmap64.and_(live_rows, matched)
-        indexed_result = self._eval_column_query(splits_by_column, live_rows)
+        matched = self._matched_indexed_rows(index_splits, live_rows)
+        indexed_result = self._eval_column_query(splits_by_column, matched if self._filter is not None else live_rows)
         raw_ranges = _raw_row_ranges(raw_splits)
         if self._filter is None:
             raw_result = self._read_raw_search(raw_ranges, _index_type(index_splits))
         else:
-            raw_result = self._read_raw_search(raw_ranges, _index_type(index_splits), live_rows)
+            candidates = GlobalIndexResult.from_ranges(raw_ranges).results()
+            if live_rows is not None:
+                candidates = RoaringBitmap64.and_(candidates, live_rows)
+            matched = self._matching_rows(candidates)
+            raw_result = self._read_raw_search(raw_ranges, _index_type(index_splits), matched)
         return indexed_result.or_(raw_result).top_k(self._limit)
+
+    def _matching_rows(self, candidates):
+        from pypaimon.table.source.global_index_row_filter import matching_rows
+
+        table = self._table.copy({'scalar-index.search-mode': 'full'})
+        return matching_rows(table, self._filter, candidates, self._partition_filter)
+
+    def _matched_indexed_rows(self, splits, live_rows):
+        if self._filter is None:
+            return live_rows
+        from pypaimon.common.options.core_options import GlobalIndexSearchMode
+        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+
+        covered = RoaringBitmap64()
+        files = {}
+        for split in splits:
+            covered.add_range(split.row_range_start, split.row_range_end)
+            files.update((file.file_name, file) for file in split.scalar_index_files)
+        if live_rows is not None:
+            covered = RoaringBitmap64.and_(covered, live_rows)
+        if covered.is_empty():
+            return covered
+        snapshot = getattr(self, '_snapshot', None)
+        if snapshot is None:
+            snapshot = TimeTravelUtil.resolve_snapshot(self._table)
+        mode = self._table.options.scalar_index_search_mode()
+        scalar_files = list(files.values())
+        coverage = DataEvolutionGlobalIndexCoverage(self._table, snapshot, self._partition_filter, scalar_files)
+        raw_ranges = coverage.unindexed_ranges(self._table.fields, self._filter, mode)
+        unindexed = RoaringBitmap64.and_(GlobalIndexResult.from_ranges(raw_ranges).results(), covered)
+        decided = RoaringBitmap64.remove_all(covered, unindexed)
+        matched = RoaringBitmap64()
+        if not decided.is_empty():
+            scanner = DataEvolutionGlobalIndexScanner.create(self._table, index_files=scalar_files,
+                                                             snapshot=snapshot, partition_filter=self._partition_filter)
+            evaluation = None
+            if scanner is not None:
+                try:
+                    evaluation = scanner.scan_with_coverage(self._filter)
+                finally:
+                    scanner.close()
+            if evaluation is not None:
+                candidates = RoaringBitmap64.and_(evaluation.result.results(), decided)
+                if evaluation.result.is_exact():
+                    matched = candidates
+                elif self._table.options.global_index_filter_refine_from_data():
+                    matched = self._matching_rows(candidates)
+            elif mode != GlobalIndexSearchMode.FAST:
+                unindexed = RoaringBitmap64.or_(unindexed, decided)
+        return RoaringBitmap64.or_(matched, self._matching_rows(unindexed))
 
     def _eval_column_query(
             self,

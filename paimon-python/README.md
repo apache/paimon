@@ -789,6 +789,37 @@ falls back to the Python search reader. Distributed Ray searches keep their
 existing scan/read path.
 
 
+# Native local full-text search
+
+For REST Data Evolution tables with row tracking and Parquet files,
+`read.native.enabled=true` delegates local full-text search to Rust core.
+The Python builder and scored result API stay the same:
+
+```python
+import json
+
+native_table = table.copy({'read.native.enabled': 'true'})
+predicate = native_table.new_read_builder().new_predicate_builder().equal('category', 'news')
+result = (native_table.new_full_text_search_builder()
+          .with_query('content', json.dumps({'match': {'query': 'paimon'}}))
+          .with_filter(predicate)
+          .with_limit(10)
+          .execute_local())
+```
+
+Rust selects one snapshot, prunes partitions, evaluates scalar filters before
+ranking, and searches indexed and uncovered rows. Full-text and scalar
+`fast`, `full`, and `detail` search modes follow Java coverage semantics.
+Scalar candidate refinement obeys `global-index.filter.refine-from-data`.
+Filtering keeps the complete shard or raw corpus for BM25 scoring.
+
+A full-text index definition must exist even in `full` or `detail` mode.
+Tables outside the supported route, or Rust versions without the full-text
+builder, use the Python implementation. Once native execution starts,
+errors propagate without retrying the search through Python. PK and distributed
+searches retain their existing Python scan/read path.
+
+
 # Vector index range reads
 
 Native vector indexes (`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`)
