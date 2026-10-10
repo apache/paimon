@@ -545,6 +545,8 @@ def write_paimon(
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     hash_fixed_precluster: str = "auto",
+    commit_mode: str = "two_phase",
+    options: Optional[Dict[str, str]] = None,
 ) -> "Optional[PaimonWriteResult]":
     """Write a Ray Dataset to a Paimon table.
 
@@ -567,10 +569,26 @@ def write_paimon(
         hash_fixed_precluster: Pre-clustering mode. ``"auto"`` follows
             table options, ``"off"`` disables it, and ``"map_groups"``
             explicitly enables HASH_FIXED grouping.
+        commit_mode: ``"two_phase"`` (default) has the write tasks return
+            their commit messages to the driver, which commits once after
+            every task finishes, so the write is all-or-nothing and the
+            returned snapshot is exactly the one it committed.
+            ``"actor"`` instead has each task commit through a singleton
+            Ray actor, which serializes the commits and makes each task's
+            rows visible as soon as that task returns -- at the cost of a
+            partial write staying committed if a later task fails, and of
+            the returned snapshot id being the table's latest rather than
+            this write's own. Actor mode is append-only and rejects
+            ``overwrite``, ``hash_fixed_precluster="map_groups"`` and
+            postpone-bucket tables.
+        options: Optional dynamic table options applied for this write
+            only, e.g. ``{"target-file-size": "256mb"}``.
 
     Returns:
-        Metadata for the exact committed snapshot, or ``None`` when no
-        snapshot was committed.
+        Metadata for the committed snapshot, or ``None`` when no snapshot
+        was committed. With ``commit_mode="actor"`` this is the table's
+        latest snapshot after the write, which a concurrent writer may
+        have produced; see ``commit_mode`` above.
     """
     _require_ray_data()
 
@@ -587,4 +605,6 @@ def write_paimon(
         concurrency=concurrency,
         ray_remote_args=ray_remote_args,
         hash_fixed_precluster=hash_fixed_precluster,
+        commit_mode=commit_mode,
+        options=options,
     )

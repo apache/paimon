@@ -296,6 +296,64 @@ class RayActorCommitTest(unittest.TestCase):
         )
         self.assertEqual(len(self._read_all(table)), 3)
 
+    def test_public_write_paimon_reaches_actor_mode(self):
+        """``commit_mode`` and ``options`` must be reachable through the
+        documented public entry point, not only through the internal
+        ``write_paimon_dataset``. ``file.format`` doubles as proof that
+        both kwargs really traversed the wrapper rather than being
+        accepted and dropped.
+        """
+        from pypaimon.ray.ray_paimon import write_paimon
+
+        table = self._create_append_table('test_public_actor')
+
+        ds = ray.data.from_arrow(
+            pa.Table.from_pydict(
+                {'id': [1, 2, 3], 'value': ['a', 'b', 'c']}, schema=SCHEMA
+            )
+        )
+
+        result = write_paimon(
+            ds, 'default.test_public_actor', {'warehouse': self.warehouse},
+            commit_mode='actor',
+            options={'file.format': 'orc'},
+        )
+
+        self.assertEqual(result.row_count, 3)
+
+        table_dir = os.path.join(
+            self.warehouse, 'default.db', 'test_public_actor'
+        )
+        self.assertTrue(
+            glob.glob(os.path.join(table_dir, '**', '*.orc'), recursive=True),
+            f'no .orc data files under {table_dir}',
+        )
+        self.assertFalse(
+            glob.glob(os.path.join(table_dir, '**', '*.parquet'), recursive=True),
+            'file.format=orc did not survive the public wrapper',
+        )
+        self.assertEqual(len(self._read_all(table)), 3)
+
+    def test_public_write_paimon_rejects_unknown_commit_mode(self):
+        """The wrapper must forward ``commit_mode`` to the validation that
+        rejects it, rather than silently defaulting to two_phase.
+        """
+        from pypaimon.ray.ray_paimon import write_paimon
+
+        self._create_append_table('test_public_bad_mode')
+
+        ds = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [1], 'value': ['a']}, schema=SCHEMA)
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            write_paimon(
+                ds, 'default.test_public_bad_mode',
+                {'warehouse': self.warehouse},
+                commit_mode='nonsense',
+            )
+        self.assertIn('nonsense', str(ctx.exception))
+
     # ------------------------------------------------------------------
     # Commit dedup (actor replay / whole-task retry)
     # ------------------------------------------------------------------
