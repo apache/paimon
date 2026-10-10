@@ -168,6 +168,25 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testFormatReaderCacheKeyIncludesPhysicalSchema() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("row_sidecar_physical_schema_key", options);
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        writeSecondSplitColumns(table, ROW_COUNT, bitmapOptions("f2"));
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType projection = latest.rowType().project(Arrays.asList("f1", "f2"));
+        List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)), projection);
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows)
+                .extracting(row -> row.getString(0).toString())
+                .containsExactlyInAnyOrder(f1(50), "second-" + f1(50));
+        assertThat(rows).extracting(row -> row.getString(1).toString()).containsOnly(f2(50));
+    }
+
+    @Test
     public void testBitmapFilterWithWideWriteSchemaAndRowSidecar() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         for (int i = 0; i < 7; i++) {
@@ -1103,6 +1122,35 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
         FileStoreTable latest = getTable(identifier(table.name()));
         long firstRowId = latest.snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = latest.copy(secondOptions).newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType1);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(BinaryString.fromString(f2(i))));
+            }
+            List<CommitMessage> commitables = write.prepareCommit();
+            setSingleFileFirstRowId(commitables, firstRowId);
+            commit.commit(commitables);
+        }
+    }
+
+    /** Writes f1 and f2 into a second merged group with a different physical schema. */
+    private void writeSecondSplitColumns(
+            FileStoreTable table, int count, Map<String, String> secondOptions) throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType writeType0 = latest.rowType().project(Collections.singletonList("f1"));
+        BatchWriteBuilder builder = latest.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType0);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("second-" + f1(i))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        latest = getTable(identifier(table.name()));
+        long firstRowId = latest.snapshotManager().latestSnapshot().nextRowId() - count;
+        RowType writeType1 = latest.rowType().project(Collections.singletonList("f2"));
         builder = latest.copy(secondOptions).newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite().withWriteType(writeType1);
                 BatchTableCommit commit = builder.newCommit()) {

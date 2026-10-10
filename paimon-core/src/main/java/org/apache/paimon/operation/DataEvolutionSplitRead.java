@@ -482,9 +482,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             TableSchema dataSchema = bunchDataSchemas[i];
             RowType partialReadRowType = new RowType(readFields);
             List<String> cacheKey =
-                    nestedFieldEnabled
-                            ? readerCacheKey(readFields, dataSchema.fields(), true)
-                            : readFields.stream().map(DataField::name).collect(Collectors.toList());
+                    readerCacheKey(readFields, dataSchema.fields(), nestedFieldEnabled);
             FormatReaderMapping formatReaderMapping =
                     formatReaderMappings.computeIfAbsent(
                             new FormatKey(schemaId, formatIdentifier, cacheKey),
