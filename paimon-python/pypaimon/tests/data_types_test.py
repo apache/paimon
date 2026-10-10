@@ -242,7 +242,6 @@ class DataTypesTest(unittest.TestCase):
                 "type": "VECTOR",
                 "element": "FLOAT",
                 "length": 3,
-                "nullable": True
             }
         )
         self.assertEqual(vector_type, VectorType.from_dict(vector_type.to_dict()))

@@ -28,6 +28,7 @@ from pypaimon.table.source.vector_search_read import (
     _filtered_raw_row_ranges,
     _offer_score,
     _scored_result,
+    _split_search_splits,
 )
 from pypaimon.table.source import global_index_live_row_filter
 from pypaimon.utils.range import Range
@@ -77,6 +78,10 @@ class _RayVectorSearchRead(DataEvolutionVectorRead):
             reader._filter, reader._partition_filter, reader._options)
         self._concurrency = concurrency
         self._remote_args = remote_args
+
+    def _prepare_search_splits(self, splits, snapshot):
+        # Scalar evaluation and candidate verification belong to the workers.
+        return _split_search_splits(splits)
 
     def _search_index_splits(self, splits, query, search_limit, snapshot, batch=False):
         # Send predicates and metadata, leaving each worker to build and consume
