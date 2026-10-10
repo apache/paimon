@@ -268,7 +268,12 @@ class PaimonDatasetReader(ABC):
         if self._video_keys and self._file_io is None:
             raise ValueError(
                 "A video-backed PaimonDatasetReader must expose file_io.")
-        cache_size = self._video_decoder_cache_size()
+        table_options = getattr(self._read_table, "options", None)
+        cache_size = (
+            table_options.read_video_max_open_decoders()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.default_value()
+        )
         self._video_collators = [
             VideoFrameCollator(
                 access,
@@ -284,9 +289,6 @@ class PaimonDatasetReader(ABC):
             for key in self._video_keys
         ]
         self._init_delta_projection(validation_context, subtasks)
-
-    def _video_decoder_cache_size(self):
-        return CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.default_value()
 
     def _init_frame_contract(self, target_schema, info, validate_metadata):
         tasks = _metadata_member(self.meta, "tasks")
@@ -613,17 +615,6 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
 
     def read_indices(self, indices, columns):
         return self._frame_rows.read_indices(indices, columns)
-
-    def _video_decoder_cache_size(self):
-        key = CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.key()
-        raw = self._frames_table.options.options.to_map().get(key)
-        if isinstance(raw, (bool, float)):
-            raise ValueError("%s must be a positive integer." % key)
-        try:
-            size = self._frames_table.options.read_video_max_open_decoders()
-        except (TypeError, ValueError) as error:
-            raise ValueError("%s must be a positive integer." % key) from error
-        return _positive_int(size, key)
 
     def _validate_physical_metadata(self):
         return True

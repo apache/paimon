@@ -696,8 +696,6 @@ class LeRobotValidationTest(unittest.TestCase):
                           "tasks": ["pick"]}],
             "tasks": ["pick"],
         })
-        rows = SimpleNamespace(
-            num_rows=1, file_io=LocalFileIO(), close=lambda: None)
         module = "pypaimon.multimodal.lerobot.dataset."
         option = "read.video.max-open-decoders"
 
@@ -706,6 +704,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 options = {} if configured is None else {option: configured}
                 frames = SimpleNamespace(
                     options=CoreOptions(Options(options)))
+                rows = SimpleNamespace(
+                    _table=frames, num_rows=1, file_io=LocalFileIO(),
+                    close=lambda: None)
                 with patch(module + "_load_dataset", return_value=(frames, metadata)), \
                         patch(module + "_target_schema",
                               return_value=_schema_from_info(info)), \
@@ -722,6 +723,9 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.subTest(configured=configured):
                 frames = SimpleNamespace(
                     options=CoreOptions(Options({option: configured})))
+                rows = SimpleNamespace(
+                    _table=frames, num_rows=1, file_io=LocalFileIO(),
+                    close=lambda: None)
                 with patch(module + "_load_dataset", return_value=(frames, metadata)), \
                         patch(module + "_target_schema",
                               return_value=_schema_from_info(info)), \

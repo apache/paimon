@@ -1937,7 +1937,18 @@ class CoreOptions:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
     def read_video_max_open_decoders(self) -> int:
-        return self.options.get(CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS)
+        option = CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS
+        raw = self.options.to_map().get(option.key())
+        if isinstance(raw, (bool, float)):
+            raise ValueError("%s must be a positive integer." % option.key())
+        try:
+            value = self.options.get(option)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "%s must be a positive integer." % option.key()) from error
+        if value <= 0:
+            raise ValueError("%s must be a positive integer." % option.key())
+        return value
 
     def parquet_column_index_enabled(self) -> bool:
         return self.options.get(CoreOptions.PARQUET_COLUMN_INDEX_ENABLED)
