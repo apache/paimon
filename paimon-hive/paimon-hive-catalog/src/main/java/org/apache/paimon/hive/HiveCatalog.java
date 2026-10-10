@@ -570,7 +570,7 @@ public class HiveCatalog extends AbstractCatalog {
                                             client ->
                                                     client.getPartition(
                                                             identifier.getDatabaseName(),
-                                                            identifier.getObjectName(),
+                                                            identifier.getTableName(),
                                                             partitionValues));
                     hivePartition.setValues(partitionValues);
                     hivePartition.setLastAccessTime(
@@ -581,7 +581,7 @@ public class HiveCatalog extends AbstractCatalog {
                                     client ->
                                             client.alter_partition(
                                                     identifier.getDatabaseName(),
-                                                    identifier.getObjectName(),
+                                                    identifier.getTableName(),
                                                     hivePartition));
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
