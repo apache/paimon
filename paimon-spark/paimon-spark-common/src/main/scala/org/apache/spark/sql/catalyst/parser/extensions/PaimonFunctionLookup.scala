@@ -29,6 +29,7 @@ import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedFunctionName, UnresolvedIdentifier}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.catalog.{CatalogManager, CatalogPlugin, LookupCatalog}
+import org.apache.spark.sql.paimon.shims.SparkVersionCompat
 
 /** Resolves Paimon function identifiers in parser-stage plans. */
 case class PaimonFunctionLookup(catalogManager: CatalogManager) extends LookupCatalog {
@@ -48,7 +49,7 @@ case class PaimonFunctionLookup(catalogManager: CatalogManager) extends LookupCa
     def unapply(nameParts: Seq[String]): Option[(CatalogPlugin, FunctionIdentifier, Boolean)] = {
       nameParts match {
         // Spark's built-in or tmp functions is without database name or catalog name.
-        case Seq(funName) if isSparkBuiltInFunction(FunctionIdentifier(funName)) =>
+        case Seq(funName) if isSparkBuiltInFunction(funName) =>
           None
         case Seq(funName) if isSparkTmpFunc(FunctionIdentifier(funName)) =>
           Some(null, FunctionIdentifier(funName), true)
@@ -76,12 +77,16 @@ case class PaimonFunctionLookup(catalogManager: CatalogManager) extends LookupCa
     }
   }
 
-  def isSparkBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
-    catalogManager.v1SessionCatalog.isBuiltinFunction(funcIdent)
+  def isSparkBuiltInFunction(funcName: String): Boolean = {
+    // Takes a bare name, not a FunctionIdentifier: see SparkVersionCompat.isBuiltinFunction —
+    // the qualifier is not part of the question on any version.
+    SparkVersionCompat.isBuiltinFunction(
+      SparkVersionCompat.v1SessionCatalog(catalogManager),
+      funcName)
   }
 
   def isSparkTmpFunc(funcIdent: FunctionIdentifier): Boolean = {
-    catalogManager.v1SessionCatalog.isTemporaryFunction(funcIdent)
+    SparkVersionCompat.v1SessionCatalog(catalogManager).isTemporaryFunction(funcIdent)
   }
 }
 

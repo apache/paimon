@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, ResolveCatalogs,
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{CatalogManager, LookupCatalog}
+import org.apache.spark.sql.paimon.shims.SparkVersionCompat
 
 case class RewritePaimonViewCommands(spark: SparkSession)
   extends Rule[LogicalPlan]
@@ -60,16 +61,16 @@ case class RewritePaimonViewCommands(spark: SparkSession)
       DropPaimonView(resolved, ifExists)
 
     case ShowViews(namespace, pattern, output)
-        if catalogManager.currentCatalog.isInstanceOf[SupportView] =>
+        if SparkVersionCompat.currentCatalog(catalogManager).isInstanceOf[SupportView] =>
       val resolvedNamespace = new ResolveCatalogs(catalogManager)(namespace).transform {
         case r: ResolvedNamespace if r.namespace.isEmpty =>
-          r.copy(namespace = catalogManager.currentNamespace)
+          r.copy(namespace = SparkVersionCompat.currentNamespace(catalogManager))
       }
       ShowPaimonViews(resolvedNamespace, pattern, output)
   }
 
   private def isTempView(nameParts: Seq[String]): Boolean = {
-    catalogManager.v1SessionCatalog.isTempView(nameParts)
+    SparkVersionCompat.v1SessionCatalog(catalogManager).isTempView(nameParts)
   }
 
   private object ResolvedIdent {

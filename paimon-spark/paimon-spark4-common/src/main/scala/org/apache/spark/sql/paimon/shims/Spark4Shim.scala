@@ -20,6 +20,7 @@ package org.apache.spark.sql.paimon.shims
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.{GenericVariant, Variant}
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
@@ -33,11 +34,15 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.{ResolvedPartitionSpec, ResolvedTable}
+import org.apache.spark.sql.catalyst.analysis.{UnresolvedIdentifier, UnresolvedTableOrView}
 import org.apache.spark.sql.catalyst.analysis.CTESubstitution
+import org.apache.spark.sql.catalyst.analysis.NamedRelation
+import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CreateTableLike, CTERelationRef, DescribeRelation, DescribeTablePartition, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, OverwriteByExpression, OverwritePartitionsDynamic, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -48,7 +53,7 @@ import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
-import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
+import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, CreateTableAsSelectExec, DescribeTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
 import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
@@ -57,6 +62,7 @@ import org.apache.spark.sql.types.{DataTypes, Geography, GeographyType, Geometry
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.VariantVal
 
+import java.net.URI
 import java.util.{Map => JMap}
 
 class Spark4Shim extends SparkShim {
@@ -94,6 +100,47 @@ class Spark4Shim extends SparkShim {
       properties: JMap[String, String]): Table = {
     val columns = CatalogV2Util.structTypeToV2Columns(schema)
     tableCatalog.createTable(ident, columns, partitions, properties)
+  }
+
+  override def withStorageLocation(
+      storage: CatalogStorageFormat,
+      locationUri: Option[URI]): CatalogStorageFormat =
+    storage.copy(locationUri = locationUri)
+
+  override def overwriteByName(
+      table: NamedRelation,
+      query: LogicalPlan,
+      deleteExpr: Expression,
+      writeOptions: Map[String, String]): OverwriteByExpression =
+    OverwriteByExpression.byName(
+      table,
+      query,
+      deleteExpr,
+      writeOptions,
+      withSchemaEvolution = false)
+
+  override def overwritePartitionsDynamicByName(
+      table: NamedRelation,
+      query: LogicalPlan,
+      writeOptions: Map[String, String]): OverwritePartitionsDynamic =
+    OverwritePartitionsDynamic.byName(table, query, writeOptions, withSchemaEvolution = false)
+
+  override def createCreateTableAsSelectExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      ifNotExists: Boolean): SparkPlan = {
+    CreateTableAsSelectExec(
+      catalog,
+      ident,
+      partitioning,
+      query,
+      tableSpec,
+      writeOptions,
+      ifNotExists)
   }
 
   override def createReplaceTableAsSelectExec(
@@ -372,20 +419,24 @@ class Spark4Shim extends SparkShim {
   override def toPaimonGeometry(o: Object): Array[Byte] =
     o.asInstanceOf[Geometry].getBytes
 
+  // Spark 4.2 (SPARK-57058) folded the geo value classes into `BinaryView`: `SpecializedGetters`
+  // lost `getGeometry` / `getGeography` in favour of `getBinaryView`, and `STUtils.stAsBinary` was
+  // split into `stGeomAsBinary` / `stGeogAsBinary`. `paimon-spark-4.1` forks this file to keep the
+  // pre-4.2 calls.
   override def toPaimonGeometry(row: InternalRow, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(row.getGeometry(pos))
+    STUtils.stGeomAsBinary(row.getBinaryView(pos))
 
   override def toPaimonGeometry(array: ArrayData, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(array.getGeometry(pos))
+    STUtils.stGeomAsBinary(array.getBinaryView(pos))
 
   override def toPaimonGeography(o: Object): Array[Byte] =
     o.asInstanceOf[Geography].getBytes
 
   override def toPaimonGeography(row: InternalRow, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(row.getGeography(pos))
+    STUtils.stGeogAsBinary(row.getBinaryView(pos))
 
   override def toPaimonGeography(array: ArrayData, pos: Int): Array[Byte] =
-    STUtils.stAsBinary(array.getGeography(pos))
+    STUtils.stGeogAsBinary(array.getBinaryView(pos))
 
   override def toSparkGeometry(wkb: Array[Byte], crs: String): Object = {
     val geometryType = sparkGeometryType(crs)
@@ -394,7 +445,8 @@ class Spark4Shim extends SparkShim {
 
   override def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object = {
     val geographyType = sparkGeographyType(crs, algorithm)
-    STUtils.stSetSrid(STUtils.stGeogFromWKB(wkb), geographyType.srid)
+    // 4.2 renamed the single `stSetSrid` overload pair to `stGeogSetSrid` / `stGeomSetSrid`.
+    STUtils.stGeogSetSrid(STUtils.stGeogFromWKB(wkb), geographyType.srid)
   }
 
   override def isSparkGeometryType(dataType: org.apache.spark.sql.types.DataType): Boolean =
@@ -448,6 +500,59 @@ class Spark4Shim extends SparkShim {
       parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
     org.apache.paimon.spark.catalog.functions.SQLFunctionConverter
       .toSQLFunctionExpression(funcIdent, function, arguments, parser)
+
+  // Spark 4.2 (SPARK-39660) removed partitionSpec from DescribeRelation; DESCRIBE ... PARTITION is
+  // a separate DescribeTablePartition plan there.
+  override def createTableLikeParts(plan: LogicalPlan)
+      : Option[(Seq[String], Seq[String], Option[String], Option[String], Map[String, String], Boolean, Boolean)] =
+    plan match {
+      case c: CreateTableLike =>
+        // Parser-stage rule: the children have not been analyzed yet.
+        (c.name, c.source) match {
+          case (target: UnresolvedIdentifier, source: UnresolvedTableOrView) =>
+            Some(
+              (
+                target.nameParts,
+                source.multipartIdentifier,
+                c.provider,
+                c.location,
+                c.properties,
+                c.ifNotExists,
+                // `STORED AS` lands in `serdeInfo`; Paimon tables cannot honour Hive storage syntax.
+                c.serdeInfo.isDefined))
+          case _ => None
+        }
+      case _ => None
+    }
+
+  override def describeTablePartition(
+      plan: LogicalPlan): Option[(LogicalPlan, Map[String, String], Boolean, Seq[Attribute])] =
+    plan match {
+      case d: DescribeTablePartition =>
+        (d.table, d.partitionSpec) match {
+          // `PaimonStrategy` only plans Paimon's own `SparkTable`; anything else stays with Spark.
+          case (r @ ResolvedTable(_, _, table: SparkTable, _), spec: ResolvedPartitionSpec) =>
+            // The values arrive typed, so name the partition the way Paimon itself does, which is
+            // how `Partition.spec()` was produced.
+            Some((r, table.paimonPartitionSpec(spec.ident, spec.names), d.isExtended, d.output))
+          case _ => None
+        }
+      case _ => None
+    }
+
+  override def describeRelationPartitionSpec(plan: DescribeRelation): Map[String, String] =
+    Map.empty
+
+  override def createDescribeTableExec(
+      output: Seq[Attribute],
+      catalogName: String,
+      identifier: Identifier,
+      table: Table,
+      isExtended: Boolean): SparkPlan =
+    DescribeTableExec(output, catalogName, identifier, table, isExtended)
+
+  override def mergeNeedsSchemaEvolution(merge: MergeIntoTable): Boolean =
+    merge.pendingSchemaChanges.nonEmpty
 }
 
 object Spark4Shim {
