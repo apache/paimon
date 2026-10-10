@@ -57,6 +57,7 @@ class FileStoreWrite:
         self.data_writers: Dict[Tuple, DataWriter] = {}
         self._runtime_total_buckets: Dict[Tuple, int] = {}
         self.max_seq_numbers: dict = {}
+        self.restore_snapshot_id = None
         self.write_cols = None
         self.blob_consumer = None
         self.blob_uri_reader_factory = None
@@ -120,6 +121,8 @@ class FileStoreWrite:
             self.table.table_schema.fields,
             column_names,
         )
+        from pypaimon.write.row_kind import with_row_kind
+        data = with_row_kind(self.table, data, row)
         writer.write(data.to_batches()[0])
 
     def roll_before_group_if_needed(self, row_count: int):
@@ -173,7 +176,8 @@ class FileStoreWrite:
                     "unset it or write with Java/Flink/Spark.")
 
         def max_seq_number():
-            return self._seq_number_stats(partition).get(bucket, 1)
+            default = -1 if self.table.is_primary_key_table else 1
+            return self._seq_number_stats(partition).get(bucket, default)
 
         # Dedicated Blob files are an append-table layout. PK tables require
         # managed packs and references attached to their key-value Parquet files.
@@ -322,6 +326,12 @@ class FileStoreWrite:
         return any(isinstance(f.type, VectorType) for f in self.table.table_schema.fields)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+        messages = self._prepare_commit_messages(commit_identifier)
+        self._release_prepared_files()
+        return messages
+
+    def _prepare_commit_messages(self, commit_identifier) -> List[CommitMessage]:
+        """Collect files while their parent is still preparing the complete increment."""
         self.commit_identifier = commit_identifier
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
@@ -336,15 +346,13 @@ class FileStoreWrite:
                     total_buckets=self._runtime_total_buckets.get(partition),
                 )
                 commit_messages.append(commit_message)
-        self._release_prepared_postpone_files()
         return commit_messages
 
-    def _release_prepared_postpone_files(self):
+    def _release_prepared_files(self):
         # Hand off only after every partition prepared successfully. Until
         # then, close/abort must still clean up files from earlier partitions.
         for writer in self.data_writers.values():
-            if isinstance(writer, PostponeDataWriter):
-                writer._release_prepared_files()
+            writer._release_prepared_files()
 
     def close(self):
         """Close all data writers and clean up resources."""
@@ -371,6 +379,15 @@ class FileStoreWrite:
         return buckets
 
     def _sequence_read_table(self):
+        if self.restore_snapshot_id is not None:
+            snapshot = None
+            if self.restore_snapshot_id != 0:
+                snapshot = self.table.snapshot_manager().get_snapshot_by_id(self.restore_snapshot_id)
+                if snapshot is None:
+                    raise ValueError("Snapshot id '{}' doesn't exist".format(self.restore_snapshot_id))
+            # Replace inherited selectors and mode, including an explicit empty
+            # view. plan_for_write still validates row filters and column masks.
+            return self.table._copy_with_snapshot(snapshot)
         return self.table
 
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
@@ -409,8 +426,8 @@ class PostponeFixedBucketFileStoreWrite(FileStoreWrite):
             return {}
         return super()._load_seq_number_stats(partition)
 
-    def prepare_commit(self, commit_identifier):
-        messages = super().prepare_commit(commit_identifier)
+    def _prepare_commit_messages(self, commit_identifier):
+        messages = super()._prepare_commit_messages(commit_identifier)
         for message in messages:
             message.check_from_snapshot = self._check_from_snapshot
         return messages

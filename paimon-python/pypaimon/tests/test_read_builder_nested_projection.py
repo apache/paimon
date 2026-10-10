@@ -84,18 +84,18 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
              'ratio': "try_variant_get(payload, '$.ratio', 'float')",
              'age': "variant_get(payload, '$.age', 'float')"})
 
-        self.assertEqual(['id', 'payload'], builder._projection)
+        self.assertEqual(['id', 'payload'], [field.name for field in builder.read_type()])
         self.assertEqual(
             ['__VARIANT_METADATA$.ratio;false;UTC',
              '__VARIANT_METADATA$.age;true;UTC'],
             self._variant_descriptions(builder))
         self.assertEqual(
-            [('identifier', 'id', None), ('ratio', 'payload', 0),
-             ('age', 'payload', 1)], builder._expression_projection)
+            [('identifier', ['id']), ('ratio', ['payload', '0']),
+             ('age', ['payload', '1'])], builder._output_projection.columns)
 
         builder.with_projection(['id'])
         self.assertEqual(['id'], [field.name for field in builder.read_type()])
-        self.assertIsNone(builder._expression_projection)
+        self.assertEqual([('id', ['id'])], builder._output_projection.columns)
 
     def test_variant_read_type_is_shared_by_batch_stream_and_ray_providers(self):
         table = Mock()
@@ -220,7 +220,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
             with self.subTest(projection=projection):
                 batch = ReadBuilder(table).with_projection(projection)
                 stream = StreamReadBuilder(table).with_projection(projection)
-                self.assertIsNone(batch._nested_paths)
+                self.assertNotIn('_nested_paths', batch.__dict__)
                 self.assertIsNone(batch._nested_name_paths())
                 self.assertEqual(
                     sources, [field.name for field in batch.read_type()])
@@ -229,14 +229,12 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
                     sources, [field.name for field in stream.read_type()])
                 with patch('pypaimon.read.read_builder.TableRead') as read:
                     batch.new_read()
-                    self.assertIsNone(
-                        read.call_args.kwargs['nested_name_paths'])
+                    self.assertNotIn('nested_name_paths', read.call_args.kwargs)
                     fields = read.call_args.kwargs['read_type']
                     self.assertIn(column, [field.name for field in fields])
                 with patch('pypaimon.read.stream_read_builder.TableRead') as read:
                     stream.new_read()
-                    self.assertIsNone(
-                        read.call_args.kwargs['nested_name_paths'])
+                    self.assertNotIn('nested_name_paths', read.call_args.kwargs)
                     fields = read.call_args.kwargs['read_type']
                     self.assertIn(column, [field.name for field in fields])
 
@@ -249,7 +247,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         ]
         table.options.row_tracking_enabled.return_value = False
         for expression in (
-            'row.value', 'payload + 1',
+            'row.value + 1', 'payload + 1',
             "try_variant_get(payload, '$.ratio', 'float') + 1",
             "try_variant_get(payload, '$.ratio', 'float', 1)",
         ):
@@ -273,7 +271,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['val', 'pk'])
         # No nested paths derived; only names are stored.
-        self.assertIsNone(rb._nested_paths)
+        self.assertIsNone(rb._nested_name_paths())
 
     def test_named_ordinary_columns_keep_aliases_without_native_read(self):
         read = self.table.new_read_builder().with_projection({
@@ -329,18 +327,17 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
     def test_dotted_name_resolves_to_nested_path(self):
         rb = self.table.new_read_builder().with_projection(
             ['mv.latest_version', 'pk'])
-        # _nested_paths is populated; user-facing names are kept on _projection
-        self.assertIsNotNone(rb._nested_paths)
-        self.assertEqual(rb._nested_paths, [[1, 0], [0]])
+        self.assertEqual(rb._nested_name_paths(), [['mv', 'latest_version'], ['pk']])
         names = [f.name for f in rb.read_type()]
-        # Nested leaves get flattened to underscore-joined names.
-        self.assertEqual(names, ['mv_latest_version', 'pk'])
+        self.assertEqual(names, ['mv', 'pk'])
+        self.assertEqual(['latest_version'], [f.name for f in rb.read_type()[0].type.fields])
+        self.assertEqual(['mv_latest_version', 'pk'], rb.new_read()._output_arrow_schema().names)
 
     def test_dotted_name_unknown_top_silently_skipped(self):
         rb = self.table.new_read_builder().with_projection(
             ['nope.x', 'val'])
         # Only 'val' resolved, with no nested field actually selected.
-        self.assertIsNone(rb._nested_paths)
+        self.assertIsNone(rb._nested_name_paths())
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['val'])
 
@@ -348,7 +345,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         rb = self.table.new_read_builder().with_projection(
             ['mv.no_such_subfield', 'pk'])
         # The bad path drops out, the plain name survives.
-        self.assertIsNone(rb._nested_paths)
+        self.assertIsNone(rb._nested_name_paths())
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['pk'])
 
@@ -362,7 +359,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         )
         self.assertEqual(
             ['attrs_key_with_dots', 'attrs_other'],
-            [field.name for field in rb.read_type()],
+            rb.new_read()._output_arrow_schema().names,
         )
         self.assertEqual(
             ['attrs'], [field.name for field in rb.new_scan()._read_type])
@@ -379,7 +376,7 @@ class ReadBuilderProjectionFieldIdTest(_ReadBuilderTestBase):
     def test_nested_leaves_inherit_leaf_field_id(self):
         rb = self.table.new_read_builder().with_projection(
             ['mv.latest_version', 'mv.latest_value'])
-        leaf_ids = [f.id for f in rb.read_type()]
+        leaf_ids = [f.id for f in rb.read_type()[0].type.fields]
         # Look up the actual leaf IDs from the table schema for assertion
         mv_field = next(f for f in self.table.fields if f.name == 'mv')
         sub_v = next(f for f in mv_field.type.fields
@@ -408,14 +405,39 @@ class StreamReadBuilderNestedProjectionTest(_ReadBuilderTestBase):
             batch._nested_name_paths(),
             stream._nested_name_paths(),
         )
-        self.assertEqual(
-            [field.name for field in batch.new_scan()._read_type],
-            [field.name for field in stream.new_streaming_scan()._read_type],
-        )
-
         table_read = stream.with_include_row_kind().new_read()
         self.assertEqual(batch._nested_name_paths(), table_read.nested_name_paths)
         self.assertTrue(table_read.include_row_kind)
+
+        # Exercise the configured scan through its public iterator. Native
+        # owns its read type in Rust and does not expose Python scanner fields.
+        write_builder = self.table.new_batch_write_builder()
+        writer, commit = write_builder.new_write(), write_builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pydict({
+                'pk': [1, 2],
+                'mv': [{'latest_version': 7, 'latest_value': 'unused'}, None],
+                'val': ['unused', 'unused'],
+                'attrs': [[('key.with.dots', 42), ('other', 99)], []],
+            }, schema=self.pa_schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+        expected = {'mv_latest_version': [7, None],
+                    'attrs_key_with_dots': [42, None], 'pk': [1, 2]}
+        batch_plan = batch.new_scan().plan()
+        self.assertEqual(expected, batch.new_read().to_arrow(
+            batch_plan.splits(), parallelism=1).to_pydict())
+        iterator = stream.new_streaming_scan().stream_sync()
+        try:
+            stream_plan = next(iterator)
+            actual = table_read.to_arrow(stream_plan.splits(), parallelism=1).to_pydict()
+        finally:
+            iterator.close()
+        self.assertEqual(['+I', '+I'], actual.pop('_row_kind'))
+        self.assertEqual(expected, actual)
 
 
 if __name__ == '__main__':

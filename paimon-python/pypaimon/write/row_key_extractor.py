@@ -175,9 +175,9 @@ class RowKeyExtractor(ABC):
         num_rows = data.num_rows
         columns = {}
         key_names = []
-        for k, pi in enumerate(self.partition_indices):
+        for k, column in enumerate(self._input_columns(data, self.partition_indices)):
             name = f"__p{k}"
-            columns[name] = data.column(pi)
+            columns[name] = column
             key_names.append(name)
         columns["__bucket"] = pa.array(buckets, type=pa.int32())
         key_names.append("__bucket")
@@ -248,7 +248,7 @@ class RowKeyExtractor(ABC):
         if not self.partition_indices:
             return [() for _ in range(data.num_rows)]
 
-        partition_columns = [data.column(i) for i in self.partition_indices]
+        partition_columns = self._input_columns(data, self.partition_indices)
 
         partitions = []
         for row_idx in range(data.num_rows):
@@ -256,6 +256,17 @@ class RowKeyExtractor(ABC):
             partitions.append(partition_values)
 
         return partitions
+
+    def _input_columns(self, data: pa.RecordBatch, field_indices: List[int]):
+        """Resolve routing fields in the actual write type, as Java's converter does."""
+        columns = []
+        for field_index in field_indices:
+            name = self.table_schema.fields[field_index].name
+            index = data.schema.get_field_index(name)
+            if index < 0:
+                raise ValueError(f"Input must contain exactly one routing column '{name}'.")
+            columns.append(data.column(index))
+        return columns
 
     @staticmethod
     def _binary_row_hash_code(values: Tuple, fields: List) -> int:
@@ -292,7 +303,7 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
         self._bucket_key_fields = table_schema.logical_bucket_key_fields
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
-        columns = [data.column(i) for i in self.bucket_key_indices]
+        columns = self._input_columns(data, self.bucket_key_indices)
         return [
             _bucket_from_hash(
                 self._binary_row_hash_code(
@@ -481,6 +492,8 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 snapshot = table.snapshot_manager().get_snapshot_by_id(
                     base_snapshot_id
                 )
+                if snapshot is None:
+                    raise ValueError("Snapshot id '{}' doesn't exist".format(base_snapshot_id))
             self.base_snapshot_id = snapshot.id if snapshot is not None else 0
             self._assigner = HashBucketAssigner(
                 table=table,
@@ -519,7 +532,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
         return partitions, partition_hashes, key_hashes
 
     def _extract_key_hashes_batch(self, data: pa.RecordBatch) -> List[int]:
-        key_columns = [data.column(i) for i in self.bucket_key_indices]
+        key_columns = self._input_columns(data, self.bucket_key_indices)
         return [
             self._binary_row_hash_code(
                 tuple(column[row_idx].as_py() for column in key_columns),
@@ -651,58 +664,25 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
     def notify_precomputed_bucket_batch(
         self, data: pa.RecordBatch, bucket: int
     ) -> Optional[Tuple]:
-        """Maintain HASH indexes for rows assigned by an upstream coordinator."""
-        partitions, _, key_hashes = self.extract_hashes_batch(data)
-        return self.notify_precomputed_bucket_hashes_batch(
-            data, bucket, key_hashes, partitions=partitions
-        )
-
-    def notify_precomputed_bucket_hashes_batch(
-        self,
-        data: pa.RecordBatch,
-        bucket: int,
-        key_hashes: List[int],
-        partitions: Optional[List[Tuple]] = None,
-        new_mappings: Optional[List[bool]] = None,
-    ) -> Optional[Tuple]:
-        """Maintain HASH indexes using hashes carried through the shuffle."""
+        """Maintain HASH indexes for every row in an upstream bucket."""
         from pypaimon.index.dynamic_bucket import to_signed_int32
 
         if self._index_maintainer is None:
-            raise RuntimeError(
-                "Precomputed dynamic buckets require a persistent table extractor"
-            )
-        if len(key_hashes) != data.num_rows:
-            raise ValueError(
-                "Precomputed key hash count {} does not match row count {}".format(
-                    len(key_hashes), data.num_rows
-                )
-            )
-        if partitions is None:
-            partitions = self._extract_partitions_batch(data)
-        if new_mappings is not None and len(new_mappings) != data.num_rows:
-            raise ValueError(
-                "Precomputed new-mapping count {} does not match row count {}".format(
-                    len(new_mappings), data.num_rows
-                )
-            )
+            raise RuntimeError('Precomputed dynamic buckets require a persistent table extractor')
+        partitions, _, key_hashes = self.extract_hashes_batch(data)
         if not partitions:
             return None
         partition = tuple(partitions[0])
-        if new_mappings is None:
-            new_mappings = [True] * data.num_rows
-        for actual_partition, key_hash, is_new in zip(
-            partitions, key_hashes, new_mappings
-        ):
-            if tuple(actual_partition) != tuple(partition):
-                raise RuntimeError(
-                    "A precomputed dynamic-bucket group contained multiple "
-                    f"partitions: expected {partition}, got {actual_partition}"
-                )
-            if is_new:
-                self._index_maintainer.notify_new_record(
-                    partition, bucket, to_signed_int32(key_hash)
-                )
+        if any(tuple(actual_partition) != partition for actual_partition in partitions):
+            raise RuntimeError(
+                "A precomputed dynamic-bucket group contained multiple "
+                f"partitions: expected {partition}, got {partitions}"
+            )
+        # Java's maintainer observes every written key after RowKind filtering.
+        for key_hash in key_hashes:
+            self._index_maintainer.notify_new_record(
+                partition, bucket, to_signed_int32(key_hash)
+            )
         return partition
 
     def release_prepared(self) -> None:
@@ -765,7 +745,7 @@ class PostponeFixedBucketRowKeyExtractor(RowKeyExtractor):
         self, data: pa.RecordBatch
     ) -> Tuple[List[Tuple], List[int]]:
         partitions = self._extract_partitions_batch(data)
-        columns = [data.column(i) for i in self.bucket_key_indices]
+        columns = self._input_columns(data, self.bucket_key_indices)
         buckets = [
             _bucket_from_hash(
                 self._binary_row_hash_code(

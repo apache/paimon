@@ -118,7 +118,7 @@ def test_dynamic_cross_backend_restart(tmp_path, bucket_local, first_native):
         assert len(indexes) == 1
         assert indexes[0].index_file.external_path is None
         path = table.path_factory().bucket_index_path(
-            tuple(indexes[0].partition.values), 0, indexes[0].index_file, table.file_io)
+            tuple(indexes[0].partition.values), 0, indexes[0].index_file)
         assert table.file_io.exists(path)
     assert _indexes(table)[0].index_file.row_count == 5
     expected = [{'id': i, 'p': 'a/b', 'v': v} for i, v in
@@ -172,8 +172,8 @@ def test_dynamic_abort_index_ownership(tmp_path, bucket_local, commit_first):
     if commit_first:
         builder.new_commit().commit(messages)
     writer.abort()
-    assert table.file_io.exists(path) == commit_first
-    assert all(table.file_io.exists(f.file_path) == commit_first
+    assert table.file_io.exists(path)
+    assert all(table.file_io.exists(f.file_path)
                for m in messages for f in m.new_files)
 
 

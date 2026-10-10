@@ -589,8 +589,8 @@ class TableUpsertByKey:
         """
         Append rows that have no matching upsert key.
 
-        New rows are always written with *all* columns — ``update_cols``
-        only restricts which columns are rewritten for *matched* rows.
+        New rows write all supplied columns; omitted columns stay absent from
+        the file. ``update_cols`` only restricts matched-row updates.
 
         :class:`StreamTableWrite` is used so the produced commit messages
         carry this upsert's ``commit_identifier``; in batch mode the

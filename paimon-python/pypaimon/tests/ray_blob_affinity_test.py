@@ -88,9 +88,9 @@ class BlobAffinityHelperTest(unittest.TestCase):
     def test_video_frames_share_payload_uri_key_and_preserve_offsets(self):
         batch = pa.table({"image": [
             _descriptor("oss://bucket/a", 10, 100),
-            VideoFrameDescriptor("oss://bucket/a", 20, 100, 0).serialize(),
-            VideoFrameDescriptor("oss://bucket/a", 20, 100, 1).serialize(),
-            VideoFrameDescriptor("oss://bucket/b", 30, 100, 0).serialize(),
+            VideoFrameDescriptor("oss://bucket/a", 20, 100, 0, -1, 0).serialize(),
+            VideoFrameDescriptor("oss://bucket/a", 20, 100, 1, -1, 0).serialize(),
+            VideoFrameDescriptor("oss://bucket/b", 30, 100, 0, -1, 0).serialize(),
         ]})
         result = _append_blob_affinity_keys(batch, ["image"], "key", "offset")
         keys = result.column("key").to_pylist()
@@ -102,7 +102,7 @@ class BlobAffinityHelperTest(unittest.TestCase):
     def test_video_prefetch_windows_use_payload_length(self):
         batch = pa.table({"image": [
             VideoFrameDescriptor("oss://bucket/video-{}".format(i),
-                                 0, 10 * 1024 * 1024, 0).serialize()
+                                 0, 10 * 1024 * 1024, 0, -1, 0).serialize()
             for i in range(3)
         ]})
         windows = list(_blob_prefetch_windows(

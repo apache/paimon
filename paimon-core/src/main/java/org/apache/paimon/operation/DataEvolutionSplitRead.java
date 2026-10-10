@@ -242,6 +242,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             if (fileIndexResult != null && !fileIndexResult.remain()) {
                                 return new EmptyFileRecordReader<>();
                             }
+                            if (isSelectionEmpty(file, rowRanges, fileIndexResult)) {
+                                return new EmptyFileRecordReader<>();
+                            }
                             DeletionVectorWithRange deletionVector =
                                     readDeletionVector(needMergeFiles, deletionVectorFactory);
                             if (fileIndexResult != null
@@ -283,16 +286,25 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     .anyMatch(entry -> !entry.result.remain())) {
                                 return new EmptyFileRecordReader<>();
                             }
+                            BitmapIndexResult groupSelection =
+                                    buildGroupSelection(needMergeFiles, fileIndexResults);
+                            if (isSelectionEmpty(
+                                    needMergeFiles.get(0), rowRanges, groupSelection)) {
+                                return new EmptyFileRecordReader<>();
+                            }
                             DeletionVectorWithRange deletionVector =
                                     readDeletionVector(needMergeFiles, deletionVectorFactory);
                             if (deletionVector != null
-                                    && !deletionVector.deletionVector.isEmpty()
-                                    && skipByFileIndex(
-                                            fileIndexResults, rowRanges, deletionVector)) {
-                                return new EmptyFileRecordReader<>();
+                                    && !deletionVector.deletionVector.isEmpty()) {
+                                fileIndexResults =
+                                        intersectFileIndexResults(
+                                                fileIndexResults, rowRanges, deletionVector);
+                                if (fileIndexResults == null) {
+                                    return new EmptyFileRecordReader<>();
+                                }
+                                groupSelection =
+                                        buildGroupSelection(needMergeFiles, fileIndexResults);
                             }
-                            BitmapIndexResult groupSelection =
-                                    buildGroupSelection(needMergeFiles, fileIndexResults);
                             return createUnionReader(
                                     needMergeFiles,
                                     partition,
@@ -994,16 +1006,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     /**
      * Applies a group deletion vector to already evaluated file-index results.
      *
-     * <p>A merged group can only be skipped when one of the files responsible for the final
-     * predicate values has no live candidate rows. This method only intersects the saved results;
-     * it does not reopen or reevaluate any file index. The offset passed to the evaluator maps
-     * positions in the group's DV anchor range to positions local to the current file.
+     * <p>A merged group can be skipped when one of the files responsible for the final predicate
+     * values has no live candidate rows. Otherwise, the intersected results are retained for the
+     * group-level bitmap selection. This method only intersects the saved results; it does not
+     * reopen or reevaluate any file index. The offset passed to the evaluator maps positions in the
+     * group's DV anchor range to positions local to the current file.
      */
-    private boolean skipByFileIndex(
+    @Nullable
+    private List<FileIndexResultEntry> intersectFileIndexResults(
             List<FileIndexResultEntry> fileIndexResults,
             List<Range> rowRanges,
             DeletionVectorWithRange deletionVector) {
         DeletionVector dv = deletionVector.deletionVector;
+        List<FileIndexResultEntry> intersectedResults = new ArrayList<>(fileIndexResults.size());
         for (FileIndexResultEntry entry : fileIndexResults) {
             long fileOffset =
                     deletionVectorOffset(entry.file.nonNullRowIdRange(), rowRanges, deletionVector);
@@ -1011,10 +1026,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     FileIndexEvaluator.intersectDeletionVector(
                             entry.result, entry.file, dv, fileOffset);
             if (!result.remain()) {
-                return true;
+                return null;
             }
+            intersectedResults.add(new FileIndexResultEntry(entry.file, result));
         }
-        return false;
+        return intersectedResults;
     }
 
     /**
@@ -1040,6 +1056,21 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
         return selection;
+    }
+
+    /** Returns whether exact bitmap candidates and the requested row ranges are disjoint. */
+    private static boolean isSelectionEmpty(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult) {
+        if (!(fileIndexResult instanceof BitmapIndexResult)) {
+            return false;
+        }
+        RoaringBitmap32 indexSelection = ((BitmapIndexResult) fileIndexResult).get();
+        RoaringBitmap32 rangeSelection = file.toFileSelection(rowRanges);
+        return rangeSelection == null
+                ? indexSelection.isEmpty()
+                : RoaringBitmap32.and(rangeSelection, indexSelection).isEmpty();
     }
 
     private boolean canPushDownGroupSelection(List<DataFileMeta> files) {

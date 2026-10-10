@@ -50,6 +50,7 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
+import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
@@ -387,7 +388,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(changes, materializedBuckets),
+                                compactChangesProvider(
+                                        new CommitChanges(
+                                                changes.compactTableFiles,
+                                                changes.compactChangelog,
+                                                changes.compactIndexFiles),
+                                        materializedBuckets),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -571,10 +577,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                CommitChangesProvider.provider(
-                                        changes.compactTableFiles,
-                                        emptyList(),
-                                        changes.compactIndexFiles),
+                                compactChangesProvider(
+                                        new CommitChanges(
+                                                changes.compactTableFiles,
+                                                emptyList(),
+                                                changes.compactIndexFiles),
+                                        Collections.emptySet()),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -827,15 +835,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @VisibleForTesting
     CommitChangesProvider compactChangesProvider(
-            ManifestEntryChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
+            CommitChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
         if (materializedBuckets.isEmpty()) {
+            Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
+            if (options.dataEvolutionEnabled()
+                    && !conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
+                    && lastSafeSnapshot != null
+                    && lastSafeSnapshot >= 0) {
+                return new ReassignCompactChangesProvider(
+                        fileIO, pathFactory, snapshotManager, lastSafeSnapshot, changes);
+            }
             return CommitChangesProvider.provider(
-                    changes.compactTableFiles, changes.compactChangelog, changes.compactIndexFiles);
+                    changes.tableFiles, changes.changelogFiles, changes.indexFiles);
         }
 
         return latestSnapshot -> {
             List<IndexManifestEntry> indexFiles =
-                    changes.compactIndexFiles.stream()
+                    changes.indexFiles.stream()
                             // Replace global-index deletions prepared against an older snapshot.
                             .filter(
                                     entry ->
@@ -861,8 +877,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
             }
 
-            return new CommitChanges(
-                    changes.compactTableFiles, changes.compactChangelog, indexFiles);
+            return new CommitChanges(changes.tableFiles, changes.changelogFiles, indexFiles);
         };
     }
 
@@ -880,13 +895,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            CommitChanges changes = changesProvider.provide(latestSnapshot);
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
-                            changes.tableFiles,
-                            changes.changelogFiles,
-                            changes.indexFiles,
+                            changesProvider,
                             identifier,
                             watermark,
                             properties,
@@ -1016,10 +1028,34 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
             @Nullable String newStatsFileName) {
+        return tryCommitOnce(
+                retryResult,
+                CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
+                identifier,
+                watermark,
+                properties,
+                commitKind,
+                allowRollback,
+                latestSnapshot,
+                detectConflicts,
+                newStatsFileName);
+    }
+
+    private CommitResult tryCommitOnce(
+            @Nullable RetryCommitResult retryResult,
+            CommitChangesProvider changesProvider,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKind commitKind,
+            boolean allowRollback,
+            @Nullable Snapshot latestSnapshot,
+            boolean detectConflicts,
+            @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
 
-        // Check if the commit has been completed. At this point, there will be no more repeated
-        // commits and just return success
+        // Resolve an uncertain successful commit before preparing changes, which may refer
+        // to inputs removed by that successful commit.
         boolean hasOverwriteSinceLastAttempt = false;
         if (retryResult instanceof CommitFailRetryResult && latestSnapshot != null) {
             CommitFailRetryResult commitFailRetry = (CommitFailRetryResult) retryResult;
@@ -1043,6 +1079,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        CommitChanges changes = changesProvider.provide(latestSnapshot);
+        List<ManifestEntry> deltaFiles = changes.tableFiles;
+        List<ManifestEntry> changelogFiles = changes.changelogFiles;
+        List<IndexManifestEntry> indexFiles = changes.indexFiles;
+        Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
+
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
         if (latestSnapshot != null) {
@@ -1060,7 +1102,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<BinaryRow> changedPartitions = null;
         if (strictModeChecker != null) {
             changedPartitions = changedPartitions(deltaFiles, indexFiles);
-            strictModeChecker.check(newSnapshotId, commitKind, changedPartitions);
+            strictModeChecker.check(
+                    newSnapshotId, commitKind, changedPartitions, rebasedReassignments);
             strictModeChecker.update(newSnapshotId - 1);
         }
 

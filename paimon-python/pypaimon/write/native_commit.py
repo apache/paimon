@@ -39,15 +39,12 @@ def native_commit_available() -> bool:
 
 
 def native_messages_supported(table, messages) -> bool:
-    path_factory = table.path_factory()
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
             return False
         partition = tuple(message.partition)
-        bucket_path = path_factory.bucket_path(
-            partition, message.bucket, canonical_partition=True)
         for file in message.new_files + message.changelog_files:
             if file.external_path:
                 continue
@@ -56,16 +53,19 @@ def native_messages_supported(table, messages) -> bool:
             if file.file_path:
                 if str(file.file_path) != expected:
                     return False
-            elif path_factory.bucket_path(partition, message.bucket) != bucket_path:
-                # The message does not say which of the two partition layouts
-                # contains the file. Use Python's path-aware commit and abort.
-                return False
     return True
 
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
     if not _rest_catalog_supported(table) or not native_commit_available():
+        return None
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.write.native_write import _native_partition_types_supported
+    if not _native_partition_types_supported(
+            PyarrowFieldParser.from_paimon_schema(table.table_schema.fields), table.partition_keys,
+            table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -147,6 +147,8 @@ def create_native_write_table(table):
         table.options.snapshot_ignore_empty_commit())
     options['row-tracking.partition-group-on-commit'] = _option_value_to_string(
         table.options.row_tracking_partition_group_on_commit())
+    options['data-evolution.row-sidecar.enabled'] = _option_value_to_string(
+        table.options.data_evolution_row_sidecar_enabled())
     schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
     if environment.supports_version_management:
         if not _rest_catalog_supported(table):

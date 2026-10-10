@@ -30,6 +30,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
@@ -40,10 +41,10 @@ from pypaimon.write.file_store_commit import (
     FileStoreCommit,
     RollbackRetryResult,
     RewriteResult,
-    _abort_commit_messages,
     _reject_compact_increment,
     _row_id_check_from_messages,
 )
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
 
 class TestRowIdCheckFromMessages(unittest.TestCase):
@@ -79,67 +80,53 @@ class TestRowIdCheckFromMessages(unittest.TestCase):
                 None, [CommitMessage((), 0, [], check_from_snapshot=-1)], 1)
 
 
-class TestAbortCommitMessages(unittest.TestCase):
+class TestExplicitCommitAbort(unittest.TestCase):
 
-    @staticmethod
-    def _file_meta(**kwargs):
-        return DataFileMeta(
-            file_name='data.parquet', file_size=1, row_count=1,
-            min_key=None, max_key=None, key_stats=None, value_stats=None,
-            min_sequence_number=0, max_sequence_number=0, schema_id=0,
-            level=0, extra_files=kwargs.pop('extra_files', []), **kwargs)
-
-    def test_reconstructs_local_path_after_wire_decode(self):
-        table = Mock()
-        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
-        file = self._file_meta()
-        message = CommitMessage((1,), 0, [file])
-        _abort_commit_messages(table, [message])
-        table.file_io.delete_quietly.assert_called_once_with(
-            '/table/p=1/bucket-0/data.parquet')
-
-    def test_reconstructs_aligned_sidecars_after_wire_decode(self):
-        table = Mock()
-        table.path_factory.return_value.bucket_path.return_value = '/table/p=1/bucket-0'
-        file = self._file_meta(extra_files=['data.parquet.index'])
-        _abort_commit_messages(table, [CommitMessage((1,), 0, [file])])
-        self.assertEqual(table.file_io.delete_quietly.call_args_list, [
-            unittest.mock.call('/table/p=1/bucket-0/data.parquet'),
-            unittest.mock.call('/table/p=1/bucket-0/data.parquet.index'),
-        ])
-
-    def test_deletes_literal_external_paths_and_preserves_metadata(self):
+    def test_abort_deletes_new_data_sidecars_changelog_compact_and_indexes_only(self):
         with TemporaryDirectory() as directory:
             parent = Path(directory) / 'pt=a%2Fb%25%3F%23'
             parent.mkdir()
-            paths = [parent / 'data.parquet', parent / 'data.parquet.index']
+            paths = [parent / name for name in (
+                'data.parquet', 'data.parquet.index', 'changelog.parquet',
+                'compact-before.parquet', 'compact-after.parquet',
+                'compact-changelog.parquet', 'index-file', 'old-index')]
             for path in paths:
-                path.touch()
-            external_path = 'file:' + paths[0].as_posix()
-            file = self._file_meta(external_path=external_path, extra_files=[paths[1].name])
-            table = Mock(file_io=LocalFileIO())
-            _abort_commit_messages(table, [CommitMessage(('a/b%?#',), 0, [file])])
-            self.assertFalse(any(path.exists() for path in paths))
-            self.assertEqual(file.external_path, external_path)
-            self.assertEqual(file.extra_files, [paths[1].name])
-            table.path_factory.assert_not_called()
+                path.write_bytes(b'keep')
 
-    def test_index_path_failure_does_not_escape_abort(self):
-        table = Mock()
-        table.path_factory.side_effect = RuntimeError("path lookup failed")
-        index_file = Mock(file_name="index-file", external_path=None)
-        message = Mock(
-            new_files=[],
-            changelog_files=[],
-            index_adds=[Mock(index_file=index_file)],
-            compact_after=[],
-            compact_changelog_files=[],
-            compact_index_adds=[],
-        )
+            def meta(path, **kwargs):
+                return DataFileMeta(
+                    file_name=path.name, file_size=4, row_count=1,
+                    min_key=None, max_key=None, key_stats=None, value_stats=None,
+                    min_sequence_number=0, max_sequence_number=0, schema_id=0,
+                    level=0, extra_files=kwargs.pop('extra_files', []),
+                    external_path='file:' + path.as_posix(), **kwargs)
 
-        with self.assertLogs(
-                'pypaimon.write.file_store_commit', level='WARNING'):
-            _abort_commit_messages(table, [message])
+            index_entry = Mock(index_file=Mock(index_type='BTREE', external_path=str(paths[-2])))
+            old_index = Mock(index_file=Mock(index_type='BTREE', external_path=str(paths[-1])))
+            message = CommitMessage(
+                ('a/b%?#',), 0, [meta(paths[0], extra_files=[paths[1].name])],
+                deleted_files=[meta(paths[3])], changelog_files=[meta(paths[2])],
+                compact_before=[meta(paths[3])], compact_after=[meta(paths[4])],
+                compact_changelog_files=[meta(paths[5])], index_adds=[index_entry],
+                index_deletes=[old_index], compact_index_adds=[index_entry],
+                compact_index_deletes=[old_index])
+            commit = FileStoreCommit.__new__(FileStoreCommit)
+            commit.table = Mock(file_io=LocalFileIO())
+            commit.abort([message])
+            commit.abort([message])
+            for i, path in enumerate(paths):
+                self.assertEqual(path.exists(), i in (3, len(paths) - 1), str(path))
+
+    def test_abort_continues_after_storage_cleanup_errors(self):
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.table = Mock()
+        commit.table.file_io.delete_quietly.side_effect = [OSError('cleanup failed'), None]
+        first = Mock()
+        first.collect_files.return_value = ['/first']
+        second = Mock()
+        second.collect_files.return_value = ['/second']
+        commit.abort([CommitMessage((), 0, [first, second])])
+        self.assertEqual(commit.table.file_io.delete_quietly.call_count, 2)
 
 
 class TestFileStoreCommitRowTracking(unittest.TestCase):
@@ -147,6 +134,9 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
     def setUp(self):
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
+        self.mock_table.path_factory.return_value = FileStorePathFactory(
+            '/test/table/path', ['dt', 'region'], '__DEFAULT_PARTITION__', 'parquet',
+            'data-', 'changelog-', False, False, 'zstd')
         self.mock_table.current_branch.return_value = 'main'
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
@@ -366,6 +356,13 @@ class TestFileStoreCommit(unittest.TestCase):
         # Mock table with required attributes
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
+        self.mock_table.partition_keys_fields = [
+            DataField(0, 'dt', AtomicType('STRING')),
+            DataField(1, 'region', AtomicType('STRING')),
+        ]
+        self.mock_table.path_factory.return_value = FileStorePathFactory(
+            '/test/table/path', ['dt', 'region'], '__DEFAULT_PARTITION__', 'parquet',
+            'data-', 'changelog-', False, False, 'zstd')
         self.mock_table.current_branch.return_value = 'main'
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
@@ -739,7 +736,7 @@ class TestFileStoreCommit(unittest.TestCase):
 
         for old_buckets, new_buckets in [(-2, 2), (2, 3)]:
             with self.subTest(old=old_buckets, new=new_buckets):
-                partition = GenericRow(['2024-01-15', 'us-east-1'], None)
+                partition = GenericRow(['2024-01-15', 'us-east-1'], self.mock_table.partition_keys_fields)
                 entries = [
                     ManifestEntry(
                         kind=1,
@@ -854,6 +851,7 @@ class TestFileStoreCommit(unittest.TestCase):
         """Test partition statistics generation for unpartitioned table."""
         # Update mock table to have no partition keys
         self.mock_table.partition_keys = []
+        self.mock_table.partition_keys_fields = []
 
         # Create FileStoreCommit instance
         file_store_commit = self._create_file_store_commit()
@@ -969,19 +967,8 @@ class TestFileStoreCommit(unittest.TestCase):
             new_files=[file_meta]
         )
 
-        # Test method
-        statistics = file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
-
-        # Verify results - should fallback to index-based naming
-        self.assertEqual(len(statistics), 1)
-
-        stat = statistics[0]
-        expected_spec = {
-            'partition_0': '2024-01-15',
-            'partition_1': 'us-east-1',
-            'partition_2': 'extra-value'
-        }
-        self.assertEqual(stat.spec, expected_spec)
+        with self.assertRaisesRegex(ValueError, 'Partition row does not match'):
+            file_store_commit._generate_partition_statistics(self._to_entries([commit_message]))
 
     def test_generate_partition_statistics_empty_commit_messages(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -1126,11 +1113,10 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(2, file_store_commit._try_commit_once.call_count)
         file_store_commit._commit_retry_wait.assert_called_once_with(0)
 
-    @staticmethod
-    def _to_entries(commit_messages):
+    def _to_entries(self, commit_messages):
         commit_entries = []
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), None)
+            partition = GenericRow(list(msg.partition), self.mock_table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,

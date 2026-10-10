@@ -29,6 +29,9 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
 from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
@@ -95,7 +98,7 @@ class DataWriter(ABC):
 
         self.path_factory = self.table.path_factory()
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
-            self.partition, self.bucket
+            self.partition, self.bucket, canonical_partition=True
         )
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
@@ -157,8 +160,10 @@ class DataWriter(ABC):
         Call only after all sidecars are prepared and validated. Until then, this
         writer retains its metadata for retry and its responsibility for cleanup.
         """
-        owned_files = self.committed_files.copy() if self.delete_file_upon_abort() else []
+        owned_files = (self.committed_files + self.committed_changelog_files
+                       if self.delete_file_upon_abort() else [])
         self.committed_files.clear()
+        self.committed_changelog_files.clear()
         return owned_files
 
     def delete_file_upon_abort(self) -> bool:
@@ -306,62 +311,26 @@ class DataWriter(ABC):
                     zstd_level=self.zstd_level)
                 extra_files.append(row_sidecar_name)
 
-            # min key & max key
-
-            selected_table = logical_data.select(self.trimmed_primary_keys)
-            key_columns_batch = selected_table.to_batches()[0]
-            min_key_row_batch = key_columns_batch.slice(0, 1)
-            max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
-            min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
-            max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
-
-            # key stats & value stats
-            value_stats_enabled = self.options.metadata_stats_enabled()
-            if value_stats_enabled:
-                stats_fields = self.table.fields if self.table.is_primary_key_table \
-                    else PyarrowFieldParser.to_paimon_schema(logical_data.schema)
-            else:
-                stats_fields = self.table.trimmed_primary_keys_fields
-            column_stats = {
-                field.name: self._get_column_stats(logical_data, field.name)
-                for field in stats_fields
-            }
-            key_fields = self.trimmed_primary_keys_fields
-            key_stats = self._collect_value_stats(
-                logical_data, key_fields, column_stats)
-            if not self.options.primary_key_nullable() and not all(
-                    count == 0 for count in key_stats.null_counts):
-                raise RuntimeError("Primary key should not be null")
-
-            value_fields = stats_fields if value_stats_enabled else []
-            value_stats = self._collect_value_stats(
-                logical_data, value_fields, column_stats)
-
-            # Read the range without advancing it: the advance belongs with the
-            # append below, so a retried flush derives the same range.
-            min_seq = self.sequence_generator.start
-            max_seq = self.sequence_generator.current
-            creation_time = Timestamp.now()
+            statistics = self._data_file_statistics(logical_data)
             data_meta = self._create_data_file_meta(
                 file_name=file_name,
                 file_path=file_path,
                 row_count=data.num_rows,
-                min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
-                max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-                key_stats=key_stats,
-                value_stats=value_stats,
-                min_sequence_number=min_seq,
-                max_sequence_number=max_seq,
+                min_key=GenericRow(statistics['min_key'], self.trimmed_primary_keys_fields),
+                max_key=GenericRow(statistics['max_key'], self.trimmed_primary_keys_fields),
+                key_stats=statistics['key_stats'],
+                value_stats=statistics['value_stats'],
+                min_sequence_number=statistics['min_seq'],
+                max_sequence_number=statistics['max_seq'],
                 extra_files=extra_files,
-                creation_time=creation_time,
+                creation_time=statistics['creation_time'],
+                delete_row_count=self._count_delete_rows(data),
             )
 
-            if self.changelog_producer == ChangelogProducer.INPUT:
+            if (self.changelog_producer == ChangelogProducer.INPUT
+                    and not self._writes_changelog_before_merge()):
                 changelog_meta = self._write_changelog_file(
-                    data, min_key, max_key, key_stats, value_stats,
-                    min_seq, max_seq, creation_time,
-                    value_stats_enabled, external_path_str is not None,
-                )
+                    data, is_external=external_path_str is not None, **statistics)
         except Exception:
             self.file_io.delete_quietly(file_path)
             if row_sidecar_path is not None:
@@ -369,6 +338,57 @@ class DataWriter(ABC):
             raise
 
         self._finish_data_file(data_meta, changelog_meta, shared_shredding_stats)
+
+    def _data_file_statistics(self, data):
+        # min key & max key
+
+        selected_table = data.select(self.trimmed_primary_keys)
+        key_columns_batch = selected_table.to_batches()[0]
+        min_key_row_batch = key_columns_batch.slice(0, 1)
+        max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
+        min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
+        max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
+
+        # key stats & value stats
+        value_stats_enabled = self.options.metadata_stats_enabled()
+        if value_stats_enabled:
+            stats_fields = self.table.fields if self.table.is_primary_key_table \
+                else PyarrowFieldParser.to_paimon_schema(data.schema)
+        else:
+            stats_fields = self.table.trimmed_primary_keys_fields
+        column_stats = {
+            field.name: self._get_column_stats(data, field.name)
+            for field in stats_fields
+        }
+        key_fields = self.trimmed_primary_keys_fields
+        key_stats = self._collect_value_stats(
+            data, key_fields, column_stats)
+        if not self.options.primary_key_nullable() and not all(
+                count == 0 for count in key_stats.null_counts):
+            raise RuntimeError("Primary key should not be null")
+
+        value_fields = stats_fields if value_stats_enabled else []
+        value_stats = self._collect_value_stats(
+            data, value_fields, column_stats)
+
+        # Read the range without advancing it: the advance belongs with the
+        # append below, so a retried flush derives the same range.
+        if self.table.is_primary_key_table and '_SEQUENCE_NUMBER' in data.schema.names:
+            # PK files can contain a deduplicated or split subset of the
+            # buffer. Java records the range of the rows actually written.
+            sequences = data.column('_SEQUENCE_NUMBER')
+            min_seq = pc.min(sequences).as_py()
+            max_seq = pc.max(sequences).as_py()
+        else:
+            min_seq = self.sequence_generator.start
+            max_seq = self.sequence_generator.current
+        creation_time = Timestamp.now()
+        return dict(min_key=min_key, max_key=max_key, key_stats=key_stats,
+                    value_stats=value_stats, min_seq=min_seq, max_seq=max_seq,
+                    creation_time=creation_time, value_stats_enabled=value_stats_enabled)
+
+    def _writes_changelog_before_merge(self):
+        return False
 
     def _finish_data_file(self, data_meta, changelog_meta=None,
                           shared_shredding_stats=None):
@@ -392,7 +412,7 @@ class DataWriter(ABC):
     def _create_data_file_meta(self, file_name, file_path, row_count,
                                min_key, max_key, key_stats, value_stats,
                                min_sequence_number, max_sequence_number,
-                               extra_files=None, creation_time=None):
+                               extra_files=None, creation_time=None, delete_row_count=0):
         """Common metadata finalization for buffered and incremental files."""
         return DataFileMeta.create(
             file_name=file_name,
@@ -405,11 +425,22 @@ class DataWriter(ABC):
             schema_id=self.table.table_schema.id, level=0,
             extra_files=extra_files if extra_files is not None else [],
             creation_time=creation_time if creation_time is not None else Timestamp.now(),
-            delete_row_count=0, file_source=0,
+            delete_row_count=delete_row_count, file_source=0,
             value_stats_cols=None if self.options.metadata_stats_enabled() else [],
             external_path=file_path if self.external_path_provider is not None else None,
             first_row_id=None, write_cols=self.write_cols, file_path=file_path,
         )
+
+    def _count_delete_rows(self, data: pa.Table) -> int:
+        # Count the final file contents, after merging and rolling the buffer.
+        if (
+            not self.table.is_primary_key_table
+            or SpecialFields.VALUE_KIND.name not in data.schema.names
+        ):
+            return 0
+        kind_counts = pc.value_counts(data.column(SpecialFields.VALUE_KIND.name))
+        return sum(entry['counts'].as_py() for entry in kind_counts
+                   if entry['values'].as_py() in (RowKind.UPDATE_BEFORE.value, RowKind.DELETE.value))
 
     def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
         """Transform VARIANT columns into shredded Parquet format.
@@ -439,11 +470,10 @@ class DataWriter(ABC):
     def _write_changelog_file(self, data, min_key, max_key, key_stats, value_stats,
                               min_seq, max_seq, creation_time,
                               value_stats_enabled, is_external) -> DataFileMeta:
-        """Write the changelog file for one data file and return its meta.
+        """Write a complete changelog file and return its metadata.
 
-        The caller appends the returned meta only once the whole data file has
-        landed, so a failure here leaves nothing behind: no meta to commit, and
-        no file on disk either.
+        The caller publishes this metadata after success. A failure here leaves
+        neither metadata to commit nor a partial changelog file on disk.
         """
         cl_fmt = self.changelog_file_format
         changelog_file_name = f"changelog-{uuid.uuid4()}-0.{cl_fmt}"
@@ -473,7 +503,7 @@ class DataWriter(ABC):
                 level=0,
                 extra_files=[],
                 creation_time=creation_time,
-                delete_row_count=0,
+                delete_row_count=self._count_delete_rows(data),
                 file_source=0,
                 value_stats_cols=None if value_stats_enabled else [],
                 external_path=changelog_external_path,
@@ -489,8 +519,9 @@ class DataWriter(ABC):
         if self.external_path_provider:
             return self.external_path_provider.get_next_external_data_path(file_name)
 
-        bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
-        return f"{bucket_path.rstrip('/')}/{file_name}"
+        # New files use Java's escaped partition names, including on the pure
+        # Python writer path. Never introduce another Python-specific layout.
+        return canonical_data_file_path(self.table, self.partition, self.bucket, file_name)
 
     def _should_write_row_sidecar(self) -> bool:
         return (

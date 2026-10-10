@@ -28,7 +28,7 @@ _native_plan_count = 0
 _native_read_count = 0
 _native_write_count = 0
 _native_commit_count = 0
-_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental'), 0)
+_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental', 'merge'), 0)
 _force_native_for_test = False
 _force_native_read_for_test = False
 _force_native_write_for_test = False
@@ -113,6 +113,19 @@ def pytest_configure(config):
 
         TableScan._try_native_plan = tracked_plan
 
+        from pypaimon.read.streaming_table_scan import StreamTableScan
+
+        original_stream_plan = StreamTableScan.plan
+
+        def tracked_stream_plan(self, *args, **kwargs):
+            global _native_plan_count
+            plan = original_stream_plan(self, *args, **kwargs)
+            if plan is not None and _force_native_for_test:
+                _native_plan_count += 1
+            return plan
+
+        StreamTableScan.plan = tracked_stream_plan
+
     if _native_read_enabled():
         from pypaimon.read.table_read import TableRead
 
@@ -130,17 +143,20 @@ def pytest_configure(config):
     if _native_write_enabled():
         from pypaimon.write.native_write import NativeTableWrite
 
-        original_write = NativeTableWrite.write_arrow_batch
+        def track_write(method):
+            original_write = getattr(NativeTableWrite, method)
 
-        def tracked_write(self, data):
-            global _native_write_count
-            native = self._native_writer is not None
-            result = original_write(self, data)
-            if native and data.num_rows and _force_native_write_for_test:
-                _native_write_count += 1
-            return result
+            def tracked_write(self, data, *args, **kwargs):
+                global _native_write_count
+                native = self._native_writer is not None
+                result = original_write(self, data, *args, **kwargs)
+                if native and data.num_rows and _force_native_write_for_test:
+                    _native_write_count += 1
+                return result
 
-        NativeTableWrite.write_arrow_batch = tracked_write
+            setattr(NativeTableWrite, method, tracked_write)
+
+        track_write('write_arrow_batch')
 
     if _native_commit_enabled():
         from pypaimon.write.table_commit import TableCommit
@@ -157,6 +173,7 @@ def pytest_configure(config):
         TableCommit._prepare_native_commit = tracked_prepare
 
     if _native_update_enabled():
+        from pypaimon.write.native_merge_into import NativeTableMergeInto
         from pypaimon.write.native_update import (
             NativeBatchTableUpdate, NativePredicateTableUpdate,
             NativeTableUpdateByRowId, NativeTableUpsert,
@@ -178,6 +195,7 @@ def pytest_configure(config):
         track_update(NativePredicateTableUpdate, 'update', 'predicate')
         track_update(NativeTableUpsert, 'upsert', 'upsert')
         track_update(NativeTableUpdateByRowId, 'update_columns', 'incremental')
+        track_update(NativeTableMergeInto, 'prepare_commit', 'merge')
 
 
 def pytest_collection_modifyitems(items):

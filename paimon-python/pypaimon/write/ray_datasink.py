@@ -192,6 +192,10 @@ class PaimonDatasink(_DatasinkBase):
                         f"Error aborting worker-side table_write: {abort_error}",
                         exc_info=abort_error
                     )
+            # prepare_commit has handed these files off, but a failed close
+            # prevents this worker from returning them to the coordinator.
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
 
     @staticmethod

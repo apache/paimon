@@ -2270,6 +2270,10 @@ public class RESTCatalogServer {
                         existed.add(spec);
                     }
                 }
+                if (formatTable) {
+                    RESTCatalogPartitionSupport.applyRequestedFormats(
+                            storedPartitions, request, requestedOptions, tableMetadata);
+                }
                 RESTCatalogPartitionSupport.settlePartitionLocations(
                         storedPartitions,
                         returningToDefault,

@@ -1748,7 +1748,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[('bad', None)]], type=map_blob_type),
         }, schema=pa_schema)
         invalid_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "does not allow null values"):
+        with self.assertRaisesRegex(ValueError, "does not allow null values|non-nullable"):
             invalid_writer.write_arrow(invalid_data)
         invalid_writer.abort()
 
@@ -1821,7 +1821,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=array_blob_type),
         }, schema=pa_schema)
         invalid_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "does not allow null elements"):
+        with self.assertRaisesRegex(ValueError, "does not allow null elements|cannot contain nulls"):
             invalid_writer.write_arrow(invalid_data)
         invalid_writer.abort()
 
@@ -6302,11 +6302,9 @@ class BlobConsumerTest(unittest.TestCase):
 
         self.assertGreater(len(received), 0)
 
-        # Capture data writers before close() clears them, then abort each one.
-        data_writers = list(writer.file_store_write.data_writers.values())
-        self.assertGreater(len(data_writers), 0)
-        for dw in data_writers:
-            dw.abort()
+        # Public abort covers both Python and Native writers. Consumer-held
+        # descriptors keep their Blob files regardless of the writer backend.
+        writer.abort()
 
         # Every descriptor returned to the consumer must still be readable.
         uri_reader = FileUriReader(table.file_io)

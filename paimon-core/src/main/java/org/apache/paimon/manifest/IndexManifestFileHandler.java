@@ -149,10 +149,12 @@ public class IndexManifestFileHandler {
                     }
                     indexEntries.put(fileName, entry);
                 } else {
+                    IndexManifestEntry previous = indexEntries.get(fileName);
                     checkState(
-                            indexEntries.containsKey(fileName),
+                            previous != null,
                             "Trying to delete file %s which is not exists.",
                             fileName);
+                    checkDeletedIndexFile(previous, entry);
                     if (dvRanges != null) {
                         for (String dataFile : dvRanges.keySet()) {
                             checkState(
@@ -221,10 +223,12 @@ public class IndexManifestFileHandler {
                             .collect(Collectors.toList());
             for (IndexManifestEntry entry : removed) {
                 String fileName = entry.indexFile().fileName();
+                IndexManifestEntry previous = indexEntries.get(fileName);
                 checkState(
-                        indexEntries.containsKey(fileName),
+                        previous != null,
                         "Trying to delete global index file %s which does not exist.",
                         fileName);
+                checkDeletedIndexFile(previous, entry);
                 indexEntries.remove(fileName);
             }
             validateRetainedIndexFiles(indexEntries.values(), added);
@@ -278,6 +282,17 @@ public class IndexManifestFileHandler {
                 }
             }
         }
+    }
+
+    private static void checkDeletedIndexFile(
+            IndexManifestEntry previous, IndexManifestEntry deleted) {
+        // File identity alone does not detect metadata-only row-id reassignment.
+        checkState(
+                previous.partition().equals(deleted.partition())
+                        && previous.bucket() == deleted.bucket()
+                        && previous.indexFile().equals(deleted.indexFile()),
+                "Index file %s metadata does not match the current entry.",
+                deleted.indexFile().fileName());
     }
 
     private static BucketIdentifier identifier(IndexManifestEntry indexManifestEntry) {

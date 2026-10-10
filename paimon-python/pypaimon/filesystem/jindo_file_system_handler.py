@@ -156,7 +156,8 @@ class JindoInputFile:
         if whence == os.SEEK_END and self._file_size is not None:
             position = self._file_size + position
             whence = os.SEEK_SET
-        return self._stream.seek(position, whence)
+        self._stream.seek(position, whence)
+        return self._stream.tell()
 
     def tell(self) -> int:
         if self.closed:
@@ -233,6 +234,14 @@ class JindoFileSystemHandler(FileSystemHandler):
 
         config = build_jindo_config(catalog_options)
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
+
+    def __getstate__(self):
+        # Native clients and thread locks belong to this process. Transport only
+        # connection configuration; immutable-file size hints can be refilled.
+        return {"root_path": self.root_path, "properties": self.properties}
+
+    def __setstate__(self, state):
+        self.__init__(state["root_path"], state["properties"])
 
     def register_file_size(self, path: str, file_size: int):
         """Register an immutable file's size supplied by Paimon metadata."""

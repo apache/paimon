@@ -133,7 +133,7 @@ case class PaimonRecordReaderIterator(
                 currentIterator.asInstanceOf[ScoreRecordIterator[PaimonInternalRow]])
               currentResult = joinedRow.replace(dataRow, metadataRow)
             } else if (needMetadata) {
-              updateMetadataRow(currentIterator.asInstanceOf[FileRecordIterator[PaimonInternalRow]])
+              updateMetadataRow(currentIterator)
               currentResult = joinedRow.replace(dataRow, metadataRow)
             } else {
               currentResult = dataRow
@@ -160,12 +160,14 @@ case class PaimonRecordReaderIterator(
     }
   }
 
-  private def updateMetadataRow(fileRecordIterator: FileRecordIterator[PaimonInternalRow]): Unit = {
+  private def updateMetadataRow(iterator: RecordReader.RecordIterator[PaimonInternalRow]): Unit = {
     metadataColumns.zipWithIndex.foreach {
       case (metadataColumn, index) =>
         metadataColumn.name match {
           case PaimonMetadataColumn.ROW_INDEX_COLUMN =>
-            metadataRow.setField(index, fileRecordIterator.returnedPosition())
+            metadataRow.setField(
+              index,
+              iterator.asInstanceOf[FileRecordIterator[PaimonInternalRow]].returnedPosition())
           case PaimonMetadataColumn.FILE_PATH_COLUMN =>
             metadataRow.setField(index, BinaryString.fromString(lastFilePath.toString))
           case PaimonMetadataColumn.PARTITION_COLUMN =>

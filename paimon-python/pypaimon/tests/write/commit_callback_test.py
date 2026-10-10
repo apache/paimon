@@ -135,6 +135,7 @@ class CommitCallbackTest(unittest.TestCase):
     def test_callback_invoked_after_lost_commit_response(self):
         table = self._create_table(
             'test_callback_response_loss',
+            partition_keys=['dt'],
             options={
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
@@ -150,7 +151,7 @@ class CommitCallbackTest(unittest.TestCase):
         table_write.write_arrow(pa.Table.from_pydict({
             'id': [1, 2],
             'name': ['a', 'b'],
-            'dt': ['p1', 'p1'],
+            'dt': ['a/b', 'a%b'],
         }, schema=self.pa_schema))
         messages = table_write.prepare_commit()
         expected_paths = sorted(
@@ -171,6 +172,9 @@ class CommitCallbackTest(unittest.TestCase):
             for entry in callback.contexts[0].commit_entries
             if entry.kind == 0
         ))
+        self.assertTrue(all(table.file_io.exists(path) for path in expected_paths))
+        self.assertTrue(any('/dt=a%2Fb/' in path for path in expected_paths))
+        self.assertTrue(any('/dt=a%25b/' in path for path in expected_paths))
         table_write.close()
         table_commit.close()
 

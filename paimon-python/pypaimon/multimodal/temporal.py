@@ -390,6 +390,30 @@ class _AsOfJoinRight:
         self._row_ids = metadata[_ROW_ID].combine_chunks()
         self._index = {}
         group_columns = [metadata[name].combine_chunks() for name in self.by]
+        encode = getattr(pc, "run_end_encode", None)
+        if len(group_columns) == 1 and encode is not None:
+            column = group_columns[0]
+            data_type = column.type
+            # Only use types whose Arrow runs have Python key equality.
+            # In particular, run-end encoding distinguishes -0.0 from +0.0.
+            if (pa.types.is_integer(data_type)
+                    or pa.types.is_boolean(data_type)
+                    or pa.types.is_string(data_type)
+                    or pa.types.is_large_string(data_type)
+                    or pa.types.is_binary(data_type)
+                    or pa.types.is_large_binary(data_type)):
+                try:
+                    groups = encode(column, run_end_type=pa.int64())
+                except pa.ArrowNotImplementedError:
+                    pass
+                else:
+                    start = 0
+                    # Avoid Arrow scalar conversion per run for dense groups.
+                    ends = groups.run_ends.to_numpy().tolist()
+                    for key, end in zip(groups.values.to_pylist(), ends):
+                        self._index[(key,)] = (start, end)
+                        start = end
+                    return
         previous = None
         start = 0
         for position in range(len(metadata)):
@@ -977,8 +1001,8 @@ def _query_schema_and_paths(query):
         CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
     })
     builder = query._configured_read_builder(table)
-    schema = PyarrowFieldParser.from_paimon_schema(builder.read_type())
-    paths = builder._nested_name_paths()
+    schema = PyarrowFieldParser.from_paimon_schema(builder._output_fields())
+    paths = builder._output_name_paths()
     if paths is None:
         paths = [[field.name] for field in schema]
     return schema, paths
@@ -1113,7 +1137,7 @@ class _RowIdFetcher:
             plan_projection = visible_projection
             projected = table.new_read_builder().with_projection(
                 visible_projection)
-            projected_paths = projected._nested_name_paths()
+            projected_paths = projected._output_name_paths()
             if projected_paths is not None:
                 plan_projection = list(dict.fromkeys(
                     path[0] for path in projected_paths))
@@ -1133,8 +1157,8 @@ class _RowIdFetcher:
         projected_builder = table.new_read_builder().with_projection(
             list(dict.fromkeys(read_projection + [_ROW_ID])))
         projected_schema = PyarrowFieldParser.from_paimon_schema(
-            projected_builder.read_type())
-        projected_paths = projected_builder._nested_name_paths()
+            projected_builder._output_fields())
+        projected_paths = projected_builder._output_name_paths()
         if projected_paths is not None:
             table_names = set(_table_schema(query).names)
             for field, path in zip(projected_schema, projected_paths):
@@ -1157,8 +1181,8 @@ class _RowIdFetcher:
         visible_builder = table.new_read_builder().with_projection(
             read_projection)
         self._fetch_schema = PyarrowFieldParser.from_paimon_schema(
-            visible_builder.read_type())
-        self._name_paths = visible_builder._nested_name_paths()
+            visible_builder._output_fields())
+        self._name_paths = visible_builder._output_name_paths()
         self._row_id_name = _ROW_ID
         if self._name_paths is not None:
             self._row_id_name = next(

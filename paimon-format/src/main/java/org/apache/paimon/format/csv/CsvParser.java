@@ -108,39 +108,45 @@ public class CsvParser {
         int position = 0;
         while (position < line.length() && columnIndex < rowValues.length) {
             char c = line.charAt(position);
-            if (c == escapeChar) {
-                // if the next character is special, process it here as to not trigger the special
-                // handling
-                if (inQuotes || inField) {
-                    int nextCharacter = peekNextCharacter(line, position);
-                    if (nextCharacter == quoteChar || nextCharacter == escapeChar) {
-                        buffer.append(line.charAt(position + 1));
-                        position++;
-                    }
+            // Only a quote at the start of a field enables CSV quoting and escaping.
+            // Quotes and backslashes in an unquoted field (for example JSON in TSV)
+            // belong to the field value and must not be interpreted as CSV syntax.
+            // A single NUL quote or escape is still used by the writer. Only disable
+            // quoting and escaping when both characters are NUL.
+            if (!inField
+                    && buffer.length() == 0
+                    && (quoteChar != '\0' || escapeChar != '\0')
+                    && c == quoteChar) {
+                rowQuoted[columnIndex] = true;
+            }
+            if (rowQuoted[columnIndex] && c == escapeChar) {
+                int nextCharacter = peekNextCharacter(line, position);
+                if ((inQuotes || inField)
+                        && (nextCharacter == quoteChar || nextCharacter == escapeChar)) {
+                    buffer.append(line.charAt(position + 1));
+                    position++;
+                } else {
+                    // An escape before an ordinary character is part of the value.
+                    buffer.append(c);
                 }
-            } else if (c == quoteChar) {
+            } else if (rowQuoted[columnIndex] && c == quoteChar) {
                 // a quote character can be escaped with another quote character
                 if ((inQuotes || inField) && peekNextCharacter(line, position) == quoteChar) {
                     buffer.append(line.charAt(position + 1));
                     position++;
                 } else {
-                    // the tricky case of an embedded quote in the middle: a,bc"d"ef,g
-                    // Embedded quote is not for first 3 characters of the line, and is not allowed
-                    // immediately before a separator
+                    // Preserve the existing handling of unescaped quotes in quoted fields.
                     if (position > 2
                             && line.charAt(position - 1) != separatorChar
                             && line.length() > (position + 1)
                             && line.charAt(position + 1) != separatorChar) {
-                        // if field starts begins whitespace, skip the whitespace and quote
+                        // Discard whitespace accumulated before an unescaped quote.
                         if (buffer.length() != 0 && isAllWhitespace(buffer)) {
                             buffer.setLength(0);
                         } else {
                             // otherwise write the quote as a literal value
                             buffer.append(c);
                         }
-                    }
-                    if (!inQuotes && buffer.length() == 0) {
-                        rowQuoted[columnIndex] = true;
                     }
                     inQuotes = !inQuotes;
                 }

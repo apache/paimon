@@ -1125,7 +1125,7 @@ class AoReaderTest(unittest.TestCase):
                           manifest_entry_filter=None,
                           drop_stats=True, early_entry_filter=None,
                           early_record_filter=None, partition_filter=None,
-                          selected_blocks=None):
+                          selected_blocks=None, file_size=None):
             # avro_total = every entry in the manifest (no manifest-file pruning
             # here: single file, is_in spans its partition stats).
             path = f"{self_mgr.manifest_path}/{manifest_file_name}"
@@ -1136,7 +1136,7 @@ class AoReaderTest(unittest.TestCase):
                 self_mgr, manifest_file_name,
                 manifest_entry_filter, drop_stats,
                 early_entry_filter, early_record_filter, partition_filter,
-                selected_blocks=selected_blocks)
+                selected_blocks=selected_blocks, file_size=file_size)
 
         def counting_dfm_init(self_dfm, *args, **kwargs):
             entry_counts['constructed'] += 1

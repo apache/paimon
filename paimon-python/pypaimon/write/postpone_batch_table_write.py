@@ -126,14 +126,18 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
             for partition in self._planner.input_partition_stats(data)
         )
 
-    def write_arrow(self, table: pa.Table):
+    def write_arrow(self, table: pa.Table, bucket=None):
+        if bucket is not None:
+            raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         table = self._prepare_arrow_data(table)
         if not self._buffer_input(table):
             return super().write_arrow(table)
         self._pending_inputs.extend(
             ("batch", batch) for batch in table.to_batches())
 
-    def write_arrow_batch(self, data: pa.RecordBatch):
+    def write_arrow_batch(self, data: pa.RecordBatch, bucket=None):
+        if bucket is not None:
+            raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         data = self._prepare_arrow_data(data)
         if not self._buffer_input(data):
             return super().write_arrow_batch(data)
@@ -152,6 +156,10 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         )
         require_columns(values_by_name, column_names, "write_row")
         require_columns(values_by_name, self.table.partition_keys, "write_row")
+        from pypaimon.write.row_kind import skip_write_row
+
+        if skip_write_row(self.table, values_by_name, row.get_row_kind()):
+            return
         partition = tuple(
             values_by_name[key] for key in self.table.partition_keys)
         if self._bucket_plan.contains(partition):

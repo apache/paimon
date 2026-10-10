@@ -188,7 +188,6 @@ class VectorType(DataType):
             "type": "VECTOR" + (" NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
             "length": self.length,
-            "nullable": self.nullable
         }
 
     @classmethod
@@ -505,9 +504,10 @@ class DataTypeParser:
 
     @staticmethod
     def parse_nullability(type_string: str) -> bool:
-        if "NOT NULL" in type_string:
+        type_upper = type_string.upper()
+        if "NOT NULL" in type_upper:
             return False
-        elif "NULL" in type_string:
+        elif "NULL" in type_upper:
             return True
         return True
 

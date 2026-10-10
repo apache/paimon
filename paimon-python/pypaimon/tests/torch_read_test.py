@@ -57,10 +57,20 @@ def _collect_spawned_worker_splits(dataset, output):
     output.put(dataset._worker_splits(None))
 
 
+class _EmptyTableRead:
+    read_type = []
+
+    def __init__(self, limit=None):
+        self.limit = limit
+
+    def _output_arrow_schema(self):
+        return pa.schema([])
+
+
 class TorchDistributedShardingTest(unittest.TestCase):
     @staticmethod
     def _table_read(limit=None):
-        return SimpleNamespace(limit=limit, read_type=[])
+        return _EmptyTableRead(limit)
 
     @staticmethod
     def _worker(worker_id, num_workers):
@@ -444,7 +454,7 @@ class TorchBatchShuffleTest(unittest.TestCase):
             iter(source), buffer_size, random.Random(17))))
 
         legacy = TorchShuffledIterDataset(
-            SimpleNamespace(read_type=[], limit=None), [], seed=17, buffer_size=buffer_size)
+            _EmptyTableRead(), [], seed=17, buffer_size=buffer_size)
         expected = list(legacy._iter_buffer_shuffled_rows(iter(rows), 0))
         self.assertEqual(actual.schema, table.schema)
         self.assertEqual(actual.to_pylist(), expected)
@@ -496,7 +506,7 @@ class TorchBatchShuffleTest(unittest.TestCase):
             return batch
 
         dataset = TorchShuffledBatchIterDataset(
-            SimpleNamespace(read_type=[], limit=None), list(range(8)),
+            _EmptyTableRead(), list(range(8)),
             buffer_size=3, max_buffer_input_splits=2, batch_size=2,
             batch_format="torch", to_tensor_fn=convert)
         with patch.object(TorchBatchIterDataset, "_arrow_batches_for_splits", read):
@@ -550,6 +560,35 @@ class TorchReadTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def test_nested_projection_uses_output_names_and_duplicate_values(self):
+        schema = pa.schema([
+            ('id', pa.int32()), ('payload', pa.struct([('value', pa.int32()), ('unused', pa.string())]))])
+        self.catalog.create_table('default.torch_canonical_read_type', Schema.from_pyarrow_schema(
+            schema, options={'file.format': 'parquet'}), False)
+        table = self.catalog.get_table('default.torch_canonical_read_type')
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist([
+                {'id': 1, 'payload': {'value': 10, 'unused': 'x'}},
+                {'id': 2, 'payload': None}], schema=schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        builder = table.new_read_builder().with_projection(['payload.value', 'id', 'id'])
+        read, splits = builder.new_read(), builder.new_scan().plan().splits()
+        self.assertEqual([field.name for field in read.read_type], ['payload', 'id'])
+        expected = [{'payload_value': 10, 'id': 1, 'id__0': 1},
+                    {'payload_value': None, 'id': 2, 'id__0': 2}]
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                dataset = read.to_torch(splits, streaming=streaming)
+                self.assertEqual(sorted(list(dataset), key=lambda row: row['id']), expected)
+        dataset = read.to_torch(splits, streaming=True, batch_format='pyarrow')
+        actual = pa.Table.from_batches(list(dataset)).sort_by('id')
+        self.assertEqual(actual.to_pylist(), expected)
 
     @parameterized.expand([True, False])
     def test_torch_read(self, is_streaming: bool = False):
@@ -1044,7 +1083,7 @@ class TorchReadTest(unittest.TestCase):
     def test_non_binding_limit_uses_merged_row_counts(self):
         from pypaimon.read.datasource.torch_dataset import TorchIterDataset
 
-        table_read = SimpleNamespace(limit=8, read_type=[])
+        table_read = _EmptyTableRead(limit=8)
         splits = [
             SimpleNamespace(row_count=10, merged_row_count=lambda: 4),
             SimpleNamespace(row_count=10, merged_row_count=lambda: 4),

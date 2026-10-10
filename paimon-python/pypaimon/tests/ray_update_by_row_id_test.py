@@ -492,17 +492,52 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_by_row_id(name, src, self.catalog_options, update_cols=["name"])
 
-    def test_rejects_deletion_vectors_table(self):
-        # A DV-deleted row still lives in its file, so update_by_row_id can't tell it is
-        # gone without reading the target; DV tables are refused for now.
+    def test_updates_live_rows_with_deletion_vectors(self):
         opts = dict(self.de_options, **{"deletion-vectors.enabled": "true"})
         target = self._create(options=opts)
         self._write(target, pa.Table.from_pydict(
-            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
-        src = pa.table({"_ROW_ID": [0], "age": [9]},
-                       schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]))
-        with self.assertRaises(ValueError):
-            update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
+            {"id": [1, 2, 3, 4], "name": ["a"] * 4, "age": [10, 20, 30, 40]},
+            schema=self.pa_schema))
+        table = self.catalog.get_table(target)
+        wb = table.new_batch_write_builder()
+        commit = wb.new_commit()
+        try:
+            commit.commit(wb.new_update().delete_by_row_id([0, 2]))
+        finally:
+            commit.close()
+        src = pa.table({"_ROW_ID": [1, 3], "age": [99, 88]})
+        self.assertEqual(update_by_row_id(
+            target, src, self.catalog_options, update_cols=["age"]), {"num_updated": 2})
+        rb = table.new_read_builder().with_projection(["id", "age", "_ROW_ID"])
+        rows = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(sorted(rows, key=lambda r: r["id"]), [
+            {"id": 2, "age": 99, "_ROW_ID": 1}, {"id": 4, "age": 88, "_ROW_ID": 3}])
+        # Deleting after workers have prepared their column files must not
+        # resurrect the row when the update is committed.
+        import importlib
+        module = importlib.import_module("pypaimon.ray.update_by_row_id")
+        original_commit = module._commit_update_messages
+
+        def delete_then_commit(target_table, messages):
+            builder = target_table.new_batch_write_builder()
+            concurrent = builder.new_commit()
+            try:
+                concurrent.commit(builder.new_update().delete_by_row_id([3]))
+            finally:
+                concurrent.close()
+            original_commit(target_table, messages)
+
+        with mock.patch.object(module, "_commit_update_messages", delete_then_commit):
+            update_by_row_id(target, pa.table({"_ROW_ID": [3], "age": [77]}),
+                             self.catalog_options, update_cols=["age"])
+        rb = table.new_read_builder().with_projection(["id", "age", "_ROW_ID"])
+        self.assertEqual(rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist(),
+                         [{"id": 2, "age": 99, "_ROW_ID": 1}])
+        snapshot = table.snapshot_manager().get_latest_snapshot().id
+        with self.assertRaisesRegex(ValueError, "deleted _ROW_ID"):
+            update_by_row_id(target, pa.table({"_ROW_ID": [0, 1], "age": [9, 9]}),
+                             self.catalog_options, update_cols=["age"])
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, snapshot)
 
     def test_rejects_blob_column_update(self):
         blob_schema = pa.schema([("id", pa.int32()), ("payload", pa.large_binary())])

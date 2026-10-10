@@ -384,22 +384,56 @@ class PaimonQueryTest extends PaimonSparkTestBase {
     )
   }
 
-  test("Paimon Query: not support querying metadata columns for pk table") {
-    spark.sql("""
-                |CREATE TABLE T (id INT, name STRING)
-                |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')
-                |""".stripMargin)
+  test("Paimon Query: query partition and bucket metadata columns for pk table") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'pt,id',
+            |  'bucket' = '1',
+            |  'write-only' = 'true',
+            |  'deletion-vectors.enabled' = 'false')
+            |""".stripMargin)
 
-    spark.sql("INSERT INTO T VALUES(1,'a')")
-    assertThat(spark.sql("SELECT *,__paimon_file_path FROM T").collect()).hasSize(1)
+      sql("INSERT INTO T VALUES (1, 'old', 'p1')")
+      checkAnswer(
+        sql("SELECT id, name, __paimon_bucket, __paimon_partition FROM T"),
+        Row(1, "old", 0, Row("p1")))
+
+      // Updating the same key in a separate file requires merging; write-only disables compaction.
+      sql("INSERT INTO T VALUES (1, 'new', 'p1')")
+      checkAnswer(sql("SELECT id, name FROM T"), Row(1, "new"))
+      checkAnswer(sql("SELECT __paimon_bucket FROM T"), Row(0))
+      checkAnswer(sql("SELECT __paimon_partition FROM T"), Row(Row("p1")))
+      checkAnswer(
+        sql("SELECT id, name, __paimon_bucket, __paimon_partition FROM T"),
+        Row(1, "new", 0, Row("p1")))
+      checkAnswer(
+        sql("SELECT __paimon_bucket, __paimon_partition FROM T WHERE id = 999"),
+        Seq.empty)
+    }
+  }
+
+  test("Paimon Query: reject file path and row index metadata when merging pk files") {
+    sql("""
+          |CREATE TABLE T (id INT, name STRING)
+          |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')
+          |""".stripMargin)
+
+    sql("INSERT INTO T VALUES(1,'a')")
+    assertThat(sql("SELECT *, __paimon_file_path, __paimon_row_index FROM T").collect()).hasSize(1)
 
     // query failed if more than one file in a bucket
-    spark.sql("INSERT INTO T VALUES(2,'b')")
-    assert(
-      intercept[SparkException] {
-        spark.sql("SELECT *,__paimon_file_path FROM T").collect()
-      }.getMessage
-        .contains("Only append table or deletion vector table support querying metadata columns."))
+    sql("INSERT INTO T VALUES(2,'b')")
+    Seq("__paimon_file_path", "__paimon_row_index").foreach {
+      column =>
+        assert(
+          intercept[SparkException] {
+            sql(s"SELECT *, $column FROM T").collect()
+          }.getMessage
+            .contains(
+              "Only append table or deletion vector table support querying metadata columns."))
+    }
   }
 
   test("Paimon Query: disallow full scan") {

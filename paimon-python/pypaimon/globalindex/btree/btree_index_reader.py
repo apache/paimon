@@ -24,6 +24,7 @@ multiple files is handled by LazyFilteredBTreeReader.
 import struct
 import threading
 import zlib
+from contextlib import suppress
 from typing import List, Optional
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
@@ -85,18 +86,26 @@ class BTreeIndexReader:
                      if io_meta.external_path
                      else index_path + "/" + io_meta.file_name)
         self.input_stream = file_io.new_input_stream(file_path)
-        self._supports_pread = supports_pread(self.input_stream)
-        self._io_lock = threading.Lock()
+        try:
+            self._supports_pread = supports_pread(self.input_stream)
+            self._io_lock = threading.Lock()
 
-        # Lazy-loaded null bitmap
-        self._null_bitmap: Optional[RoaringBitmap64] = None
-        self._null_bitmap_lock = threading.Lock()
+            # Lazy-loaded null bitmap
+            self._null_bitmap: Optional[RoaringBitmap64] = None
+            self._null_bitmap_lock = threading.Lock()
 
-        # Read footer to get index and bloom filter handles
-        self.footer = self._read_footer()
+            # Read footer to get index and bloom filter handles
+            self.footer = self._read_footer()
+            if self.footer.version != BTreeFileFooter.VERSION_1:
+                raise ValueError(
+                    f"Unsupported BTree index file version: {self.footer.version}")
 
-        # Initialize SST file reader
-        self.reader = self._create_sst_reader()
+            # Initialize SST file reader
+            self.reader = self._create_sst_reader()
+        except BaseException:
+            with suppress(Exception):
+                self.input_stream.close()
+            raise
 
     def _read_from(self, offset: int, length: int) -> bytes:
         if self._supports_pread:

@@ -20,7 +20,7 @@ from parameterized import parameterized
 import pyarrow as pa
 
 from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, MultisetType, MapType,
-                                        RowType, VectorType, PyarrowFieldParser,
+                                        RowType, VectorType, PyarrowFieldParser, DataTypeParser,
                                         is_blob_file_type)
 
 
@@ -82,6 +82,28 @@ class DataTypesTest(unittest.TestCase):
             # Round-trips stably and stays materializable as a PyArrow type.
             self.assertEqual(parsed.to_dict(), original.to_dict(), type_str)
             PyarrowFieldParser.from_paimon_type(parsed)
+
+    def test_parse_nullability_is_case_insensitive(self):
+        # The CLI ``table alter --type`` path feeds the user's raw declaration to
+        # the parser, and SQL type keywords are conventionally written lowercase.
+        # A lowercase "not null" must still be read as NOT NULL rather than being
+        # silently treated as nullable.
+        self.assertFalse(DataTypeParser.parse_nullability("bigint not null"))
+        self.assertFalse(DataTypeParser.parse_nullability("BIGINT NOT NULL"))
+        self.assertFalse(DataTypeParser.parse_nullability("Int Not Null"))
+        self.assertTrue(DataTypeParser.parse_nullability("bigint"))
+        self.assertTrue(DataTypeParser.parse_nullability("int null"))
+
+    def test_parse_atomic_type_lowercase_not_null(self):
+        # End to end: a lowercase declaration keeps NOT NULL through the atomic
+        # parser, for both plain and parameterized types.
+        parsed = DataTypeParser.parse_atomic_type_sql_string("bigint not null")
+        self.assertEqual(parsed.type, "BIGINT")
+        self.assertFalse(parsed.nullable)
+
+        parsed_decimal = DataTypeParser.parse_atomic_type_sql_string("decimal(12, 2) not null")
+        self.assertEqual(parsed_decimal.type, "DECIMAL(12, 2)")
+        self.assertFalse(parsed_decimal.nullable)
 
     @parameterized.expand([
         (ArrayType, AtomicType("TIMESTAMP(6)"), "ARRAY<TIMESTAMP(6)>", "ARRAY<ARRAY<TIMESTAMP(6)>>"),
@@ -220,7 +242,6 @@ class DataTypesTest(unittest.TestCase):
                 "type": "VECTOR",
                 "element": "FLOAT",
                 "length": 3,
-                "nullable": True
             }
         )
         self.assertEqual(vector_type, VectorType.from_dict(vector_type.to_dict()))

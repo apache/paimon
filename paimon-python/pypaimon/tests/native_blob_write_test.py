@@ -150,7 +150,7 @@ def test_native_blob_cleanup_includes_completed_groups(tmp_path, external, actio
 
 @pytest.mark.parametrize('external', [False, True])
 @pytest.mark.parametrize('stream', [False, True])
-def test_native_blob_abort_removes_prepared_and_outstanding_files(tmp_path, external, stream):
+def test_native_blob_abort_preserves_prepared_and_removes_outstanding_files(tmp_path, external, stream):
     options = {'data-file.path-directory': 'data/nested'}
     if external:
         options['data-file.external-paths'] = (tmp_path / 'external').as_uri()
@@ -163,11 +163,13 @@ def test_native_blob_abort_removes_prepared_and_outstanding_files(tmp_path, exte
             writer.write_arrow(_data(identifier * 2))
             messages = writer.prepare_commit(identifier) if stream else writer.prepare_commit()
             assert messages
-        assert {path.suffix for path in _physical_files(tmp_path)} == {'.parquet', '.blob', '.index'}
+        prepared = _physical_files(tmp_path)
+        assert {path.suffix for path in prepared} == {'.parquet', '.blob', '.index'}
         writer.write_arrow(_data(6))
+        assert _physical_files(tmp_path) > prepared
         writer.abort()
         writer.abort()
-        assert not _physical_files(tmp_path)
+        assert _physical_files(tmp_path) == prepared
         assert table.snapshot_manager().get_latest_snapshot() is None
     finally:
         writer.close()
@@ -198,7 +200,7 @@ def test_native_blob_close_releases_prepared_files_to_committer(tmp_path, extern
 
 @pytest.mark.parametrize('external', [False, True])
 @pytest.mark.parametrize('commit_native_option', [False, True])
-def test_native_blob_stream_abort_preserves_submitted_files(tmp_path, external, commit_native_option):
+def test_native_blob_stream_abort_preserves_all_prepared_files(tmp_path, external, commit_native_option):
     options = {'commit.native.enabled': str(commit_native_option).lower()}
     if external:
         options['data-file.external-paths'] = (tmp_path / 'external').as_uri()
@@ -211,10 +213,12 @@ def test_native_blob_stream_abort_preserves_submitted_files(tmp_path, external, 
         submitted = _physical_files(tmp_path)
         writer.write_arrow(_data(2))
         assert writer.prepare_commit(2)
+        prepared = _physical_files(tmp_path)
+        assert prepared > submitted
         writer.write_arrow(_data(4))
         assert _physical_files(tmp_path) > submitted
         writer.abort()
-        assert _physical_files(tmp_path) == submitted
+        assert _physical_files(tmp_path) == prepared
         for planner in (False, True):
             for reader in (False, True):
                 assert _read(table, planner, reader) == _data().to_pylist()
@@ -268,7 +272,7 @@ class _StreamingBlob(Blob):
         return io.BytesIO(self.data)
 
 
-def test_blob_object_selects_python_before_writing(tmp_path):
+def test_blob_object_rows_keep_native_writer(tmp_path):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
@@ -278,7 +282,7 @@ def test_blob_object_selects_python_before_writing(tmp_path):
         writer.write_row(GenericRow([0, b'bytes', None], table.fields))
         writer.write_row(GenericRow([1, blob, None], table.fields))
         writer.write_arrow(_data(2))
-        assert writer._python_writer is not None
+        assert writer._python_writer is None
         commit.commit(writer.prepare_commit())
         assert blob.opened
         expected = [{'id': 0, 'large': b'bytes', 'small': None},
@@ -289,18 +293,19 @@ def test_blob_object_selects_python_before_writing(tmp_path):
         commit.close()
 
 
-def test_blob_object_cannot_switch_after_native_write(tmp_path):
+def test_blob_object_rows_mix_with_native_arrow_writes(tmp_path):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     blob = _StreamingBlob(b'stream')
     try:
         writer.write_arrow(_data())
-        with pytest.raises(RuntimeError, match='after native data was written'):
-            writer.write_row(GenericRow([2, blob, None], table.fields))
-        assert not blob.opened
+        writer.write_row(GenericRow([2, blob, None], table.fields))
+        assert blob.opened
+        assert writer._python_writer is None
         commit.commit(writer.prepare_commit())
-        assert _read(table, True, True) == _data().to_pylist()
+        assert _read(table, True, True) == _data().to_pylist() + [
+            {'id': 2, 'large': b'stream', 'small': None}]
     finally:
         writer.close()
         commit.close()

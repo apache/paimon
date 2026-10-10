@@ -168,6 +168,36 @@ path select the Python writer before native data is written. If the runtime or t
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
 
+For primary-key Row writes, `rowkind.field` takes precedence over the object's `RowKind`; otherwise the object event is preserved. Plain Arrow input defaults to INSERT. Both Python and native writers apply `ignore-delete` and `ignore-update-before` before routing object rows.
+
+Batch and stream `merge_into` also use Rust core for eligible data-evolution
+Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
+`WhenNotMatched` clauses accept Arrow/pandas input, Paimon table sources, or
+self-merge on `_ROW_ID`.
+Core pins the target snapshot, matches keys, selects the first satisfied clause
+and prepares updates, deletion vectors and inserts. SQL conditions, including
+subqueries, execute in the Rust DataFusion adapter; Python transports the
+normalized clauses and returned commit messages. Conditional MERGE requires
+Python 3.10+ and the existing `pypaimon[sql]` extra, which installs both Python
+DataFusion and `pypaimon-rust`. Shared clause validation checks that dependency
+before native execution. NULL keys do not match.
+Multiple source rows matching a target are rejected before action conditions,
+except for a sole unconditional DELETE, following Paimon Spark MERGE.
+For table sources, core independently pins the selected source branch/snapshot
+and reads only keys and referenced columns. Append and primary-key sources do
+not require data evolution. Source scan options select the same point in time
+on Python and native paths. Numeric `incremental-between-timestamp` source
+windows are resolved and read by core. Non-REST Blob views
+requiring catalog resolution and packed-video inserts use the Python path
+selected before native execution starts. Native failures propagate without
+Python retry or deleting files from earlier prepared actions.
+
+Python and native writers use Java's escaped partition directories for data,
+changelog, Blob and row sidecar files, including external locations. Both
+planners, file-range metadata, commit callbacks and explicit aborts use the same
+path rules. Row sidecar reads resolve that path even when the primary file is
+unavailable.
+
 MAP columns configured with `fields.<name>.map.storage-layout=shared-shredding`
 also use native Parquet writes and data-evolution updates, including predicate
 updates and upserts. Rust applies Java's `plain`, `sequential` and `lru` column
@@ -248,13 +278,14 @@ BLOB table selects the Python writer before any native data is written. Switchin
 to row writes after native Arrow writes is rejected. Use `write.native.enabled=false` when
 mixing Arrow batches and Python `Blob` objects in one writer.
 
-An explicit native writer `abort()` also deletes prepared files that have not
-been passed to a PyPaimon committer. Calling `close()` instead releases those
-files to the caller without deleting them; use `commit.abort(messages)` to
-discard them after closing the writer. Once a commit attempt starts, writer
-abort preserves its files even if the attempt raises, because a snapshot may
-already reference them. Stream writers retain cleanup ownership only for
-messages that have not been submitted to a committer.
+A successful `prepare_commit()` transfers file ownership to the caller.
+Writer `abort()` and `close()` preserve those prepared files and may clean only
+outputs still owned by the writer. Explicit `commit.abort(messages)` deletes
+newly written data, changelog, sidecars and added indexes, matching Java's
+Paimon Table committer. Call it only when those messages are known to be
+uncommitted and will never be submitted. Never call it after a commit with an
+unknown outcome: publication may have succeeded before its response failed.
+Internal failure paths preserve prepared files instead of calling commit abort.
 
 Both native options are disabled by default.
 
@@ -407,7 +438,10 @@ counts can differ between shards. Limits are applied after shard/slice selection
 Timestamp incremental scans require `ReadBuilder.new_incremental_scan()` and
 stream-aware splits exposing `Split.is_streaming()`. Python resolves
 `(start_timestamp, end_timestamp]` to snapshot IDs; Rust packs the selected APPEND
-deltas into one plan. Continuous streaming uses the same native path for initial
+deltas into one plan. Equal timestamp bounds produce an empty result, as in Java.
+AUTO selects physical changelog files when a changelog producer is configured;
+each split carries the selected ending snapshot ID. Numeric bounds use signed
+64-bit milliseconds and Java's integer syntax. Continuous streaming uses the same native path for initial
 and delta frames. When `changelog-producer` is enabled, follow-up frames request
 Rust's explicit `changelog` mode and read the physical changelog manifests.
 OVERWRITE changelog frames retain per-snapshot Python planning because Java
@@ -730,6 +764,29 @@ unsupported platform such as Windows), `pypaimon` automatically falls
 back to the `pyarrow` (`libhdfs`/JVM) path and logs a warning. Disable
 the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
+
+
+# Native local vector search
+
+For REST tables, `read.native.enabled=true` also delegates local vector search
+execution to Rust. Single-vector searches support Data Evolution and configured
+PK vector indexes; batch searches use the existing Data Evolution result API.
+
+```python
+native_table = table.copy({'read.native.enabled': 'true'})
+result = (native_table.new_vector_search_builder()
+          .with_vector_column('embedding')
+          .with_query_vector([1.0, 0.0])
+          .with_limit(10)
+          .execute_local())
+```
+
+Rust plans one snapshot, applies scalar and partition filters before Top-K,
+searches indexes, scans uncovered rows and performs refinement. The returned
+Python result can be passed to `with_global_index_result` as usual, including
+scored physical-position splits for PK tables. An unavailable native backend
+falls back to the Python search reader. Distributed Ray searches keep their
+existing scan/read path.
 
 
 # Vector index range reads

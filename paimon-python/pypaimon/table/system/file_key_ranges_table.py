@@ -30,6 +30,7 @@ from pypaimon.table.system.files_table import (
     _stringify_path,
 )
 from pypaimon.table.system.system_table import SystemTable
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 
 
 TABLE_TYPE = RowType(False, [
@@ -71,7 +72,6 @@ class FileKeyRangesTable(SystemTable):
             manifest_files, drop_stats=False)
 
         file_format = self.base_table.options.file_format()
-        path_factory = self.base_table.path_factory()
         rows = {
             "partition": [],
             "bucket": [],
@@ -88,14 +88,13 @@ class FileKeyRangesTable(SystemTable):
 
         for entry in entries:
             meta = entry.file
-            bucket_path = path_factory.bucket_path(
-                tuple(entry.partition.values), int(entry.bucket))
             rows["partition"].append(_render_partition(entry.partition))
             rows["bucket"].append(int(entry.bucket))
             rows["file_path"].append(_stringify_path(
                 meta.external_path
                 or meta.file_path
-                or "%s/%s" % (bucket_path, meta.file_name)))
+                or canonical_data_file_path(
+                    self.base_table, tuple(entry.partition.values), int(entry.bucket), meta.file_name)))
             rows["file_format"].append(file_format)
             rows["schema_id"].append(int(meta.schema_id))
             rows["level"].append(int(meta.level))

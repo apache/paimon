@@ -15,7 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import io
 import os
+import pickle
+import threading
 import types
 import unittest
 import uuid
@@ -85,6 +88,55 @@ class JindoInputFileTest(unittest.TestCase):
 
 
 class JindoConfigTest(unittest.TestCase):
+
+    def test_input_file_seek_returns_position(self):
+        class JindoStream:
+
+            def __init__(self):
+                self._stream = io.BytesIO(b"video")
+
+            def seek(self, offset, whence=io.SEEK_SET):
+                self._stream.seek(offset, whence)
+
+            def tell(self):
+                return self._stream.tell()
+
+        stream = JindoInputFile(JindoStream())
+        self.assertEqual(5, stream.seek(0, io.SEEK_END))
+
+    def test_pickle_reconnects_without_native_client_lock_or_cache(self):
+        options = Options({
+            "fs.oss.impl": "jindo", "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.accessKeyId": "test-ak", "fs.oss.accessKeySecret": "test-sk",
+            "fs.oss.securityToken": "test-token", "fs.jindocache.client.metrics.enable": True,
+        })
+        # A native client is not serializable even after the handler lock is
+        # removed. Give this stand-in its own lock to enforce reconstruction.
+        clients = [types.SimpleNamespace(lock=threading.Lock()) for _ in range(2)]
+        connect = mock.Mock(side_effect=clients)
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(connect=connect)), \
+             mock.patch.object(jindo_module, "jutil", types.SimpleNamespace(Config=_RecordingConfig)):
+            original = JindoFileSystemHandler("oss://bucket/", options)
+            original.register_file_size("object", 123)
+            # Exercise PyArrow's enclosing filesystem serialization as well.
+            encoded = pickle.dumps(PyFileSystem(original))
+            with original._known_file_sizes_lock:
+                restored = pickle.loads(encoded).handler
+            self.assertIs(original._jindo_fs, clients[0])
+            self.assertIs(restored._jindo_fs, clients[1])
+            self.assertEqual(restored.root_path, original.root_path)
+            self.assertEqual(restored.properties.to_map(), options.to_map())
+            self.assertIsNot(restored._known_file_sizes_lock, original._known_file_sizes_lock)
+            self.assertIsNone(restored._known_file_size("oss://bucket/object"))
+            restored.register_file_size("object", 456)
+            self.assertEqual(restored._known_file_size("oss://bucket/object"), 456)
+            self.assertEqual(original._known_file_size("oss://bucket/object"), 123)
+        self.assertEqual(connect.call_count, 2)
+        for call in connect.call_args_list:
+            self.assertEqual(call[0][:2], ("oss://bucket/", "root"))
+            self.assertEqual(call[0][2].values["fs.oss.securityToken"], "test-token")
+            self.assertEqual(call[0][2].values["fs.jindocache.client.metrics.enable"], "true")
 
     def test_forwards_native_options_to_connect(self):
         created_config = _RecordingConfig()
