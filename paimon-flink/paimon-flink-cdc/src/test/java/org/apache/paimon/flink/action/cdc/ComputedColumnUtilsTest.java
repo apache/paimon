@@ -128,6 +128,35 @@ public class ComputedColumnUtilsTest {
     }
 
     @Test
+    public void testTemporalFunctionsOnPreEpochNumericValues() {
+        List<DataField> physicalFields =
+                Collections.singletonList(new DataField(0, "ts", DataTypes.BIGINT()));
+        Map<String, ComputedColumn> columns =
+                buildComputedColumns(
+                                Arrays.asList(
+                                        "micros=date_format(ts,yyyy-MM-dd HH:mm:ss.SSSSSS,6)",
+                                        "nanos=date_format(ts,yyyy-MM-dd HH:mm:ss.SSSSSSSSS,9)",
+                                        "micros_year=year(ts,6)",
+                                        "nanos_second=second(ts,9)"),
+                                physicalFields)
+                        .stream()
+                        .collect(Collectors.toMap(ComputedColumn::columnName, c -> c));
+
+        // -1 is the last microsecond or nanosecond before the epoch
+        assertEquals("1969-12-31 23:59:59.999999", columns.get("micros").eval("-1"));
+        assertEquals("1969-12-31 23:59:59.999999999", columns.get("nanos").eval("-1"));
+        assertEquals("1969", columns.get("micros_year").eval("-1"));
+        assertEquals("59", columns.get("nanos_second").eval("-1"));
+
+        assertEquals("1969-12-31 23:59:59.998500", columns.get("micros").eval("-1500"));
+        assertEquals("1969-12-31 23:59:59.998499999", columns.get("nanos").eval("-1500001"));
+        // whole milliseconds before the epoch and values after it are unchanged
+        assertEquals("1969-12-31 23:59:59.999000", columns.get("micros").eval("-1000"));
+        assertEquals("1970-01-01 00:00:00.001500", columns.get("micros").eval("1500"));
+        assertEquals("1970-01-01 00:00:00.001500001", columns.get("nanos").eval("1500001"));
+    }
+
+    @Test
     public void testCycleReference() {
         List<String> calColArgs =
                 Arrays.asList("A=substring(B, 1)", "B=substring(C, 1)", "C=substring(A, 1)");

@@ -378,6 +378,8 @@ public interface Expression extends Serializable {
                 long numericValue = Long.parseLong(input);
                 long milliseconds = 0;
                 int nanosOfMillisecond = 0;
+                // Floor the sub-millisecond digits: values before 1970 are negative, and
+                // truncating them toward zero would yield a negative nano-of-millisecond.
                 switch (precision) {
                     case 0:
                         milliseconds = numericValue * 1000L;
@@ -386,12 +388,12 @@ public interface Expression extends Serializable {
                         milliseconds = numericValue;
                         break;
                     case 6:
-                        milliseconds = numericValue / 1000;
-                        nanosOfMillisecond = (int) (numericValue % 1000 * 1000);
+                        milliseconds = Math.floorDiv(numericValue, 1000L);
+                        nanosOfMillisecond = (int) Math.floorMod(numericValue, 1000L) * 1000;
                         break;
                     case 9:
-                        milliseconds = numericValue / 1_000_000;
-                        nanosOfMillisecond = (int) (numericValue % 1_000_000);
+                        milliseconds = Math.floorDiv(numericValue, 1_000_000L);
+                        nanosOfMillisecond = (int) Math.floorMod(numericValue, 1_000_000L);
                         break;
                         // no error case because precision is validated
                 }
