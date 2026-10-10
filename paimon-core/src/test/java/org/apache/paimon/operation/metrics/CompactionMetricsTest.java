@@ -28,7 +28,10 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.metrics.Gauge;
+import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
+import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.metrics.TestMetricRegistry;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.Options;
@@ -47,8 +50,16 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -255,6 +266,227 @@ public class CompactionMetricsTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testCompactTimersRetiredAfterPerBucketWorkerChurn() throws Exception {
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+        for (int i = 0; i < 32; i++) {
+            ExecutorService worker = Executors.newSingleThreadExecutor();
+            CompactionMetrics.Reporter reporter = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
+            try {
+                worker.submit(
+                                () -> {
+                                    reporter.getCompactTimer().start();
+                                    reporter.getCompactTimer().finish();
+                                })
+                        .get(30, TimeUnit.SECONDS);
+            } finally {
+                metrics.retireCompactTimersForBucket(BinaryRow.EMPTY_ROW, i);
+                reporter.unregister();
+                worker.shutdownNow();
+            }
+        }
+        assertThat(metrics.activeCompactTimerCount()).isZero();
+    }
+
+    @Test
+    public void testCompactTimerConcurrentUnregisterAndStartOnSharedWorker() throws Exception {
+        for (int attempt = 0; attempt < 200; attempt++) {
+            CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+            ExecutorService worker = Executors.newSingleThreadExecutor();
+            CompactionMetrics.Reporter retiring = metrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+            CompactionMetrics.Reporter starting = metrics.createReporter(BinaryRow.EMPTY_ROW, 1);
+            CountDownLatch compactionStarted = new CountDownLatch(1);
+            CountDownLatch allowWorkerContinue = new CountDownLatch(1);
+            AtomicReference<Throwable> workerError = new AtomicReference<>();
+
+            Future<?> compaction =
+                    worker.submit(
+                            () -> {
+                                try {
+                                    retiring.getCompactTimer().start();
+                                    retiring.getCompactTimer().finish();
+                                    compactionStarted.countDown();
+                                    allowWorkerContinue.await(30, TimeUnit.SECONDS);
+                                    starting.getCompactTimer().start();
+                                    starting.getCompactTimer().finish();
+                                } catch (Throwable t) {
+                                    workerError.set(t);
+                                }
+                            });
+
+            assertThat(compactionStarted.await(30, TimeUnit.SECONDS)).isTrue();
+            retiring.unregister();
+            allowWorkerContinue.countDown();
+
+            compaction.get(30, TimeUnit.SECONDS);
+            worker.shutdownNow();
+
+            assertThat(workerError.get()).isNull();
+            starting.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testSharedCompactionCountersWithConcurrentNonAtomicBackend() throws Exception {
+        Map<String, Counter> counters = new HashMap<>();
+        MetricRegistry registry =
+                (groupName, variables) ->
+                        new MetricGroup() {
+                            @Override
+                            public Counter counter(String name) {
+                                return counters.computeIfAbsent(
+                                        name, n -> new NonThreadSafeCounter());
+                            }
+
+                            @Override
+                            public <T> Gauge<T> gauge(String name, Gauge<T> gauge) {
+                                return gauge;
+                            }
+
+                            @Override
+                            public Histogram histogram(String name, int windowSize) {
+                                throw new UnsupportedOperationException();
+                            }
+
+                            @Override
+                            public Map<String, String> getAllVariables() {
+                                return variables;
+                            }
+
+                            @Override
+                            public String getGroupName() {
+                                return groupName;
+                            }
+
+                            @Override
+                            public Map<String, Metric> getMetrics() {
+                                return Collections.emptyMap();
+                            }
+
+                            @Override
+                            public void close() {}
+                        };
+
+        CompactionMetrics metrics = new CompactionMetrics(registry, "myTable");
+        CompactionMetrics.Reporter[] reporters = new CompactionMetrics.Reporter[4];
+        for (int i = 0; i < reporters.length; i++) {
+            reporters[i] = metrics.createReporter(BinaryRow.EMPTY_ROW, i);
+        }
+
+        ExecutorService workers = Executors.newFixedThreadPool(4);
+        try {
+            Future<?>[] futures = new Future<?>[reporters.length];
+            for (int i = 0; i < reporters.length; i++) {
+                CompactionMetrics.Reporter reporter = reporters[i];
+                futures[i] =
+                        workers.submit(
+                                () -> {
+                                    for (int j = 0; j < 10_000; j++) {
+                                        reporter.increaseCompactionsCompletedCount();
+                                        reporter.increaseCompactionsTotalCount();
+                                        reporter.increaseCompactionsQueuedCount();
+                                        reporter.decreaseCompactionsQueuedCount();
+                                    }
+                                });
+            }
+            for (Future<?> future : futures) {
+                future.get(60, TimeUnit.SECONDS);
+            }
+        } finally {
+            workers.shutdownNow();
+        }
+
+        assertThat(counters.get(CompactionMetrics.COMPACTION_COMPLETED_COUNT).getCount())
+                .isEqualTo(40_000L);
+        assertThat(counters.get(CompactionMetrics.COMPACTION_TOTAL_COUNT).getCount())
+                .isEqualTo(40_000L);
+        assertThat(counters.get(CompactionMetrics.COMPACTION_QUEUED_COUNT).getCount())
+                .isEqualTo(0L);
+    }
+
+    @Test
+    public void testCompactTimerNotRetiredOnReporterUnregisterForSharedExecutor() throws Exception {
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+        ExecutorService sharedPool = Executors.newSingleThreadExecutor();
+        CompactionMetrics.Reporter first = metrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+        CompactionMetrics.Reporter second = metrics.createReporter(BinaryRow.EMPTY_ROW, 1);
+        try {
+            sharedPool
+                    .submit(
+                            () -> {
+                                first.getCompactTimer().start();
+                                first.getCompactTimer().finish();
+                                second.getCompactTimer().start();
+                                second.getCompactTimer().finish();
+                            })
+                    .get(30, TimeUnit.SECONDS);
+            first.unregister();
+            second.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+        } finally {
+            sharedPool.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testCompactTimerKeptWhileSharedCompactionThreadInUse() throws Exception {
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+        ExecutorService sharedPool = Executors.newFixedThreadPool(1);
+        CompactionMetrics.Reporter first = metrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+        CompactionMetrics.Reporter second = metrics.createReporter(BinaryRow.EMPTY_ROW, 1);
+        try {
+            sharedPool
+                    .submit(
+                            () -> {
+                                first.getCompactTimer().start();
+                                first.getCompactTimer().finish();
+                                second.getCompactTimer().start();
+                                second.getCompactTimer().finish();
+                            })
+                    .get(30, TimeUnit.SECONDS);
+            first.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+            second.unregister();
+            assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+        } finally {
+            sharedPool.shutdownNow();
+        }
+    }
+
+    /**
+     * Mimics Flink's {@code org.apache.flink.metrics.SimpleCounter}, which is not safe under
+     * concurrent updates from multiple compaction worker threads.
+     */
+    private static class NonThreadSafeCounter implements Counter {
+        private long count;
+
+        @Override
+        public void inc() {
+            count++;
+        }
+
+        @Override
+        public void inc(long n) {
+            count += n;
+        }
+
+        @Override
+        public void dec() {
+            count--;
+        }
+
+        @Override
+        public void dec(long n) {
+            count -= n;
+        }
+
+        @Override
+        public long getCount() {
+            return count;
+        }
     }
 
     private Object getMetric(CompactionMetrics metrics, String metricName) {

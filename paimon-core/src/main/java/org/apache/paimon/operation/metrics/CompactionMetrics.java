@@ -25,9 +25,11 @@ import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.DoubleStream;
@@ -66,23 +68,77 @@ public class CompactionMetrics {
     private final MetricGroup metricGroup;
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
     private final Map<Long, CompactTimer> compactTimers;
+    private final Map<Long, Object> compactTimerLocks;
     private final Queue<Long> compactionTimes;
     private Counter compactionsCompletedCounter;
     private Counter compactionsTotalCounter;
     private Counter compactionsQueuedCounter;
+    private final Object sharedCounterLock = new Object();
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.reporters = new HashMap<>();
         this.compactTimers = new ConcurrentHashMap<>();
+        this.compactTimerLocks = new ConcurrentHashMap<>();
         this.compactionTimes = new ConcurrentLinkedQueue<>();
 
         registerGenericCompactionMetrics();
     }
 
+    /**
+     * Retire compact timers when an internally owned per-bucket compaction executor is released.
+     */
+    public void retireCompactTimersForBucket(BinaryRow partition, int bucket) {
+        PartitionAndBucket key = new PartitionAndBucket(partition, bucket);
+        ReporterImpl reporter = reporters.get(key);
+        if (reporter != null) {
+            reporter.retireCompactTimers();
+        }
+    }
+
     @VisibleForTesting
     public MetricGroup getMetricGroup() {
         return metricGroup;
+    }
+
+    @VisibleForTesting
+    public int activeCompactTimerCount() {
+        return compactTimers.size();
+    }
+
+    private Object compactTimerLock(long threadId) {
+        return compactTimerLocks.computeIfAbsent(threadId, ignored -> new Object());
+    }
+
+    private void releaseCompactTimer(long threadId) {
+        synchronized (compactTimerLock(threadId)) {
+            compactTimers.remove(threadId);
+            compactTimerLocks.remove(threadId);
+        }
+    }
+
+    private void incrementCompactionsCompletedCount() {
+        synchronized (sharedCounterLock) {
+            compactionsCompletedCounter.inc();
+        }
+    }
+
+    private void incrementCompactionsTotalCount() {
+        synchronized (sharedCounterLock) {
+            compactionsTotalCounter.inc();
+        }
+    }
+
+    private void incrementCompactionsQueuedCount() {
+        synchronized (sharedCounterLock) {
+            compactionsQueuedCounter.inc();
+        }
+    }
+
+    private void decrementCompactionsQueuedCount() {
+        synchronized (sharedCounterLock) {
+            compactionsQueuedCounter.dec();
+        }
     }
 
     private void registerGenericCompactionMetrics() {
@@ -218,6 +274,7 @@ public class CompactionMetrics {
         private long totalFileCount = 0;
         private long sortBufferUsedBytes = 0;
         private double sortBufferUtilisationPercent = 0.0;
+        private final Set<Long> compactThreadIds = new HashSet<>();
 
         private ReporterImpl(PartitionAndBucket key) {
             this.key = key;
@@ -226,9 +283,12 @@ public class CompactionMetrics {
 
         @Override
         public CompactTimer getCompactTimer() {
-            return compactTimers.computeIfAbsent(
-                    Thread.currentThread().getId(),
-                    ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
+            long threadId = Thread.currentThread().getId();
+            synchronized (compactTimerLock(threadId)) {
+                compactThreadIds.add(threadId);
+                return compactTimers.computeIfAbsent(
+                        threadId, ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
+            }
         }
 
         @Override
@@ -275,26 +335,34 @@ public class CompactionMetrics {
 
         @Override
         public void increaseCompactionsCompletedCount() {
-            compactionsCompletedCounter.inc();
+            CompactionMetrics.this.incrementCompactionsCompletedCount();
         }
 
         @Override
         public void increaseCompactionsTotalCount() {
-            compactionsTotalCounter.inc();
+            CompactionMetrics.this.incrementCompactionsTotalCount();
         }
 
         @Override
         public void increaseCompactionsQueuedCount() {
-            compactionsQueuedCounter.inc();
+            CompactionMetrics.this.incrementCompactionsQueuedCount();
         }
 
         @Override
         public void decreaseCompactionsQueuedCount() {
-            compactionsQueuedCounter.dec();
+            CompactionMetrics.this.decrementCompactionsQueuedCount();
+        }
+
+        private void retireCompactTimers() {
+            for (Long threadId : compactThreadIds) {
+                releaseCompactTimer(threadId);
+            }
+            compactThreadIds.clear();
         }
 
         @Override
         public void unregister() {
+            compactThreadIds.clear();
             reporters.remove(key);
         }
     }
