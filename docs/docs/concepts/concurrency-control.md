@@ -72,6 +72,29 @@ The commit mechanism depends on the catalog and storage:
 All writers of the same table must use a compatible commit mechanism and shared locking
 configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
+## REST Catalog Commit Leases
+
+A REST catalog can expose optional table commit leases. Set `rest.commit.lock-enabled = true`
+on the table to allow lease acquisition; the option defaults to `false`. Enabling this capability
+does not automatically make writers acquire leases. The catalog API exposes acquisition and
+renewal for callers that manage a commit lease explicitly.
+
+The client supplies the stable table UUID and its exact `commitUser` when acquiring and renewing.
+A grant includes the server's current snapshot; the holder uses that head to rebuild and validate
+its changes, renewing the lease while preparing and publishing. The existing snapshot commit
+request is unchanged: the server checks ownership using `snapshot.commitUser` and the authenticated
+caller. It must enforce this admission check for all writers in the same transaction as publication,
+including writers that do not acquire leases. A new successful publication clears the lease
+atomically. Abandoned attempts stop renewal and expire automatically; there is no explicit unlock API.
+
+This is a commit admission lease, not a generation or fencing token. Requests with the same
+`commitUser` and authenticated caller share ownership. Use a unique commit user per logical writer
+and preserve it during recovery. Snapshot UUID comparison and file conflict validation remain
+required; leases cannot make stale file changes valid or guarantee success after lease loss.
+
+This REST table capability is independent of the catalog options `lock.enabled` and `lock.type`,
+which configure the existing catalog lock used for filesystem publication.
+
 ## Files conflict
 
 A writer validates file-level changes as well as the snapshot ID. For example, if two compactors

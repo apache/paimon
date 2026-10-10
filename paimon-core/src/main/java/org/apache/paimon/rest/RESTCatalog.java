@@ -25,6 +25,7 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogCommitLock;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
@@ -55,6 +56,7 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
+import org.apache.paimon.rest.responses.CommitLockResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -536,6 +538,40 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
+    public Optional<CatalogCommitLock> acquireCommitLock(
+            Identifier identifier, String tableUuid, String commitUser)
+            throws TableNotExistException {
+        try {
+            CommitLockResponse response = api.acquireCommitLock(identifier, tableUuid, commitUser);
+            return response.isAcquired()
+                    ? Optional.of(
+                            new CatalogCommitLock(
+                                    response.getCommitUser(),
+                                    response.getLeaseMillis(),
+                                    response.getSnapshot()))
+                    : Optional.empty();
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier, e);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public boolean renewCommitLock(Identifier identifier, String tableUuid, String commitUser)
+            throws TableNotExistException {
+        try {
+            return api.renewCommitLock(identifier, tableUuid, commitUser);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier, e);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
         }
     }
 

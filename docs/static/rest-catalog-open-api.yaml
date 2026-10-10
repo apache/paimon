@@ -615,6 +615,104 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock:
+    post:
+      tags:
+        - table
+      summary: Acquire a table commit lease
+      operationId: acquireCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires rest.commit.lock-enabled=true and the same permission as committing snapshots.
+        Ownership is the exact commitUser together with the authenticated caller. Contention
+        returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
+        Renewal never revives an expired lease. Publication retains snapshot CAS validation
+        and atomically releases the lease on a new successful commit. There is no unlock RPC.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew:
+    post:
+      tags:
+        - table
+      summary: Renew a table commit lease
+      operationId: renewCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires rest.commit.lock-enabled=true and the same permission as committing snapshots.
+        Ownership is the exact commitUser together with the authenticated caller. Contention
+        returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
+        Renewal never revives an expired lease. Publication retains snapshot CAS validation
+        and atomically releases the lease on a new successful commit. There is no unlock RPC.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/rollback:
     post:
       tags:
@@ -3499,6 +3597,39 @@ components:
           $ref: '#/components/schemas/Identifier'
         destination:
           $ref: '#/components/schemas/Identifier'
+    CommitLockRequest:
+      type: object
+      required: [tableId, commitUser]
+      properties:
+        tableId:
+          type: string
+          description: Stable resolved table or branch UUID; a recreated table cannot inherit a lease.
+        commitUser:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Exact commitUser that will appear in the submitted snapshot.
+    CommitLockResponse:
+      type: object
+      required: [acquired, expiresAtMillis, leaseMillis]
+      properties:
+        acquired:
+          type: boolean
+        commitUser:
+          type: [string, "null"]
+        expiresAtMillis:
+          type: integer
+          format: int64
+          description: Server database clock expiration; zero when acquired is false.
+        leaseMillis:
+          type: integer
+          format: int64
+          description: Renewal duration in milliseconds; zero when acquired is false.
+        snapshot:
+          anyOf:
+            - $ref: '#/components/schemas/Snapshot'
+            - type: "null"
+          description: Authoritative head at grant time; null for an empty table.
     CommitTableRequest:
       type: object
       properties:
