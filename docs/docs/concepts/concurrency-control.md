@@ -72,6 +72,31 @@ The commit mechanism depends on the catalog and storage:
 All writers of the same table must use a compatible commit mechanism and shared locking
 configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
+## REST Catalog Commit Leases
+
+The REST catalog exposes table-bound commit leases through `Catalog.createLock` and the unified
+`Lock.runWithLock` contract. Existing `CatalogLockFactory` implementations remain compatible
+through the named `CatalogLock` adapter. Set `rest.commit.lock-enabled = true` on the table to
+allow acquisition; it defaults to `false`. Callers supply their exact `commitUser` and table UUID.
+Lock contention waits until `commit.timeout` when configured, independently of publication retries.
+The client renews the lease during the protected operation and validates its monotonic deadline
+before publishing. A failed operation stops renewal and its lease expires automatically.
+
+The server must validate the current table incarnation, branch, authenticated caller and exact
+owner, and atomically publish the snapshot and clear the lease. All snapshot writers must honor
+active leases, including writers that do not request one. Each successful snapshot publication
+ends its lease; a later publication must acquire another scope. Snapshot comparison and file
+conflict validation remain necessary.
+
+Rollback inside a lease supplies optional `tableId` and `commitUser` fields in addition to the
+expected `fromSnapshot`. The server must validate the lease and expected head, roll back and clear
+the lease atomically. Legacy rollback requests omit these fields and cannot change a leased head.
+
+This is a commit admission lease, not a generation or fencing token. Requests with the same
+commit user and authenticated caller share ownership. Use a unique commit user per logical writer
+and preserve it during recovery. A server without the lease protocol rejects acquisition rather
+than silently proceeding without protection.
+
 ## Files conflict
 
 A writer validates file-level changes as well as the snapshot ID. For example, if two compactors

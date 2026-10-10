@@ -19,18 +19,31 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.operation.Lock;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.util.concurrent.Callable;
 
-/**
- * An interface that allows source and sink to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
+/** Compatibility SPI for catalog lock factories. Runtime operations use {@link Lock}. */
 @Public
-public interface CatalogLock extends Closeable {
+public interface CatalogLock extends Lock, Closeable {
 
-    /** Run with catalog lock. The caller should tell catalog the database and table name. */
     <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+
+    /** Bind table incarnation and writer identity when the backend requires them. */
+    default <T> T runWithLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Callable<T> callable)
+            throws Exception {
+        return runWithLock(identifier.getDatabaseName(), identifier.getObjectName(), callable);
+    }
+
+    @Override
+    default <T> T runWithLock(Callable<T> callable) throws Exception {
+        throw new UnsupportedOperationException("A catalog lock requires a table identifier.");
+    }
 }

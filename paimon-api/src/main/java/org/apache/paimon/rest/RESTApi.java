@@ -45,6 +45,7 @@ import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
+import org.apache.paimon.rest.requests.CommitLockRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -72,6 +73,7 @@ import org.apache.paimon.rest.requests.UpsertLabelRequest;
 import org.apache.paimon.rest.requests.UpsertSemanticViewRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
+import org.apache.paimon.rest.responses.CommitLockResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
@@ -734,6 +736,26 @@ public class RESTApi {
         return response.isSuccess();
     }
 
+    public CommitLockResponse acquireCommitLock(
+            Identifier identifier, String tableUuid, String commitUser) {
+        return client.post(
+                resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName()),
+                new CommitLockRequest(tableUuid, commitUser),
+                CommitLockResponse.class,
+                restAuthFunction);
+    }
+
+    public boolean renewCommitLock(Identifier identifier, String tableUuid, String commitUser) {
+        return client.post(
+                        resourcePaths.commitLock(
+                                        identifier.getDatabaseName(), identifier.getObjectName())
+                                + "/renew",
+                        new CommitLockRequest(tableUuid, commitUser),
+                        CommitLockResponse.class,
+                        restAuthFunction)
+                .isAcquired();
+    }
+
     /**
      * Rollback instant for table.
      *
@@ -761,7 +783,17 @@ public class RESTApi {
      *     this table
      */
     public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
-        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
+        rollbackTo(identifier, null, instant, fromSnapshot, null);
+    }
+
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String commitUser) {
+        RollbackTableRequest request =
+                new RollbackTableRequest(instant, fromSnapshot, tableUuid, commitUser);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
