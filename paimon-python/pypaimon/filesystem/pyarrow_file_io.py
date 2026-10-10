@@ -20,7 +20,6 @@ import os
 import re
 import subprocess
 import threading
-from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
@@ -30,7 +29,7 @@ import pyarrow.fs as pafs
 from packaging.version import parse
 from pyarrow._fs import FileSystem
 
-from pypaimon.common.file_io import FileIO, create_temp_path
+from pypaimon.common.file_io import FileIO, create_temp_path, normalize_naive_datetimes
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options, SecurityOptions
 from pypaimon.common.options.options_utils import OptionsUtils
@@ -710,9 +709,7 @@ class PyArrowFileIO(FileIO):
                 record = {}
                 for col in records_dict.keys():
                     value = records_dict[col][i]
-                    if isinstance(value, datetime) and value.tzinfo is None:
-                        value = value.replace(tzinfo=timezone.utc)
-                    record[col] = value
+                    record[col] = normalize_naive_datetimes(value)
                 yield record
 
         records = record_generator()
