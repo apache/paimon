@@ -18,22 +18,25 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.catalog.CatalogCommitLock;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.requests.CommitLockRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.CommitLockResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.InstantiationUtil;
 
@@ -107,9 +110,40 @@ class CommitLockProtocolTest {
         }
     }
 
+    @Test
+    void rollbackWithinLeaseCarriesOwnerAndLegacyPayloadStaysUnchanged() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Options options = new Options();
+            options.set(RESTCatalogOptions.URI, server.url("/").toString());
+            options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            options.set(RESTCatalogOptions.TOKEN, "token");
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options), false);
+            Identifier identifier = new Identifier("db", "table", "dev");
+            server.enqueue(json("{}"));
+            catalog.rollbackTo(identifier, "table-id", Instant.snapshot(1L), 2L, "morax-job");
+            RecordedRequest owned = server.takeRequest(10, TimeUnit.SECONDS);
+            assertThat(owned.getPath()).endsWith("/rollback");
+            RollbackTableRequest request =
+                    RESTApi.fromJson(owned.getBody().readUtf8(), RollbackTableRequest.class);
+            assertThat(request.getTableId()).isEqualTo("table-id");
+            assertThat(request.getCommitUser()).isEqualTo("morax-job");
+            assertThat(request.getFromSnapshot()).isEqualTo(2L);
+            server.enqueue(json("{}"));
+            catalog.rollbackTo(identifier, Instant.snapshot(1L), 2L);
+            ObjectNode legacy =
+                    RESTApi.fromJson(
+                            server.takeRequest(10, TimeUnit.SECONDS).getBody().readUtf8(),
+                            ObjectNode.class);
+            assertThat(legacy.has("tableId")).isFalse();
+            assertThat(legacy.has("commitUser")).isFalse();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void restTableCarriesSerializableCommitLockFactory(boolean external, @TempDir Path directory)
+    void restTableCarriesSerializableCatalogLockEntry(boolean external, @TempDir Path directory)
             throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.start();
@@ -134,6 +168,7 @@ class CommitLockProtocolTest {
                             0,
                             null);
             server.enqueue(json(RESTApi.toJson(tableResponse)));
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
             RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options), false);
             Identifier identifier = new Identifier("db", "table", "dev");
             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
@@ -148,7 +183,7 @@ class CommitLockProtocolTest {
                         .isInstanceOf(RenamingSnapshotCommit.class);
                 return;
             }
-            assertThat(environment.lockFactory()).isInstanceOf(RESTCatalogLockFactory.class);
+            assertThat(environment.lockFactory()).isNull();
             assertThat(
                             FactoryUtil.discoverFactory(
                                     getClass().getClassLoader(), CatalogLockFactory.class, "rest"))
@@ -158,13 +193,19 @@ class CommitLockProtocolTest {
                             RESTApi.toJson(
                                     new CommitLockResponse(
                                             true, "morax-job", 100000, 60000, snapshot(1)))));
-            try (CatalogLock lock =
-                            environment.lockFactory().createLock(environment.lockContext());
-                    CatalogCommitLock lease =
-                            lock.acquireCommitLock(identifier, environment.uuid(), "morax-job")
-                                    .get()) {
-                assertThat(lease.snapshot().id()).isEqualTo(1);
-                lease.ensureValid();
+            Options tableOptions = Options.fromMap(table.options());
+            tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
+            try (Catalog writerCatalog = environment.catalogLoader().load();
+                    Lock lock =
+                            writerCatalog.createLock(
+                                    identifier, environment.uuid(), "morax-job", tableOptions)) {
+                assertThat(
+                                lock.runWithLock(
+                                        () -> {
+                                            lock.ensureValid();
+                                            return "published";
+                                        }))
+                        .isEqualTo("published");
                 RecordedRequest acquire = server.takeRequest(10, TimeUnit.SECONDS);
                 assertThat(acquire.getPath()).endsWith("/commit-lock");
                 assertThat(acquire.getHeader("Authorization")).isEqualTo("Bearer token");

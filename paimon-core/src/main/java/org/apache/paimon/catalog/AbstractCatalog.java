@@ -30,6 +30,7 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -120,6 +121,21 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected FileIO fileIO(Path path) {
         return fileIO;
+    }
+
+    @Override
+    public Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            String commitUser,
+            Options tableOptions) {
+        return Lock.fromCatalog(
+                lockFactory()
+                        .map(factory -> factory.createLock(lockContext().orElse(null)))
+                        .orElse(null),
+                identifier,
+                tableUuid,
+                commitUser);
     }
 
     public Optional<CatalogLockFactory> lockFactory() {

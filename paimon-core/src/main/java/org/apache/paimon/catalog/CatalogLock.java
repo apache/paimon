@@ -19,33 +19,31 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.operation.Lock;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
-/**
- * An interface that allows source and sink to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
+/** Compatibility SPI for catalog lock factories. Runtime operations use {@link Lock}. */
 @Public
-public interface CatalogLock extends Closeable {
+public interface CatalogLock extends Lock, Closeable {
 
-    /** Run with catalog lock. The caller should tell catalog the database and table name. */
     <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
 
-    /**
-     * Acquire a commit lease for the exact table UUID, branch and commit user. An empty result
-     * means another writer holds the lease. The scope covers head refresh, validation, preparation
-     * and publication; implementations must also gate writers that do not request leases.
-     *
-     * <p>This capability is separate from {@link #runWithLock}. Existing publication locks do not
-     * automatically support a larger commit scope.
-     */
-    default Optional<CatalogCommitLock> acquireCommitLock(
-            Identifier identifier, String tableUuid, String commitUser) throws Exception {
-        throw new UnsupportedOperationException(
-                "This catalog lock does not support commit leases.");
+    /** Bind table incarnation and writer identity when the backend requires them. */
+    default <T> T runWithLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Callable<T> callable)
+            throws Exception {
+        return runWithLock(identifier.getDatabaseName(), identifier.getObjectName(), callable);
+    }
+
+    @Override
+    default <T> T runWithLock(Callable<T> callable) throws Exception {
+        throw new UnsupportedOperationException("A catalog lock requires a table identifier.");
     }
 }

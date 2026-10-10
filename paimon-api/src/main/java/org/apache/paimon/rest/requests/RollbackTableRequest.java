@@ -29,6 +29,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
+
 /** Request for rollback table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackTableRequest implements RESTRequest {
@@ -44,12 +46,43 @@ public class RollbackTableRequest implements RESTRequest {
     @Nullable
     private final Long fromSnapshot;
 
+    @JsonProperty("tableId")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    private final String tableId;
+
+    @JsonProperty("commitUser")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    private final String commitUser;
+
+    public RollbackTableRequest(Instant instant, @Nullable Long fromSnapshot) {
+        this(instant, fromSnapshot, null, null);
+    }
+
     @JsonCreator
+    @ConstructorProperties({"instant", "fromSnapshot", "tableId", "commitUser"})
     public RollbackTableRequest(
             @JsonProperty(FIELD_INSTANT) Instant instant,
-            @JsonProperty(FIELD_FROM_SNAPSHOT) @Nullable Long fromSnapshot) {
+            @JsonProperty(FIELD_FROM_SNAPSHOT) @Nullable Long fromSnapshot,
+            @JsonProperty("tableId") @Nullable String tableId,
+            @JsonProperty("commitUser") @Nullable String commitUser) {
         this.instant = instant;
         this.fromSnapshot = fromSnapshot;
+        this.tableId = tableId;
+        this.commitUser = commitUser;
+    }
+
+    @JsonGetter("tableId")
+    @Nullable
+    public String getTableId() {
+        return tableId;
+    }
+
+    @JsonGetter("commitUser")
+    @Nullable
+    public String getCommitUser() {
+        return commitUser;
     }
 
     @JsonGetter(FIELD_INSTANT)

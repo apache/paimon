@@ -24,7 +24,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
-import org.apache.paimon.catalog.CommitAttempt;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
@@ -64,6 +63,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -74,9 +74,12 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -102,7 +105,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -118,8 +124,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -1739,7 +1746,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testRetryAcquiresLeaseBeforeRebuildingOnConcurrentAppend() throws Exception {
+    public void testEveryAttemptLocksAndRefreshesHeadAfterAcquisition() throws Exception {
         TestFileStore store = createStore(false);
         store.commitData(
                 Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
@@ -1756,43 +1763,247 @@ public class FileStoreCommitTest {
                 Collections.emptyList(),
                 (commit, committable) -> prepared.set(committable));
         SnapshotCommit delegate = new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty());
-        SnapshotCommit publisher = mock(SnapshotCommit.class);
-        when(publisher.commit(any(), any(), any(), any()))
-                .thenAnswer(
-                        invocation -> {
+        List<String> events = new ArrayList<>();
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicBoolean held = new AtomicBoolean();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        assertThat(held.get()).isFalse();
+                        int attempt = attempts.incrementAndGet();
+                        // A writer publishes while this writer is waiting to acquire its first
+                        // lock.
+                        if (attempt == 1) {
                             store.commitData(
                                     Collections.singletonList(
                                             gen.nextInsert("20211110", 10, 3L, null, "c")),
                                     gen::getPartition,
                                     value -> 0);
-                            return false;
-                        });
-        CommitAttempt lease = mock(CommitAttempt.class);
-        when(publisher.beginCommit(any(), eq("morax-job"), eq(true)))
-                .thenReturn(Optional.of(lease));
-        when(lease.latestSnapshot(any()))
-                .thenAnswer(invocation -> store.snapshotManager().latestSnapshot());
-        when(lease.commit(any(), any(), any(), any()))
+                        }
+                        held.set(true);
+                        events.add("acquire");
+                        try {
+                            return action.call();
+                        } finally {
+                            held.set(false);
+                            events.add("release");
+                        }
+                    }
+
+                    @Override
+                    public void ensureValid() {
+                        assertThat(held.get()).isTrue();
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        SnapshotCommit publisher = mock(SnapshotCommit.class);
+        when(publisher.commit(any(), any(), any(), any()))
                 .thenAnswer(
-                        invocation ->
-                                delegate.commit(
-                                        invocation.getArgument(0),
-                                        invocation.getArgument(1),
-                                        invocation.getArgument(2),
-                                        invocation.getArgument(3)));
-        Map<String, String> retryOptions = new HashMap<>(store.options().toMap());
-        retryOptions.put("rest.commit.lock-enabled", "true");
-        retryOptions.put("commit.lock-on-retry", "true");
+                        invocation -> {
+                            assertThat(held.get()).isTrue();
+                            Snapshot head = store.snapshotManager().latestSnapshot();
+                            assertThat((String) invocation.getArgument(0)).isEqualTo(head.uuid());
+                            assertThat(((Snapshot) invocation.getArgument(1)).id())
+                                    .isEqualTo(head.id() + 1);
+                            events.add("publish");
+                            // Force one conflict to verify that the next attempt obtains a new
+                            // scope as well.
+                            if (attempts.get() == 1) {
+                                return false;
+                            }
+                            return delegate.commit(
+                                    invocation.getArgument(0),
+                                    invocation.getArgument(1),
+                                    invocation.getArgument(2),
+                                    invocation.getArgument(3));
+                        });
         try (FileStoreCommitImpl commit =
-                newCommitWithSnapshotCommit(
-                        store, "morax-job", publisher, new CoreOptions(retryOptions), false)) {
+                newCommitWithSnapshotCommit(store, "morax-job", publisher).withLock(lock)) {
             commit.commit(checkNotNull(prepared.get()), false);
         }
         Snapshot latest = store.snapshotManager().latestSnapshot();
         assertThat(latest.commitUser()).isEqualTo("morax-job");
         assertThat(store.readKvsFromSnapshot(latest.id())).hasSize(3);
-        verify(publisher).beginCommit(any(), eq("morax-job"), eq(true));
-        verify(lease).latestSnapshot(any());
+        assertThat(events)
+                .containsExactly("acquire", "publish", "release", "acquire", "publish", "release");
+    }
+
+    @Test
+    public void testAppendAndCompactAcquireSeparateScopesAndCallbacksRunAfterRelease()
+            throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue row = gen.nextInsert("20211110", 8, 1L, null, "a");
+        List<ManifestCommittable> prepared = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            store.commitDataImpl(
+                    Collections.singletonList(row),
+                    gen::getPartition,
+                    value -> 0,
+                    false,
+                    23L,
+                    null,
+                    Collections.emptyList(),
+                    (commit, committable) -> prepared.add(committable));
+        }
+        CommitMessageImpl append = (CommitMessageImpl) prepared.get(0).fileCommittables().get(0);
+        CommitMessageImpl replacement =
+                (CommitMessageImpl) prepared.get(1).fileCommittables().get(0);
+        ManifestCommittable committable = new ManifestCommittable(23L);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        append.partition(),
+                        append.bucket(),
+                        append.totalBuckets(),
+                        append.newFilesIncrement(),
+                        new CompactIncrement(
+                                append.newFilesIncrement().newFiles(),
+                                replacement.newFilesIncrement().newFiles(),
+                                Collections.emptyList())));
+        List<String> events = new ArrayList<>();
+        AtomicBoolean held = new AtomicBoolean();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        assertThat(held.getAndSet(true)).isFalse();
+                        events.add("acquire");
+                        try {
+                            return action.call();
+                        } finally {
+                            held.set(false);
+                            events.add("release");
+                        }
+                    }
+
+                    @Override
+                    public void ensureValid() {
+                        assertThat(held.get()).isTrue();
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        SnapshotCommit publisher = mock(SnapshotCommit.class);
+        SnapshotCommit delegate = new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty());
+        when(publisher.commit(any(), any(), any(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            assertThat(held.get()).isTrue();
+                            events.add("publish");
+                            return delegate.commit(
+                                    invocation.getArgument(0),
+                                    invocation.getArgument(1),
+                                    invocation.getArgument(2),
+                                    invocation.getArgument(3));
+                        });
+        CommitCallback callback = mock(CommitCallback.class);
+        doAnswer(
+                        invocation -> {
+                            assertThat(held.get()).isFalse();
+                            events.add("callback");
+                            return null;
+                        })
+                .when(callback)
+                .call(any());
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                                store,
+                                "writer",
+                                publisher,
+                                store.options(),
+                                false,
+                                Collections.singletonList(callback))
+                        .withLock(lock)) {
+            commit.commit(committable, false);
+        }
+        assertThat(store.snapshotManager().snapshot(1).commitKind())
+                .isEqualTo(Snapshot.CommitKind.APPEND);
+        assertThat(store.snapshotManager().snapshot(2).commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(events)
+                .containsExactly(
+                        "acquire",
+                        "publish",
+                        "release",
+                        "callback",
+                        "acquire",
+                        "publish",
+                        "release",
+                        "callback");
+        assertThat(store.readKvsFromSnapshot(2)).hasSize(1);
+    }
+
+    @Test
+    public void testInvalidLockPreventsSnapshotPublication() throws Exception {
+        TestFileStore store = createStore(false);
+        AtomicReference<ManifestCommittable> prepared = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.next()),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> prepared.set(committable));
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        return action.call();
+                    }
+
+                    @Override
+                    public void ensureValid() {
+                        throw new IllegalStateException("Lost lease");
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        SnapshotCommit publisher = mock(SnapshotCommit.class);
+        Options options = Options.fromMap(store.options().toMap());
+        options.set(CoreOptions.COMMIT_MAX_RETRIES, 0);
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                                store, "writer", publisher, new CoreOptions(options), false)
+                        .withLock(lock)) {
+            assertThatThrownBy(() -> commit.commit(checkNotNull(prepared.get()), false))
+                    .satisfies(anyCauseMatches(IllegalStateException.class, "Lost lease"));
+        }
+        verify(publisher, never()).commit(any(), any(), any(), any());
+        assertThat(store.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    public void testManifestReplacementAcceptsLegacySnapshotWithoutUuid() throws Exception {
+        TestFileStore store = createStore(false);
+        store.commitData(Collections.singletonList(gen.next()), gen::getPartition, value -> 0);
+        Snapshot snapshot = store.snapshotManager().latestSnapshot();
+        ObjectNode legacyJson = JsonSerdeUtil.fromJson(snapshot.toJson(), ObjectNode.class);
+        legacyJson.remove("uuid");
+        Snapshot legacy = Snapshot.fromJson(legacyJson.toString());
+        store.fileIO()
+                .overwriteFileUtf8(
+                        store.snapshotManager().snapshotPath(snapshot.id()), legacyJson.toString());
+        assertThat(store.snapshotManager().latestSnapshot().uuid()).isNull();
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    legacy,
+                                    legacy.totalRecordCount(),
+                                    Pair.of(
+                                            legacy.baseManifestList(),
+                                            legacy.baseManifestListSize()),
+                                    Pair.of(
+                                            legacy.deltaManifestList(),
+                                            legacy.deltaManifestListSize())))
+                    .isTrue();
+        }
+        assertThat(store.readKvsFromSnapshot(2)).hasSize(1);
     }
 
     @Test
@@ -2256,6 +2467,22 @@ public class FileStoreCommitTest {
             SnapshotCommit snapshotCommit,
             CoreOptions options,
             boolean dataEvolutionEnabled) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                options,
+                dataEvolutionEnabled,
+                Collections.emptyList());
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            CoreOptions options,
+            boolean dataEvolutionEnabled,
+            List<CommitCallback> callbacks) {
         String tableName = store.options().path().getName();
         return new FileStoreCommitImpl(
                 snapshotCommit,
@@ -2274,7 +2501,7 @@ public class FileStoreCommitTest {
                 store.newStatsFileHandler(),
                 store.bucketMode(),
                 Collections.emptyList(),
-                Collections.emptyList(),
+                callbacks,
                 scanner ->
                         ConflictDetection.create(
                                 tableName,

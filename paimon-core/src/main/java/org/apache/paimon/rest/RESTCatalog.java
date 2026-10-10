@@ -26,7 +26,6 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -45,6 +44,7 @@ import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.SemanticViewManagement;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -397,10 +397,28 @@ public class RESTCatalog implements Catalog {
                 path -> fileIOForData(path, identifier),
                 this::fileIOFromOptions,
                 this::loadTableMetadata,
-                new RESTCatalogLockFactory(),
-                CatalogLockContext.fromOptions(context.options()),
+                null,
+                null,
                 context,
                 true);
+    }
+
+    @Override
+    public Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            String commitUser,
+            Options tableOptions) {
+        if (!new CoreOptions(tableOptions).restCommitLockEnabled()) {
+            return Lock.empty();
+        }
+        return Lock.fromCatalog(
+                new RESTCatalogLock(
+                        new RESTApi(context.options(), false),
+                        new CoreOptions(tableOptions).commitTimeout()),
+                identifier,
+                tableUuid,
+                commitUser);
     }
 
     @Override
@@ -543,8 +561,19 @@ public class RESTCatalog implements Catalog {
     @Override
     public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
+        rollbackTo(identifier, null, instant, fromSnapshot, null);
+    }
+
+    @Override
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String commitUser)
+            throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, instant, fromSnapshot);
+            api.rollbackTo(identifier, tableUuid, instant, fromSnapshot, commitUser);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
@@ -615,8 +644,8 @@ public class RESTCatalog implements Catalog {
                     path -> fileIOForData(path, identifier),
                     this::fileIOFromOptions,
                     i -> toTableMetadata(db, response),
-                    new RESTCatalogLockFactory(),
-                    CatalogLockContext.fromOptions(context.options()),
+                    null,
+                    null,
                     context,
                     true);
         } catch (TableNotExistException e) {

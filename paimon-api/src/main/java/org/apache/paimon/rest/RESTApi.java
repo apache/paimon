@@ -783,7 +783,17 @@ public class RESTApi {
      *     this table
      */
     public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
-        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
+        rollbackTo(identifier, null, instant, fromSnapshot, null);
+    }
+
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String commitUser) {
+        RollbackTableRequest request =
+                new RollbackTableRequest(instant, fromSnapshot, tableUuid, commitUser);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),

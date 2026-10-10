@@ -333,12 +333,6 @@ under the License.
             <td>Snapshot preceding the earliest snapshot to inspect when committing. Only later snapshots are searched for this commit user's previous commits. This also provides the starting point for strict-mode checks when enabled. Keep this bound unchanged across retries and recovery.</td>
         </tr>
         <tr>
-            <td><h5>commit.lock-on-retry</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Acquire a commit lock before preparing a retried snapshot. Requires lock support from the snapshot committer.</td>
-        </tr>
-        <tr>
             <td><h5>commit.max-retries</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>

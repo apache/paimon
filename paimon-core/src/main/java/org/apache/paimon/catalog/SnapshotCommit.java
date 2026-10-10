@@ -24,24 +24,9 @@ import org.apache.paimon.partition.PartitionStatistics;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Optional;
 
 /** Interface to commit snapshot atomically. */
 public interface SnapshotCommit extends AutoCloseable {
-
-    /**
-     * Begin snapshot preparation and publication, optionally acquiring a commit lock. The returned
-     * locked attempt protects head refresh, validation, preparation and publication. An empty
-     * result means that another writer currently holds the lock.
-     */
-    default Optional<CommitAttempt> beginCommit(
-            String branch, String commitUser, boolean acquireLock) throws Exception {
-        if (acquireLock) {
-            throw new UnsupportedOperationException(
-                    "This snapshot committer does not support locks.");
-        }
-        return Optional.of(CommitAttempt.unlocked(this));
-    }
 
     boolean commit(
             @Nullable String baseSnapshotUuid,

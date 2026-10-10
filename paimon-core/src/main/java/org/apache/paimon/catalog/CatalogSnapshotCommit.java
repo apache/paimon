@@ -24,7 +24,6 @@ import org.apache.paimon.partition.PartitionStatistics;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Optional;
 
 /** A {@link SnapshotCommit} using {@link Catalog} to commit. */
 public class CatalogSnapshotCommit implements SnapshotCommit {
@@ -32,36 +31,11 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
     private final Catalog catalog;
     private final Identifier identifier;
     @Nullable private final String uuid;
-    @Nullable private final CatalogLock lock;
 
     public CatalogSnapshotCommit(Catalog catalog, Identifier identifier, @Nullable String uuid) {
-        this(catalog, identifier, uuid, null);
-    }
-
-    public CatalogSnapshotCommit(
-            Catalog catalog,
-            Identifier identifier,
-            @Nullable String uuid,
-            @Nullable CatalogLock lock) {
         this.catalog = catalog;
         this.identifier = identifier;
         this.uuid = uuid;
-        this.lock = lock;
-    }
-
-    @Override
-    public Optional<CommitAttempt> beginCommit(
-            String branch, String commitUser, boolean acquireLock) throws Exception {
-        if (!acquireLock || lock == null) {
-            return SnapshotCommit.super.beginCommit(branch, commitUser, acquireLock);
-        }
-        if (uuid == null) {
-            throw new IllegalArgumentException("A commit lease requires a stable table UUID.");
-        }
-        Identifier branchIdentifier =
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
-        return lock.acquireCommitLock(branchIdentifier, uuid, commitUser)
-                .map(lease -> CommitAttempt.locked(this, lease, branch, commitUser));
     }
 
     @Override
@@ -78,12 +52,6 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
 
     @Override
     public void close() throws Exception {
-        try {
-            if (lock != null) {
-                lock.close();
-            }
-        } finally {
-            catalog.close();
-        }
+        catalog.close();
     }
 }

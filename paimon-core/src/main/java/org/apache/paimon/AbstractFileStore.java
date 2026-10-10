@@ -290,7 +290,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public FileStoreCommitImpl newCommit(String commitUser, FileStoreTable table) {
         SnapshotManager snapshotManager = snapshotManager();
-        SnapshotCommit snapshotCommit = catalogEnvironment.snapshotCommit(snapshotManager);
+        SnapshotCommit snapshotCommit =
+                catalogEnvironment.snapshotCommit(snapshotManager, Lock.empty());
         if (snapshotCommit == null) {
             snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
         }
@@ -311,30 +312,31 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 snapshotManager,
                                 scanner);
         CommitRollback rollback = null;
-        TableRollback tableRollback = catalogEnvironment.catalogTableRollback();
+        TableRollback tableRollback = catalogEnvironment.catalogTableRollback(commitUser);
         if (tableRollback != null) {
             rollback = new CommitRollback(tableRollback);
         }
         return new FileStoreCommitImpl(
-                snapshotCommit,
-                fileIO,
-                schemaManager,
-                tableName,
-                commitUser,
-                partitionType,
-                options,
-                pathFactory(),
-                snapshotManager,
-                manifestFileFactory(),
-                manifestListFactory(),
-                indexManifestFileFactory(),
-                this::newScan,
-                newStatsFileHandler(),
-                bucketMode(),
-                createCommitPreCallbacks(table),
-                createCommitCallbacks(commitUser, table),
-                conflictDetectFactory,
-                rollback);
+                        snapshotCommit,
+                        fileIO,
+                        schemaManager,
+                        tableName,
+                        commitUser,
+                        partitionType,
+                        options,
+                        pathFactory(),
+                        snapshotManager,
+                        manifestFileFactory(),
+                        manifestListFactory(),
+                        indexManifestFileFactory(),
+                        this::newScan,
+                        newStatsFileHandler(),
+                        bucketMode(),
+                        createCommitPreCallbacks(table),
+                        createCommitCallbacks(commitUser, table),
+                        conflictDetectFactory,
+                        rollback)
+                .withLock(catalogEnvironment.createLock(options, commitUser));
     }
 
     @Override
