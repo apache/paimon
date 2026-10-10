@@ -287,6 +287,12 @@ class ConflictDetection:
         if conflict is not None:
             return conflict
 
+        from pypaimon.write.commit.global_index_source_check import check_global_index_sources
+        conflict = check_global_index_sources(
+            self, latest_snapshot, merged_entries, delta_entries, delta_index_entries)
+        if conflict is not None:
+            return conflict
+
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
 
     @staticmethod

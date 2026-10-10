@@ -173,8 +173,13 @@ class GlobalIndexBuilder:
             from pypaimon.ray.vector_index_build import validate_build_options
             concurrency, ray_remote_args = validate_build_options(
                 self, concurrency, ray_remote_args)
-        read_builder = self._table.new_read_builder()
         partition_filter = self._resolve_partition_filter()
+        if execution == "local" and self._index_type in _SORTED_INDEX_IDENTIFIERS:
+            from pypaimon.globalindex.native_index_build import build_native_sorted_index
+            messages = build_native_sorted_index(self, partition_filter)
+            if messages is not None:
+                return messages
+        read_builder = self._table.new_read_builder()
         if partition_filter is not None:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
