@@ -508,7 +508,7 @@ def test_python_written_partition_source_uses_java_paths_for_native_merge(tmp_pa
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('partition_type', [pa.float32(), pa.float64()])
-def test_float_partition_source_selects_python_before_native_merge(tmp_path, native, stream, partition_type):
+def test_float_partition_source_uses_native_merge(tmp_path, native, stream, partition_type):
     target = _table(tmp_path / 'target', [dict(id=1, value=10, name='old')]).copy({
         'write.native.enabled': str(native).lower()})
     schema = pa.schema(list(_SCHEMA) + [pa.field('part', partition_type)])
@@ -522,8 +522,11 @@ def test_float_partition_source_selects_python_before_native_merge(tmp_path, nat
                                  dict(id=2, value=22, name='insert', part=2.25)])
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     kwargs = dict(commit_identifier=57) if stream else {}
-    with patch('pypaimon.write.native_merge_into.NativeTableMergeInto.prepare_commit',
-               side_effect=AssertionError('Unsupported source entered native MERGE')):
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+                                      side_effect=AssertionError('Python source materialization')))
         messages = builder.new_update().merge_into(
             source, on=['id'], when_matched=[WhenMatched.update({'value': source_col('value')})],
             when_not_matched=[WhenNotMatched('*')], **kwargs)

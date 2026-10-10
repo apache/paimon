@@ -62,6 +62,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -727,6 +728,63 @@ public class HiveCatalogTest extends CatalogTestBase {
         catalog.dropPartitions(identifier, partitionSpecs("20250102"));
         assertHmsDts(databaseName, tableName);
         assertPhysicalDts(identifier);
+    }
+
+    @Test
+    public void testCreateAndDropPartitionsWithSpecNotInPartitionKeyOrder() throws Exception {
+        String databaseName = "test_partition_spec_order";
+        String tableName = "multi_key_table";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .column("hh", DataTypes.STRING())
+                        .partitionKeys("dt", "hh")
+                        .build(),
+                false);
+        IMetaStoreClient hmsClient = ((HiveCatalog) catalog).getHmsClient();
+
+        // register dt=d1/hh=h1 and its mirror dt=h1/hh=d1 in partition key order
+        catalog.createPartitions(
+                identifier,
+                Arrays.asList(
+                        orderedSpec("dt", "d1", "hh", "h1"), orderedSpec("dt", "h1", "hh", "d1")));
+        assertThat(hmsClient.listPartitions(databaseName, tableName, Short.MAX_VALUE))
+                .extracting(p -> p.getValues())
+                .containsExactlyInAnyOrder(Arrays.asList("d1", "h1"), Arrays.asList("h1", "d1"));
+
+        // drop dt=d1/hh=h1 with a spec in reversed key order, the mirror must be kept
+        catalog.dropPartitions(
+                identifier, Collections.singletonList(orderedSpec("hh", "h1", "dt", "d1")));
+        assertThat(hmsClient.listPartitions(databaseName, tableName, Short.MAX_VALUE))
+                .extracting(p -> p.getValues())
+                .containsExactly(Arrays.asList("h1", "d1"));
+
+        // create dt=d9/hh=h9 with a spec in reversed key order
+        catalog.createPartitions(
+                identifier, Collections.singletonList(orderedSpec("hh", "h9", "dt", "d9")));
+        assertThat(hmsClient.listPartitions(databaseName, tableName, Short.MAX_VALUE))
+                .extracting(p -> p.getValues())
+                .containsExactlyInAnyOrder(Arrays.asList("h1", "d1"), Arrays.asList("d9", "h9"));
+        assertThat(
+                        hmsClient
+                                .getPartition(databaseName, tableName, Arrays.asList("d9", "h9"))
+                                .getSd()
+                                .getLocation())
+                .endsWith("/dt=d9/hh=h9");
+    }
+
+    private static Map<String, String> orderedSpec(
+            String key1, String value1, String key2, String value2) {
+        Map<String, String> spec = new LinkedHashMap<>();
+        spec.put(key1, value1);
+        spec.put(key2, value2);
+        return spec;
     }
 
     private void writePartitionRow(Identifier identifier, String dt, String pk) throws Exception {

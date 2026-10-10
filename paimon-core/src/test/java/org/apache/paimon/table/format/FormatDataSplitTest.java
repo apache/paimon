@@ -25,6 +25,7 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.ObjectStreamClass;
 import java.util.Arrays;
 
@@ -73,7 +74,8 @@ public class FormatDataSplitTest {
                 new FormatDataSplit(
                         Arrays.asList(new FileMeta(new Path("oss://archive/data.csv"), 10L)),
                         null,
-                        true);
+                        true,
+                        null);
 
         FormatDataSplit deserialized =
                 InstantiationUtil.deserializeObject(
@@ -81,6 +83,24 @@ public class FormatDataSplitTest {
 
         assertThat(deserialized).isEqualTo(split);
         assertThat(deserialized.useCatalogContextFileIO()).isTrue();
+    }
+
+    @Test
+    public void testDeserializeSplitWithoutFileFormat() throws Exception {
+        // Serialized by FormatDataSplit at ce0633cb09, before the fileFormat field was added.
+        try (InputStream input =
+                getClass()
+                        .getClassLoader()
+                        .getResourceAsStream("compatibility/format-data-split-v3")) {
+            assertThat(input).isNotNull();
+            FormatDataSplit split =
+                    InstantiationUtil.deserializeObject(input, getClass().getClassLoader());
+            assertThat(split.fileFormat()).isNull();
+            assertThat(split.useCatalogContextFileIO()).isTrue();
+            assertThat(split.partition()).isNull();
+            assertThat(split.files())
+                    .containsExactly(new FileMeta(new Path("/legacy/file.orc"), 128L));
+        }
     }
 
     @Test

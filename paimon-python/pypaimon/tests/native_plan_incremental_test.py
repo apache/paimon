@@ -286,7 +286,7 @@ def test_incremental_ignores_deletion_vectors_from_window_end(native, catalog):
     assert actual == [rows[4]]
 
 
-@pytest.mark.parametrize('window', ['100,100', '200,100', '100', 'one,200'])
+@pytest.mark.parametrize('window', ['100', 'one,200', '0,100,200'])
 def test_invalid_timestamp_window_is_rejected_even_for_empty_tables(catalog, window):
     table = _table(catalog, 'invalid')
     with pytest.raises(ValueError):
@@ -406,12 +406,9 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
 
 
 @pytest.mark.native_plan
-@pytest.mark.skipif(
-    not native_method_available('ReadBuilder', 'with_nested_projection'),
-    reason='pypaimon_rust nested native reader API required')
 def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
         catalog):
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.read.streaming_table_scan import StreamTableScan
 
     schema = pa.schema([
         ('k', pa.int64()),
@@ -445,11 +442,12 @@ def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
     builder = (native_table.new_stream_read_builder()
                .with_projection(['payload.score', 'k'])
                .with_include_row_kind())
-    # Use the same delta-plan primitive as the streaming loop without polling.
+    # Restore the public stream scan to consume this snapshot as a delta.
     scan = builder.new_streaming_scan()
-    assert isinstance(scan, AsyncStreamingTableScan)
+    assert isinstance(scan, StreamTableScan)
     snapshot = native_table.snapshot_manager().get_latest_snapshot()
-    plan = scan._create_delta_plan(snapshot)
+    scan.restore(snapshot.id)
+    plan = scan.plan()
     with patch(
             'pypaimon.read.table_read.TableRead._create_split_read',
             side_effect=AssertionError('streaming nested native read fell back')):
@@ -494,8 +492,8 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
             if len(plans) == 2:
                 return plans
 
-    with patch.object(
-            scan, '_create_plan_from_manifests',
+    with patch(
+            'pypaimon.read.streaming_table_scan.ManifestFileManager',
             side_effect=AssertionError(
                 'streaming changelog native plan fell back to Python')):
         plans = asyncio.run(first_two_frames())
@@ -590,3 +588,36 @@ def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native,
                 side_effect=AssertionError('explicit DV native read fell back')))
         result = read_table.new_read_builder().new_read().to_arrow([dv_split]).to_pylist()
     assert result == [{'k': 1, 'v': '1'}, {'k': 3, 'v': '3'}]
+
+
+@pytest.mark.parametrize('window', [(100, 100), (200, 100)])
+def test_empty_table_timestamp_windows_follow_java(catalog, native, window):
+    table = _table(catalog, 'empty_window')
+    plan, rows = _read(table, native, window)
+    assert rows == []
+    assert plan.snapshot_id is None
+
+
+def test_reverse_window_is_rejected_when_snapshots_exist(catalog):
+    table = _table(catalog, 'reverse_window')
+    _write(table, 100, [{'k': 1, 'v': 'base'}])
+    with pytest.raises(ValueError, match='Ending timestamp'):
+        table.copy({'incremental-between-timestamp': '200,100'}).new_read_builder().new_scan()
+
+
+def test_equal_window_is_empty_for_populated_tables(native, history):
+    plan, rows = _read(history, native, (100, 100))
+    assert rows == []
+    assert plan.snapshot_id is None
+
+
+def test_timestamp_auto_reads_physical_changelog(native, catalog):
+    table = _table(catalog, 'batch_changelog', True, {'bucket': '1', 'changelog-producer': 'input'})
+    _write(table, 100, [{'k': 1, 'v': 'old'}])
+    _write(table, 200, [{'k': 1, 'v': 'new'}, {'k': 2, 'v': 'insert'}])
+    _write(table, 300, [{'k': 9, 'v': 'overwrite'}], overwrite=True)
+    plan, rows = _read(table, native, (100, 300))
+    assert plan.snapshot_id == 3
+    assert all(split.snapshot_id == 3 for split in plan.splits())
+    assert all(file.file_name.startswith('changelog-') for split in plan.splits() for file in split.files)
+    assert sorted((row['k'], row['v']) for row in rows) == [(1, 'new'), (2, 'insert')]

@@ -110,11 +110,12 @@ public class SortedIndexTopoBuilder {
         return SUPPORTED_INDEX_TYPES.contains(indexType);
     }
 
+    /** Builds independent indexes, each defined by its ordered columns. */
     public static boolean buildIndex(
             StreamExecutionEnvironment env,
             Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
             FileStoreTable table,
-            List<String> indexColumns,
+            List<List<String>> definitions,
             String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
@@ -124,7 +125,7 @@ public class SortedIndexTopoBuilder {
                         env,
                         indexScannerSupplier,
                         table,
-                        indexColumns,
+                        definitions,
                         indexType,
                         partitionPredicate,
                         userOptions);
@@ -146,29 +147,6 @@ public class SortedIndexTopoBuilder {
             StreamExecutionEnvironment env,
             Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
             FileStoreTable table,
-            List<String> indexColumns,
-            String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions)
-            throws Exception {
-        List<List<String>> definitions = new ArrayList<>();
-        for (String name : indexColumns) {
-            definitions.add(Collections.singletonList(name));
-        }
-        return buildIndexDefinitions(
-                env,
-                indexScannerSupplier,
-                table,
-                definitions,
-                indexType,
-                partitionPredicate,
-                userOptions);
-    }
-
-    private static Optional<DataStream<Committable>> buildIndexDefinitions(
-            StreamExecutionEnvironment env,
-            Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
-            FileStoreTable table,
             List<List<String>> definitions,
             String indexType,
             PartitionPredicate partitionPredicate,
@@ -176,6 +154,9 @@ public class SortedIndexTopoBuilder {
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (List<String> indexColumns : definitions) {
+            if (indexColumns.isEmpty()) {
+                throw new IllegalArgumentException("At least one index column is required.");
+            }
             String indexColumn = indexColumns.get(0);
             SortedGlobalIndexScanner indexScanner =
                     indexScannerSupplier.get().withIndexFields(indexColumns);
@@ -322,22 +303,19 @@ public class SortedIndexTopoBuilder {
     public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
             FileStoreTable table,
-            List<String> indexColumns,
+            List<List<String>> definitions,
             String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        Optional<DataStream<Committable>> written =
-                buildIndexDefinitions(
-                        env,
-                        () -> new SortedGlobalIndexScanner(table, indexType, userOptions),
-                        table,
-                        Collections.singletonList(indexColumns),
-                        indexType,
-                        partitionPredicate,
-                        userOptions);
-        if (written.isPresent()) {
-            commit(table, written.get(), CoreOptions.createCommitUser(userOptions));
+        if (buildIndex(
+                env,
+                () -> new SortedGlobalIndexScanner(table, indexType, userOptions),
+                table,
+                definitions,
+                indexType,
+                partitionPredicate,
+                userOptions)) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
         }
     }

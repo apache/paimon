@@ -21,6 +21,7 @@ package org.apache.paimon.append;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
+import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -58,6 +59,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
@@ -92,8 +94,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final boolean omitAllNonDedicatedWriteCols;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
-    private final List<DataFileMeta> compactBefore;
-    private final List<DataFileMeta> compactAfter;
+    private final LinkedHashMap<String, DataFileMeta> compactBefore;
+    private final LinkedHashMap<String, DataFileMeta> compactAfter;
     private final Supplier<LongCounter> seqNumCounterProvider;
     private final String fileCompression;
     private final CompressOptions spillCompression;
@@ -160,8 +162,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.omitAllNonDedicatedWriteCols = omitAllNonDedicatedWriteCols;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
-        this.compactBefore = new ArrayList<>();
-        this.compactAfter = new ArrayList<>();
+        this.compactBefore = new LinkedHashMap<>();
+        this.compactAfter = new LinkedHashMap<>();
         final LongCounter seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.seqNumCounterProvider =
                 dataEvolutionEnabled ? () -> new LongCounter(0) : () -> seqNumCounter;
@@ -180,8 +182,14 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
             deletedFiles.addAll(increment.newFilesIncrement().deletedFiles());
-            compactBefore.addAll(increment.compactIncrement().compactBefore());
-            compactAfter.addAll(increment.compactIncrement().compactAfter());
+            increment
+                    .compactIncrement()
+                    .compactBefore()
+                    .forEach(file -> compactBefore.put(file.fileName(), file));
+            increment
+                    .compactIncrement()
+                    .compactAfter()
+                    .forEach(file -> compactAfter.put(file.fileName(), file));
             updateCompactDeletionFile(increment.compactDeletionFile());
         }
     }
@@ -285,7 +293,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         sync();
 
         compactManager.close();
-        for (DataFileMeta file : compactAfter) {
+        for (DataFileMeta file : compactAfter.values()) {
             // appendOnlyCompactManager will rewrite the file and no file upgrade will occur, so we
             // can directly delete the file in compactAfter.
             file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
@@ -367,14 +375,22 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     private void trySyncLatestCompaction(boolean blocking)
             throws ExecutionException, InterruptedException {
-        compactManager
-                .getCompactionResult(blocking)
-                .ifPresent(
-                        result -> {
-                            compactBefore.addAll(result.before());
-                            compactAfter.addAll(result.after());
-                            updateCompactDeletionFile(result.deletionFile());
-                        });
+        compactManager.getCompactionResult(blocking).ifPresent(this::updateCompactResult);
+    }
+
+    private void updateCompactResult(CompactResult result) {
+        for (DataFileMeta file : result.before()) {
+            DataFileMeta intermediate = compactAfter.remove(file.fileName());
+            if (intermediate != null) {
+                // Append compaction rewrites files. An output compacted again before the next
+                // prepareCommit has not been handed to a committer and can be deleted directly.
+                intermediate.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
+            } else {
+                compactBefore.put(file.fileName(), file);
+            }
+        }
+        result.after().forEach(file -> compactAfter.put(file.fileName(), file));
+        updateCompactDeletionFile(result.deletionFile());
     }
 
     private void updateCompactDeletionFile(@Nullable CompactDeletionFile newDeletionFile) {
@@ -394,8 +410,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                         Collections.emptyList());
         CompactIncrement compactIncrement =
                 new CompactIncrement(
-                        new ArrayList<>(compactBefore),
-                        new ArrayList<>(compactAfter),
+                        new ArrayList<>(compactBefore.values()),
+                        new ArrayList<>(compactAfter.values()),
                         Collections.emptyList());
         CompactDeletionFile drainDeletionFile = compactDeletionFile;
 

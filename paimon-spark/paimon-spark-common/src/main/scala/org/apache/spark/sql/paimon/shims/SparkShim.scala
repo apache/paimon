@@ -36,13 +36,14 @@ import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, 
 import org.apache.spark.sql.catalyst.plans.physical.Distribution
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
-import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
+import org.apache.spark.sql.connector.catalog.{CatalogPlugin, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Map => JMap}
 
@@ -195,6 +196,14 @@ trait SparkShim {
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation
+
+  // Per-version shim: Spark 4.1 added a 5th `timeTravelSpec` parameter with a default. A 4-arg call
+  // site compiled against 4.1 emits a `create$default$5()` lookup absent on 4.0.
+  def createDataSourceV2Relation(
+      table: Table,
+      catalog: Option[CatalogPlugin],
+      identifier: Option[Identifier],
+      options: CaseInsensitiveStringMap): DataSourceV2Relation
 
   /** Creates an internal scan relation whose constructor changed across Spark minor versions. */
   def createDataSourceV2ScanRelation(

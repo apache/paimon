@@ -23,10 +23,15 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import json_field
 from pypaimon.function.function_change import FunctionChange
 from pypaimon.function.function_definition import FunctionDefinition
+from pypaimon.management.column_mask import ColumnMask
+from pypaimon.management.data_policy import DataPolicy
+from pypaimon.management.java_string import is_blank
 from pypaimon.management.permission_access import PermissionAccess
 from pypaimon.management.permission_assignment import PermissionAssignment
 from pypaimon.management.permission_columns import PermissionColumns
 from pypaimon.management.permission_resource import PermissionResource
+from pypaimon.management.policy_type import PolicyType
+from pypaimon.management.row_filter import RowFilter
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
@@ -288,3 +293,92 @@ class RevokePermissionRequest(RESTRequest):
         resource = data.get(cls.FIELD_RESOURCE)
         return cls(None if resource is None else PermissionResource.from_dict(resource),
                    data.get(cls.FIELD_ACCESS), data.get(cls.FIELD_PRINCIPAL))
+
+
+class PolicyRequest(RESTRequest):
+    FIELD_ROW_FILTER = "rowFilter"
+    FIELD_COLUMN_MASK = "columnMask"
+    FIELD_PRINCIPAL = "principal"
+
+    def __init__(self, row_filter: Optional[RowFilter], column_mask: Optional[ColumnMask],
+                 principal: str):
+        self._row_filter = row_filter
+        self._column_mask = column_mask
+        self._principal = principal
+
+    @classmethod
+    def from_policy(cls, policy: DataPolicy) -> "PolicyRequest":
+        return cls(policy.get_row_filter(), policy.get_column_mask(), policy.get_principal())
+
+    def policy(self, resource: PermissionResource) -> DataPolicy:
+        return DataPolicy(resource, self._row_filter, self._column_mask, self._principal)
+
+    def get_row_filter(self) -> Optional[RowFilter]:
+        return self._row_filter
+
+    def get_column_mask(self) -> Optional[ColumnMask]:
+        return self._column_mask
+
+    def get_principal(self) -> str:
+        return self._principal
+
+    def to_dict(self) -> dict:
+        result = {}
+        if self._row_filter is not None:
+            result[self.FIELD_ROW_FILTER] = self._row_filter.to_dict()
+        if self._column_mask is not None:
+            result[self.FIELD_COLUMN_MASK] = self._column_mask.to_dict()
+        result[self.FIELD_PRINCIPAL] = self._principal
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PolicyRequest":
+        row_filter = data.get(cls.FIELD_ROW_FILTER)
+        column_mask = data.get(cls.FIELD_COLUMN_MASK)
+        return cls(None if row_filter is None else RowFilter.from_dict(row_filter),
+                   None if column_mask is None else ColumnMask.from_dict(column_mask),
+                   data.get(cls.FIELD_PRINCIPAL))
+
+
+class DropPolicyRequest(RESTRequest):
+    FIELD_TYPE = "type"
+    FIELD_PRINCIPAL = "principal"
+    FIELD_COLUMN = "column"
+
+    def __init__(self, policy_type: PolicyType, principal: str, column: Optional[str] = None):
+        if policy_type is None:
+            raise ValueError("policy type cannot be null")
+        self._type = policy_type
+        self._principal = PermissionAssignment.validate_principal(principal)
+        if policy_type == PolicyType.ROW_FILTER:
+            if not is_blank(column):
+                raise ValueError("ROW_FILTER identity cannot contain a column.")
+            self._column = None
+        else:
+            if is_blank(column):
+                raise ValueError("column is required for COLUMN_MASKING identity.")
+            self._column = column
+
+    def get_type(self) -> PolicyType:
+        return self._type
+
+    def get_principal(self) -> str:
+        return self._principal
+
+    def get_column(self) -> Optional[str]:
+        return self._column
+
+    def to_dict(self) -> dict:
+        result = {self.FIELD_TYPE: self._type.name, self.FIELD_PRINCIPAL: self._principal}
+        if self._column is not None:
+            result[self.FIELD_COLUMN] = self._column
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DropPolicyRequest":
+        policy_type = data.get(cls.FIELD_TYPE)
+        # Jackson matches enum names exactly.
+        if policy_type is not None and policy_type not in PolicyType.__members__:
+            raise ValueError("Unknown policy type '{}'.".format(policy_type))
+        return cls(None if policy_type is None else PolicyType[policy_type],
+                   data.get(cls.FIELD_PRINCIPAL), data.get(cls.FIELD_COLUMN))

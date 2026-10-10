@@ -127,7 +127,7 @@ public class SortedIndexTopoBuilderTest {
                                 env,
                                 () -> indexScanner,
                                 mock(FileStoreTable.class),
-                                Collections.singletonList("id"),
+                                Collections.singletonList(Collections.singletonList("id")),
                                 "btree",
                                 null,
                                 new Options()))
@@ -149,7 +149,7 @@ public class SortedIndexTopoBuilderTest {
                                 env,
                                 () -> indexScanner,
                                 mock(FileStoreTable.class),
-                                Collections.singletonList("id"),
+                                Collections.singletonList(Collections.singletonList("id")),
                                 "btree",
                                 null,
                                 new Options()))

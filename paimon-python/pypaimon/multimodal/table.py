@@ -538,9 +538,11 @@ class MultimodalTable:
             pre_filter=pre_filter,
         )
 
-    def create_index(self, column, index_type, options=None):
+    def create_index(self, column, index_type, options=None, *, execution="local",
+                     concurrency=None, ray_remote_args=None):
         return self.raw_table.create_global_index(
-            column, index_type=_normalize_index_type(index_type), options=options)
+            column, index_type=_normalize_index_type(index_type), options=options,
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
 
     def _merge(
             self,

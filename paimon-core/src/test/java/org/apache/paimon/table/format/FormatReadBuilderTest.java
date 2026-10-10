@@ -310,7 +310,8 @@ public class FormatReadBuilderTest {
                                                         csvFile,
                                                         clientFileIO.getFileSize(csvFile))),
                                         null,
-                                        true)),
+                                        true,
+                                        null)),
                         getClass().getClassLoader());
 
         List<InternalRow> rows = readAllRows(readBuilder.createReader(split), rowType);

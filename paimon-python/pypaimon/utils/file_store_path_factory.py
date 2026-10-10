@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import math
 import struct
 from datetime import date, timezone
 from decimal import Decimal
@@ -32,7 +33,29 @@ def _is_null_or_whitespace_only(value) -> bool:
     if value is None:
         return True
     s = str(value)
-    return len(s) == 0 or s.isspace()
+    # Character.isWhitespace, as used by Java StringUtils. Python isspace also
+    # folds NBSP, NEL and other characters Java keeps in a partition name.
+    return all(char in '\t\n\v\f\r\x1c\x1d\x1e\x1f \u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006'
+               '\u2008\u2009\u200a\u2028\u2029\u205f\u3000' for char in s)
+
+
+def _decode_java_utf8(value: bytes) -> str:
+    """BinaryString.toString replaces a malformed surrogate as one sequence."""
+    value = bytes(value)
+    parts = []
+    while value:
+        try:
+            parts.append(value.decode('utf-8'))
+            break
+        except UnicodeDecodeError as error:
+            parts.append(value[:error.start].decode('utf-8'))
+            value = value[error.start:]
+            length = error.end - error.start
+            if len(value) >= 2 and value[0] == 0xed and 0xa0 <= value[1] <= 0xbf:
+                length = 3 if len(value) >= 3 and value[2] & 0xc0 == 0x80 else 2
+            parts.append('\ufffd')
+            value = value[length:]
+    return ''.join(parts)
 
 
 def _escape_partition_component(value: str) -> str:
@@ -60,11 +83,15 @@ def canonical_data_file_path(table, partition, bucket, file_name):
 
 
 def _floating_partition_string(value, single_precision: bool) -> str:
-    # Use a shortest round-tripping form for the initial lookup. Older JVMs
-    # can use different digits; the read fallback matches their stored values.
+    # Java's JDK 19+ contract selects a shortest round-tripping form with at
+    # least two significant digits before applying its notation thresholds.
     encoding = '>f' if single_precision else '>d'
     bits = struct.pack(encoding, value)
     value = struct.unpack(encoding, bits)[0]
+    if math.isnan(value):
+        return 'NaN'
+    if math.isinf(value):
+        return '-Infinity' if value < 0 else 'Infinity'
     for precision in range(2, 10 if single_precision else 18):
         text = format(value, '.{}g'.format(precision))
         try:
@@ -74,8 +101,6 @@ def _floating_partition_string(value, single_precision: bool) -> str:
         if rounded != bits:
             continue
         decimal = Decimal(text)
-        if not decimal.is_finite():
-            return str(value)
         if decimal.is_zero() or Decimal('0.001') <= abs(decimal) < Decimal('1e7'):
             text = format(decimal, 'f')
             if '.' in text:
@@ -175,6 +200,8 @@ class FileStorePathFactory:
         for i, value in enumerate(partition):
             data_type = self.partition_types[i] if self.partition_types is not None else None
             type_name = str(data_type).split('(', 1)[0].split()[0]
+            if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+                value = _decode_java_utf8(value)
             if value is not None and _is_ltz_type(str(data_type).upper()):
                 # Legacy Timestamp.toString() uses UTC fields. Java's non-legacy
                 # cast uses TimeZone.getDefault(); neither includes an offset.
@@ -199,6 +226,8 @@ class FileStorePathFactory:
             elif self.legacy_partition_name and type_name.startswith('TIME'):
                 text = str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000
                            + value.microsecond // 1000)
+            elif type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+                text = value
             elif data_type is not None and not _is_unsupported(data_type):
                 text = cast_value_to_string(value, data_type)
             else:
@@ -272,67 +301,19 @@ class FileStorePathFactory:
             if external is not None:
                 return external.get_next_external_data_path(file_name), True
             path = f"{self.bucket_path(partition, bucket, canonical_partition=True)}/{file_name}"
-            # Java Float/Double.toString differs across JDK versions. Record
-            # the actual Java-style directory so every Java reader resolves
-            # the same file through IndexFileMeta.externalPath.
-            floating = any(value is not None and str(data_type).split()[0] in ('FLOAT', 'REAL', 'DOUBLE')
-                           for value, data_type in zip(partition, self.partition_types or []))
-            return to_file_io_path(path), floating
+            # Java IndexInDataFileDirPathFactory marks a path external only
+            # when a configured ExternalPathProvider selected it.
+            return to_file_io_path(path), False
         factory = self.global_index_path_factory()
         return factory.to_path(file_name), factory.is_external_path()
 
-    def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
+    def bucket_index_path(self, partition: Tuple, bucket: int, index_file) -> str:
         """Resolve a bucket index using Java partition paths and explicit locations."""
         if index_file.external_path:
             return to_file_io_path(index_file.external_path)
         if not self.index_file_in_data_file_dir:
             return f"{self.index_path()}/{index_file.file_name}"
-        path = to_file_io_path(f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}")
-        # Java Float/Double.toString can produce different digits across JDK
-        # versions. Only these floating partition spellings need a lookup.
-        if file_io is not None and index_file.index_type in ('DELETION_VECTORS', 'HASH') and not file_io.exists(path):
-            python_path = to_file_io_path(f"{self.bucket_path(partition, bucket)}/{index_file.file_name}")
-            alternate = self._find_floating_bucket_index(partition, bucket, index_file.file_name, file_io, python_path)
-            if alternate is not None:
-                return alternate
-        return path
-
-    def _find_floating_bucket_index(self, partition, bucket, file_name, file_io, python_path):
-        floating = [str(data_type).split()[0] in ('FLOAT', 'REAL', 'DOUBLE')
-                    for data_type in self.partition_types or []]
-        if not any(is_float and value is not None for is_float, value in zip(floating, partition)):
-            return None
-        # Float/Double.toString changed across JDK releases. Only if the usual
-        # path is missing, inspect floating partition components and compare
-        # their exact encoded values (including the sign of zero).
-        paths = [to_file_io_path(resolve_path(self.data_file_path(), '.'))]
-        for i, text in enumerate(self._canonical_partition(partition)):
-            prefix = _escape_partition_component(self.partition_keys[i]) + '='
-            if not floating[i] or partition[i] is None:
-                paths = [path + '/' + prefix + _escape_partition_component(text) for path in paths]
-                continue
-            encoding = '>d' if str(self.partition_types[i]).split()[0] == 'DOUBLE' else '>f'
-            expected = struct.pack(encoding, partition[i])
-            matched = []
-            for path in paths:
-                if not file_io.exists(path):
-                    continue
-                for status in file_io.list_status(path):
-                    name = status.base_name
-                    if not name.startswith(prefix):
-                        continue
-                    try:
-                        if struct.pack(encoding, float(name[len(prefix):])) == expected:
-                            matched.append(path + '/' + name)
-                    except (ValueError, OverflowError):
-                        continue
-            paths = sorted(matched)
-        bucket_name = 'postpone' if bucket == BucketMode.POSTPONE_BUCKET.value else str(bucket)
-        for path in paths:
-            candidate = '{}/{}{}/{}'.format(path, self.BUCKET_PATH_PREFIX, bucket_name, file_name)
-            if candidate != python_path and file_io.exists(candidate):
-                return candidate
-        return None
+        return to_file_io_path(f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}")
 
 
 class IndexPathFactory:
