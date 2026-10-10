@@ -132,9 +132,9 @@ class AbstractVectorSearchReadImpl:
         self._scalar_pre_filter = None
         if self._filter is None or not index_splits:
             return index_splits, raw_splits
-        matched = self._scalar_matched_rows(index_splits, snapshot)
-        if matched is not None:
-            self._scalar_pre_filter = matched
+        result = self._scalar_index_result(index_splits, snapshot)
+        if result is not None:
+            self._scalar_pre_filter = self._refine_scalar_result(index_splits, result, snapshot)
             return index_splits, raw_splits
 
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
@@ -163,6 +163,10 @@ class AbstractVectorSearchReadImpl:
         matched_rows = self._scalar_pre_filter
         if matched_rows is None:
             matched_rows = self._scalar_matched_rows(splits, snapshot)
+        return self._combine_pre_filters(splits, live_rows, matched_rows)
+
+    @staticmethod
+    def _combine_pre_filters(splits, live_rows, matched_rows):
         if live_rows is None and matched_rows is None:
             return []
 
@@ -188,6 +192,10 @@ class AbstractVectorSearchReadImpl:
         if self._filter is None:
             return None
 
+        return self._refine_scalar_result(splits, self._scalar_index_result(splits, snapshot), snapshot)
+
+    def _scalar_index_result(self, splits, snapshot=None):
+        """Evaluate scalar indexes without data reads; None means no usable result."""
         # Collect scalar index files across splits, deduplicated by file name.
         seen = set()
         scalar_files = []
@@ -211,12 +219,12 @@ class AbstractVectorSearchReadImpl:
         if scanner is None:
             return None
         try:
-            result = scanner.scan(self._filter)
+            return scanner.scan(self._filter)
         finally:
             scanner.close()
-        if result is None:
-            return None
-        if result.is_exact():
+
+    def _refine_scalar_result(self, splits, result, snapshot=None):
+        if result is not None and result.is_exact():
             return result.results()
         if not self._table.options.global_index_filter_refine_from_data():
             logging.getLogger(__name__).warning(
@@ -526,7 +534,8 @@ class AbstractVectorSearchReadImpl:
         future.add_done_callback(lambda _: reader.close())
         return future
 
-    def _search_index_splits(self, splits, query, search_limit, pre_filters, batch=False):
+    def _search_index_splits(self, splits, query, search_limit, snapshot, batch=False):
+        pre_filters = self._pre_filters(splits, snapshot)
         # Native readers finish their search before returning a completed Future.
         # Schedule the entire open/search/close operation, not just Future.result().
         option = CoreOptions.GLOBAL_INDEX_THREAD_NUM
@@ -718,10 +727,9 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
     def _read_indexed(self, splits, query_vector, snapshot):
         index_type = _vector_index_type(splits)
         search_limit = self._indexed_search_limit(index_type)
-        pre_filters = self._pre_filters(splits, snapshot)
         merged_scores = {}
         with closing(self._search_index_splits(
-                splits, query_vector, search_limit, pre_filters)) as results:
+                splits, query_vector, search_limit, snapshot)) as results:
             for split_result in results:
                 _merge_index_scores(merged_scores, split_result)
                 del split_result
@@ -754,11 +762,10 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         # passing that split's pre-filter. Each future returns n per-query results.
         index_type = _vector_index_type(index_splits)
         search_limit = self._indexed_search_limit(index_type)
-        pre_filters = self._pre_filters(index_splits, snapshot)
         # Merge each query vector's indexed results across index splits.
         merged_scores = [{} for _ in range(n)]
         with closing(self._search_index_splits(
-                index_splits, self._query_vectors, search_limit, pre_filters, batch=True)) as results:
+                index_splits, self._query_vectors, search_limit, snapshot, batch=True)) as results:
             for split_results in results:
                 for i in range(n):
                     _merge_index_scores(merged_scores[i], split_results[i])

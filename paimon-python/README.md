@@ -168,6 +168,8 @@ path select the Python writer before native data is written. If the runtime or t
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
 
+For primary-key Row writes, `rowkind.field` takes precedence over the object's `RowKind`; otherwise the object event is preserved. Plain Arrow input defaults to INSERT. Both Python and native writers apply `ignore-delete` and `ignore-update-before` before routing object rows.
+
 Batch and stream `merge_into` also use Rust core for eligible data-evolution
 Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
 `WhenNotMatched` clauses accept Arrow/pandas input, Paimon table sources, or

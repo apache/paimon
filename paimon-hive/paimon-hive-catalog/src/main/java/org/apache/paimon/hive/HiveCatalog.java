@@ -441,8 +441,13 @@ public class HiveCatalog extends AbstractCatalog {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         StorageDescriptor sd = hmsTable.getSd();
         String dataFilePath = getDataFilePath(tableIdentifier, hmsTable);
+        List<String> partitionKeys =
+                hmsTable.getPartitionKeys().stream()
+                        .map(FieldSchema::getName)
+                        .collect(Collectors.toList());
         List<Partition> hivePartitions = new ArrayList<>();
-        for (Map<String, String> partitionSpec : partitions) {
+        for (Map<String, String> spec : partitions) {
+            Map<String, String> partitionSpec = orderByPartitionKeys(partitionKeys, spec);
             Partition hivePartition = new Partition();
             StorageDescriptor newSd = new StorageDescriptor(sd);
             hivePartition.setDbName(tableIdentifier.getDatabaseName());
@@ -475,7 +480,9 @@ public class HiveCatalog extends AbstractCatalog {
                             ? partitions
                             : removePartitionsExistsInOtherBranches(identifier, partitions);
             for (Map<String, String> part : metaPartitions) {
-                List<String> partitionValues = new ArrayList<>(part.values());
+                List<String> partitionValues =
+                        new ArrayList<>(
+                                orderByPartitionKeys(schema.partitionKeys(), part).values());
                 try {
                     clients()
                             .execute(
@@ -512,6 +519,22 @@ public class HiveCatalog extends AbstractCatalog {
                 + Path.SEPARATOR
                 + PartitionPathUtils.generatePartitionPathUtil(
                         new LinkedHashMap<>(partitionSpec), onlyValue);
+    }
+
+    /**
+     * Hive metastore matches partition values to partition keys by position, so reorder the spec by
+     * the partition keys. The spec is returned unchanged if its keys differ from them.
+     */
+    private static Map<String, String> orderByPartitionKeys(
+            List<String> partitionKeys, Map<String, String> spec) {
+        if (partitionKeys.size() != spec.size() || !spec.keySet().containsAll(partitionKeys)) {
+            return spec;
+        }
+        Map<String, String> ordered = new LinkedHashMap<>();
+        for (String key : partitionKeys) {
+            ordered.put(key, spec.get(key));
+        }
+        return ordered;
     }
 
     @Override

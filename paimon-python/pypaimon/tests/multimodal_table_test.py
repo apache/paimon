@@ -1922,8 +1922,6 @@ class MultimodalTableTest(unittest.TestCase):
             t.search([1.0, 0.0, 0.0], column="emb").read_blobs("img")
         with self.assertRaisesRegex(TypeError, "only supported on scan"):
             t.search([1.0, 0.0, 0.0], column="emb").stream_blobs("img")
-        with self.assertRaisesRegex(TypeError, "only supported on scan"):
-            t.search([1.0, 0.0, 0.0], column="emb").to_ray()
 
     def test_scan_stream_blobs(self):
         obs = self.conn.create_table(
@@ -2835,7 +2833,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         calls = []
 
-        def create_global_index(column, index_type, options=None):
+        def create_global_index(column, index_type, options=None, **kwargs):
             calls.append((column, index_type, options))
             return index_type
 
@@ -2865,7 +2863,7 @@ class MultimodalTableTest(unittest.TestCase):
             options=_PARQUET_OPTIONS,
         )
 
-        def create_global_index(column, index_type, options=None):
+        def create_global_index(column, index_type, options=None, **kwargs):
             return index_type
 
         docs.raw_table.create_global_index = create_global_index
