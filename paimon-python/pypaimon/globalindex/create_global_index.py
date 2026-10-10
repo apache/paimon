@@ -174,9 +174,9 @@ class GlobalIndexBuilder:
             concurrency, ray_remote_args = validate_build_options(
                 self, concurrency, ray_remote_args)
         partition_filter = self._resolve_partition_filter()
-        if execution == "local" and self._index_type in _SORTED_INDEX_IDENTIFIERS:
-            from pypaimon.globalindex.native_index_build import build_native_sorted_index
-            messages = build_native_sorted_index(self, partition_filter)
+        if execution == "local":
+            from pypaimon.globalindex.native_index_build import build_native_global_index
+            messages = build_native_global_index(self, partition_filter)
             if messages is not None:
                 return messages
         read_builder = self._table.new_read_builder()

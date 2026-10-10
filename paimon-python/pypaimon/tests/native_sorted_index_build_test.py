@@ -38,7 +38,7 @@ from pypaimon.write.table_commit import BatchTableCommit
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_sorted_global_index_build_builder'),
+    not native_method_available('Table', 'new_global_index_build_builder'),
     reason='Rust index builder required')]
 
 SCHEMA = pa.schema([('id', pa.int32()), ('name', pa.string()), ('pt', pa.int32())])
@@ -258,7 +258,7 @@ def test_binding_partition_conjunction_and_rejection_are_core_semantics(rest_cat
     table = _create(catalog, partitioned=True)
     _append(table, ROWS)
     predicates = table.new_read_builder().new_predicate_builder()
-    native = _native_table(table).new_sorted_global_index_build_builder().with_index_column('id').with_index_type(kind)
+    native = _native_table(table).new_global_index_build_builder().with_index_column('id').with_index_type(kind)
     # Python partition predicates carry partition-row indices; bindings resolve by field name.
     native.with_partition_filter(_predicate_to_native(predicates.equal('pt', 0)))
     native.with_partition_filter(_predicate_to_native(predicates.equal('pt', 1)))
@@ -275,7 +275,7 @@ def test_empty_table_build_is_a_noop(rest_catalog, kind):
     table = _create(catalog)
     assert _build(table, kind) == []
     assert table.create_global_index('name', index_type=kind) == 0
-    assert _native_table(table).new_sorted_global_index_build_builder().with_index_column('name').execute() == 0
+    assert _native_table(table).new_global_index_build_builder().with_index_column('name').execute() == 0
     assert table.snapshot_manager().get_latest_snapshot() is None
 
 
@@ -284,7 +284,7 @@ def test_native_binding_can_build_and_execute_separate_indexes(rest_catalog):
     table = _create(catalog)
     _append(table, ROWS)
     native = _native_table(table)
-    builder = native.new_sorted_global_index_build_builder().with_index_column('name')
+    builder = native.new_global_index_build_builder().with_index_column('name')
     prepared = builder.build()
     assert all(message.serialize() for message in prepared)
     _commit(table, from_native_commit_messages(table, prepared))
