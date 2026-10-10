@@ -35,21 +35,7 @@ from pypaimon.globalindex.key_serializer import KeySerializer
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.sst_file_reader import SstFileReader
-from pypaimon.globalindex.memory_slice_input import MemorySliceInput
-
-
-def _deserialize_row_ids(data: bytes) -> List[int]:
-    data_input = MemorySliceInput(data)
-    length = data_input.read_var_len_int()
-
-    if length <= 0:
-        raise ValueError(f"Invalid row id length: {length}")
-
-    row_ids = []
-    for _ in range(length):
-        row_ids.append(data_input.read_var_len_long())
-
-    return row_ids
+from pypaimon.globalindex.btree.btree_posting_list import add_row_ids
 
 
 class BTreeIndexReader:
@@ -96,7 +82,7 @@ class BTreeIndexReader:
 
             # Read footer to get index and bloom filter handles
             self.footer = self._read_footer()
-            if self.footer.version != BTreeFileFooter.VERSION_1:
+            if self.footer.version not in (BTreeFileFooter.VERSION_1, BTreeFileFooter.VERSION_2):
                 raise ValueError(
                     f"Unsupported BTree index file version: {self.footer.version}")
 
@@ -197,9 +183,7 @@ class BTreeIndexReader:
                 if difference > 0 or (not to_inclusive and difference == 0):
                     return result
 
-                row_ids = _deserialize_row_ids(value_bytes)
-                for row_id in row_ids:
-                    result.add(row_id)
+                add_row_ids(value_bytes, self.footer.version, result)
 
         return result
 
@@ -273,8 +257,7 @@ class BTreeIndexReader:
         result = RoaringBitmap64()
         row_ids = self.reader.lookup(self.key_serializer.serialize(key))
         if row_ids is not None:
-            for row_id in _deserialize_row_ids(row_ids):
-                result.add(row_id)
+            add_row_ids(row_ids, self.footer.version, result)
         return result
 
     def close(self) -> None:
