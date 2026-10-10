@@ -67,6 +67,14 @@ def build_native_global_index(builder, partition_filter):
                         if key != 'index.type'})
         options['fields.' + column + '.train.sample-ratio'] = str(train_sample_ratio(
             table.options.options.to_map(), builder._index_type, column, builder._user_options))
+    if builder._index_type == 'full-text' or builder._index_type in VINDEX_IDENTIFIERS:
+        # Resolve typed values and explicit default overrides through the same
+        # ConfigOption conversion as the local builder before crossing the FFI.
+        try:
+            parallelism = int(builder._core_options.global_index_build_parallelism())
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError('Invalid global-index.build.parallelism: %s' % error) from error
+        options['global-index.build.parallelism'] = str(parallelism)
     native.with_options(options)
     if partition_filter is not None:
         native.with_partition_filter(_predicate_to_native(partition_filter))

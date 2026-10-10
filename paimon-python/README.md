@@ -805,6 +805,20 @@ budgets. This option controls index I/O, not shard search or native compute
 threads.
 
 
+# Native local index builds
+
+With `write.native.enabled=true`, eligible REST data-evolution tables delegate
+local full-text and vector index construction to Rust. Set
+`global-index.build.parallelism` in table options or per-build options to bound
+the number of shards built concurrently; the default is 1. Each shard owns its
+writer and may also use native worker threads, so increase the value
+conservatively. Commit messages retain shard plan order.
+
+`GlobalIndexBuilder.build()` returns unpublished messages for either committer.
+A failed build waits for started shards and cleans its private outputs.
+After messages are returned, the caller owns those files. A failed or uncertain
+commit retains them; use explicit abort only when they will not be committed.
+
 # Native vector index training
 
 The native vector index writer submits training vectors in bounded batches.
