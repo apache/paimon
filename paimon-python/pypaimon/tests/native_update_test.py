@@ -1027,5 +1027,5 @@ def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, op
             read = table.new_read_builder()
             actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
             assert actual.to_pydict() == {'id': [1, 2], 'part': parts, 'value': [value, value]}
-    expected_calls = 2 if layout in ('python-escaped', 'canonical', 'ordinary', 'directory', 'external') else 0
+    expected_calls = 0 if layout == 'external-binary' else 2
     assert len(native_calls) == expected_calls

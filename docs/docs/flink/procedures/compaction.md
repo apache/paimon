@@ -130,9 +130,9 @@ To compact databases. Arguments:
 
 - `mode`: compact mode. "divided" (default): start a sink for each table, detecting the new table requires restarting the job; "combined": start a single combined sink for all tables, the new table will be automatically detected.
 
-- `includingTables`: to specify tables. You can use regular expression.
+- `includingTables`: to specify tables. The format is `databaseName.tableName`, and the whole name must match. You can use regular expression, for example `.*\.table_.*`.
 
-- `excludingTables`: to specify tables that are not compacted. You can use regular expression.
+- `excludingTables`: to specify tables that are not compacted. The usage is same as `includingTables`.
 
 - `tableOptions`: additional dynamic options of the table.
 
@@ -198,8 +198,8 @@ CALL [catalog.]sys.compact_database(
 CALL sys.compact_database(
     including_databases => 'db1|db2',
     mode => 'combined',
-    including_tables => 'table_.*',
-    excluding_tables => 'ignore',
+    including_tables => '.*\.table_.*',
+    excluding_tables => '.*\.ignore',
     table_options => 'sink.parallelism=4',
     compact_strategy => 'full');
 ```

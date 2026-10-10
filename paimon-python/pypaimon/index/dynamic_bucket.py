@@ -84,7 +84,7 @@ def validate_bucket_id(bucket: int) -> None:
 def _iter_hashes(table, entry: IndexManifestEntry) -> Iterator[int]:
     meta = entry.index_file
     path = table.path_factory().bucket_index_path(
-        tuple(entry.partition.values), entry.bucket, meta, table.file_io
+        tuple(entry.partition.values), entry.bucket, meta
     )
     with table.file_io.new_input_stream(path) as stream:
         remainder = b""

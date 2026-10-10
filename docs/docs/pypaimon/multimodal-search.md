@@ -50,6 +50,32 @@ docs.create_index("embedding", index_type="ivf-pq")
 docs.create_index("content", index_type="full-text")
 ```
 
+### Build vector indexes with Ray
+
+Pass `execution="ray"` to distribute native vector-index shards across Ray
+workers. BTree, Bitmap and full-text builds still use local execution.
+
+```python
+docs.create_index(
+    "embedding", index_type="ivf-flat",
+    options={"global-index.row-count-per-shard": "1000000"},
+    execution="ray", concurrency=4, ray_remote_args={"num_cpus": 1},
+)
+```
+
+The driver plans uncovered row ranges from one snapshot. Workers build files;
+the driver publishes their index entries in one commit after all shards succeed.
+`concurrency` bounds running shards; `global-index.build.parallelism` controls
+only local thread-based builds. Install the same `pypaimon[ray,vindex]`
+dependencies on every worker and use storage accessible to the entire cluster.
+
+Write tasks require `max_retries=0` and `retry_exceptions=False` (set by default).
+On a task failure, the driver stops submissions, waits for dispatched tasks,
+and removes their uncommitted output files. Rerun the build after the failure;
+already committed index coverage is skipped. Driver/cluster termination can
+still leave orphan files for normal orphan-file maintenance. Retain the source
+snapshot's files until the build and its commit finish.
+
 ## Search
 
 Use `search` for one vector query or one full-text query.
@@ -248,6 +274,15 @@ filtering and final row lookup.
 In particular, `pre_filter` filters candidates before ranking; `where()` filters
 the selected rows and can return fewer than the requested number of results.
 
+For indexed vector searches, workers evaluate scalar predicates and build
+live-row filters at the query snapshot. Tasks using the same scalar index files
+share one Ray scalar-index evaluation; its result is passed directly to dependent
+tasks without materializing the bitmap on the driver. Candidate verification
+reads only filter columns and row IDs in the task's shard range, without scanning
+the scalar indexes again. The final shard filter is reused across a batch's query
+vectors. This lets expensive verification scale with search concurrency; partially
+overlapping scalar index inputs can still cause repeated index reads.
+
 Index search, raw scans, refinement, lookup, and task retries use the same read
 snapshot. The existing `snapshot_id` and `tag_name` arguments to `search()` also
 work with Ray execution. A failed task fails the query rather than returning
@@ -401,3 +436,30 @@ batch_neighbors = (
     .to_list()
 )
 ```
+
+## Return search rows as a Ray Dataset
+
+Vector queries support `to_ray()` to run candidate search on Ray and fetch the
+selected columns on workers. Single queries return one Dataset; `search_vectors`
+returns one Dataset per input vector. Candidate IDs and scores are merged on the
+driver, while projected row data stays in Ray blocks.
+
+```python
+ds = (docs.search([0.1, 0.2, 0.3], column="embedding")
+      .select(["content", "image"])
+      .with_score().order_by_score().limit(100)
+      .to_ray(concurrency=4, override_num_blocks=4))
+```
+
+Search runs eagerly; row lookup is lazy and uses the same captured snapshot.
+Retain that snapshot's files until downstream Dataset actions finish. `where`
+filters the candidates during lookup without refilling top-k. `order_by_score`
+performs a distributed global sort, breaking ties by ascending row ID. Empty
+results retain their output schema, including the score column.
+
+BLOB values are serialized descriptors, as with `scan().to_ray()`. Pass the
+Dataset to `docs.map_with_blobs(...)` to resolve payloads on workers. Projections
+must be nonempty and have unique names. This API requires data evolution;
+`execution="local"` selects local candidate search while keeping distributed
+lookup. Batch queries share candidate-search work but have separate lazy lookup
+pipelines for each query.

@@ -210,11 +210,9 @@ class TableScan:
                         self.file_scanner.partition_key_predicate,
                     ) if predicate is not None
                 ])
-            # Append positions and Python sorted-index refinement still precede
-            # LIMIT. Ordinary PK shards are selected inside Rust before LIMIT.
-            defer_limit = has_distribution and (
-                not self.table.is_primary_key_table
-                or self.table.options.global_index_enabled())
+            # Append positions still precede LIMIT. Rust owns PK shards and
+            # source-backed sorted-index refinement before applying LIMIT.
+            defer_limit = has_distribution and not self.table.is_primary_key_table
             plan = native_plan(
                 self.table,
                 predicate=native_predicate,
@@ -240,11 +238,6 @@ class TableScan:
                 splits = [s for s in splits
                           if getattr(s, 'partition', None) is None
                           or partition_predicate.test(s.partition)]
-            if (self.table.is_primary_key_table and not fs.is_streaming and self.predicate is not None
-                    and self.table.options.global_index_enabled()
-                    and plan.snapshot_id is not None):
-                snapshot = self.table.snapshot_manager().get_snapshot_by_id(plan.snapshot_id)
-                splits = fs._apply_primary_key_sorted_indexes(splits, snapshot)
             if chunk_shuffle is None and defer_limit:
                 # A partial IndexedSplit plus a file-wide DV cardinality cannot
                 # reveal how many deleted rows lie inside the selected range.

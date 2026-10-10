@@ -586,8 +586,29 @@ class _PreFilterQuery(ScanQuery):
     def stream_blobs(self, *args, **kwargs):
         raise TypeError("stream_blobs is only supported on scan(), not search queries.")
 
-    def to_ray(self, *args, **kwargs):
-        raise TypeError("to_ray is only supported on scan(), not search queries.")
+    def to_ray(self, *, execution="ray", concurrency=None, ray_remote_args=None,
+               override_num_blocks=None):
+        """Return search rows as a Ray Dataset, with BLOB descriptors.
+
+        Search resolves candidates eagerly on one snapshot. Projected row data
+        is fetched lazily by Ray workers on that same snapshot. Retain its files
+        until the Dataset has finished executing.
+        """
+        from pypaimon.ray.search_result import read_search_result
+        from pypaimon.ray.vector_search import _execution_options
+
+        concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
+        query = self._for_execution()
+        if execution == "ray":
+            result = query._execute_ray(concurrency, remote_args)
+        elif execution == "local":
+            result = query._result_factory(query)
+        else:
+            raise ValueError("execution must be 'local' or 'ray'.")
+        return read_search_result(query, result, concurrency, remote_args, override_num_blocks)
+
+    def _execute_ray(self, concurrency, ray_remote_args):
+        raise NotImplementedError("Ray search is not supported for this query type.")
 
     def to_arrow_batch_reader(self, *args, **kwargs):
         raise TypeError(
@@ -651,6 +672,12 @@ class VectorQuery(_PreFilterQuery):
         return self.to_arrow(
             execution=execution, concurrency=concurrency,
             ray_remote_args=ray_remote_args).to_pylist()
+
+    def _execute_ray(self, concurrency, ray_remote_args):
+        from pypaimon.ray.vector_search import _execute_vector_search
+        return _execute_vector_search(
+            self._vector_search_builder(self), concurrency=concurrency,
+            ray_remote_args=ray_remote_args)
 
     def _execute_vector(self, query):
         return self._vector_search_builder(query).execute_local()
@@ -816,6 +843,26 @@ class BatchVectorQuery(_PreFilterQuery):
             self._batch_vector_search_builder(query),
             concurrency=concurrency, ray_remote_args=ray_remote_args)
         return query._read_batch_results(results)
+
+    def to_ray(self, *, execution="ray", concurrency=None, ray_remote_args=None,
+               override_num_blocks=None):
+        """Return one lazy Ray Dataset per query, with distributed row lookup."""
+        from pypaimon.ray.batch_vector_search import _execute_batch_vector_search
+        from pypaimon.ray.search_result import read_search_result
+        from pypaimon.ray.vector_search import _execution_options
+
+        concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
+        query = self._for_execution()
+        if execution == "ray":
+            results = _execute_batch_vector_search(
+                query._batch_vector_search_builder(query), concurrency=concurrency,
+                ray_remote_args=remote_args)
+        elif execution == "local":
+            results = query._execute_batch_vector(query)
+        else:
+            raise ValueError("execution must be 'local' or 'ray'.")
+        return [read_search_result(query, result, concurrency, remote_args, override_num_blocks)
+                for result in results]
 
     def _read_batch_results(self, results):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult

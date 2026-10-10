@@ -73,6 +73,10 @@ def create_global_index(
     partition_filter: Optional[Predicate] = None,
     partitions: Optional[Union[Dict[str, object], Sequence[Dict[str, object]]]] = None,
     options: Optional[Dict[str, object]] = None,
+    *,
+    execution="local",
+    concurrency=None,
+    ray_remote_args=None,
 ) -> int:
     """Build and commit global index files for a table.
 
@@ -87,7 +91,8 @@ def create_global_index(
         partitions=partitions,
         options=options,
     )
-    messages = builder.build()
+    messages = builder.build(
+        execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
     if not messages:
         return 0
 
@@ -159,7 +164,15 @@ class GlobalIndexBuilder:
         if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
             self._validate_generic_index_table()
 
-    def build(self) -> List[CommitMessage]:
+    def build(self, *, execution="local", concurrency=None, ray_remote_args=None) -> List[CommitMessage]:
+        if execution not in ("local", "ray"):
+            raise ValueError("execution must be 'local' or 'ray'.")
+        if execution == "local" and (concurrency is not None or ray_remote_args is not None):
+            raise ValueError("Ray options require execution='ray'.")
+        if execution == "ray":
+            from pypaimon.ray.vector_index_build import validate_build_options
+            concurrency, ray_remote_args = validate_build_options(
+                self, concurrency, ray_remote_args)
         read_builder = self._table.new_read_builder()
         partition_filter = self._resolve_partition_filter()
         if partition_filter is not None:
@@ -203,6 +216,11 @@ class GlobalIndexBuilder:
         if self._index_type in _SORTED_INDEX_IDENTIFIERS:
             return self._build_sorted_index(
                 splits, unindexed_ranges, index_field, table_read, index_path)
+        if execution == "ray":
+            from pypaimon.ray.vector_index_build import build_vector_index
+            return build_vector_index(
+                self, splits, unindexed_ranges, index_field, table_read,
+                index_path, concurrency, ray_remote_args)
         return self._build_generic_index(
             splits, unindexed_ranges, index_field, table_read, index_path)
 
@@ -380,7 +398,7 @@ class GlobalIndexBuilder:
             raise
 
     def _build_generic_shard(
-        self, index_split, index_range, index_field, table_read, index_path: str
+        self, index_split, index_range, index_field, table_read, index_path: str, file_name=None
     ) -> Optional[CommitMessage]:
         from pypaimon.read.table_read import _ClosableArrowBatchReader
 
@@ -396,6 +414,8 @@ class GlobalIndexBuilder:
                     if writer is None:
                         writer = self._create_generic_index_writer(
                             index_path, index_field)
+                        if file_name is not None:
+                            writer.file_name = file_name
                     if self._index_type in VINDEX_IDENTIFIERS:
                         if batch.column(SpecialFields.ROW_ID.name).null_count:
                             raise ValueError(
