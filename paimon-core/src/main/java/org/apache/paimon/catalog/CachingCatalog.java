@@ -391,6 +391,15 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
+    public void dropDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.dropDonePartitions(identifier, partitions);
+        if (partitionCache != null) {
+            partitionCache.invalidate(identifier);
+        }
+    }
+
+    @Override
     public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
         wrapped.alterPartitions(identifier, partitions);

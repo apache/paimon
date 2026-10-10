@@ -39,7 +39,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -198,8 +197,8 @@ public class NormalPartitionExpire implements PartitionExpire {
         if (partitionModification != null) {
             try {
                 partitionModification.dropPartitions(expiredBatchPartitions);
-                // also drop corresponding .done partitions
-                partitionModification.dropPartitions(toDonePartitions(expiredBatchPartitions));
+                // Markers are metadata only and may not be valid values of the partition type.
+                partitionModification.dropDonePartitions(expiredBatchPartitions);
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(e);
             }
@@ -208,24 +207,6 @@ public class NormalPartitionExpire implements PartitionExpire {
             // (metastore.partitioned-table = true), so no need to handle them here
             commit.dropPartitions(expiredBatchPartitions, commitIdentifier);
         }
-    }
-
-    private List<Map<String, String>> toDonePartitions(
-            List<Map<String, String>> expiredPartitions) {
-        List<Map<String, String>> donePartitions = new ArrayList<>(expiredPartitions.size());
-        for (Map<String, String> partition : expiredPartitions) {
-            LinkedHashMap<String, String> donePartition = new LinkedHashMap<>(partition);
-            // append .done suffix to the last partition field value
-            Map.Entry<String, String> lastEntry = null;
-            for (Map.Entry<String, String> entry : donePartition.entrySet()) {
-                lastEntry = entry;
-            }
-            if (lastEntry != null) {
-                donePartition.put(lastEntry.getKey(), lastEntry.getValue() + ".done");
-                donePartitions.add(donePartition);
-            }
-        }
-        return donePartitions;
     }
 
     private List<Map<String, String>> convertToPartitionString(

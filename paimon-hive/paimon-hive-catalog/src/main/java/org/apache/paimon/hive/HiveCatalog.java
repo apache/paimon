@@ -40,6 +40,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.partition.actions.AddDonePartitionAction;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -474,26 +475,46 @@ public class HiveCatalog extends AbstractCatalog {
                     tagToPart
                             ? partitions
                             : removePartitionsExistsInOtherBranches(identifier, partitions);
-            for (Map<String, String> part : metaPartitions) {
-                List<String> partitionValues = new ArrayList<>(part.values());
-                try {
-                    clients()
-                            .execute(
-                                    client ->
-                                            client.dropPartition(
-                                                    identifier.getDatabaseName(),
-                                                    identifier.getTableName(),
-                                                    partitionValues,
-                                                    false));
-                } catch (NoSuchObjectException e) {
-                    // do nothing if the partition not exists
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }
+            dropPartitionsFromMetastore(identifier, metaPartitions);
         }
         if (!tagToPart) {
             super.dropPartitions(identifier, partitions);
+        }
+    }
+
+    @Override
+    public void dropDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        TableSchema schema = loadTableSchema(identifier);
+        if (!schema.partitionKeys().isEmpty()
+                && CoreOptions.fromMap(schema.options()).partitionedTableInMetastore()) {
+            // Check the original values: DATE and other typed fields cannot parse a .done suffix.
+            List<Map<String, String>> donePartitions =
+                    removePartitionsExistsInOtherBranches(identifier, partitions).stream()
+                            .map(AddDonePartitionAction::toDonePartition)
+                            .collect(Collectors.toList());
+            dropPartitionsFromMetastore(identifier, donePartitions);
+        }
+    }
+
+    private void dropPartitionsFromMetastore(
+            Identifier identifier, List<Map<String, String>> partitions) {
+        for (Map<String, String> part : partitions) {
+            List<String> partitionValues = new ArrayList<>(part.values());
+            try {
+                clients()
+                        .execute(
+                                client ->
+                                        client.dropPartition(
+                                                identifier.getDatabaseName(),
+                                                identifier.getTableName(),
+                                                partitionValues,
+                                                false));
+            } catch (NoSuchObjectException e) {
+                // Missing partitions and markers are already removed.
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 

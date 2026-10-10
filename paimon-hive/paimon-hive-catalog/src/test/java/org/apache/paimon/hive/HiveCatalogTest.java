@@ -28,14 +28,17 @@ import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.partition.actions.AddDonePartitionAction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -56,8 +59,12 @@ import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -678,6 +685,163 @@ public class HiveCatalogTest extends CatalogTestBase {
         assertHmsDts(databaseName, tableName, "20250104");
         assertPhysicalDts(snapshotId, "20250104");
         assertPhysicalDts(identifier);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false,values-time,false",
+        "false,values-time,true",
+        "true,values-time,false",
+        "true,values-time,true",
+        "false,update-time,false",
+        "false,update-time,true",
+        "true,update-time,false",
+        "true,update-time,true"
+    })
+    public void testExpireDatePartition(boolean legacyName, String strategy, boolean withMarker)
+            throws Exception {
+        Identifier identifier = Identifier.create("test_date_expiration", "t");
+        FileStoreTable table = createDatePartitionTable(identifier, legacyName);
+        LocalDate today = LocalDate.now();
+        LocalDate expiredDate = today.minusDays(5);
+        LocalDate retainedDate = today.minusDays(1);
+        writeDatePartition(table, expiredDate);
+        writeDatePartition(table, retainedDate);
+        String expiredValue = datePartitionValue(expiredDate, legacyName);
+        String retainedValue = datePartitionValue(retainedDate, legacyName);
+        if (withMarker) {
+            AddDonePartitionAction action =
+                    new AddDonePartitionAction(PartitionModification.create(catalog, identifier));
+            action.markDone("dt=" + expiredValue);
+            action.markDone("dt=" + retainedValue);
+        }
+
+        Map<String, String> options = new HashMap<>();
+        boolean valuesTime = "values-time".equals(strategy);
+        options.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), valuesTime ? "2 d" : "0 ms");
+        options.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0 ms");
+        options.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), strategy);
+        options.put(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd");
+        table = table.copy(options);
+        PartitionExpire expire = table.store().newPartitionExpire("expire", table);
+        List<Map<String, String>> expected =
+                valuesTime
+                        ? partitionSpecs(expiredValue)
+                        : partitionSpecs(expiredValue, retainedValue);
+        assertThat(expire.expire(Long.MAX_VALUE)).containsExactlyElementsOf(expected);
+
+        if (valuesTime) {
+            assertThat(table.newScan().listPartitions())
+                    .extracting(partition -> partition.getInt(0))
+                    .containsExactly((int) retainedDate.toEpochDay());
+            assertHmsDts(
+                    identifier.getDatabaseName(),
+                    identifier.getTableName(),
+                    withMarker
+                            ? new String[] {retainedValue, retainedValue + ".done"}
+                            : new String[] {retainedValue});
+        } else {
+            assertThat(table.newScan().listPartitions()).isEmpty();
+            assertHmsDts(identifier.getDatabaseName(), identifier.getTableName());
+        }
+        // Retrying cleanup must also work when the marker no longer exists.
+        catalog.dropDonePartitions(identifier, expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDropDonePartitionsPreservesOtherBranches(boolean legacyName) throws Exception {
+        Identifier identifier = Identifier.create("test_date_markers_branches", "t");
+        FileStoreTable table = createDatePartitionTable(identifier, legacyName);
+        table.createBranch("dev");
+        Identifier devIdentifier =
+                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), "dev");
+        FileStoreTable devTable = (FileStoreTable) catalog.getTable(devIdentifier);
+        LocalDate date = LocalDate.of(2023, 1, 1);
+        writeDatePartition(table, date);
+        writeDatePartition(devTable, date);
+        String value = datePartitionValue(date, legacyName);
+        new AddDonePartitionAction(PartitionModification.create(catalog, identifier))
+                .markDone("dt=" + value);
+
+        catalog.dropPartitions(identifier, partitionSpecs(value));
+        catalog.dropDonePartitions(identifier, partitionSpecs(value));
+        assertHmsDts(
+                identifier.getDatabaseName(), identifier.getTableName(), value, value + ".done");
+        assertThat(table.newScan().listPartitions()).isEmpty();
+        assertThat(devTable.newScan().listPartitions())
+                .extracting(partition -> partition.getInt(0))
+                .containsExactly((int) date.toEpochDay());
+
+        catalog.dropPartitions(devIdentifier, partitionSpecs(value));
+        catalog.dropDonePartitions(devIdentifier, partitionSpecs(value));
+        assertHmsDts(identifier.getDatabaseName(), identifier.getTableName());
+        assertThat(devTable.newScan().listPartitions()).isEmpty();
+    }
+
+    @Test
+    public void testDropDonePartitionsOnlyRemovesMetadata() throws Exception {
+        Identifier identifier = Identifier.create("test_string_markers", "t");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(FILE_FORMAT.key(), "avro")
+                        .option(FILE_COMPRESSION.key(), "snappy")
+                        .option(MANIFEST_COMPRESSION.key(), "snappy")
+                        .build(),
+                false);
+        writeAppendPartition(identifier, "20230101");
+        new AddDonePartitionAction(PartitionModification.create(catalog, identifier))
+                .markDone("dt=20230101");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Long snapshotId = table.snapshotManager().latestSnapshotId();
+
+        catalog.dropDonePartitions(identifier, partitionSpecs("20230101"));
+
+        assertHmsDts(identifier.getDatabaseName(), identifier.getTableName(), "20230101");
+        assertPhysicalDts(identifier, "20230101");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
+    }
+
+    private FileStoreTable createDatePartitionTable(Identifier identifier, boolean legacyName)
+            throws Exception {
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("v", DataTypes.INT())
+                        .column("dt", DataTypes.DATE())
+                        .partitionKeys("dt")
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(
+                                CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(),
+                                Boolean.toString(legacyName))
+                        .option(FILE_FORMAT.key(), "avro")
+                        .option(FILE_COMPRESSION.key(), "snappy")
+                        .option(MANIFEST_COMPRESSION.key(), "snappy")
+                        .build(),
+                false);
+        return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    private void writeDatePartition(FileStoreTable table, LocalDate date) throws Exception {
+        BatchWriteBuilder builder =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"))
+                        .newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, (int) date.toEpochDay()));
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private static String datePartitionValue(LocalDate date, boolean legacyName) {
+        return legacyName ? Long.toString(date.toEpochDay()) : date.toString();
     }
 
     @Test

@@ -426,6 +426,32 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testDropDonePartitionsInvalidatesPartitionCache() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        Catalog delegate =
+                new DelegateCatalog(wrapped) {
+                    @Override
+                    public CatalogLoader catalogLoader() {
+                        return wrapped.catalogLoader();
+                    }
+                };
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(delegate, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Partition marker =
+                new Partition(singletonMap("dt", "20260717.done"), 0, 0, 0, 0, -1, false);
+        when(wrapped.listPartitions(identifier)).thenReturn(singletonList(marker), emptyList());
+
+        assertThat(catalog.listPartitions(identifier)).containsExactly(marker);
+        catalog.dropDonePartitions(identifier, singletonList(spec));
+
+        Mockito.verify(wrapped).dropDonePartitions(identifier, singletonList(spec));
+        Mockito.verify(wrapped, Mockito.never()).dropPartitions(identifier, singletonList(spec));
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+    }
+
+    @Test
     public void testDeadlock() throws Exception {
         Catalog underlyCatalog = this.catalog;
         TestableCachingCatalog catalog =

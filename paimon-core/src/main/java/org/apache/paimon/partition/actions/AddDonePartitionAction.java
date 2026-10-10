@@ -41,13 +41,21 @@ public class AddDonePartitionAction implements PartitionMarkDoneAction {
 
     @Override
     public void markDone(String partition) throws Exception {
-        LinkedHashMap<String, String> doneSpec = extractPartitionSpecFromPath(new Path(partition));
-        Map.Entry<String, String> lastField = tailEntry(doneSpec);
-        doneSpec.put(lastField.getKey(), lastField.getValue() + ".done");
-        partitionModification.createPartitions(Collections.singletonList(doneSpec));
+        partitionModification.createPartitions(
+                Collections.singletonList(
+                        toDonePartition(extractPartitionSpecFromPath(new Path(partition)))));
     }
 
-    private Map.Entry<String, String> tailEntry(LinkedHashMap<String, String> partitionSpec) {
+    /** Append the marker suffix to the last partition field without changing the original spec. */
+    public static Map<String, String> toDonePartition(Map<String, String> partition) {
+        LinkedHashMap<String, String> doneSpec = new LinkedHashMap<>(partition);
+        Map.Entry<String, String> lastField = tailEntry(doneSpec);
+        doneSpec.put(lastField.getKey(), lastField.getValue() + ".done");
+        return doneSpec;
+    }
+
+    private static Map.Entry<String, String> tailEntry(
+            LinkedHashMap<String, String> partitionSpec) {
         return Iterators.getLast(partitionSpec.entrySet().iterator());
     }
 

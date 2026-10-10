@@ -132,19 +132,11 @@ public class PartitionExpireTest {
                     @Override
                     public void dropPartitions(List<Map<String, String>> partitions)
                             throws Catalog.TableNotExistException {
-                        List<Map<String, String>> dataPartitions = new ArrayList<>();
                         for (Map<String, String> partition : partitions) {
                             // only record partitions that were created
                             if (createdPartitions.remove(partition)) {
                                 deletedPartitions.add(partition);
-                                dataPartitions.add(partition);
-                            } else if (partition.values().stream()
-                                    .noneMatch(value -> value.endsWith(".done"))) {
-                                dataPartitions.add(partition);
                             }
-                        }
-                        if (dataPartitions.isEmpty()) {
-                            return;
                         }
                         try (FileStoreCommit commit =
                                 table.store()
@@ -152,8 +144,18 @@ public class PartitionExpireTest {
                                                 createCommitUser(
                                                         table.coreOptions().toConfiguration()),
                                                 null)) {
-                            commit.dropPartitions(
-                                    dataPartitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                        }
+                    }
+
+                    @Override
+                    public void dropDonePartitions(List<Map<String, String>> partitions) {
+                        for (Map<String, String> partition : partitions) {
+                            Map<String, String> donePartition =
+                                    AddDonePartitionAction.toDonePartition(partition);
+                            if (createdPartitions.remove(donePartition)) {
+                                deletedPartitions.add(donePartition);
+                            }
                         }
                     }
 
