@@ -748,27 +748,6 @@ public interface Catalog extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     /**
-     * Acquire a lease for this exact table UUID, branch and commit user. An empty result means
-     * another writer currently holds the lease. The grant includes the authoritative snapshot head.
-     *
-     * <p>Implementations must enforce ownership for all snapshot writers, including those that do
-     * not acquire leases, in the transaction that publishes the snapshot. A new successful
-     * publication releases the lease atomically; failed attempts stop renewal and expire. Existing
-     * snapshot compare-and-swap and conflict validation remain required.
-     */
-    default Optional<CatalogCommitLock> acquireCommitLock(
-            Identifier identifier, String tableUuid, String commitUser)
-            throws Catalog.TableNotExistException {
-        throw new UnsupportedOperationException("This catalog does not support commit leases.");
-    }
-
-    /** Renew an active lease for its exact owner; return false after expiry or ownership loss. */
-    default boolean renewCommitLock(Identifier identifier, String tableUuid, String commitUser)
-            throws Catalog.TableNotExistException {
-        throw new UnsupportedOperationException("This catalog does not support commit leases.");
-    }
-
-    /**
      * Return the snapshot of table identified by the given {@link Identifier}.
      *
      * @param identifier Path of the table

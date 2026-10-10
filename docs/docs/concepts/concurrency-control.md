@@ -74,26 +74,28 @@ configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
 ## REST Catalog Commit Leases
 
-A REST catalog can expose optional table commit leases. Set `rest.commit.lock-enabled = true`
-on the table to allow lease acquisition; the option defaults to `false`. Enabling this capability
-does not automatically make writers acquire leases. The catalog API exposes acquisition and
-renewal for callers that manage a commit lease explicitly.
+The REST catalog can coordinate snapshot publication using table commit leases. Set
+`rest.commit.lock-enabled = true` on the table to allow lease acquisition; this capability option
+is disabled by default and is independent of the catalog options `lock.enabled` and `lock.type`.
+Enabling it does not automatically acquire leases for writers.
 
-The client supplies the stable table UUID and its exact `commitUser` when acquiring and renewing.
-A grant includes the server's current snapshot; the holder uses that head to rebuild and validate
-its changes, renewing the lease while preparing and publishing. The existing snapshot commit
-request is unchanged: the server checks ownership using `snapshot.commitUser` and the authenticated
-caller. It must enforce this admission check for all writers in the same transaction as publication,
-including writers that do not acquire leases. A new successful publication clears the lease
-atomically. Abandoned attempts stop renewal and expire automatically; there is no explicit unlock API.
+`RESTCatalogLockFactory` uses the existing `CatalogLockFactory` mechanism to create a lease client.
+Callers explicitly acquire a scope through `CatalogLock.acquireCommitLock`, supplying the stable
+table UUID, branch and exact `commitUser`. The scope provides the authoritative snapshot head,
+renews the lease while open, and detects expiry or renewal failure through `ensureValid`.
+Closing a scope stops renewal; callers must check `ensureValid` before publishing.
+The optional commit lease capability does not change existing `runWithLock` implementations.
+
+The snapshot commit request is unchanged. The server must check ownership using
+`snapshot.commitUser` and the authenticated caller, and publish the snapshot in the same
+transaction, including for writers that do not request leases. A new successful publication
+clears the lease atomically. Abandoned attempts stop renewal and expire automatically;
+there is no separate unlock RPC.
 
 This is a commit admission lease, not a generation or fencing token. Requests with the same
-`commitUser` and authenticated caller share ownership. Use a unique commit user per logical writer
-and preserve it during recovery. Snapshot UUID comparison and file conflict validation remain
-required; leases cannot make stale file changes valid or guarantee success after lease loss.
-
-This REST table capability is independent of the catalog options `lock.enabled` and `lock.type`,
-which configure the existing catalog lock used for filesystem publication.
+`commitUser` and authenticated caller share ownership. Use a unique commit user per logical
+writer and preserve it during recovery. Snapshot UUID comparison and file conflict validation
+remain required; leases cannot make stale file changes valid or guarantee success after lease loss.
 
 ## Files conflict
 

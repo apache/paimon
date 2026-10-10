@@ -19,11 +19,23 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.CatalogCommitLock;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.requests.CommitLockRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.responses.CommitLockResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -31,7 +43,11 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
@@ -88,6 +104,75 @@ class CommitLockProtocolTest {
                     .isEqualTo("morax-job");
             assertThat(RESTApi.fromJson(commitBody, CommitTableRequest.class).getTableId())
                     .isEqualTo("table-id");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void restTableCarriesSerializableCommitLockFactory(boolean external, @TempDir Path directory)
+            throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Options options = new Options();
+            options.set(RESTCatalogOptions.URI, server.url("/").toString());
+            options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            options.set(RESTCatalogOptions.TOKEN, "token");
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            options.set(RESTTokenFileIO.DATA_TOKEN_ENABLED, false);
+            GetTableResponse tableResponse =
+                    new GetTableResponse(
+                            "table-id",
+                            "db",
+                            "table$branch_dev",
+                            directory.toUri().toString(),
+                            external,
+                            0,
+                            Schema.newBuilder().column("id", DataTypes.INT()).build(),
+                            null,
+                            0,
+                            null,
+                            0,
+                            null);
+            server.enqueue(json(RESTApi.toJson(tableResponse)));
+            RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options), false);
+            Identifier identifier = new Identifier("db", "table", "dev");
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath()).contains("table");
+            CatalogEnvironment environment = InstantiationUtil.clone(table.catalogEnvironment());
+            assertThat(environment.uuid()).isEqualTo("table-id");
+            if (external) {
+                assertThat(environment.catalogLoader()).isNull();
+                assertThat(environment.lockFactory()).isNull();
+                assertThat(environment.lockContext()).isNull();
+                assertThat(environment.snapshotCommit(table.snapshotManager()))
+                        .isInstanceOf(RenamingSnapshotCommit.class);
+                return;
+            }
+            assertThat(environment.lockFactory()).isInstanceOf(RESTCatalogLockFactory.class);
+            assertThat(
+                            FactoryUtil.discoverFactory(
+                                    getClass().getClassLoader(), CatalogLockFactory.class, "rest"))
+                    .isInstanceOf(RESTCatalogLockFactory.class);
+            server.enqueue(
+                    json(
+                            RESTApi.toJson(
+                                    new CommitLockResponse(
+                                            true, "morax-job", 100000, 60000, snapshot(1)))));
+            try (CatalogLock lock =
+                            environment.lockFactory().createLock(environment.lockContext());
+                    CatalogCommitLock lease =
+                            lock.acquireCommitLock(identifier, environment.uuid(), "morax-job")
+                                    .get()) {
+                assertThat(lease.snapshot().id()).isEqualTo(1);
+                lease.ensureValid();
+                RecordedRequest acquire = server.takeRequest(10, TimeUnit.SECONDS);
+                assertThat(acquire.getPath()).endsWith("/commit-lock");
+                assertThat(acquire.getHeader("Authorization")).isEqualTo("Bearer token");
+                CommitLockRequest request =
+                        RESTApi.fromJson(acquire.getBody().readUtf8(), CommitLockRequest.class);
+                assertThat(request.getTableId()).isEqualTo("table-id");
+                assertThat(request.getCommitUser()).isEqualTo("morax-job");
+            }
         }
     }
 

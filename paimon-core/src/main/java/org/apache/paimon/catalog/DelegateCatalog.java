@@ -329,19 +329,6 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Optional<CatalogCommitLock> acquireCommitLock(
-            Identifier identifier, String tableUuid, String commitUser)
-            throws TableNotExistException {
-        return wrapped.acquireCommitLock(identifier, tableUuid, commitUser);
-    }
-
-    @Override
-    public boolean renewCommitLock(Identifier identifier, String tableUuid, String commitUser)
-            throws TableNotExistException {
-        return wrapped.renewCommitLock(identifier, tableUuid, commitUser);
-    }
-
-    @Override
     public boolean supportsPartitionModification() {
         return wrapped.supportsPartitionModification();
     }
