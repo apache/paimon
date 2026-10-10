@@ -425,5 +425,39 @@ class Catalog(ABC):
             "list_tags_paged is not supported by this catalog."
         )
 
+    def rename_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            target_tag_name: str,
+    ) -> None:
+        """Rename a tag on a table.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "rename_tag is not supported by this catalog."
+        )
+
+    def replace_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+    ) -> None:
+        """Point an existing tag at a snapshot.
+
+        ``snapshot_id`` defaults to the latest snapshot. ``time_retained``
+        is written only when set.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "replace_tag is not supported by this catalog."
+        )
+
     def auth_table_query(self, identifier: Identifier, select: Optional[List[str]]) -> TableQueryAuthResult:
         raise NotImplementedError("auth_table_query not supported by this catalog")
