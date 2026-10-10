@@ -811,6 +811,10 @@ Rust selects one snapshot, prunes partitions, evaluates scalar filters before
 ranking, and searches indexed and uncovered rows. Full-text and scalar
 `fast`, `full`, and `detail` search modes follow Java coverage semantics.
 Scalar candidate refinement obeys `global-index.filter.refine-from-data`.
+Search predicates `contains`, `endsWith`, and residual `LIKE` require
+refinement for both BTree and bitmap indexes, as in Java. Simple `LIKE`
+patterns are first rewritten to equality, prefix, suffix or substring
+predicates; equality and prefix retain the underlying index's exactness.
 Filtering keeps the complete shard or raw corpus for BM25 scoring.
 
 A full-text index definition must exist even in `full` or `detail` mode.

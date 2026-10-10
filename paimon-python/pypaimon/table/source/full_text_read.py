@@ -118,6 +118,7 @@ class DataEvolutionFullTextRead(FullTextRead):
         from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
         from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        from pypaimon.table.source.global_index_row_filter import is_exact
 
         covered = RoaringBitmap64()
         files = {}
@@ -149,7 +150,7 @@ class DataEvolutionFullTextRead(FullTextRead):
                     scanner.close()
             if evaluation is not None:
                 candidates = RoaringBitmap64.and_(evaluation.result.results(), decided)
-                if evaluation.result.is_exact():
+                if is_exact(self._filter, evaluation.result):
                     matched = candidates
                 elif self._table.options.global_index_filter_refine_from_data():
                     matched = self._matching_rows(candidates)

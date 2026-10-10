@@ -116,18 +116,68 @@ def test_scalar_filter_modes_before_full_text_top_k(rest_catalog, text_mode, sca
 
 @pytest.mark.parametrize('refine', [False, True])
 @pytest.mark.parametrize('scalar_mode', ['fast', 'full', 'detail'])
-def test_candidate_filter_refinement_retains_full_corpus_scores(rest_catalog, refine, scalar_mode):
+@pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
+@pytest.mark.parametrize('method, literal', [('contains', 'eep'), ('endswith', 'eep'), ('like', 'k%p')])
+def test_candidate_filter_refinement_retains_full_corpus_scores(
+        rest_catalog, refine, scalar_mode, index_type, method, literal):
     catalog, _ = rest_catalog
     table = _table(catalog, {'global-index.filter.refine-from-data': str(refine).lower(),
                              'scalar-index.search-mode': scalar_mode})
-    table.create_global_index('label', index_type='btree')
+    table.create_global_index('label', index_type=index_type)
     indexes._append(table, _rows(8, 4), schema=SCHEMA)
-    predicate = table.new_read_builder().new_predicate_builder().contains('label', 'eep')
+    predicate = getattr(table.new_read_builder().new_predicate_builder(), method)('label', literal)
     scores = _compare(table, predicate=predicate)
     assert set(scores) == ({1, 5, 7, 9, 11} if refine else {9, 11})
     full = _compare(table)
     assert scores == pytest.approx({row_id: full[row_id] for row_id in scores}, abs=1e-6)
     assert indexes._ids(table) == list(range(12))
+
+
+@pytest.mark.parametrize('refine', [False, True])
+@pytest.mark.parametrize('compound', ['and', 'or'])
+@pytest.mark.parametrize('method, literal', [('contains', 'eep'), ('endswith', 'eep'), ('like', '%eep%')])
+def test_bitmap_candidate_leaves_require_refinement_in_compounds(rest_catalog, refine, compound, method, literal):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'global-index.filter.refine-from-data': str(refine).lower(),
+                             'scalar-index.search-mode': 'fast'})
+    table.create_global_index('label', index_type='bitmap')
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    pb = table.new_read_builder().new_predicate_builder()
+    candidate = getattr(pb, method)('label', literal)
+    predicate = (pb.and_predicates([pb.is_not_null('label'), candidate]) if compound == 'and'
+                 else pb.or_predicates([pb.equal('label', 'drop'), candidate]))
+    rows = set(_compare(table, predicate=predicate))
+    indexed = ({1, 5, 7} if compound == 'and' else {0, 1, 2, 4, 5, 6, 7}) if refine else set()
+    assert rows == indexed.union({9, 11} if compound == 'and' else {8, 9, 10, 11})
+    assert indexes._ids(table) == list(range(12))
+
+
+@pytest.mark.parametrize('pattern', ['keep', 'ke%'])
+def test_optimized_bitmap_like_filters_stay_exact_without_refinement(rest_catalog, pattern):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'global-index.filter.refine-from-data': 'false',
+                             'scalar-index.search-mode': 'fast'})
+    table.create_global_index('label', index_type='bitmap')
+    predicate = table.new_read_builder().new_predicate_builder().like('label', pattern)
+    assert set(_compare(table, predicate=predicate)) == {1, 5, 7}
+    assert indexes._ids(table) == list(range(8))
+
+
+@pytest.mark.parametrize('refine', [False, True])
+def test_escaped_bitmap_like_is_refined_without_prefix_rewrite(rest_catalog, refine):
+    catalog, _ = rest_catalog
+    table = indexes._create(catalog, schema=SCHEMA, partitioned=True, options={
+        'read.native.enabled': 'true', 'scalar-index.search-mode': 'fast',
+        'global-index.filter.refine-from-data': str(refine).lower()})
+    indexes._append(table, [
+        {'id': 0, 'content': 'paimon', 'label': 'ke%', 'pt': 0},
+        {'id': 1, 'content': 'paimon', 'label': r'ke\suffix', 'pt': 0},
+        {'id': 2, 'content': 'paimon', 'label': 'keep', 'pt': 0}], schema=SCHEMA)
+    table.create_global_index('content', index_type='full-text')
+    table.create_global_index('label', index_type='bitmap')
+    predicate = table.new_read_builder().new_predicate_builder().like('label', r'ke\%')
+    assert set(_compare(table, predicate=predicate)) == ({0} if refine else set())
+    assert indexes._ids(table) == list(range(3))
 
 
 @pytest.mark.parametrize('selection', ['partition', 'mixed', 'repeat'])

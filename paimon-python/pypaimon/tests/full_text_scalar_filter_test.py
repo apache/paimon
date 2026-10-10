@@ -73,9 +73,9 @@ def test_full_text_data_filters_precede_top_k_and_preserve_scores(docs, kind, ra
         append_rows(docs)
     expected = scores(builder(docs).execute_local())
     actual = scores(builder(docs, "label LIKE '%target%'", limit=1).execute_local())
-    # BTree LIKE supplies candidates requiring refinement. Exact bitmap
-    # matches and raw rows do not depend on the refinement option.
-    candidates = [] if kind == "btree" and not refine else [2]
+    # Java requires LIKE/contains refinement for either scalar index family.
+    # Raw rows are evaluated from the data independently of this option.
+    candidates = [] if kind is not None and not refine else [2]
     if raw:
         candidates.append(4)
     best = max(candidates, key=lambda row_id: (expected[row_id], -row_id)) if candidates else None
