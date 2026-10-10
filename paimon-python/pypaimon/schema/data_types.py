@@ -188,7 +188,6 @@ class VectorType(DataType):
             "type": "VECTOR" + (" NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
             "length": self.length,
-            "nullable": self.nullable
         }
 
     @classmethod

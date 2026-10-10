@@ -330,8 +330,8 @@ def _rest_data_token(table):
     return file_io._existing_valid_token()
 
 
-def _native_read_builder(table):
-    """Return a fresh builder with the current schema and shared REST FileIO."""
+def _native_table(table):
+    """Return the current schema and shared REST FileIO for Native operations."""
     rest_response = _resolved_rest_table_response(table)
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
@@ -365,7 +365,11 @@ def _native_read_builder(table):
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
-    return rt.new_read_builder()
+    return rt
+
+
+def _native_read_builder(table):
+    return _native_table(table).new_read_builder()
 
 
 def _configure_native_read_builder(builder, predicate, limit, projection,

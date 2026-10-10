@@ -130,6 +130,64 @@ def test_batch_native_write_commits_through_both_committers(
 
 
 @requires_native
+@pytest.mark.parametrize('evolution', [False, True])
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('element_type', [pa.float32(), pa.float64()])
+@pytest.mark.parametrize('child_name', ['item', 'element', ''])
+def test_native_vector_write_preserves_slices_and_nulls(
+        native_rest_catalog, evolution, streaming, element_type, child_name):
+    schema = pa.schema([
+        ('id', pa.int32()), ('embedding', pa.list_(pa.field(child_name, element_type), 2)),
+    ])
+    options = {
+        'file.format': 'parquet',
+        'write.native.enabled': 'true', 'commit.native.enabled': 'true',
+        'row-tracking.enabled': str(evolution).lower(),
+        'data-evolution.enabled': str(evolution).lower(),
+    }
+    if evolution:
+        options['vector.file.format'] = 'parquet'
+    native_rest_catalog.create_table('default.vectors', Schema.from_pyarrow_schema(schema, options=options), False)
+    table = native_rest_catalog.get_table('default.vectors')
+    builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
+    writer = builder.new_write()
+    commit = builder.new_commit()
+    data = pa.Table.from_pylist([
+        {'id': 0, 'embedding': [0.0, 1.0]}, {'id': 1, 'embedding': [2.0, 3.0]},
+        {'id': 2, 'embedding': None}, {'id': 3, 'embedding': [4.0, None]},
+    ], schema=schema).slice(1)
+    try:
+        assert isinstance(writer, NativeTableWrite)
+        assert writer._python_writer is None
+        with patch.object(NativeTableWrite, '_switch_to_python', side_effect=AssertionError('Vector fallback')):
+            writer.write_arrow(data)
+        messages = writer.prepare_commit(7) if streaming else writer.prepare_commit()
+        commit.commit(messages, 7) if streaming else commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+    assert _rows(table) == data.to_pylist()
+
+
+@requires_native
+@pytest.mark.parametrize('streaming', [False, True])
+def test_unavailable_vector_format_falls_back_before_accepting_data(native_rest_catalog, streaming):
+    schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32(), 2))])
+    native_rest_catalog.create_table('default.vectors', Schema.from_pyarrow_schema(schema, options={
+        'write.native.enabled': 'true', 'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true', 'vector.file.format': 'lance',
+    }), False)
+    table = native_rest_catalog.get_table('default.vectors')
+    builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        assert not isinstance(writer, NativeTableWrite)
+        assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+
+
+@requires_native
 @pytest.mark.parametrize('directory', [None, 'relative', 'absolute', 'uri'])
 def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, directory):
     catalog = native_rest_catalog

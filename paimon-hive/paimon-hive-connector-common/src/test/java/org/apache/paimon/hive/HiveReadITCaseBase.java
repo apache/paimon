@@ -707,6 +707,54 @@ public abstract class HiveReadITCaseBase extends HiveTestBase {
     }
 
     @Test
+    public void testPredicatePushDownWithLiteralsNotRepresentableInColumnType() throws Exception {
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.DECIMAL(5, 2), DataTypes.TINYINT(), DataTypes.INT()
+                                },
+                                new String[] {"c", "t", "i"}),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+
+        // one data file per row, so that file pruning by statistics is observable
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        write.write(GenericRow.of(decimal("1.00"), (byte) 5, 5));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.write(GenericRow.of(decimal("1.01"), (byte) 100, 100));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.write(GenericRow.of(decimal("999.99"), (byte) 120, 2000000000));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+        createExternalTable();
+
+        String select = "SELECT t FROM " + externalTable + " WHERE ";
+        assertThat(hiveShell.executeQuery(select + "c < 1000"))
+                .containsExactlyInAnyOrder("5", "100", "120");
+        assertThat(hiveShell.executeQuery(select + "c BETWEEN 0 AND 1000"))
+                .containsExactlyInAnyOrder("5", "100", "120");
+        assertThat(hiveShell.executeQuery(select + "c > 1.005"))
+                .containsExactlyInAnyOrder("100", "120");
+        assertThat(hiveShell.executeQuery(select + "c < 1.004")).containsExactly("5");
+        assertThat(hiveShell.executeQuery(select + "t < 200"))
+                .containsExactlyInAnyOrder("5", "100", "120");
+        assertThat(hiveShell.executeQuery(select + "i < 3000000000"))
+                .containsExactlyInAnyOrder("5", "100", "120");
+        assertThat(hiveShell.executeQuery(select + "c < 1.01")).containsExactly("5");
+    }
+
+    private static Decimal decimal(String value) {
+        return Decimal.fromBigDecimal(new BigDecimal(value), 5, 2);
+    }
+
+    @Test
     public void testDateAndTimestamp() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         Options conf = getBasicConf();

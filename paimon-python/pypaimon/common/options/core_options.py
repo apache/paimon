@@ -992,7 +992,7 @@ class CoreOptions:
         .default_value(1)
         .with_description(
             "Number of global index shards built concurrently by the local "
-            "Python builder. Each shard may also use native worker threads, "
+            "builder, including native builds. Each shard may also use native worker threads, "
             "so increase this value conservatively."
         )
     )

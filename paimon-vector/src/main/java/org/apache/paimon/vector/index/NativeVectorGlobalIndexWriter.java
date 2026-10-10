@@ -21,6 +21,7 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
@@ -66,6 +67,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
     private static final int ADD_BATCH_SIZE = 10000;
     private static final int TRAIN_BATCH_SIZE = 4096;
+    private static final long WRITE_PROGRESS_INTERVAL_BYTES = 64L * 1024 * 1024;
     static final int MAX_FLOAT_ARRAY_LENGTH = Integer.MAX_VALUE - 8;
     private static final long TRAIN_MEMORY_WARNING_BYTES = 4L * 1024 * 1024 * 1024;
 
@@ -277,7 +279,24 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             LOG.info("{} write phase started", identifier);
             String fileName = fileWriter.newFileName(fileNamePrefix());
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
-                writer.writeIndex(out);
+                writer.writeIndex(
+                        new PositionOutputStreamWrapper(out) {
+                            private long bytesWritten;
+
+                            @Override
+                            public void write(byte[] b) throws IOException {
+                                super.write(b);
+                                long previous = bytesWritten;
+                                bytesWritten += b.length;
+                                if (bytesWritten / WRITE_PROGRESS_INTERVAL_BYTES
+                                        > previous / WRITE_PROGRESS_INTERVAL_BYTES) {
+                                    LOG.info(
+                                            "{} write progress: {} MiB written",
+                                            identifier,
+                                            bytesWritten / (1024 * 1024));
+                                }
+                            }
+                        });
                 out.flush();
             }
             LOG.info(

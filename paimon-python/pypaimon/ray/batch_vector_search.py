@@ -21,11 +21,12 @@ from contextlib import closing
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.ray.vector_search import _execution_options, _map_tasks, _require_ray
-from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl, _filtered_raw_row_ranges, _offer_score, _scored_result,
+from pypaimon.ray.vector_search import (
+    _execution_options, _map_tasks, _require_ray, _shared_scalar_filters, _worker_pre_filter,
 )
-from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+from pypaimon.table.source.vector_search_read import (
+    BatchVectorSearchReadImpl, _filtered_raw_row_ranges, _offer_score, _scored_result, _split_search_splits,
+)
 
 
 def _execute_batch_vector_search(builder, *, concurrency=None, ray_remote_args=None):
@@ -47,12 +48,18 @@ class _RayBatchVectorSearchRead(BatchVectorSearchReadImpl):
         self._concurrency = concurrency
         self._remote_args = remote_args
 
-    def _search_index_splits(self, splits, query, search_limit, pre_filters, batch=False):
-        items = [(split, None if not pre_filters or pre_filters[i] is None
-                  else pre_filters[i].serialize()) for i, split in enumerate(splits)]
-        context = (self._table, self._vector_column, query, search_limit, self._options)
-        with closing(_map_tasks(
-                _search_batch_index_split, context, items, self._concurrency, self._remote_args, True)) as tasks:
+    def _prepare_search_splits(self, splits, snapshot):
+        # Scalar evaluation and candidate verification belong to the workers.
+        return _split_search_splits(splits)
+
+    def _search_index_splits(self, splits, query, search_limit, snapshot, batch=False):
+        # Send predicates and metadata, leaving each worker to build and consume
+        # its own filter. Batch queries reuse the same filter for every vector.
+        context = (self._table, self._vector_column, query, search_limit, self._options,
+                   self._filter, self._partition_filter, snapshot)
+        with _shared_scalar_filters(splits, self._filter, self._remote_args) as prepare, closing(_map_tasks(
+                _search_batch_index_split, context, splits, self._concurrency,
+                self._remote_args, True, prepare)) as tasks:
             for _, (metric, scores) in tasks:
                 if metric is not None:
                     self._set_index_metric(metric)
@@ -97,11 +104,14 @@ class _RayBatchVectorSearchRead(BatchVectorSearchReadImpl):
         return [_scored_result(heap) for heap in heaps]
 
 
-def _search_batch_index_split(context, item):
-    table, column, queries, limit, options = context
-    split, include_bytes = item
-    scorer = BatchVectorSearchReadImpl(table, limit, column, queries, options=options)
-    include = None if include_bytes is None else RoaringBitmap64.deserialize(include_bytes)
+def _search_batch_index_split(context, split, scalar_filter=None):
+    table, column, queries, limit, options, filter_, partition_filter, snapshot = context
+    # Explicit shard indexes are evaluated below. Candidate verification must
+    # not rediscover and scan table-wide scalar indexes in every worker.
+    table = table.copy({"global-index.enabled": "false"})
+    scorer = BatchVectorSearchReadImpl(
+        table, limit, column, queries, filter_, partition_filter, options)
+    include = _worker_pre_filter(scorer, split, snapshot, scalar_filter)
     reader, offset_reader = scorer._open_offset_reader(
         split.vector_index_files, split.row_range_start, split.row_range_end)
     try:

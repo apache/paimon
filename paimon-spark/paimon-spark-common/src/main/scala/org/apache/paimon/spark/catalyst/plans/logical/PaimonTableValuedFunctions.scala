@@ -37,7 +37,7 @@ import org.apache.spark.sql.catalyst.plans.{Inner, JoinType}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LeafNode, LogicalPlan, Project, SubqueryAlias, UnaryNode}
 import org.apache.spark.sql.catalyst.util.MapData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -146,7 +146,7 @@ object PaimonTableValuedFunctions {
           case Some(snapshotIdPair: (Long, Long)) =>
             sparkIncrementQuery(spark, sparkTable, sparkCatalog, ident, options, snapshotIdPair)
           case _ =>
-            DataSourceV2Relation.create(
+            SparkShimLoader.shim.createDataSourceV2Relation(
               sparkTable,
               Some(sparkCatalog),
               Some(ident),
@@ -168,7 +168,7 @@ object PaimonTableValuedFunctions {
         }
         val vectorSearch = vsq.createVectorSearch(innerTable, argsWithoutTable)
         val vectorSearchTable = VectorSearchTable.create(innerTable, vectorSearch)
-        DataSourceV2Relation.create(
+        SparkShimLoader.shim.createDataSourceV2Relation(
           st.copy(table = vectorSearchTable),
           Some(sparkCatalog),
           Some(ident),
@@ -190,7 +190,7 @@ object PaimonTableValuedFunctions {
       case st @ SparkTable(innerTable: InnerTable) =>
         val hybridSearch = hsq.createHybridSearch(innerTable, argsWithoutTable)
         val hybridSearchTable = HybridSearchTable.create(innerTable, hybridSearch)
-        DataSourceV2Relation.create(
+        SparkShimLoader.shim.createDataSourceV2Relation(
           st.copy(table = hybridSearchTable),
           Some(sparkCatalog),
           Some(ident),
@@ -346,7 +346,7 @@ object PaimonTableValuedFunctions {
       case st @ SparkTable(innerTable: InnerTable) =>
         val fullTextSearch = ftsq.createFullTextSearch(innerTable, argsWithoutTable)
         val fullTextSearchTable = FullTextSearchTable.create(innerTable, fullTextSearch)
-        DataSourceV2Relation.create(
+        SparkShimLoader.shim.createDataSourceV2Relation(
           st.copy(table = fullTextSearchTable),
           Some(sparkCatalog),
           Some(ident),
@@ -393,7 +393,7 @@ object PaimonTableValuedFunctions {
       val updatedOptions = filteredOptions + (CoreOptions.SCAN_VERSION.key() -> snapshotId.toString)
       createDataset(
         spark,
-        DataSourceV2Relation.create(
+        SparkShimLoader.shim.createDataSourceV2Relation(
           sparkTable,
           Some(sparkCatalog),
           Some(ident),

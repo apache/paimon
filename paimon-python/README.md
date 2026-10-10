@@ -168,6 +168,8 @@ path select the Python writer before native data is written. If the runtime or t
 unavailable, write uses Python. Once Rust starts writing a batch, errors
 propagate without retrying that batch through Python.
 
+For primary-key Row writes, `rowkind.field` takes precedence over the object's `RowKind`; otherwise the object event is preserved. Plain Arrow input defaults to INSERT. Both Python and native writers apply `ignore-delete` and `ignore-update-before` before routing object rows.
+
 Batch and stream `merge_into` also use Rust core for eligible data-evolution
 Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
 `WhenNotMatched` clauses accept Arrow/pandas input, Paimon table sources, or
@@ -764,6 +766,29 @@ the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
 
 
+# Native local vector search
+
+For REST tables, `read.native.enabled=true` also delegates local vector search
+execution to Rust. Single-vector searches support Data Evolution and configured
+PK vector indexes; batch searches use the existing Data Evolution result API.
+
+```python
+native_table = table.copy({'read.native.enabled': 'true'})
+result = (native_table.new_vector_search_builder()
+          .with_vector_column('embedding')
+          .with_query_vector([1.0, 0.0])
+          .with_limit(10)
+          .execute_local())
+```
+
+Rust plans one snapshot, applies scalar and partition filters before Top-K,
+searches indexes, scans uncovered rows and performs refinement. The returned
+Python result can be passed to `with_global_index_result` as usual, including
+scored physical-position splits for PK tables. An unavailable native backend
+falls back to the Python search reader. Distributed Ray searches keep their
+existing scan/read path.
+
+
 # Vector index range reads
 
 Native vector indexes (`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`)
@@ -779,6 +804,20 @@ and released when the index reader closes; separate readers have separate
 budgets. This option controls index I/O, not shard search or native compute
 threads.
 
+
+# Native local index builds
+
+With `write.native.enabled=true`, eligible REST data-evolution tables delegate
+local full-text and vector index construction to Rust. Set
+`global-index.build.parallelism` in table options or per-build options to bound
+the number of shards built concurrently; the default is 1. Each shard owns its
+writer and may also use native worker threads, so increase the value
+conservatively. Commit messages retain shard plan order.
+
+`GlobalIndexBuilder.build()` returns unpublished messages for either committer.
+A failed build waits for started shards and cleans its private outputs.
+After messages are returned, the caller owns those files. A failed or uncertain
+commit retains them; use explicit abort only when they will not be committed.
 
 # Native vector index training
 

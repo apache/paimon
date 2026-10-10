@@ -30,6 +30,7 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
@@ -432,9 +433,12 @@ class DataWriter(ABC):
 
     def _count_delete_rows(self, data: pa.Table) -> int:
         # Count the final file contents, after merging and rolling the buffer.
-        if not self.table.is_primary_key_table or '_VALUE_KIND' not in data.schema.names:
+        if (
+            not self.table.is_primary_key_table
+            or SpecialFields.VALUE_KIND.name not in data.schema.names
+        ):
             return 0
-        kind_counts = pc.value_counts(data.column('_VALUE_KIND'))
+        kind_counts = pc.value_counts(data.column(SpecialFields.VALUE_KIND.name))
         return sum(entry['counts'].as_py() for entry in kind_counts
                    if entry['values'].as_py() in (RowKind.UPDATE_BEFORE.value, RowKind.DELETE.value))
 
