@@ -26,9 +26,11 @@ import org.apache.paimon.table.InnerTable
 import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.types.{DataField, DataType, DataTypes, RowType}
 
-import org.apache.spark.sql.catalyst.plans.logical.Repartition
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, DynamicPruningExpression, Expression, GreaterThan, InputFileBlockLength, InputFileBlockStart, InputFileName, IsNotNull, Literal}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter, Project, Repartition}
 import org.apache.spark.sql.connector.catalog.{Table => ConnectorTable, TableCapability}
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
+import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.types.{IntegerType, StructType}
 import org.mockito.Mockito.{mock, when}
 
@@ -36,11 +38,125 @@ import java.util.Collections
 
 import scala.collection.JavaConverters._
 
-/** Rule tests with synthetic scan metadata; no source files or Spark data jobs are needed. */
+/** Rule tests with synthetic metadata and query regressions for file context and runtime pruning. */
 class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
 
   private val enabledKey =
     s"spark.paimon.${SparkConnectorOptions.READ_REPARTITION_LARGE_SCAN_ENABLED.key()}"
+
+  test("input-file expressions in projections and filters skip scan planning") {
+    withSplitConf {
+      Seq[Expression](InputFileName(), InputFileBlockStart(), InputFileBlockLength()).foreach {
+        expression =>
+          val scan = relation(Seq(Seq(120L)), failOnPlanning = true)
+          val projection = Project(Seq(Alias(expression, "file_info")()), scan)
+          assert(RepartitionLargePaimonScan(projection) eq projection)
+          val filter = Filter(IsNotNull(expression), scan)
+          assert(RepartitionLargePaimonScan(filter) eq filter)
+          val aliasProjection = Project(projection.output, projection)
+          assert(RepartitionLargePaimonScan(aliasProjection) == aliasProjection)
+      }
+    }
+  }
+
+  test("shuffle stays above dynamic pruning filters and remains idempotent") {
+    withSplitConf {
+      val scan = relation(Seq(Seq(120L), Seq(30L)))
+      val filter = Filter(
+        And(DynamicPruningExpression(Literal(true)), GreaterThan(scan.output.head, Literal(0))),
+        scan)
+      val result = RepartitionLargePaimonScan(filter).asInstanceOf[Repartition]
+      assert(result.numPartitions == 3)
+      assert(result.child eq filter)
+      assert(RepartitionLargePaimonScan(result) eq result)
+
+      val fileProjection = Project(Seq(Alias(InputFileName(), "file_name")()), scan)
+      val fileFilter = Filter(DynamicPruningExpression(Literal(true)), fileProjection)
+      assert(RepartitionLargePaimonScan(fileFilter) eq fileFilter)
+    }
+  }
+
+  test("input_file_name projection and filter preserve source file context in real queries") {
+    withSparkSQLConf(
+      "spark.sql.adaptive.enabled" -> "false",
+      "spark.paimon.write.use-v2-write" -> "false") {
+      withTable("file_context") {
+        sql("""CREATE TABLE file_context (id INT) TBLPROPERTIES (
+              |'row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+              |'source.split.target-size'='4kb')""".stripMargin)
+        sql("INSERT INTO file_context SELECT /*+ COALESCE(1) */ CAST(id AS INT) FROM range(5000)")
+        sql("ALTER TABLE file_context ADD COLUMN payload BINARY COMMENT '__BLOB_FIELD'")
+
+        withSparkSQLConf(enabledKey -> "true") {
+          assert(sql("SELECT id FROM file_context").queryExecution.optimizedPlan.exists {
+            case _: Repartition => true
+            case _ => false
+          })
+        }
+        val queries = Seq(
+          "SELECT id, input_file_name(), input_file_block_start(), input_file_block_length() " +
+            "FROM file_context",
+          "SELECT id FROM file_context WHERE length(input_file_name()) > 0"
+        )
+        queries.zipWithIndex.foreach {
+          case (query, index) =>
+            var expected = Seq.empty[Row]
+            withSparkSQLConf(enabledKey -> "false") {
+              expected = sql(query).collect().toSeq
+            }
+            assert(expected.size == 5000)
+            if (index == 0) {
+              assert(expected.forall(_.getString(1).nonEmpty))
+            }
+            withSparkSQLConf(enabledKey -> "true") {
+              val result = sql(query)
+              assert(!result.queryExecution.optimizedPlan.exists(_.isInstanceOf[Repartition]))
+              checkAnswer(result, expected)
+            }
+        }
+      }
+    }
+  }
+
+  test("real Blob join retains runtime partition filters below the added shuffle") {
+    withSparkSQLConf(
+      "spark.sql.adaptive.enabled" -> "false",
+      "spark.paimon.write.use-v2-write" -> "false",
+      "spark.sql.optimizer.dynamicPartitionPruning.enabled" -> "true",
+      "spark.sql.optimizer.dynamicPartitionPruning.useStats" -> "false",
+      "spark.sql.optimizer.dynamicPartitionPruning.reuseBroadcastOnly" -> "false",
+      "spark.sql.optimizer.dynamicPartitionPruning.fallbackFilterRatio" -> "1.0"
+    ) {
+      withTable("pruning_fact", "pruning_dim") {
+        sql("""CREATE TABLE pruning_fact (id INT, pt INT, payload BINARY) PARTITIONED BY (pt)
+              |TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',
+              |'blob-field'='payload', 'source.split.target-size'='64kb')""".stripMargin)
+        sql("""INSERT INTO pruning_fact SELECT /*+ COALESCE(1) */
+              |CAST(id AS INT), CAST(id DIV 100 AS INT), CAST(repeat('x', 8192) AS BINARY)
+              |FROM range(300)""".stripMargin)
+        sql("CREATE TABLE pruning_dim (pt INT, keep INT)")
+        sql("INSERT INTO pruning_dim VALUES (0, 1), (1, 0), (2, 0)")
+        val query = """SELECT /*+ BROADCAST(d) */ f.id, length(f.payload)
+                      |FROM pruning_fact f JOIN pruning_dim d ON f.pt = d.pt
+                      |WHERE d.keep = 1""".stripMargin
+        Seq(false, true).foreach {
+          enabled =>
+            withSparkSQLConf(enabledKey -> enabled.toString) {
+              val result = sql(query)
+              if (enabled) {
+                assert(result.queryExecution.optimizedPlan.exists(_.isInstanceOf[Repartition]))
+              }
+              val factScan = result.queryExecution.executedPlan.collectFirst {
+                case scan: BatchScanExec if scan.output.exists(_.name == "payload") => scan
+              }.get
+              assert(factScan.runtimeFilters.nonEmpty, result.queryExecution.executedPlan.toString)
+              checkAnswer(result, (0 until 100).map(id => Row(id, 8192)))
+              assert(factScan.metrics("numOutputRows").value == 100)
+            }
+        }
+      }
+    }
+  }
 
   test("non-Blob tables are skipped without planning scan partitions") {
     withSplitConf {

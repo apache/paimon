@@ -208,6 +208,12 @@ it does not split source scan tasks. It leaves streaming scans and an existing
 shuffle directly above the scan unchanged. Runtime filtering can subsequently
 reduce the scan input without changing this statically planned repartition count.
 
+The shuffle is placed above an existing dynamic partition pruning filter, keeping the
+filter adjacent to its scan operation so Spark can pass runtime filters to Paimon.
+Scans below expressions using `input_file_name()`, `input_file_block_start()`, or
+`input_file_block_length()` are skipped: these functions need the source reader's
+task-local file context, which is not carried through a shuffle.
+
 ### Filter Pushdown
 
 It is highly recommended to specify partition and primary key filters
