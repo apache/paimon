@@ -37,7 +37,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_C
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskResult}
+import org.apache.paimon.spark.write.{PaimonDataWrite, StreamingWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
@@ -45,6 +45,7 @@ import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.{SerializationUtils, UriReaderFactory}
 
 import org.apache.spark.{Partitioner, TaskContext}
+import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
@@ -55,11 +56,20 @@ import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
 
+/**
+ * @param streaming
+ *   the micro-batch this writer writes, when it writes for a streaming query. Such a write goes
+ *   through the stream write API, the way a Flink streaming job does: it is committed under an
+ *   identifier by the committer of the query, which recognises a replayed micro-batch.
+ */
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Option[Long] = None)
-  extends WriteHelper {
+    streaming: Option[StreamingWrite] = None)
+  extends WriteHelper
+  with Logging {
+
+  private val commitIdentifier: Option[Long] = streaming.map(_.commitIdentifier)
 
   private lazy val tableSchema = table.schema
 
@@ -89,8 +99,14 @@ case class PaimonSparkWriter(
 
   @transient private lazy val metricRegistry = SparkMetricRegistry()
 
+  /**
+   * A streaming write to a postpone bucket table always goes to bucket -2, to be bucketed by a
+   * later compaction, the same as a Flink streaming write: the fixed-bucket paths are for a batch
+   * job that ends with its commit.
+   */
   val postponeBatchWriteFixedBucket: Boolean =
-    table.bucketMode() == POSTPONE_MODE && coreOptions.postponeBatchWriteFixedBucket()
+    streaming.isEmpty && table.bucketMode() == POSTPONE_MODE &&
+      coreOptions.postponeBatchWriteFixedBucket()
 
   private val postponeBaseSnapshotId =
     if (postponeBatchWriteFixedBucket)
@@ -102,25 +118,34 @@ case class PaimonSparkWriter(
     if (bucketNum.isPresent) Some(bucketNum.get().intValue()) else None
   }
 
-  val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+  val writeBuilder: WriteBuilder = streaming match {
+    case Some(streamingWrite) =>
+      // Every micro-batch is committed under the commit user of the query, which is stable across
+      // its runs, so that a replayed micro-batch can be recognised as already committed.
+      table.newStreamWriteBuilder().withCommitUser(streamingWrite.context.commitUser)
+    case None => table.newBatchWriteBuilder()
+  }
 
   def withOverwrite(): PaimonSparkWriter = withOverwrite(java.util.Collections.emptyMap())
 
   def withOverwrite(partition: JMap[String, String]): PaimonSparkWriter = {
     overwritePartitionSpec = Some(partition.asScala.toMap)
-    if (!postponeBatchWriteFixedBucket) {
-      writeBuilder.withOverwrite(partition)
+    writeBuilder match {
+      case batchWriteBuilder: BatchWriteBuilder if !postponeBatchWriteFixedBucket =>
+        batchWriteBuilder.withOverwrite(partition)
+      // A stream write builder is told at commit time; see [[commit]].
+      case _ =>
     }
     this
   }
 
   def writeOnly(): PaimonSparkWriter = {
-    PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
+    PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")), streaming = streaming)
   }
 
   def withRowTracking(): PaimonSparkWriter = {
     if (coreOptions.rowTrackingEnabled()) {
-      PaimonSparkWriter(table, writeRowTracking = true)
+      PaimonSparkWriter(table, writeRowTracking = true, streaming = streaming)
     } else {
       this
     }
@@ -140,7 +165,7 @@ case class PaimonSparkWriter(
       } else {
         None
       }
-    val activeWriteBuilder: BatchWriteBuilder = directPostponeBucketNum match {
+    val activeWriteBuilder: WriteBuilder = directPostponeBucketNum match {
       case Some(_) =>
         val directWriteOptions = new java.util.HashMap[String, String]()
         directWriteOptions.put(
@@ -176,9 +201,11 @@ case class PaimonSparkWriter(
         rowKindColIdx,
         writeRowTracking,
         fullCompactionDeltaCommits,
-        batchId,
+        commitIdentifier,
         uriReaderFactory,
-        postponePartitionBucketComputer
+        postponePartitionBucketComputer,
+        // The stream write builder does not know that the commit overwrites, see [[commit]].
+        ignorePreviousFiles = streaming.isDefined && overwritePartitionSpec.isDefined
       )
 
     def sparkParallelism = {
@@ -458,6 +485,18 @@ case class PaimonSparkWriter(
   }
 
   def commit(commitMessages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
+    streaming match {
+      case Some(streamingWrite) =>
+        commitMicroBatch(streamingWrite, commitMessages, operation)
+        postCommit(commitMessages)
+      case None =>
+        commitBatch(commitMessages, operation)
+    }
+  }
+
+  private def commitBatch(
+      commitMessages: Seq[CommitMessage],
+      operation: Snapshot.Operation): Unit = {
     if (postponeBatchWriteFixedBucket && directPostponeWriteBuilder == null) {
       if (stagedSparkSession == null) {
         throw new IllegalStateException("Postpone staged write has no SparkSession.")
@@ -471,8 +510,8 @@ case class PaimonSparkWriter(
       postCommit(finalMessages)
       return
     }
-    val activeWriteBuilder =
-      Option(directPostponeWriteBuilder).getOrElse(writeBuilder)
+    val activeWriteBuilder: BatchWriteBuilder =
+      Option(directPostponeWriteBuilder).getOrElse(writeBuilder.asInstanceOf[BatchWriteBuilder])
     val tableCommit = activeWriteBuilder.newCommit()
     tableCommit.withMetricRegistry(metricRegistry)
     if (operation != null) {
@@ -486,6 +525,34 @@ case class PaimonSparkWriter(
       tableCommit.close()
     }
     postCommit(commitMessages)
+  }
+
+  /**
+   * Commits a micro-batch through the committer of the query, which the first micro-batch of a run
+   * creates and every later one reuses.
+   */
+  private def commitMicroBatch(
+      streamingWrite: StreamingWrite,
+      commitMessages: Seq[CommitMessage],
+      operation: Snapshot.Operation): Unit = {
+    streamingWrite.context.openCommitter {
+      val committer = writeBuilder
+        .asInstanceOf[StreamWriteBuilder]
+        .newCommit()
+        .asInstanceOf[InnerTableCommit]
+      committer.withMetricRegistry(metricRegistry)
+      // Both are the same for every micro-batch of a query: its output mode does not change, and
+      // a batch that wrote nothing is no reason to publish a snapshot, as for a batch write.
+      overwritePartitionSpec.foreach(spec => committer.withOverwrite(spec.asJava))
+      committer.ignoreEmptyCommit(
+        Option(coreOptions.toConfiguration.get(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT))
+          .forall(_.booleanValue()))
+      if (operation != null) {
+        committer.withOperation(operation)
+      }
+      committer
+    }
+    streamingWrite.context.commit(streamingWrite, commitMessages, table)
   }
 
   private def baseSnapshotHasNoRealBuckets: Boolean = {

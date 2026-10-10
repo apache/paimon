@@ -44,6 +44,13 @@ public interface CommitCallback extends AutoCloseable {
 
     void retry(ManifestCommittable committable);
 
+    /**
+     * Called before an overwrite is committed, with the committable it is about to publish. A
+     * callback may add properties to it, which the snapshot of the overwrite then carries, to
+     * record what only the moment of the overwrite knows and a later {@link #retry} of it needs.
+     */
+    default void beforeOverwrite(ManifestCommittable committable) {}
+
     default void setTable(FileStoreTable table) {}
 
     /** Context for callback. */
