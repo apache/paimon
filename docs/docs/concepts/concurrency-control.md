@@ -72,6 +72,26 @@ The commit mechanism depends on the catalog and storage:
 All writers of the same table must use a compatible commit mechanism and shared locking
 configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
+## Catalog Commit Leases on Retry
+
+A REST catalog can expose optional table commit leases. Set `commit.lock-enabled = true`
+on the table to allow acquisition, and `commit.lock-on-retry = true` for a writer that should
+acquire a lease after an optimistic publication conflict. Both options default to `false`.
+The first attempt remains optimistic; lock contention does not consume the publication retry
+count, but waiting is bounded by `commit.timeout`.
+
+The client supplies its exact `commitUser` when acquiring and renewing. A grant includes the
+server's current snapshot; the client uses that head to rebuild and validate its retry while
+renewing the lease. The server must check lease ownership and publish the snapshot in the same
+transaction, including for writers that do not request leases. A new successful publication
+clears the lease atomically. Abandoned attempts stop renewal and expire automatically.
+
+This is a commit admission lease, not a generation or fencing token. Requests with the same
+`commitUser` and authenticated caller share ownership. Use a unique commit user per logical
+writer and preserve it during recovery. Snapshot UUID comparison and file conflict validation
+remain required; leases cannot make stale file changes valid or guarantee success after lease
+loss. Catalogs without this capability reject locked retries rather than silently downgrading.
+
 ## Files conflict
 
 A writer validates file-level changes as well as the snapshot ID. For example, if two compactors

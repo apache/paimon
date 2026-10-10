@@ -973,6 +973,20 @@ public class CoreOptions implements Serializable {
                             "Specify how to initialize the next sequence number for primary key "
                                     + "table writers.");
 
+    public static final ConfigOption<Boolean> COMMIT_LOCK_ENABLED =
+            key("commit.lock-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Enable the catalog's table commit lease capability.");
+
+    public static final ConfigOption<Boolean> COMMIT_LOCK_ON_RETRY =
+            key("commit.lock-on-retry")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Acquire a catalog commit lease before preparing a retried snapshot. "
+                                    + "Requires commit.lock-enabled=true.");
+
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
             key("commit.timeout")
                     .durationType()
@@ -3898,6 +3912,14 @@ public class CoreOptions implements Serializable {
 
     public SequenceNumberInitMode writeSequenceNumberInitMode() {
         return options.get(WRITE_SEQUENCE_NUMBER_INIT_MODE);
+    }
+
+    public boolean commitLockEnabled() {
+        return options.get(COMMIT_LOCK_ENABLED);
+    }
+
+    public boolean commitLockOnRetry() {
+        return options.get(COMMIT_LOCK_ON_RETRY);
     }
 
     public long commitTimeout() {

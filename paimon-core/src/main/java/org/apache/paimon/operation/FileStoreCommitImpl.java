@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.CommitAttempt;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -894,19 +895,25 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         RetryCommitResult retryResult = null;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            CommitResult result =
-                    tryCommitOnce(
-                            retryResult,
-                            changesProvider,
-                            identifier,
-                            watermark,
-                            properties,
-                            commitKind,
-                            allowRollback,
-                            latestSnapshot,
-                            detectConflicts,
-                            statsFileName);
+            CommitResult result;
+            try (CommitAttempt attempt =
+                    CommitAttempt.begin(
+                            snapshotCommit, options, commitUser, retryCount, startMillis)) {
+                Snapshot latestSnapshot = attempt.latestSnapshot(snapshotManager::latestSnapshot);
+                result =
+                        tryCommitOnce(
+                                retryResult,
+                                changesProvider,
+                                identifier,
+                                watermark,
+                                properties,
+                                commitKind,
+                                allowRollback,
+                                latestSnapshot,
+                                detectConflicts,
+                                statsFileName,
+                                attempt);
+            }
 
             if (result.isSuccess()) {
                 break;
@@ -1038,7 +1045,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 allowRollback,
                 latestSnapshot,
                 detectConflicts,
-                newStatsFileName);
+                newStatsFileName,
+                CommitAttempt.unlocked(snapshotCommit));
     }
 
     private CommitResult tryCommitOnce(
@@ -1051,7 +1059,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
-            @Nullable String newStatsFileName) {
+            @Nullable String newStatsFileName,
+            CommitAttempt attempt) {
         long startMillis = System.currentTimeMillis();
 
         // Resolve an uncertain successful commit before preparing changes, which may refer
@@ -1354,7 +1363,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 callback ->
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
         try {
-            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
+            success =
+                    commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries, attempt);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn(
@@ -1399,6 +1409,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             strictModeChecker.update(newSnapshotId);
         }
         lastCommittedSnapshotId = newSnapshotId;
+        attempt.close();
         CommitCallback.Context context =
                 new CommitCallback.Context(
                         finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);
@@ -1684,7 +1695,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int retryCount = 0;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            boolean success = compactManifestOnce();
+            boolean success;
+            try (CommitAttempt attempt =
+                    CommitAttempt.begin(
+                            snapshotCommit, options, commitUser, retryCount, startMillis)) {
+                success = compactManifestOnce(attempt);
+            }
             if (success) {
                 break;
             }
@@ -1702,8 +1718,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private boolean compactManifestOnce() {
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+    private boolean compactManifestOnce(CommitAttempt attempt) {
+        Snapshot latestSnapshot = attempt.latestSnapshot(snapshotManager::latestSnapshot);
 
         if (latestSnapshot == null) {
             return true;
@@ -1756,7 +1772,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.nextRowId(),
                         null);
 
-        return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
+        return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList(), attempt);
     }
 
     static CoreOptions manifestCompactionOptions(CoreOptions options) {
@@ -1772,12 +1788,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot baseSnapshot,
             Snapshot newSnapshot,
             List<PartitionEntry> deltaPartitionEntries) {
+        return commitSnapshotImpl(
+                baseSnapshot,
+                newSnapshot,
+                deltaPartitionEntries,
+                CommitAttempt.unlocked(snapshotCommit));
+    }
+
+    private boolean commitSnapshotImpl(
+            @Nullable Snapshot baseSnapshot,
+            Snapshot newSnapshot,
+            List<PartitionEntry> deltaPartitionEntries,
+            CommitAttempt attempt) {
         try {
             List<PartitionStatistics> statistics = new ArrayList<>(deltaPartitionEntries.size());
             for (PartitionEntry entry : deltaPartitionEntries) {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
-            return snapshotCommit.commit(
+            return attempt.commit(
                     baseSnapshot == null ? null : baseSnapshot.uuid(),
                     newSnapshot,
                     options.branch(),

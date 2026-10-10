@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.catalog.CommitAttempt;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
@@ -116,6 +117,11 @@ import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link FileStoreCommitImpl}. */
 public class FileStoreCommitTest {
@@ -1730,6 +1736,63 @@ public class FileStoreCommitTest {
         }
         long id = store.snapshotManager().latestSnapshot().id();
         assertThat(id).isEqualTo(2);
+    }
+
+    @Test
+    public void testRetryAcquiresLeaseBeforeRebuildingOnConcurrentAppend() throws Exception {
+        TestFileStore store = createStore(false);
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
+                gen::getPartition,
+                value -> 0);
+        AtomicReference<ManifestCommittable> prepared = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 2L, null, "b")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> prepared.set(committable));
+        SnapshotCommit delegate = new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty());
+        SnapshotCommit publisher = mock(SnapshotCommit.class);
+        when(publisher.commit(any(), any(), any(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            store.commitData(
+                                    Collections.singletonList(
+                                            gen.nextInsert("20211110", 10, 3L, null, "c")),
+                                    gen::getPartition,
+                                    value -> 0);
+                            return false;
+                        });
+        CommitAttempt lease = mock(CommitAttempt.class);
+        when(publisher.beginCommit(any(), eq("morax-job"), eq(true)))
+                .thenReturn(Optional.of(lease));
+        when(lease.latestSnapshot(any()))
+                .thenAnswer(invocation -> store.snapshotManager().latestSnapshot());
+        when(lease.commit(any(), any(), any(), any()))
+                .thenAnswer(
+                        invocation ->
+                                delegate.commit(
+                                        invocation.getArgument(0),
+                                        invocation.getArgument(1),
+                                        invocation.getArgument(2),
+                                        invocation.getArgument(3)));
+        Map<String, String> retryOptions = new HashMap<>(store.options().toMap());
+        retryOptions.put("commit.lock-enabled", "true");
+        retryOptions.put("commit.lock-on-retry", "true");
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store, "morax-job", publisher, new CoreOptions(retryOptions), false)) {
+            commit.commit(checkNotNull(prepared.get()), false);
+        }
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(latest.commitUser()).isEqualTo("morax-job");
+        assertThat(store.readKvsFromSnapshot(latest.id())).hasSize(3);
+        verify(publisher).beginCommit(any(), eq("morax-job"), eq(true));
+        verify(lease).latestSnapshot(any());
     }
 
     @Test

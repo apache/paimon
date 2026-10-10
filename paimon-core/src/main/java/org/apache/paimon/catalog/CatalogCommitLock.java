@@ -19,30 +19,36 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.partition.PartitionStatistics;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
-import java.util.Optional;
+/** A catalog lease and the authoritative snapshot observed when it was granted. */
+public class CatalogCommitLock {
 
-/** Interface to commit snapshot atomically. */
-public interface SnapshotCommit extends AutoCloseable {
+    private final String commitUser;
+    private final long leaseMillis;
+    @Nullable private final Snapshot snapshot;
 
-    /** An empty result means that another writer currently holds the lease. */
-    default Optional<CommitAttempt> beginCommit(
-            String branch, String commitUser, boolean acquireLock) throws Exception {
-        if (acquireLock) {
-            throw new UnsupportedOperationException(
-                    "This snapshot committer does not support locks.");
+    public CatalogCommitLock(String commitUser, long leaseMillis, @Nullable Snapshot snapshot) {
+        if (commitUser == null || commitUser.isEmpty() || leaseMillis <= 0) {
+            throw new IllegalArgumentException(
+                    "A commit lock requires a commitUser and a positive lease.");
         }
-        return Optional.of(CommitAttempt.unlocked(this));
+        this.commitUser = commitUser;
+        this.leaseMillis = leaseMillis;
+        this.snapshot = snapshot;
     }
 
-    boolean commit(
-            @Nullable String baseSnapshotUuid,
-            Snapshot snapshot,
-            String branch,
-            List<PartitionStatistics> statistics)
-            throws Exception;
+    public String commitUser() {
+        return commitUser;
+    }
+
+    public long leaseMillis() {
+        return leaseMillis;
+    }
+
+    @Nullable
+    public Snapshot snapshot() {
+        return snapshot;
+    }
 }
