@@ -36,6 +36,7 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.sst_file_reader import SstFileReader
 from pypaimon.globalindex.memory_slice_input import MemorySliceInput
+from pypaimon.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
 
 
 def _deserialize_row_ids(data: bytes) -> List[int]:
@@ -163,6 +164,19 @@ class BTreeIndexReader:
             return RoaringBitmap64()
         return self._range_query(self.min_key, self.max_key, True, True)
 
+    def _entries_from(self, serialized_key: bytes):
+        file_iter = self.reader.create_iterator()
+        file_iter.seek_to(serialized_key)
+        while True:
+            data_iter = file_iter.read_batch()
+            if data_iter is None:
+                return
+            while data_iter.has_next():
+                entry = data_iter.__next__()
+                if entry is None:
+                    break
+                yield entry
+
     def _range_query(
         self,
         from_key: object,
@@ -171,35 +185,18 @@ class BTreeIndexReader:
         to_inclusive: bool
     ) -> RoaringBitmap64:
         result = RoaringBitmap64()
+        for entry in self._entries_from(self.key_serializer.serialize(from_key)):
+            key = self.key_serializer.deserialize(entry.key)
 
-        file_iter = self.reader.create_iterator()
-        file_iter.seek_to(self.key_serializer.serialize(from_key))
+            if not from_inclusive and self.comparator(key, from_key) == 0:
+                continue
 
-        while True:
-            data_iter = file_iter.read_batch()
-            if data_iter is None:
-                break
+            difference = self.comparator(key, to_key)
+            if difference > 0 or (not to_inclusive and difference == 0):
+                return result
 
-            while data_iter.has_next():
-                entry = data_iter.__next__()
-                if entry is None:
-                    break
-
-                key_bytes = entry.key
-                value_bytes = entry.value
-
-                key = self.key_serializer.deserialize(key_bytes)
-
-                if not from_inclusive and self.comparator(key, from_key) == 0:
-                    continue
-
-                difference = self.comparator(key, to_key)
-                if difference > 0 or (not to_inclusive and difference == 0):
-                    return result
-
-                row_ids = _deserialize_row_ids(value_bytes)
-                for row_id in row_ids:
-                    result.add(row_id)
+            for row_id in _deserialize_row_ids(entry.value):
+                result.add(row_id)
 
         return result
 
@@ -248,7 +245,19 @@ class BTreeIndexReader:
         return GlobalIndexResult.create(result)
 
     def visit_starts_with(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)
+        result = RoaringBitmap64()
+        if self.min_key is None:
+            return GlobalIndexResult.create(result)
+        prefix = self.key_serializer.serialize(literal)
+        upper_bound = SortedFileMetaSelector._prefix_upper_bound(prefix)
+        # STRING keys follow Java's unsigned UTF-8 order. The exclusive byte
+        # boundary need not be a valid Unicode string, so do not deserialize it.
+        for entry in self._entries_from(prefix):
+            if upper_bound is not None and entry.key >= upper_bound:
+                break
+            for row_id in _deserialize_row_ids(entry.value):
+                result.add(row_id)
+        return GlobalIndexResult.create(result)
 
     def visit_ends_with(self, literal: object) -> Optional[GlobalIndexResult]:
         return GlobalIndexResult.create(self._all_non_null_rows(), is_exact=False)

@@ -53,17 +53,14 @@ class SortedFileMetaSelector:
         if len(prefix) == 0:
             return self._filter(lambda meta: not meta.only_nulls())
 
-        prefix_key = self._key_serializer.deserialize(prefix)
         upper_bound_bytes = self._prefix_upper_bound(prefix)
-        upper_bound = (None if upper_bound_bytes is None
-                       else self._key_serializer.deserialize(upper_bound_bytes))
-
+        # Prefix selection applies to STRING keys, whose serialized order is
+        # Java's unsigned UTF-8 order. A byte upper bound may not decode to text.
         return self._filter(
             lambda meta: (
                 not meta.only_nulls()
-                and self._compare_last_key(meta, prefix_key) >= 0
-                and (upper_bound is None
-                     or self._compare_first_key(meta, upper_bound) < 0)))
+                and meta.last_key >= prefix
+                and (upper_bound_bytes is None or meta.first_key < upper_bound_bytes)))
 
     def select_ends_with(self, literal) -> List[GlobalIndexIOMeta]:
         return self._filter(lambda meta: literal is not None and not meta.only_nulls())

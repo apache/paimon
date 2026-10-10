@@ -62,19 +62,20 @@ def query(table, predicate, batch=False):
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("mode", ["full", "fast"])
 @pytest.mark.parametrize("refine", [False, True])
-def test_btree_candidates_are_verified_before_top_k(table, caplog, pattern, batch, mode, refine):
+def test_btree_string_filters_follow_java_exactness_before_top_k(table, caplog, pattern, batch, mode, refine):
     scalar_index(table)
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
     result = query(table, "name LIKE '%s'" % pattern, batch).to_list()
-    expected = [{"id": 1}] if refine else []
+    candidate_only = pattern == "%zeta%"
+    expected = [{"id": 1}] if refine or not candidate_only else []
     assert result == ([expected, expected] if batch else expected)
-    assert ("global-index.filter.refine-from-data=true" in caplog.text) == (not refine)
+    assert ("global-index.filter.refine-from-data=true" in caplog.text) == (candidate_only and not refine)
 
 
 @pytest.mark.parametrize("kind, predicate", [
     ("btree", "name = 'beta zeta'"), ("btree", "name >= 'beta' AND name < 'gamma'"),
-    ("btree", "name LIKE 'beta zeta'"), ("bitmap", "name = 'beta zeta'"),
+    ("btree", "name LIKE 'beta zeta'"), ("btree", "name LIKE 'beta%'"), ("bitmap", "name = 'beta zeta'"),
     ("bitmap", "name LIKE 'beta%'"),
 ])
 @pytest.mark.parametrize("refine", [False, True])

@@ -153,11 +153,12 @@ def test_bitmap_candidate_leaves_require_refinement_in_compounds(rest_catalog, r
 
 
 @pytest.mark.parametrize('pattern', ['keep', 'ke%'])
-def test_optimized_bitmap_like_filters_stay_exact_without_refinement(rest_catalog, pattern):
+@pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
+def test_optimized_like_filters_stay_exact_without_refinement(rest_catalog, pattern, index_type):
     catalog, _ = rest_catalog
     table = _table(catalog, {'global-index.filter.refine-from-data': 'false',
                              'scalar-index.search-mode': 'fast'})
-    table.create_global_index('label', index_type='bitmap')
+    table.create_global_index('label', index_type=index_type)
     predicate = table.new_read_builder().new_predicate_builder().like('label', pattern)
     assert set(_compare(table, predicate=predicate)) == {1, 5, 7}
     assert indexes._ids(table) == list(range(8))
@@ -167,7 +168,44 @@ def test_optimized_bitmap_like_filters_stay_exact_without_refinement(rest_catalo
 @pytest.mark.parametrize('partial', [False, True])
 @pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
 @pytest.mark.parametrize('method, literal', [
-    ('like', ''), ('like', '%'), ('like', '%%'), ('contains', ''), ('endswith', '')])
+    ('startswith', 'ke'), ('like', 'ke%'), ('startswith', 'missing'), ('like', 'missing%')])
+def test_prefix_filters_are_exact_before_refinement(rest_catalog, refine, partial, index_type, method, literal):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'global-index.filter.refine-from-data': str(refine).lower()})
+    table.create_global_index('label', index_type=index_type)
+    if partial:
+        indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    predicate = getattr(table.new_read_builder().new_predicate_builder(), method)('label', literal)
+    expected = ({1, 5, 7, 9, 11} if partial else {1, 5, 7}) if literal.startswith('ke') else set()
+    assert set(_compare(table, predicate=predicate)) == expected
+    assert indexes._ids(table) == list(range(12 if partial else 8))
+
+
+@pytest.mark.parametrize('prefix', ['\x7f', '\u00ff', '\uffff', '\U0010ffff'])
+@pytest.mark.parametrize('method', ['startswith', 'like'])
+def test_btree_unicode_prefix_bounds_keep_indexed_and_raw_matches(rest_catalog, prefix, method):
+    catalog, _ = rest_catalog
+    table = indexes._create(catalog, schema=SCHEMA, options={
+        'read.native.enabled': 'true', 'global-index.filter.refine-from-data': 'false'})
+    indexes._append(table, [
+        {'id': i, 'content': 'paimon', 'label': label, 'pt': 0}
+        for i, label in enumerate([prefix, prefix + 'a', None, 'keep'])], schema=SCHEMA)
+    table.create_global_index('content', index_type='full-text')
+    table.create_global_index('label', index_type='btree')
+    indexes._append(table, [
+        {'id': 4, 'content': 'paimon', 'label': prefix + 'raw', 'pt': 0},
+        {'id': 5, 'content': 'paimon', 'label': 'drop', 'pt': 0}], schema=SCHEMA)
+    literal = prefix + '%' if method == 'like' else prefix
+    predicate = getattr(table.new_read_builder().new_predicate_builder(), method)('label', literal)
+    assert set(_compare(table, predicate=predicate)) == {0, 1, 4}
+    assert indexes._ids(table) == list(range(6))
+
+
+@pytest.mark.parametrize('refine', [False, True])
+@pytest.mark.parametrize('partial', [False, True])
+@pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
+@pytest.mark.parametrize('method, literal', [
+    ('like', ''), ('like', '%'), ('like', '%%'), ('contains', ''), ('endswith', ''), ('startswith', '')])
 def test_empty_string_filters_preserve_java_refinement(rest_catalog, refine, partial, index_type, method, literal):
     catalog, _ = rest_catalog
     table = indexes._create(catalog, schema=SCHEMA, partitioned=True, options={
@@ -187,7 +225,8 @@ def test_empty_string_filters_preserve_java_refinement(rest_catalog, refine, par
     predicate = getattr(table.new_read_builder().new_predicate_builder(), method)('label', literal)
     indexed = {0, 4} if method == 'like' and literal == '' else {0, 2, 3, 4, 5, 6}
     raw = ({8} if method == 'like' and literal == '' else {8, 10, 11}) if partial else set()
-    assert set(_compare(table, predicate=predicate)) == (indexed if refine else set()).union(raw)
+    expected = (indexed if refine or method == 'startswith' else set()).union(raw)
+    assert set(_compare(table, predicate=predicate)) == expected
     assert indexes._ids(table) == list(range(len(labels)))
 
 
