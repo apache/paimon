@@ -18,9 +18,7 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogCommitLock;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.exceptions.BadRequestException;
@@ -31,7 +29,6 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -50,9 +47,15 @@ public class RESTCatalogLock implements CatalogLock {
     private final RESTApi api;
     private final ScheduledExecutorService renewer;
     private final LongSupplier nanoTime;
+    private final long acquireTimeoutMillis;
+    private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
 
     public RESTCatalogLock(RESTApi api) {
-        this(api, RENEWER);
+        this(api, Long.MAX_VALUE);
+    }
+
+    public RESTCatalogLock(RESTApi api, long acquireTimeoutMillis) {
+        this(api, RENEWER, System::nanoTime, acquireTimeoutMillis);
     }
 
     RESTCatalogLock(RESTApi api, ScheduledExecutorService renewer) {
@@ -60,9 +63,18 @@ public class RESTCatalogLock implements CatalogLock {
     }
 
     RESTCatalogLock(RESTApi api, ScheduledExecutorService renewer, LongSupplier nanoTime) {
+        this(api, renewer, nanoTime, Long.MAX_VALUE);
+    }
+
+    RESTCatalogLock(
+            RESTApi api,
+            ScheduledExecutorService renewer,
+            LongSupplier nanoTime,
+            long acquireTimeoutMillis) {
         this.api = api;
         this.renewer = renewer;
         this.nanoTime = nanoTime;
+        this.acquireTimeoutMillis = acquireTimeoutMillis;
     }
 
     private static ScheduledThreadPoolExecutor createRenewer() {
@@ -79,9 +91,9 @@ public class RESTCatalogLock implements CatalogLock {
     }
 
     @Override
-    public Optional<CatalogCommitLock> acquireCommitLock(
-            Identifier identifier, String tableUuid, String commitUser)
-            throws Catalog.TableNotExistException {
+    public <T> T runWithLock(
+            Identifier identifier, String tableUuid, String commitUser, Callable<T> callable)
+            throws Exception {
         if (tableUuid == null
                 || tableUuid.isEmpty()
                 || commitUser == null
@@ -89,16 +101,41 @@ public class RESTCatalogLock implements CatalogLock {
             throw new IllegalArgumentException(
                     "A commit lease requires a table UUID and commit user.");
         }
+        long startedAt = nanoTime.getAsLong();
+        while (true) {
+            Lease lease = acquire(identifier, tableUuid, commitUser);
+            if (lease != null) {
+                currentLease.set(lease);
+                try {
+                    lease.ensureValid();
+                    return callable.call();
+                } finally {
+                    currentLease.remove();
+                    lease.close();
+                }
+            }
+            if (TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - startedAt)
+                    >= acquireTimeoutMillis) {
+                throw new IllegalStateException(
+                        "Timed out acquiring commit lock for " + identifier);
+            }
+            Thread.sleep(Math.min(100, acquireTimeoutMillis));
+        }
+    }
+
+    @Nullable
+    private Lease acquire(Identifier identifier, String tableUuid, String commitUser)
+            throws Catalog.TableNotExistException {
         try {
             long requestedAt = nanoTime.getAsLong();
             CommitLockResponse response = api.acquireCommitLock(identifier, tableUuid, commitUser);
             if (!response.isAcquired()) {
-                return Optional.empty();
+                return null;
             }
             if (!commitUser.equals(response.getCommitUser()) || response.getLeaseMillis() <= 0) {
                 throw new IllegalStateException("The server returned an invalid commit lease.");
             }
-            return Optional.of(new Lease(identifier, tableUuid, commitUser, response, requestedAt));
+            return new Lease(identifier, tableUuid, commitUser, response, requestedAt);
         } catch (NoSuchResourceException e) {
             throw new Catalog.TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
@@ -108,11 +145,19 @@ public class RESTCatalogLock implements CatalogLock {
         }
     }
 
-    private class Lease implements CatalogCommitLock {
+    @Override
+    public void ensureValid() {
+        Lease lease = currentLease.get();
+        if (lease == null) {
+            throw new IllegalStateException("No commit lease is held by this thread.");
+        }
+        lease.ensureValid();
+    }
+
+    private class Lease implements AutoCloseable {
         private final Identifier identifier;
         private final String tableUuid;
         private final String commitUser;
-        @Nullable private final Snapshot snapshot;
         private final ScheduledFuture<?> renewal;
         private final AtomicBoolean closed = new AtomicBoolean();
         private final long leaseNanos;
@@ -128,7 +173,6 @@ public class RESTCatalogLock implements CatalogLock {
             this.identifier = identifier;
             this.tableUuid = tableUuid;
             this.commitUser = commitUser;
-            this.snapshot = response.getSnapshot();
             this.leaseNanos = TimeUnit.MILLISECONDS.toNanos(response.getLeaseMillis());
             this.renewedAt = requestedAt;
             long interval = Math.max(1, response.getLeaseMillis() / 3);
@@ -154,12 +198,6 @@ public class RESTCatalogLock implements CatalogLock {
             }
         }
 
-        @Override
-        public Snapshot snapshot() {
-            return snapshot;
-        }
-
-        @Override
         public void ensureValid() {
             // Count response time conservatively and do not depend on the renewer being scheduled.
             if (nanoTime.getAsLong() - renewedAt >= leaseNanos && renewalFailure == null) {

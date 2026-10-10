@@ -3645,12 +3645,21 @@ components:
             $ref: '#/components/schemas/PartitionStatistics'
     RollbackTableRequest:
       type: object
+      description: >-
+        When rolling back inside a commit lease, supply tableId and commitUser together with
+        fromSnapshot. The server must validate table incarnation, current head, authenticated
+        caller and unexpired lease ownership, then roll back and clear the lease atomically.
+        A different owner or a request without ownership cannot change the head under a lease.
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
         fromSnapshot:
           type: [ integer, "null" ]
           format: int64
+        tableId:
+          type: [ string, "null" ]
+        commitUser:
+          type: [ string, "null" ]
     RollbackSchemaRequest:
       type: object
       required:

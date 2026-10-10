@@ -74,28 +74,28 @@ configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
 ## REST Catalog Commit Leases
 
-The REST catalog can coordinate snapshot publication using table commit leases. Set
-`rest.commit.lock-enabled = true` on the table to allow lease acquisition; this capability option
-is disabled by default and is independent of the catalog options `lock.enabled` and `lock.type`.
-Enabling it does not automatically acquire leases for writers.
+The REST catalog exposes table-bound commit leases through `Catalog.createLock` and the unified
+`Lock.runWithLock` contract. Existing `CatalogLockFactory` implementations remain compatible
+through the named `CatalogLock` adapter. Set `rest.commit.lock-enabled = true` on the table to
+allow acquisition; it defaults to `false`. Callers supply their exact `commitUser` and table UUID.
+Lock contention waits until `commit.timeout` when configured, independently of publication retries.
+The client renews the lease during the protected operation and validates its monotonic deadline
+before publishing. A failed operation stops renewal and its lease expires automatically.
 
-`RESTCatalogLockFactory` uses the existing `CatalogLockFactory` mechanism to create a lease client.
-Callers explicitly acquire a scope through `CatalogLock.acquireCommitLock`, supplying the stable
-table UUID, branch and exact `commitUser`. The scope provides the authoritative snapshot head,
-renews the lease while open, and detects expiry or renewal failure through `ensureValid`.
-Closing a scope stops renewal; callers must check `ensureValid` before publishing.
-The optional commit lease capability does not change existing `runWithLock` implementations.
+The server must validate the current table incarnation, branch, authenticated caller and exact
+owner, and atomically publish the snapshot and clear the lease. All snapshot writers must honor
+active leases, including writers that do not request one. Each successful snapshot publication
+ends its lease; a later publication must acquire another scope. Snapshot comparison and file
+conflict validation remain necessary.
 
-The snapshot commit request is unchanged. The server must check ownership using
-`snapshot.commitUser` and the authenticated caller, and publish the snapshot in the same
-transaction, including for writers that do not request leases. A new successful publication
-clears the lease atomically. Abandoned attempts stop renewal and expire automatically;
-there is no separate unlock RPC.
+Rollback inside a lease supplies optional `tableId` and `commitUser` fields in addition to the
+expected `fromSnapshot`. The server must validate the lease and expected head, roll back and clear
+the lease atomically. Legacy rollback requests omit these fields and cannot change a leased head.
 
 This is a commit admission lease, not a generation or fencing token. Requests with the same
-`commitUser` and authenticated caller share ownership. Use a unique commit user per logical
-writer and preserve it during recovery. Snapshot UUID comparison and file conflict validation
-remain required; leases cannot make stale file changes valid or guarantee success after lease loss.
+commit user and authenticated caller share ownership. Use a unique commit user per logical writer
+and preserve it during recovery. A server without the lease protocol rejects acquisition rather
+than silently proceeding without protection.
 
 ## Files conflict
 
