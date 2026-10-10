@@ -122,6 +122,25 @@ class RESTCatalogTagCRUDTest(RESTBaseTest):
         with self.assertRaises(TagNotExistException):
             self.rest_catalog.delete_tag(identifier, "absent")
 
+    def test_rename_tag_not_supported(self):
+        identifier = self._identifier()
+        self.rest_catalog.create_tag(identifier, "t1")
+        with self.assertRaises(NotImplementedError) as cm:
+            self.rest_catalog.rename_tag(identifier, "t1", "t2")
+        self.assertIn("rename_tag", str(cm.exception))
+        # The server registry is unchanged; the old name still resolves.
+        response = self.rest_catalog.get_tag(identifier, "t1")
+        self.assertEqual(response.tag_name, "t1")
+
+    def test_replace_tag_not_supported(self):
+        identifier = self._identifier()
+        self.rest_catalog.create_tag(identifier, "t1", snapshot_id=1)
+        with self.assertRaises(NotImplementedError) as cm:
+            self.rest_catalog.replace_tag(identifier, "t1", snapshot_id=1)
+        self.assertIn("replace_tag", str(cm.exception))
+        response = self.rest_catalog.get_tag(identifier, "t1")
+        self.assertEqual(response.snapshot.id, 1)
+
 
 # Note: the previous ``FilesystemCatalogTagInheritsNotImplementedTest`` class
 # has been removed because FileSystemCatalog now overrides the tag CRUD

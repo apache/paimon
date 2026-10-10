@@ -624,6 +624,24 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
+    def rename_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                   target_tag_name: str) -> None:
+        # The REST API has create, get, list, and delete only. Renaming the
+        # tag file through FileStoreTable would leave the server registry
+        # pointing at a name whose file is gone.
+        raise NotImplementedError(
+            "REST catalog does not support rename_tag. "
+            "The REST API has no rename endpoint."
+        )
+
+    def replace_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                    snapshot_id: Optional[int] = None,
+                    time_retained: Optional[str] = None) -> None:
+        raise NotImplementedError(
+            "REST catalog does not support replace_tag. "
+            "The REST API has no replace endpoint."
+        )
+
     # Branch CRUD: mirrors Java RESTCatalog branch handlers.
     def create_branch(self, identifier: Union[str, Identifier], branch_name: str,
                       tag_name: Optional[str] = None) -> None:

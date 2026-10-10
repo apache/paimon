@@ -133,6 +133,13 @@ class CliTagTest(unittest.TestCase):
             'tag', 'create', 'db.t', 'v1', '--ignore-if-exists')
         self.assertEqual(0, code)
 
+    def test_create_time_retained(self):
+        _, _, code = self._run(
+            'tag', 'create', 'db.t', 'v1', '--time-retained', '12h')
+        self.assertEqual(0, code)
+        got, _, _ = self._run('tag', 'get', 'db.t', 'v1')
+        self.assertIn("Time Retained: PT12H", got)
+
     # -- get -----------------------------------------------------------------
 
     def test_get_table_format(self):
@@ -169,6 +176,79 @@ class CliTagTest(unittest.TestCase):
         _, err, code = self._run('tag', 'delete', 'db.t', 'absent')
         self.assertEqual(1, code)
         self.assertIn("does not exist", err)
+
+    # -- rename --------------------------------------------------------------
+
+    def test_rename(self):
+        self._run('tag', 'create', 'db.t', 'v1', '--snapshot-id', '1')
+        out, _, code = self._run('tag', 'rename', 'db.t', 'v1', 'v2')
+        self.assertEqual(0, code)
+        self.assertIn("renamed", out)
+        listed, _, _ = self._run('tag', 'list', 'db.t', '--format', 'json')
+        self.assertEqual(["v2"], json.loads(listed))
+        got, _, _ = self._run('tag', 'get', 'db.t', 'v2')
+        self.assertIn("Snapshot ID: 1", got)
+
+    def test_rename_missing(self):
+        _, err, code = self._run('tag', 'rename', 'db.t', 'absent', 'v2')
+        self.assertEqual(1, code)
+        self.assertIn("does not exist", err)
+
+    def test_rename_target_exists(self):
+        self._run('tag', 'create', 'db.t', 'v1')
+        self._run('tag', 'create', 'db.t', 'v2')
+        _, err, code = self._run('tag', 'rename', 'db.t', 'v1', 'v2')
+        self.assertEqual(1, code)
+        self.assertIn("already exists", err)
+
+    # -- replace -------------------------------------------------------------
+
+    def test_replace_snapshot(self):
+        self._run('tag', 'create', 'db.t', 'v1', '--snapshot-id', '1')
+        out, _, code = self._run(
+            'tag', 'replace', 'db.t', 'v1', '--snapshot-id', '2')
+        self.assertEqual(0, code)
+        self.assertIn("replaced", out)
+        got, _, _ = self._run('tag', 'get', 'db.t', 'v1')
+        self.assertIn("Snapshot ID: 2", got)
+
+    def test_replace_latest(self):
+        self._run('tag', 'create', 'db.t', 'v1', '--snapshot-id', '1')
+        _, _, code = self._run('tag', 'replace', 'db.t', 'v1')
+        self.assertEqual(0, code)
+        got, _, _ = self._run('tag', 'get', 'db.t', 'v1')
+        self.assertIn("Snapshot ID: 2", got)
+
+    def test_replace_time_retained(self):
+        self._run('tag', 'create', 'db.t', 'v1', '--snapshot-id', '1')
+        _, _, code = self._run(
+            'tag', 'replace', 'db.t', 'v1', '--time-retained', '12h')
+        self.assertEqual(0, code)
+        got, _, _ = self._run('tag', 'get', 'db.t', 'v1')
+        self.assertIn("Time Retained: PT12H", got)
+
+    def test_replace_missing_tag(self):
+        _, err, code = self._run(
+            'tag', 'replace', 'db.t', 'absent', '--snapshot-id', '1')
+        self.assertEqual(1, code)
+        self.assertIn("does not exist", err)
+
+    def test_replace_missing_snapshot(self):
+        self._run('tag', 'create', 'db.t', 'v1')
+        _, err, code = self._run(
+            'tag', 'replace', 'db.t', 'v1', '--snapshot-id', '999')
+        self.assertEqual(1, code)
+        self.assertIn("Failed to replace tag", err)
+        self.assertIn("Snapshot id '999' doesn't exist.", err)
+
+    def test_replace_without_time_retained_drops_ttl(self):
+        self._run('tag', 'create', 'db.t', 'v1', '--time-retained', '12h')
+        _, _, code = self._run(
+            'tag', 'replace', 'db.t', 'v1', '--snapshot-id', '1')
+        self.assertEqual(0, code)
+        got, _, _ = self._run('tag', 'get', 'db.t', 'v1')
+        self.assertIn("Snapshot ID: 1", got)
+        self.assertNotIn("Time Retained:", got)
 
     # -- bad input -----------------------------------------------------------
 
