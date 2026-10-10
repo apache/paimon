@@ -104,7 +104,6 @@ class PaimonDatasetReader(ABC):
             delta_timestamps=None,
             tolerance_s=1e-4,
             blob_parallelism=16,
-            max_open_videos=16,
             video_backend=None,
             return_uint8=False,
             _resolved_meta=False):
@@ -121,7 +120,6 @@ class PaimonDatasetReader(ABC):
             delta_timestamps,
             tolerance_s,
             blob_parallelism,
-            max_open_videos,
             video_backend,
             return_uint8,
         )
@@ -156,7 +154,6 @@ class PaimonDatasetReader(ABC):
             delta_timestamps,
             tolerance_s,
             blob_parallelism,
-            max_open_videos,
             video_backend,
             return_uint8):
         self.meta = metadata
@@ -166,10 +163,6 @@ class PaimonDatasetReader(ABC):
         self.tolerance_s = float(tolerance_s)
         if not math.isfinite(self.tolerance_s) or self.tolerance_s < 0:
             raise ValueError("tolerance_s must be finite and non-negative.")
-        if isinstance(max_open_videos, bool):
-            raise ValueError("max_open_videos must be a positive integer.")
-        self.max_open_videos = _positive_int(
-            max_open_videos, "max_open_videos")
         self.blob_parallelism = _positive_int(
             blob_parallelism, "blob_parallelism")
         if video_backend not in (None, "torchcodec", "pyav"):
@@ -284,7 +277,6 @@ class PaimonDatasetReader(ABC):
                 output_column=key,
                 collate_fn=_identity,
                 range_parallelism=self.blob_parallelism,
-                max_open_videos=self.max_open_videos,
             )
             for key in self._video_keys
         ]
@@ -596,7 +588,6 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             delta_timestamps=None,
             tolerance_s=1e-4,
             blob_parallelism=16,
-            max_open_videos=16,
             video_backend=None,
             return_uint8=False):
         self._frames_table, meta = _load_dataset(table, tag_name)
@@ -609,7 +600,6 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             delta_timestamps=delta_timestamps,
             tolerance_s=tolerance_s,
             blob_parallelism=blob_parallelism,
-            max_open_videos=max_open_videos,
             video_backend=video_backend,
             return_uint8=return_uint8,
             _resolved_meta=True,
@@ -644,7 +634,6 @@ class PaimonLeRobotDataset:
             delta_timestamps=None,
             tolerance_s=1e-4,
             blob_parallelism=16,
-            max_open_videos=16,
             video_backend=None,
             return_uint8=False):
         _require_dataset_python()
@@ -656,7 +645,6 @@ class PaimonLeRobotDataset:
                 or delta_timestamps is not None
                 or tolerance_s != 1e-4
                 or blob_parallelism != 16
-                or max_open_videos != 16
                 or video_backend is not None
                 or return_uint8
             ):
@@ -672,7 +660,6 @@ class PaimonLeRobotDataset:
                 delta_timestamps=delta_timestamps,
                 tolerance_s=tolerance_s,
                 blob_parallelism=blob_parallelism,
-                max_open_videos=max_open_videos,
                 video_backend=video_backend,
                 return_uint8=return_uint8,
             )
