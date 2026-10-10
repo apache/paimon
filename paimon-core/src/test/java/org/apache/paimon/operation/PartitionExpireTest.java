@@ -61,7 +61,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -145,17 +144,6 @@ public class PartitionExpireTest {
                                                         table.coreOptions().toConfiguration()),
                                                 null)) {
                             commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
-                        }
-                    }
-
-                    @Override
-                    public void dropDonePartitions(List<Map<String, String>> partitions) {
-                        for (Map<String, String> partition : partitions) {
-                            Map<String, String> donePartition =
-                                    AddDonePartitionAction.toDonePartition(partition);
-                            if (createdPartitions.remove(donePartition)) {
-                                deletedPartitions.add(donePartition);
-                            }
                         }
                     }
 
@@ -326,13 +314,12 @@ public class PartitionExpireTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"false,values-time", "true,values-time", "false,update-time", "true,update-time"})
-    public void testExpireDatePartition(
-            boolean metastorePartitionedTable, String expirationStrategy) throws Exception {
+    @ValueSource(strings = {"values-time", "update-time"})
+    public void testExpireDatePartitionWithoutMetastore(String expirationStrategy)
+            throws Exception {
         SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         Map<String, String> tableOptions = new HashMap<>();
-        tableOptions.put(
-                METASTORE_PARTITIONED_TABLE.key(), Boolean.toString(metastorePartitionedTable));
+        tableOptions.put(METASTORE_PARTITIONED_TABLE.key(), "false");
         tableOptions.put(CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(), "false");
         schemaManager.createTable(
                 new Schema(
@@ -372,9 +359,6 @@ public class PartitionExpireTest {
                 .createReader(table.newScan().plan().splits())
                 .forEachRemaining(row -> remainingDates.add(row.getInt(0)));
         assertThat(remainingDates).containsExactlyElementsOf(expectedRemaining);
-        if (metastorePartitionedTable) {
-            assertThat(deletedPartitions).containsExactlyElementsOf(expectedExpired);
-        }
     }
 
     @ParameterizedTest

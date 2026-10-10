@@ -33,10 +33,6 @@ public interface PartitionModification extends AutoCloseable {
 
     void dropPartitions(List<Map<String, String>> partitions) throws Catalog.TableNotExistException;
 
-    /** Remove corresponding {@code .done} markers without deleting data; specs have no suffix. */
-    default void dropDonePartitions(List<Map<String, String>> partitions)
-            throws Catalog.TableNotExistException {}
-
     void alterPartitions(List<PartitionStatistics> partitions)
             throws Catalog.TableNotExistException;
 
@@ -53,12 +49,6 @@ public interface PartitionModification extends AutoCloseable {
             public void dropPartitions(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
                 catalog.dropPartitions(identifier, partitions);
-            }
-
-            @Override
-            public void dropDonePartitions(List<Map<String, String>> partitions)
-                    throws Catalog.TableNotExistException {
-                catalog.dropDonePartitions(identifier, partitions);
             }
 
             @Override

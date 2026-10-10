@@ -1159,17 +1159,6 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Remove the {@code .done} markers corresponding to the supplied data partitions. Ignore
-     * missing markers and never delete table data. Catalogs which store these markers must override
-     * this method.
-     *
-     * @param identifier path of the table
-     * @param partitions original data partition specs, without the marker suffix
-     */
-    default void dropDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {}
-
-    /**
      * Alter partitions of the specify table. For non-existent partitions, partitions will be
      * created directly.
      *
