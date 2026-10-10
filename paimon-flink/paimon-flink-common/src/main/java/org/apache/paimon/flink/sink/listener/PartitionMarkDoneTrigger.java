@@ -114,6 +114,10 @@ public class PartitionMarkDoneTrigger {
         }
     }
 
+    boolean shouldMarkDoneOnEndInput(boolean endInput) {
+        return endInput && markDoneWhenEndInput;
+    }
+
     public List<String> donePartitions(boolean endInput) {
         return donePartitions(endInput, System.currentTimeMillis(), false);
     }

@@ -43,6 +43,9 @@ public class WriterCommittables {
 
     @VisibleForTesting
     WriterCommittables(long maxCheckpointId, List<CheckpointCommittables> entries) {
+        if (maxCheckpointId == Long.MAX_VALUE) {
+            throw new IllegalStateException("Coordinator commit requires real checkpoints");
+        }
         this.maxCheckpointId = maxCheckpointId;
         this.committablesPerCheckpoint = new TreeMap<>();
         for (CheckpointCommittables entry : entries) {
@@ -65,6 +68,9 @@ public class WriterCommittables {
 
     @VisibleForTesting
     WriterCommittables(CheckpointCommittables entry) {
+        if (entry.checkpointId() == Long.MAX_VALUE) {
+            throw new IllegalStateException("Legacy per-writer MAX is not supported");
+        }
         this.maxCheckpointId = entry.checkpointId();
         this.committablesPerCheckpoint = new TreeMap<>();
         committablesPerCheckpoint.put(entry.checkpointId(), entry);
@@ -117,6 +123,17 @@ public class WriterCommittables {
         }
     }
 
+    /** A reported marker is only a candidate; the coordinator promotes it after commit. */
+    public boolean hasTerminalCandidate(long checkpointId) {
+        for (CheckpointCommittables entry :
+                committablesPerCheckpoint.headMap(checkpointId, true).values()) {
+            if (entry.terminal()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public long getMaxCheckpointId() {
         return maxCheckpointId;
     }
@@ -127,7 +144,7 @@ public class WriterCommittables {
      * watermark" sentinel is what {@link
      * org.apache.paimon.flink.sink.CoordinatorCommittingRowDataStoreWriteOperator} emits at
      * barriers before any watermark is seen, and matches {@code CommitterOperator}'s initial value.
-     * Aggregation across subtasks (per-checkpoint min, future idle handling) belongs to the
+     * Aggregation across subtasks (per-checkpoint min and idle handling) belongs to the
      * coordinator, but the per-subtask policy for missing entries lives here.
      */
     public long watermarkAt(long checkpointId) {
