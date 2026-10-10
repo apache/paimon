@@ -186,7 +186,11 @@ abstract class PaimonSparkTableBase(val table: Table)
 
   def truncateTable: Boolean = {
     val commit = table.newBatchWriteBuilder().newCommit()
-    commit.truncateTable()
+    try {
+      commit.truncateTable()
+    } finally {
+      commit.close()
+    }
     true
   }
 }
