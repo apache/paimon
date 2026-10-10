@@ -29,9 +29,8 @@ def build_native_global_index(builder, partition_filter):
     Build errors propagate: a failed native build must not start a second build.
     """
     table = builder._table
-    # The Rust vector pipeline requires dense, non-null vectors. Keep Python
-    # vector construction until it supports Java's sparse relative row IDs.
-    if (builder._index_type not in ('btree', 'bitmap', 'full-text')
+    from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
+    if (builder._index_type not in ('btree', 'bitmap', 'full-text') + tuple(VINDEX_IDENTIFIERS)
             or not table.options.native_write_enabled()
             or not table.options.data_evolution_enabled()
             or not table.options.global_index_enabled()
@@ -53,6 +52,21 @@ def build_native_global_index(builder, partition_filter):
         from pypaimon.globalindex.full_text.native_full_text_global_index_reader import NativeFullTextIndexOptions
         options.update({'full-text.' + key: value for key, value in
                         NativeFullTextIndexOptions.from_options(builder._options.to_map()).to_native_options().items()})
+    elif builder._index_type in VINDEX_IDENTIFIERS:
+        from pypaimon.globalindex.vindex.vindex_vector_index_writer import native_options, train_sample_ratio
+        column = builder._index_columns[0]
+        # Reuse the Java-compatible option mapping; Rust's low-level builder also
+        # accepts native aliases which Python's public API deliberately ignores.
+        mapped = native_options(table.field_dict[column].type, table.options.options.to_map(),
+                                builder._index_type, column, builder._user_options)
+        options = {key: value for key, value in options.items()
+                   if key in ('global-index.row-count-per-shard', 'global-index.build.parallelism',
+                              'vindex.build.granule.enabled')
+                   and (key != 'vindex.build.granule.enabled' or builder._index_type != 'diskann')}
+        options.update({'fields.' + column + '.' + key: value for key, value in mapped.items()
+                        if key != 'index.type'})
+        options['fields.' + column + '.train.sample-ratio'] = str(train_sample_ratio(
+            table.options.options.to_map(), builder._index_type, column, builder._user_options))
     native.with_options(options)
     if partition_filter is not None:
         native.with_partition_filter(_predicate_to_native(partition_filter))

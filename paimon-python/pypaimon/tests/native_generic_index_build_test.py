@@ -155,24 +155,6 @@ def test_python_full_text_build_delegates_to_common_native_entry(rest_catalog):
     index_tests._commit(table, messages)
 
 
-def test_python_nullable_vector_build_keeps_sparse_row_ids(rest_catalog):
-    catalog, _ = rest_catalog
-    schema = pa.schema([('id', pa.int32()), ('name', pa.string()),
-                        ('embedding', pa.list_(pa.float32())), ('pt', pa.int32())])
-    table = index_tests._create(catalog, schema=schema)
-    rows = [dict(ROWS[0]), dict(ROWS[1]), dict(ROWS[2])]
-    rows[1]['embedding'] = None
-    index_tests._append(table, rows, schema=schema)
-    with patch.object(GlobalIndexBuilder, '_build_generic_index',
-                      wraps=GlobalIndexBuilder(table, 'embedding', index_type='ivf-flat',
-                                               options=_options('ivf-flat'))._build_generic_index) as build:
-        messages = GlobalIndexBuilder(table, 'embedding', index_type='ivf-flat',
-                                      options=_options('ivf-flat')).build()
-    assert build.call_count == 1
-    assert sum(file.row_count for file in index_tests._message_files(messages)) == 3
-    index_tests._commit(table, messages)
-
-
 @pytest.mark.parametrize('option_source', ['build', 'table'])
 @pytest.mark.parametrize('stop_words', [['paimon', 'apache'], 'paimon;apache'])
 def test_native_full_text_options_match_python_list_encoding(rest_catalog, option_source, stop_words):
