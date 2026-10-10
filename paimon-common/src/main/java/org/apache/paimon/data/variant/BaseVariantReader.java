@@ -70,11 +70,13 @@ public class BaseVariantReader {
     protected final VariantSchema schema;
     protected final DataType targetType;
     protected final VariantCastArgs castArgs;
+    protected final VariantMetadata cachedMetadata;
 
     public BaseVariantReader(VariantSchema schema, DataType targetType, VariantCastArgs castArgs) {
         this.schema = schema;
         this.targetType = targetType;
         this.castArgs = castArgs;
+        this.cachedMetadata = VariantMetadata.empty();
     }
 
     public VariantSchema schema() {
@@ -124,8 +126,9 @@ public class BaseVariantReader {
     /** A util function to rebuild the variant in binary format from a variant value. */
     protected Variant rebuildVariant(InternalRow row, ByteBuffer topLevelMetadata) {
         GenericVariantBuilder builder = new GenericVariantBuilder(false);
+        cachedMetadata.setCurrent(topLevelMetadata);
         ShreddingUtils.rebuild(
-                new PaimonShreddingUtils.PaimonShreddedRow(row), topLevelMetadata, schema, builder);
+                new PaimonShreddingUtils.PaimonShreddedRow(row), cachedMetadata, schema, builder);
         return builder.result();
     }
 
