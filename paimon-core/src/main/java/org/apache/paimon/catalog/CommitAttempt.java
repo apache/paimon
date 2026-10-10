@@ -27,6 +27,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /** A single snapshot preparation and publication, optionally protected by a commit lock. */
@@ -108,6 +109,43 @@ public abstract class CommitAttempt implements AutoCloseable {
 
             @Override
             public void close() {}
+        };
+    }
+
+    public static CommitAttempt locked(
+            SnapshotCommit commit, CatalogCommitLock lease, String branch, String commitUser) {
+        return new CommitAttempt() {
+            private final AtomicBoolean closed = new AtomicBoolean();
+
+            @Override
+            public Snapshot latestSnapshot(Supplier<Snapshot> loader) {
+                return lease.snapshot();
+            }
+
+            @Override
+            public boolean commit(
+                    String baseSnapshotUuid,
+                    Snapshot snapshot,
+                    String commitBranch,
+                    List<PartitionStatistics> statistics)
+                    throws Exception {
+                if (closed.get()) {
+                    throw new IllegalStateException("The commit attempt is closed.");
+                }
+                lease.ensureValid();
+                if (!branch.equals(commitBranch) || !commitUser.equals(snapshot.commitUser())) {
+                    throw new IllegalArgumentException(
+                            "A commit lease belongs to its exact branch and commit user.");
+                }
+                return commit.commit(baseSnapshotUuid, snapshot, commitBranch, statistics);
+            }
+
+            @Override
+            public void close() {
+                if (closed.compareAndSet(false, true)) {
+                    lease.close();
+                }
+            }
         };
     }
 }

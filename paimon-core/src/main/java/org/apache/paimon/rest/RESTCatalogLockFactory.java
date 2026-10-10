@@ -16,22 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 
-import javax.annotation.Nullable;
+/** Creates REST commit lease clients from serializable catalog options. */
+public class RESTCatalogLockFactory implements CatalogLockFactory {
 
-/** A commit lease scope, including the authoritative snapshot observed when it was granted. */
-public interface CatalogCommitLock extends AutoCloseable {
+    private static final long serialVersionUID = 1L;
 
-    @Nullable
-    Snapshot snapshot();
-
-    /** Fail before publication if the scope is closed or the lease is no longer usable. */
-    void ensureValid();
-
-    /** End the scope idempotently. Lease implementations stop renewal on close. */
     @Override
-    void close();
+    public String identifier() {
+        return RESTCatalogFactory.IDENTIFIER;
+    }
+
+    @Override
+    public CatalogLock createLock(CatalogLockContext context) {
+        return new RESTCatalogLock(new RESTApi(context.options(), false));
+    }
 }

@@ -79,14 +79,17 @@ lock before preparing a retried snapshot. The policy defaults to `false` and req
 committer that implements retry locking. The first attempt does not acquire a retry lock;
 contention does not consume the publication retry count, but waiting is bounded by `commit.timeout`.
 
-The REST catalog provides an implementation using table commit leases. Set
+The REST catalog uses `RESTCatalogLockFactory`, through the existing `CatalogLockFactory`
+mechanism, to create commit lease scopes. Set
 `rest.commit.lock-enabled = true` on the table to allow lease acquisition; this capability option
 also defaults to `false`. Other snapshot committers can provide their own retry lock implementation
 without requiring REST options. Unsupported committers reject locked retries explicitly.
 
 These options are independent of the catalog options `lock.enabled` and `lock.type`, which configure
 the existing catalog lock used for filesystem publication. The retry policy does not change those
-locks or automatically add retry locking to Hive or JDBC catalogs.
+locks or automatically add retry locking to Hive or JDBC catalogs. `CatalogLock.acquireCommitLock`
+is an optional capability with a default unsupported implementation; existing `runWithLock`
+implementations keep their original publication scope.
 
 The client supplies its exact `commitUser` when acquiring and renewing. A grant includes the
 server's current snapshot; the client uses that head to rebuild and validate its retry while

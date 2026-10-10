@@ -25,20 +25,15 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Optional;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -49,12 +44,11 @@ import static org.mockito.Mockito.when;
 /** Tests the owner lease across preparation, publication and renewal failure. */
 class CatalogCommitLeaseTest {
     private final Catalog catalog = mock(Catalog.class);
-    private final ScheduledExecutorService renewer = mock(ScheduledExecutorService.class);
-    private final ScheduledFuture<?> future = mock(ScheduledFuture.class);
+    private final CatalogLock lock = mock(CatalogLock.class);
+    private final CatalogCommitLock lease = mock(CatalogCommitLock.class);
     private final Identifier branch = new Identifier("db", "table", "main");
     private final CatalogSnapshotCommit commit =
-            new CatalogSnapshotCommit(
-                    catalog, Identifier.create("db", "table"), "table-id", renewer);
+            new CatalogSnapshotCommit(catalog, Identifier.create("db", "table"), "table-id", lock);
 
     @Test
     void firstAttemptDoesNotAcquire() {
@@ -62,7 +56,7 @@ class CatalogCommitLeaseTest {
         try (CommitAttempt attempt = begin(options(), 0)) {
             assertThat(attempt.latestSnapshot(() -> head)).isSameAs(head);
         }
-        verifyNoInteractions(catalog, renewer);
+        verifyNoInteractions(catalog, lock);
     }
 
     @Test
@@ -82,29 +76,24 @@ class CatalogCommitLeaseTest {
         assertThat(attempt.commit("base", next, "main", Collections.emptyList())).isTrue();
         attempt.close();
         attempt.close();
-        verify(future).cancel(false);
-        verify(catalog).acquireCommitLock(branch, "table-id", "morax-job");
+        verify(lease).close();
+        verify(lock).acquireCommitLock(branch, "table-id", "morax-job");
         verify(catalog).commitSnapshot(branch, "table-id", "base", next, Collections.emptyList());
     }
 
     @Test
-    void renewalFailurePreventsPublicationAndCloseStopsRenewal() throws Exception {
+    void invalidLeasePreventsPublication() throws Exception {
         grant(null);
-        when(catalog.renewCommitLock(branch, "table-id", "morax-job")).thenReturn(false);
-        CommitAttempt attempt = begin(options(), 1);
-        ArgumentCaptor<Runnable> callback = ArgumentCaptor.forClass(Runnable.class);
-        verify(renewer)
-                .scheduleWithFixedDelay(
-                        callback.capture(), eq(20000L), eq(20000L), eq(TimeUnit.MILLISECONDS));
-        callback.getValue().run();
-        assertThatThrownBy(
-                        () ->
-                                attempt.commit(
-                                        null, ownedSnapshot(), "main", Collections.emptyList()))
-                .isInstanceOf(IllegalStateException.class);
-        attempt.close();
-        callback.getValue().run();
-        verify(catalog, times(1)).renewCommitLock(branch, "table-id", "morax-job");
+        doThrow(new IllegalStateException("Expired")).when(lease).ensureValid();
+        try (CommitAttempt attempt = begin(options(), 1)) {
+            assertThatThrownBy(
+                            () ->
+                                    attempt.commit(
+                                            null, ownedSnapshot(), "main", Collections.emptyList()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Expired");
+        }
+        verify(lease).close();
         verify(catalog, never()).commitSnapshot(any(), any(), any(), any(), any());
     }
 
@@ -128,11 +117,8 @@ class CatalogCommitLeaseTest {
     @Test
     void busyWaitingDoesNotConsumePublicationRetryBudget() throws Exception {
         grant(null);
-        when(catalog.acquireCommitLock(branch, "table-id", "morax-job"))
-                .thenReturn(
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.of(new CatalogCommitLock("morax-job", 60000, null)));
+        when(lock.acquireCommitLock(branch, "table-id", "morax-job"))
+                .thenReturn(Optional.empty(), Optional.empty(), Optional.of(lease));
         Options options = options();
         options.set(CoreOptions.COMMIT_MAX_RETRIES, 0);
         try (CommitAttempt attempt = begin(options, 1)) {
@@ -143,13 +129,12 @@ class CatalogCommitLeaseTest {
                                     }))
                     .isNull();
         }
-        verify(catalog, times(3)).acquireCommitLock(branch, "table-id", "morax-job");
+        verify(lock, times(3)).acquireCommitLock(branch, "table-id", "morax-job");
     }
 
     @Test
     void busyTimeoutFailsClearly() throws Exception {
-        when(catalog.acquireCommitLock(branch, "table-id", "morax-job"))
-                .thenReturn(Optional.empty());
+        when(lock.acquireCommitLock(branch, "table-id", "morax-job")).thenReturn(Optional.empty());
         Options options = options();
         options.set(CoreOptions.COMMIT_TIMEOUT, Duration.ZERO);
         assertThatThrownBy(() -> begin(options, 1)).hasMessageContaining("Timed out");
@@ -180,7 +165,7 @@ class CatalogCommitLeaseTest {
             assertThat(attempt.commit("base", next, "main", Collections.emptyList())).isTrue();
         }
         verify(guarded).close();
-        verifyNoInteractions(catalog, renewer);
+        verifyNoInteractions(catalog, lock);
     }
 
     @Test
@@ -212,10 +197,9 @@ class CatalogCommitLeaseTest {
     }
 
     private void grant(Snapshot head) throws Exception {
-        when(catalog.acquireCommitLock(branch, "table-id", "morax-job"))
-                .thenReturn(Optional.of(new CatalogCommitLock("morax-job", 60000, head)));
-        when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
-                .thenAnswer(invocation -> future);
+        when(lock.acquireCommitLock(branch, "table-id", "morax-job"))
+                .thenReturn(Optional.of(lease));
+        when(lease.snapshot()).thenReturn(head);
     }
 
     private Snapshot ownedSnapshot() {

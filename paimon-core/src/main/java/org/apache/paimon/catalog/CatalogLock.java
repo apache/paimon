@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.Public;
 
 import java.io.Closeable;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 
 /**
@@ -33,4 +34,18 @@ public interface CatalogLock extends Closeable {
 
     /** Run with catalog lock. The caller should tell catalog the database and table name. */
     <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+
+    /**
+     * Acquire a commit lease for the exact table UUID, branch and commit user. An empty result
+     * means another writer holds the lease. The scope covers head refresh, validation, preparation
+     * and publication; implementations must also gate writers that do not request leases.
+     *
+     * <p>This capability is separate from {@link #runWithLock}. Existing publication locks do not
+     * automatically support a larger commit scope.
+     */
+    default Optional<CatalogCommitLock> acquireCommitLock(
+            Identifier identifier, String tableUuid, String commitUser) throws Exception {
+        throw new UnsupportedOperationException(
+                "This catalog lock does not support commit leases.");
+    }
 }

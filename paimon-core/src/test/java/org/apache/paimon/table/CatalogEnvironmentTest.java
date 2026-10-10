@@ -19,8 +19,18 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogCommitLock;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLoader;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.CatalogSnapshotCommit;
+import org.apache.paimon.catalog.CommitAttempt;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -32,14 +42,20 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.Optional;
+import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -136,6 +152,67 @@ class CatalogEnvironmentTest {
         table.newRead();
 
         verify(environment).dependencyReadContext();
+    }
+
+    @Test
+    void testVersionedCommitUsesCatalogLockFactory() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        CatalogLoader loader = () -> catalog;
+        CatalogLockFactory factory = mock(CatalogLockFactory.class);
+        CatalogLockContext lockContext = CatalogLockContext.fromOptions(new Options());
+        CatalogLock lock = mock(CatalogLock.class);
+        CatalogCommitLock lease = mock(CatalogCommitLock.class);
+        Snapshot head = mock(Snapshot.class);
+        Identifier identifier = Identifier.create("db", "table");
+        Identifier branch = new Identifier("db", "table", "dev");
+        when(factory.createLock(lockContext)).thenReturn(lock);
+        when(lock.acquireCommitLock(branch, "table-id", "morax-job"))
+                .thenReturn(Optional.of(lease));
+        when(lease.snapshot()).thenReturn(head);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        identifier, "table-id", loader, factory, lockContext, null, true, false);
+        try (SnapshotCommit commit = environment.snapshotCommit(mock(SnapshotManager.class));
+                CommitAttempt attempt = commit.beginCommit("dev", "morax-job", true).get()) {
+            assertThat(attempt.latestSnapshot(() -> null)).isSameAs(head);
+        }
+        verify(factory).createLock(lockContext);
+        verify(lock).acquireCommitLock(branch, "table-id", "morax-job");
+        verify(lease).close();
+        verify(lock).close();
+        verify(catalog).close();
+    }
+
+    @Test
+    void testLegacyPublicationLockIsNotReusedForRetryScope() throws Exception {
+        CatalogLock lock =
+                new CatalogLock() {
+                    @Override
+                    public <T> T runWithLock(String database, String table, Callable<T> callable)
+                            throws Exception {
+                        return callable.call();
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        assertThat(lock.runWithLock("db", "table", () -> "published")).isEqualTo("published");
+        assertThatThrownBy(
+                        () ->
+                                lock.acquireCommitLock(
+                                        Identifier.create("db", "table"), "table-id", "writer"))
+                .isInstanceOf(UnsupportedOperationException.class);
+        Catalog catalog = mock(Catalog.class);
+        try (SnapshotCommit commit =
+                new CatalogSnapshotCommit(
+                        catalog, Identifier.create("db", "table"), "table-id", lock)) {
+            try (CommitAttempt attempt = commit.beginCommit("main", "writer", false).get()) {
+                assertThat(attempt.latestSnapshot(() -> null)).isNull();
+            }
+            assertThatThrownBy(() -> commit.beginCommit("main", "writer", true))
+                    .isInstanceOf(UnsupportedOperationException.class);
+        }
+        verify(catalog, never()).commitSnapshot(any(), any(), any(), any(), any());
     }
 
     private static CatalogEnvironment environment(
