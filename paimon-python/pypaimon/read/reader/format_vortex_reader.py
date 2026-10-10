@@ -39,6 +39,9 @@ class FormatVortexReader(RecordBatchReader):
                  row_indices: Optional[List[int]] = None,
                  shard_range: Optional[Tuple[int, int]] = None,
                  predicate_fields: Optional[Set[str]] = None):
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
         import vortex
 
         from pypaimon.read.reader.vortex_utils import to_vortex_specified
@@ -55,7 +58,8 @@ class FormatVortexReader(RecordBatchReader):
         self._read_field_names = [f.name for f in read_fields]
 
         # Identify which fields exist in the file and which are missing
-        file_schema_names = set(vortex_file.dtype.to_arrow_schema().names)
+        file_schema = vortex_file.dtype.to_arrow_schema()
+        file_schema_names = set(file_schema.names)
         self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
         self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
 
@@ -79,12 +83,44 @@ class FormatVortexReader(RecordBatchReader):
             # index array. Acceptable trade-off vs reading the full file.
             indices = vortex.array(range(shard_range[0], shard_range[1]))
 
-        self.record_batch_reader = vortex_file.scan(
-            columns_for_vortex, expr=vortex_expr, indices=indices, batch_size=batch_size).to_arrow()
+        self._cast_batch_views = indices is not None
+        if indices is None:
+            # Convert directly to Arrow's offset-based strings in the native reader, avoiding
+            # a Python loop and a separate string-view cast for every column of every batch.
+            fields = []
+            for name in columns_for_vortex or file_schema.names:
+                field = file_schema.field(name)
+                if field.type == pa.string_view():
+                    field = field.with_type(pa.utf8())
+                elif field.type == pa.binary_view():
+                    field = field.with_type(pa.binary())
+                fields.append(field)
+            # Keep Vortex's layout-aware scan splits independent of the output batch size.
+            # Slicing after native Arrow conversion shares buffers instead of re-running
+            # conversion and scheduling work for every small output batch.
+            self.record_batch_reader = vortex_file.to_arrow(
+                columns_for_vortex, expr=vortex_expr, schema=pa.schema(fields))
+        else:
+            # The native Arrow reader does not yet accept row indices.
+            self.record_batch_reader = vortex_file.scan(
+                columns_for_vortex, expr=vortex_expr, indices=indices, batch_size=batch_size).to_arrow()
 
+        self._batches = (
+            self._slice_batches(self.record_batch_reader, batch_size)
+            if indices is None else iter(self.record_batch_reader)
+        )
         self._output_schema = (
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
         )
+
+    @staticmethod
+    def _slice_batches(reader, batch_size):
+        for batch in reader:
+            if batch.num_rows <= batch_size:
+                yield batch
+            else:
+                for offset in range(0, batch.num_rows, batch_size):
+                    yield batch.slice(offset, min(batch_size, batch.num_rows - offset))
 
     @staticmethod
     def _cast_view_types(batch: RecordBatch) -> RecordBatch:
@@ -111,8 +147,9 @@ class FormatVortexReader(RecordBatchReader):
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
-            batch = next(self.record_batch_reader)
-            batch = self._cast_view_types(batch)
+            batch = next(self._batches)
+            if self._cast_batch_views:
+                batch = self._cast_view_types(batch)
 
             if not self.missing_fields:
                 return batch
@@ -149,4 +186,5 @@ class FormatVortexReader(RecordBatchReader):
             return None
 
     def close(self):
+        self._batches = None
         self.record_batch_reader = None

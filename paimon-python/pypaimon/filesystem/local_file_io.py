@@ -439,7 +439,7 @@ class LocalFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
 
-    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
+    def write_vortex(self, path: str, data: pyarrow.Table, compact: bool = False, **kwargs):
         try:
             import vortex
             from vortex._lib.io import write as vortex_write
@@ -448,7 +448,12 @@ class LocalFileIO(FileIO):
             from pypaimon.read.reader.vortex_utils import to_vortex_specified
             _, store_kwargs = to_vortex_specified(self, path)
 
-            if store_kwargs:
+            if compact:
+                from vortex import store
+                from vortex.io import VortexWriteOptions
+                vortex_store = store.from_url(path, **store_kwargs) if store_kwargs else None
+                VortexWriteOptions.compact().write(vortex.array(data), path, store=vortex_store)
+            elif store_kwargs:
                 from vortex import store
                 vortex_store = store.from_url(path, **store_kwargs)
                 vortex_store.write(vortex.array(data))

@@ -469,6 +469,10 @@ class FormatPyArrowReader(RecordBatchReader):
             self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
             self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
 
+        self._variant_types = {
+            field.name: field.type for field in read_fields
+            if _contains_variant(field.type)
+        }
         self._variant_schema_cache: Dict[pa.DataType, VariantSchema] = {}
         self._shared_shredding_maps = {}
         self._selected_key_maps = {}
@@ -893,13 +897,14 @@ class FormatPyArrowReader(RecordBatchReader):
         return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
 
     def _assemble_shredded_variants(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+        if not self._variant_types:
+            return batch
         changed = False
         columns = list(batch.columns)
         fields = list(batch.schema)
-        logical_types = {field.name: field.type for field in self.read_fields}
 
         for i, f in enumerate(fields):
-            logical_type = logical_types.get(f.name)
+            logical_type = self._variant_types.get(f.name)
             if logical_type is not None:
                 new_col, column_changed = _assemble_variant_column(
                     columns[i], logical_type, self._variant_schema_cache)
