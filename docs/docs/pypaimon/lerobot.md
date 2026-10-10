@@ -72,6 +72,30 @@ conn.load_from_lerobot(
 )
 ```
 
+For distributed import, install `pypaimon[ray,lerobot]` on all nodes and connect
+to a Ray cluster:
+
+```python
+import ray
+
+ray.init(address="auto")
+conn.load_from_lerobot(
+    "robot_data", "oss://source-bucket/lerobot_dataset",
+    engine="ray", concurrency=8,
+    source_options={"fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com"},
+)
+```
+
+Workers write complete Episodes, grouping those that share video files. Parallelism
+is limited by the number of independent groups. The driver
+commits frames after all workers succeed, then publishes companion metadata.
+`concurrency` bounds active tasks; it defaults to the cluster CPU count. Source and
+target storage must be accessible from every worker; keep the source unchanged.
+Ray imports accept FileIO URIs or shared directories, not Hub repository IDs.
+Failed imports may leave partial table groups and uncommitted files; retry with a
+new target table. Multi-table publication is not atomic. Omitting `engine` keeps
+the single-process importer.
+
 Before training, finish any related data/metadata updates and pause writes to
 this table group. Create a common named tag over the current component snapshots:
 
