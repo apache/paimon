@@ -19,6 +19,7 @@
 """Tests for LocalDiskCacheManager, CachingInputStream, and CachingFileIO."""
 
 import io
+import multiprocessing
 import os
 import pickle
 import shutil
@@ -29,9 +30,31 @@ from unittest.mock import MagicMock
 
 from pypaimon.filesystem.caching_file_io import (
     LocalDiskCacheManager,
+    LocalMemoryCacheManager,
     CachingFileIO,
     CachingInputStream,
 )
+from pypaimon.filesystem.local_file_io import LocalFileIO
+
+
+class _CountingLocalFileIO(LocalFileIO):
+
+    def __init__(self):
+        super().__init__()
+        self.opens = 0
+
+    def new_input_stream(self, path):
+        self.opens += 1
+        return super().new_input_stream(path)
+
+
+def _read_cached_twice(file_io, path, connection):
+    values = []
+    for _ in range(2):
+        with file_io.new_input_stream(path) as stream:
+            values.append(stream.read())
+    connection.send((values, file_io._delegate.opens))
+    connection.close()
 
 
 class LocalDiskCacheManagerTest(unittest.TestCase):
@@ -386,20 +409,81 @@ class CachingFileIOTest(unittest.TestCase):
         caching_io.new_output_stream("/out")
         delegate.new_output_stream.assert_called_once_with("/out")
 
-    def test_pickle_drops_cache(self):
-        from pypaimon.filesystem.local_file_io import LocalFileIO
+    def test_pickle_preserves_memory_cache_configuration(self):
         from pypaimon.utils.file_type import FileType
 
-        cache = LocalDiskCacheManager(
-            self.cache_dir, 2 ** 63 - 1, block_size=64)
+        cache = LocalMemoryCacheManager(128, block_size=64)
+        cache.put_block("snapshot-1", 0, b"parent data")
+        cache.put_file_size("snapshot-1", 11)
         caching_io = CachingFileIO(
-            LocalFileIO(), cache, {FileType.META, FileType.DATA})
-
+            _CountingLocalFileIO(), cache, {FileType.META})
         restored = pickle.loads(pickle.dumps(caching_io))
 
+        self.assertIsInstance(restored._cache, LocalMemoryCacheManager)
+        self.assertEqual(128, restored._cache._max_size_bytes)
+        self.assertEqual(64, restored._cache.block_size)
+        self.assertIsNone(restored._cache.get_block("snapshot-1", 0))
+        self.assertEqual(-1, restored._cache.get_file_size("snapshot-1"))
+        self.assertEqual({FileType.META}, restored._whitelist)
+        self.assertEqual(b"parent data", cache.get_block("snapshot-1", 0))
+        self.assertIsNot(cache._lock, restored._cache._lock)
+
+    def test_pickle_preserves_disk_cache_configuration(self):
+        cache = LocalDiskCacheManager(self.cache_dir, 128, block_size=64)
+        cache.put_block("snapshot-1", 0, b"persisted block")
+        restored = pickle.loads(pickle.dumps(
+            CachingFileIO(_CountingLocalFileIO(), cache)))
+        self.assertIsInstance(restored._cache, LocalDiskCacheManager)
+        self.assertEqual(self.cache_dir, restored._cache._cache_dir)
+        self.assertEqual(128, restored._cache._max_size_bytes)
+        self.assertEqual(64, restored._cache.block_size)
+        self.assertEqual(b"persisted block",
+                         restored._cache.get_block("snapshot-1", 0))
+        self.assertIsNot(cache._lock, restored._cache._lock)
+
+    def test_pickle_preserves_shared_cache(self):
+        cache = LocalMemoryCacheManager(128, 64)
+        first, second = pickle.loads(pickle.dumps((
+            CachingFileIO(_CountingLocalFileIO(), cache),
+            CachingFileIO(_CountingLocalFileIO(), cache))))
+        self.assertIs(first._cache, second._cache)
+        first._cache.put_block("snapshot-1", 0, b"worker block")
+        self.assertEqual(b"worker block",
+                         second._cache.get_block("snapshot-1", 0))
+
+    def test_pickle_disabled_cache(self):
+        restored = pickle.loads(pickle.dumps(
+            CachingFileIO(_CountingLocalFileIO(), None)))
         self.assertIsNone(restored._cache)
-        self.assertEqual({FileType.META, FileType.DATA}, restored._whitelist)
-        self.assertIsInstance(restored._delegate, LocalFileIO)
+
+    def test_spawn_worker_reuses_cached_blocks(self):
+        path = os.path.join(self.cache_dir, "snapshot-1")
+        with open(path, "wb") as output:
+            output.write(b"cached data")
+        for disk in (False, True):
+            with self.subTest(disk=disk):
+                cache = (LocalDiskCacheManager(
+                    os.path.join(self.cache_dir, "blocks"), 128, 64)
+                    if disk else LocalMemoryCacheManager(128, 64))
+                caching_io = CachingFileIO(_CountingLocalFileIO(), cache)
+                context = multiprocessing.get_context("spawn")
+                parent, child = context.Pipe()
+                process = context.Process(
+                    target=_read_cached_twice, args=(caching_io, path, child))
+                process.start()
+                child.close()
+                try:
+                    self.assertTrue(parent.poll(30), "worker timed out")
+                    values, opens = parent.recv()
+                    process.join(10)
+                    self.assertEqual(0, process.exitcode)
+                    self.assertEqual([b"cached data", b"cached data"], values)
+                    self.assertEqual(1, opens)
+                finally:
+                    parent.close()
+                    if process.is_alive():
+                        process.terminate()
+                    process.join(10)
 
     def test_to_filesystem_path_forwarded_to_delegate(self):
         delegate = MagicMock()

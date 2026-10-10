@@ -46,6 +46,10 @@ class LocalMemoryCacheManager:
         self._cache: OrderedDict = OrderedDict()
         self._file_size_cache: dict = {}
 
+    def __reduce__(self):
+        # Rebuild process-local state without serializing cached blocks or locks.
+        return type(self), (self._max_size_bytes, self._block_size)
+
     @property
     def block_size(self) -> int:
         return self._block_size
@@ -93,6 +97,9 @@ class LocalDiskCacheManager:
         self._entry_index: OrderedDict = OrderedDict()
         os.makedirs(cache_dir, exist_ok=True)
         self._current_size = self._scan_and_populate_index()
+
+    def __reduce__(self):
+        return type(self), (self._cache_dir, self._max_size_bytes, self._block_size)
 
     @property
     def block_size(self) -> int:
@@ -329,8 +336,7 @@ class CachingFileIO(FileIO):
     """FileIO wrapper that caches reads at block granularity.
 
     Only file types in the whitelist are cached. Others are read directly
-    from the delegate. After pickling/unpickling, the cache is None and reads
-    fall through to the delegate directly.
+    from the delegate. Cache managers rebuild their local state when unpickled.
     """
 
     def __init__(self, delegate: FileIO, cache, whitelist=None):
@@ -340,11 +346,6 @@ class CachingFileIO(FileIO):
             self._whitelist = {FileType.META, FileType.GLOBAL_INDEX}
         else:
             self._whitelist = whitelist
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state['_cache'] = None
-        return state
 
     # Fallback caps when local-cache.max-size is unset (memory shares the heap).
     _DEFAULT_MEMORY_CACHE_MAX_SIZE = 256 * 1024 * 1024
