@@ -65,6 +65,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TableType;
+import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -250,12 +251,29 @@ public class HiveCatalog extends AbstractCatalog {
         Path location;
         if (tableOptions.containsKey(CoreOptions.PATH.key())) {
             externalTable = true;
-            location = new Path(tableOptions.get(CoreOptions.PATH.key()));
+            // A `LOCATION '/path'` without a scheme must resolve against the default filesystem;
+            // otherwise FileIO#get treats it as local and the schema files land on the driver's
+            // disk on a cluster.
+            location = resolveLocationScheme(new Path(tableOptions.get(CoreOptions.PATH.key())));
         } else {
             externalTable = usingExternalTable(tableOptions);
             location = getTableLocation(identifier, null);
         }
         return Pair.of(location, externalTable);
+    }
+
+    /**
+     * Returns a location whose scheme is explicitly resolved. A {@code CREATE TABLE ... LOCATION
+     * '/path'} carries no scheme, and {@link FileIO#get(Path, CatalogContext)} treats a schemeless
+     * path as a local one - so on a cluster the schema files would be written to the driver's local
+     * filesystem instead of the configured default filesystem, and the table would be created
+     * against a location no other engine can read.
+     */
+    private Path resolveLocationScheme(Path location) {
+        if (location.toUri().getScheme() != null) {
+            return location;
+        }
+        return new Path(FileSystem.getDefaultUri(hiveConf).toString(), location);
     }
 
     private Path getTableLocation(Identifier identifier, @Nullable Table table) {
@@ -1293,15 +1311,122 @@ public class HiveCatalog extends AbstractCatalog {
                                                     tableSchema,
                                                     location,
                                                     externalTable)));
+        } catch (AlreadyExistsException e) {
+            // Another caller registered the same identifier while we were writing the schema. That
+            // caller won the race and owns the metastore entry (and, for a managed winner, the
+            // actual data files) - we must not touch it here, otherwise we would drop a table we do
+            // not own. Only the schema files written by this call are cleaned up.
+            cleanupFailedCreateSchema(identifier, location, externalTable);
+            throw new RuntimeException(
+                    "Table "
+                            + identifier.getFullName()
+                            + " was concurrently created by another caller.",
+                    e);
         } catch (Exception e) {
-            try {
-                if (!externalTable) {
-                    fileIO(location).deleteDirectoryQuietly(location);
-                }
-            } catch (Exception ee) {
-                LOG.error("Delete directory[{}] fail for table {}", location, identifier, ee);
-            }
+            cleanupOnCreateTableFailure(identifier, location, externalTable);
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
+        }
+    }
+
+    /**
+     * Rolls back the table registration after {@code createHiveTable} failed, so no zombie entry is
+     * left behind in the metastore. The metastore registration is the commit point of {@link
+     * #createTableImpl(Identifier, Schema)}: the schema is written first, so removing the table
+     * (and the schema files that have just been written for a managed table) restores the pre-call
+     * state.
+     *
+     * <p>Cleanup only runs when this call can prove it owns the registered entry: the table stored
+     * in the metastore must point at the {@code location} this call resolved. A concurrently
+     * registered table (for example an external create that reused an existing filesystem schema at
+     * a different location) is left untouched, so its data files are never deleted.
+     */
+    @VisibleForTesting
+    void cleanupOnCreateTableFailure(Identifier identifier, Path location, boolean externalTable) {
+        if (!ownsRegisteredTable(identifier, location)) {
+            LOG.info(
+                    "Skipping cleanup of [{}]: the registered table is not owned by this call.",
+                    identifier.getFullName());
+            return;
+        }
+        try {
+            clients()
+                    .execute(
+                            client ->
+                                    client.dropTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            true,
+                                            false));
+        } catch (Exception e) {
+            LOG.warn(
+                    "Failed to clean up the metastore entry [{}] after a failed create table.",
+                    identifier.getFullName(),
+                    e);
+        }
+        if (!externalTable) {
+            // For a managed table whose entry we owned, the schema files and the location were
+            // created by this call, so they must be removed as well - otherwise a retry would
+            // either
+            // fail or silently reuse the stale schema.
+            try {
+                fileIO(location).deleteDirectoryQuietly(location);
+            } catch (Exception e) {
+                LOG.error(
+                        "Delete directory[{}] fail for table {}",
+                        location,
+                        identifier.getFullName(),
+                        e);
+            }
+        }
+    }
+
+    /**
+     * Removes only the schema files written by this call when a competing caller won the
+     * registration race. The metastore entry and any data files belong to the winner and are left
+     * untouched.
+     */
+    private void cleanupFailedCreateSchema(
+            Identifier identifier, Path location, boolean externalTable) {
+        if (externalTable || ownsRegisteredTable(identifier, location)) {
+            // An external table's files (and a table whose entry is ours) do not belong to the
+            // winner in the external case, but for safety we only remove schema files for a managed
+            // table whose registration we did not lose.
+            return;
+        }
+        try {
+            fileIO(location).deleteDirectoryQuietly(location);
+        } catch (Exception e) {
+            LOG.error(
+                    "Delete directory[{}] fail for table {}",
+                    location,
+                    identifier.getFullName(),
+                    e);
+        }
+    }
+
+    /**
+     * Returns whether the metastore entry registered for {@code identifier} points at the given
+     * {@code location}, i.e. whether this call is the owner of the entry.
+     */
+    private boolean ownsRegisteredTable(Identifier identifier, Path location) {
+        try {
+            Table table =
+                    clients()
+                            .run(
+                                    client ->
+                                            client.getTable(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getTableName()));
+            if (table == null) {
+                return false;
+            }
+            return table.getSd().getLocation().equals(location.toString());
+        } catch (Exception e) {
+            LOG.warn(
+                    "Could not determine ownership of the metastore entry [{}]; skipping cleanup.",
+                    identifier.getFullName(),
+                    e);
+            return false;
         }
     }
 
