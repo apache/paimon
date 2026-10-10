@@ -24,6 +24,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.beans.ConstructorProperties;
+
 /** Request to acquire or renew a table commit lease owned by a writer. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CommitLockRequest implements RESTRequest {
@@ -35,6 +37,7 @@ public class CommitLockRequest implements RESTRequest {
     private final String commitUser;
 
     @JsonCreator
+    @ConstructorProperties({"tableId", "commitUser"})
     public CommitLockRequest(
             @JsonProperty("tableId") String tableId,
             @JsonProperty("commitUser") String commitUser) {
