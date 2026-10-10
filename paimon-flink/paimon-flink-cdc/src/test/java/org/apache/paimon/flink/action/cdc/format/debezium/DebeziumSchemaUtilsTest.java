@@ -18,16 +18,22 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 
 /** Test class for DebeziumSchemaUtils. */
@@ -149,5 +155,47 @@ public class DebeziumSchemaUtilsTest {
                     DataTypes.FIELD(1, "field2", DataTypes.INT(), null)
                 };
         Assertions.assertEquals(DataTypes.ROW(expectedFields), recordType);
+    }
+
+    @Test
+    public void testTransformBinaryRawValueAsUtf8() {
+        byte[] value = "binary \u4e2d\u6587".getBytes(StandardCharsets.UTF_8);
+
+        String transformed =
+                DebeziumSchemaUtils.transformRawValue(
+                        Base64.getEncoder().encodeToString(value),
+                        "bytes",
+                        null,
+                        TypeMapping.defaultMapping(),
+                        null,
+                        ZoneOffset.UTC);
+
+        Assertions.assertEquals("binary \u4e2d\u6587", transformed);
+        // The CDC sink encodes binary values as UTF-8, so the original bytes must round-trip.
+        Assertions.assertArrayEquals(
+                value, (byte[]) TypeUtils.castFromCdcValueString(transformed, DataTypes.BYTES()));
+    }
+
+    @Test
+    public void testTransformAvroBytesDecodesOnlyReadableBytes() {
+        byte[] value = "binary \u4e2d\u6587".getBytes(StandardCharsets.UTF_8);
+        byte[] backingArray = new byte[value.length + 8];
+        Arrays.fill(backingArray, (byte) 'x');
+        System.arraycopy(value, 0, backingArray, 4, value.length);
+        ByteBuffer buffer = ByteBuffer.wrap(backingArray, 4, value.length);
+
+        String transformed =
+                DebeziumSchemaUtils.transformAvroRawValue(
+                        buffer.toString(),
+                        "bytes",
+                        null,
+                        TypeMapping.defaultMapping(),
+                        buffer,
+                        ZoneOffset.UTC);
+
+        Assertions.assertEquals("binary \u4e2d\u6587", transformed);
+        // The buffer belongs to the Avro record and must not be consumed.
+        Assertions.assertEquals(4, buffer.position());
+        Assertions.assertEquals(value.length, buffer.remaining());
     }
 }
