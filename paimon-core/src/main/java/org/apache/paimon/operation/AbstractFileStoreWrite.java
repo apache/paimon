@@ -186,6 +186,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
+        requirePartitionBucketCount(partition);
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
         write(container, data);
     }
@@ -493,7 +494,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
         Map<Integer, WriterContainer<T>> buckets = getWriterContainers(partition);
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket));
+                bucket, k -> createMaintenanceWriterContainer(partition.copy(), bucket));
     }
 
     private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket, int totalBuckets) {
@@ -503,7 +504,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     partition, totalBuckets, buckets.values().iterator().next().totalBuckets);
         }
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket, totalBuckets));
+                bucket,
+                k -> createWriterContainer(partition.copy(), bucket, totalBuckets, true, true));
     }
 
     private Map<Integer, WriterContainer<T>> getWriterContainers(BinaryRow partition) {
@@ -520,16 +522,36 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     public WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
-        return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck);
+        requirePartitionBucketCount(partition);
+        return createMaintenanceWriterContainer(partition, bucket);
+    }
+
+    private WriterContainer<T> createMaintenanceWriterContainer(BinaryRow partition, int bucket) {
+        return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck, false);
+    }
+
+    private void requirePartitionBucketCount(BinaryRow partition) {
+        if (partitionType.getFieldCount() > 0 && options.bucketPerPartitionCountEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Writing partition "
+                            + partition
+                            + " with per-partition bucket counts requires the partition-level "
+                            + "total bucket count. Use write(partition, bucket, totalBuckets, data) "
+                            + "instead.");
+        }
     }
 
     private WriterContainer<T> createWriterContainer(
             BinaryRow partition, int bucket, int totalBuckets) {
-        return createWriterContainer(partition, bucket, totalBuckets, true);
+        return createWriterContainer(partition, bucket, totalBuckets, true, true);
     }
 
     private WriterContainer<T> createWriterContainer(
-            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
+            BinaryRow partition,
+            int bucket,
+            int expectedTotalBuckets,
+            boolean validateNumBuckets,
+            boolean strictBucketCount) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
@@ -554,7 +576,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         if (!actualIgnorePreviousFiles) {
             restored =
                     scanExistingFileMetas(
-                            partition, bucket, expectedTotalBuckets, validateNumBuckets);
+                            partition,
+                            bucket,
+                            expectedTotalBuckets,
+                            validateNumBuckets,
+                            strictBucketCount);
         }
 
         DynamicBucketIndexMaintainer indexMaintainer =
@@ -647,7 +673,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(
-            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
+            BinaryRow partition,
+            int bucket,
+            int expectedTotalBuckets,
+            boolean validateNumBuckets,
+            boolean strictBucketCount) {
         Supplier<String> partInfo =
                 () ->
                         partitionType.getFieldCount() > 0
@@ -674,8 +704,33 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partInfo.get(), bucket),
                     e);
         }
-        if (restored.totalBuckets() != null && validateNumBuckets) {
-            checkNumBuckets(partInfo.get(), expectedTotalBuckets, restored.totalBuckets());
+        Integer restoredTotalBuckets = restored.totalBuckets();
+        if (restoredTotalBuckets != null
+                && validateNumBuckets
+                && expectedTotalBuckets != restoredTotalBuckets) {
+            if (partitionType.getFieldCount() > 0
+                    && options.bucketPerPartitionCountEnabled()
+                    && !strictBucketCount) {
+                if (bucket >= restoredTotalBuckets) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Trying to write bucket %d to %s, but the partition only has %d "
+                                            + "buckets (table default: %d). Recompute the bucket using the "
+                                            + "partition's bucket count, or rescale the partition via "
+                                            + "INSERT OVERWRITE.",
+                                    bucket,
+                                    partInfo.get(),
+                                    restoredTotalBuckets,
+                                    expectedTotalBuckets));
+                }
+                LOG.info(
+                        "{} uses {} buckets (expected: {}). Accepting per-partition bucket count.",
+                        partInfo.get(),
+                        restoredTotalBuckets,
+                        expectedTotalBuckets);
+            } else {
+                checkNumBuckets(partInfo.get(), expectedTotalBuckets, restoredTotalBuckets);
+            }
         }
         return restored;
     }

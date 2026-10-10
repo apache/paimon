@@ -22,18 +22,23 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 
+import java.io.Serializable;
+
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
-public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalRow> {
+public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalRow>, Serializable {
 
-    private final RowPartitionKeyExtractor partitionKeyExtractor;
+    private static final long serialVersionUID = 1L;
 
+    private transient RowPartitionKeyExtractor partitionKeyExtractor;
+
+    protected final TableSchema schema;
     protected InternalRow record;
 
     private BinaryRow partition;
     private BinaryRow trimmedPrimaryKey;
 
     public RowKeyExtractor(TableSchema schema) {
-        this.partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
+        this.schema = schema;
     }
 
     @Override
@@ -46,7 +51,7 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            partition = partitionKeyExtractor.partition(record);
+            partition = partitionKeyExtractor().partition(record);
         }
         return partition;
     }
@@ -54,8 +59,15 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     @Override
     public BinaryRow trimmedPrimaryKey() {
         if (trimmedPrimaryKey == null) {
-            trimmedPrimaryKey = partitionKeyExtractor.trimmedPrimaryKey(record);
+            trimmedPrimaryKey = partitionKeyExtractor().trimmedPrimaryKey(record);
         }
         return trimmedPrimaryKey;
+    }
+
+    private RowPartitionKeyExtractor partitionKeyExtractor() {
+        if (partitionKeyExtractor == null) {
+            partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
+        }
+        return partitionKeyExtractor;
     }
 }

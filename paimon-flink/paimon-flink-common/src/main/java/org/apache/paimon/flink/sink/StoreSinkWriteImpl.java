@@ -28,6 +28,7 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.utils.UriReaderFactory;
@@ -55,9 +56,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
     private final boolean isStreamingMode;
+    private final boolean perPartitionBucketCountsEnabled;
     private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
     private final TableWriteFactory tableWriteFactory;
+    @Nullable private final PartitionBucketMapping partitionBucketMapping;
 
     @Nullable private UriReaderFactory blobDescriptorReaderFactory;
 
@@ -83,6 +86,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 isStreamingMode,
                 memoryPoolFactory,
                 metricGroup,
+                null,
                 FileStoreTable::newWrite);
     }
 
@@ -96,6 +100,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean isStreamingMode,
             MemoryPoolFactory memoryPoolFactory,
             @Nullable MetricGroup metricGroup,
+            @Nullable PartitionBucketMapping partitionBucketMapping,
             TableWriteFactory tableWriteFactory) {
         this.commitUser = commitUser;
         this.state = state;
@@ -103,10 +108,44 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.ignorePreviousFiles = ignorePreviousFiles;
         this.waitCompaction = waitCompaction;
         this.isStreamingMode = isStreamingMode;
+        this.perPartitionBucketCountsEnabled =
+                table.coreOptions().bucketPerPartitionCountEnabled()
+                        && !table.partitionKeys().isEmpty();
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
+        this.partitionBucketMapping = partitionBucketMapping;
         this.tableWriteFactory = tableWriteFactory;
         this.write = newTableWrite(table);
+    }
+
+    /**
+     * Returns whether a checkpointed maintenance bucket still belongs to the current partition
+     * layout.
+     *
+     * <p>This method is only for restoring maintenance state. Normal row writes must continue to
+     * use the strict bucket-count validation in {@link TableWriteImpl}.
+     */
+    protected boolean isRestoredStateBucketInCurrentLayout(BinaryRow partition, int bucket) {
+        if (!perPartitionBucketCountsEnabled) {
+            return true;
+        }
+
+        if (partitionBucketMapping == null) {
+            throw new IllegalStateException(
+                    "Partition bucket mapping is required to restore per-partition bucket state.");
+        }
+
+        int totalBuckets = partitionBucketMapping.resolveNumBuckets(partition);
+        if (bucket < totalBuckets) {
+            return true;
+        }
+
+        LOG.info(
+                "Ignore retired maintenance bucket {} for partition {}; current bucket count is {}.",
+                bucket,
+                partition,
+                totalBuckets);
+        return false;
     }
 
     private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
@@ -140,7 +179,12 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     @Override
     @Nullable
     public SinkRecord write(InternalRow rowData) throws Exception {
-        return write.writeAndReturn(withBlobDescriptorReader(rowData));
+        InternalRow row = withBlobDescriptorReader(rowData);
+        if (partitionBucketMapping == null) {
+            return write.writeAndReturn(row);
+        }
+
+        return write.writeAndReturn(row, partitionBucketMapping);
     }
 
     @Override
