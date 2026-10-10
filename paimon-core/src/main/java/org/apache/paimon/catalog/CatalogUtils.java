@@ -395,7 +395,8 @@ public class CatalogUtils {
                         isRestCatalog ? null : lockContext,
                         catalogContext,
                         catalog.supportsVersionManagement(),
-                        catalog.supportsPartitionModification());
+                        catalog.supportsPartitionModification(),
+                        isRestCatalog ? options.branch() : null);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);

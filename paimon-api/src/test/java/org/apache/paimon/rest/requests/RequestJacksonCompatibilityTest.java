@@ -159,6 +159,17 @@ public class RequestJacksonCompatibilityTest {
                             request -> assertThat(request.getSchemaId()).isEqualTo(44L),
                             "schemaId"),
                     requestCase(
+                            CreateDatabaseTagRequest.class,
+                            "{\"tagName\":\"train-v1\",\"fromBranch\":\"experiment\",\"timeRetained\":\"7d\"}",
+                            request -> {
+                                assertThat(request.tagName()).isEqualTo("train-v1");
+                                assertThat(request.fromBranch()).isEqualTo("experiment");
+                                assertThat(request.timeRetained()).isEqualTo("7d");
+                            },
+                            "tagName",
+                            "fromBranch",
+                            "timeRetained"),
+                    requestCase(
                             UpsertLabelRequest.class,
                             "{\"value\":\"identifier\"}",
                             request -> assertThat(request.getValue()).isEqualTo("identifier"),
@@ -209,6 +220,18 @@ public class RequestJacksonCompatibilityTest {
                 .isNotNull()
                 .extracting(ConstructorProperties::value)
                 .isEqualTo(requestCase.propertyNames);
+    }
+
+    @Test
+    void testDatabaseTagRequestDefaultsRoundTrip() throws Exception {
+        CreateDatabaseTagRequest request =
+                EXTERNAL_MAPPER.readValue(
+                        "{\"tagName\":\"train-v1\"}", CreateDatabaseTagRequest.class);
+        CreateDatabaseTagRequest roundTrip =
+                RESTApi.fromJson(RESTApi.toJson(request), CreateDatabaseTagRequest.class);
+        assertThat(roundTrip.tagName()).isEqualTo("train-v1");
+        assertThat(roundTrip.fromBranch()).isNull();
+        assertThat(roundTrip.timeRetained()).isNull();
     }
 
     @Test
