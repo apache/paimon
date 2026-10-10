@@ -191,6 +191,10 @@ threshold = 2 * filesMaxPartitionBytes
 output partition count = ceil(total input partition bytes / filesMaxPartitionBytes)
 ```
 
+If the computed output partition count is less than or equal to the existing input partition
+count, the rule keeps the scan unchanged without adding a shuffle. A shuffle is inserted only
+when the computed count increases parallelism.
+
 `filesMaxPartitionBytes` uses Paimon's `source.split.target-size`, falling back to an explicitly
 configured `spark.sql.files.maxPartitionBytes`, then Paimon's default split size.
 All input partitions contribute to the total bytes. An input partition exactly at the

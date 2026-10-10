@@ -114,6 +114,27 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
     }
   }
 
+  test(
+    "skip shuffle when a large Blob partition and small partitions already have more parallelism") {
+    withSplitConf {
+      val scan = relation(
+        Seq(Seq(256L * 1024)) ++ Seq.fill(20)(Seq(1L)),
+        Map("source.split.target-size" -> "64kb"))
+      // The oversized partition triggers the size check, but ceil(262164 / 65536) = 5
+      // would reduce the existing 21 input partitions. Preserve the scan without a shuffle.
+      assert(RepartitionLargePaimonScan(scan) eq scan)
+    }
+  }
+
+  test("skip shuffle when computed partition count equals existing input partition count") {
+    withSplitConf {
+      val scan = relation(
+        Seq(Seq(256L * 1024)) ++ Seq.fill(4)(Seq(1L)),
+        Map("source.split.target-size" -> "64kb"))
+      assert(RepartitionLargePaimonScan(scan) eq scan)
+    }
+  }
+
   test("open file cost does not change the threshold or shuffle partition count") {
     withSplitConf {
       withSparkSQLConf(

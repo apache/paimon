@@ -177,6 +177,7 @@ public class SparkConnectorOptions {
                                     + "(including ARRAY<BLOB> and MAP values of BLOB) when any input partition "
                                     + "exceeds twice filesMaxPartitionBytes. The shuffle partition count is "
                                     + "the total input bytes divided by filesMaxPartitionBytes, rounded up. "
+                                    + "Skips the shuffle if this count is no greater than the existing input partition count. "
                                     + "Does not change the number of scan tasks.");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_REPAIR_COLLECT_STATISTICS =

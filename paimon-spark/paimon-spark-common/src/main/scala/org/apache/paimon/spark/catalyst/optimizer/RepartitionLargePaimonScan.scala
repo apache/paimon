@@ -78,7 +78,11 @@ object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
                 s"Scan repartition count $numPartitions exceeds ${Int.MaxValue}; " +
                   "increase the scan split target size"
               )
-              Repartition(numPartitions.toInt, shuffle = true, relation)
+              if (numPartitions <= partitions.size) {
+                relation
+              } else {
+                Repartition(numPartitions.toInt, shuffle = true, relation)
+              }
             } else {
               relation
             }
