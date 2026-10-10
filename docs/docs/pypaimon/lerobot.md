@@ -232,10 +232,9 @@ on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GO
 uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
 `video_backend` to force either decoder.
 
-Set `max_open_videos` on `PaimonLeRobotDataset` (or a custom
-`PaimonDatasetReader`) to bound the decoder cache per camera per worker.
-The default is 16; increasing it reduces decoder reopening at the cost of
-more memory and open streams.
+`max_open_videos` (default: 16) limits cached video decoders per camera per worker
+in `PaimonLeRobotDataset` and `PaimonDatasetReader`. Larger values improve reuse
+but consume more resources.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 
