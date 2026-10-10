@@ -16,9 +16,9 @@
 # under the License.
 
 import heapq
-import math
 from typing import Any, Callable, List, Optional
 
+from pypaimon.common.comparator import compare_values
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
@@ -212,27 +212,15 @@ def is_comparable_seq_field(field: DataField) -> bool:
 def _row_field_comparator(
         fields: List[DataField],
         indices: List[int],
-        ascending: bool = True,
-        floating_sequence: bool = False) -> Callable[[Any, Any], int]:
-    """Build a comparator over two rows on the given ``indices`` (positions
-    in ``fields`` / the row's ``get_field``), compared left-to-right.
+        ascending: bool = True) -> Callable[[Any, Any], int]:
+    """Compare the selected row fields left-to-right for keys or sequences.
 
-    Shared by :func:`builtin_key_comparator` (all key fields, ascending) and
-    :func:`builtin_seq_comparator` (the configured sequence fields, with
-    sort-order). Comparability is precomputed once. ``None`` rows/values
-    always sort first, independent of ``ascending`` -- only the comparison
-    of two non-null values is reversed when ``ascending=False``. This
-    mirrors Java ``GenerateUtils.generateRowCompare`` built with
-    ``nullIsLast=false`` (see ``CodeGeneratorImpl#getSortSpec``), where
-    descending order flips only the non-null value comparison and leaves
-    nulls sorting first.
-
-    ``floating_sequence`` enables Java's NaN and signed-zero ordering for
-    sequence fields, independently of primary-key equality.
+    Nulls stay first in either direction, matching Java's
+    ``GenerateUtils.generateRowCompare`` with ``nullIsLast=false``.
+    FLOAT/DOUBLE fields use Java's NaN and signed-zero ordering.
     """
     comparable_flags = [_base_type_name(fields[idx]) in _COMPARABLE_TYPE_NAMES for idx in indices]
-    floating_flags = [floating_sequence and _base_type_name(fields[idx]) in ('FLOAT', 'DOUBLE')
-                      for idx in indices]
+    floating_flags = [_base_type_name(fields[idx]) in ('FLOAT', 'DOUBLE') for idx in indices]
     sign = 1 if ascending else -1
 
     def comparator(row1: InternalRow, row2: InternalRow) -> int:
@@ -257,19 +245,10 @@ def _row_field_comparator(
                 raise ValueError(f"Unsupported {fields[idx].type} comparison")
 
             if floating_flags[pos]:
-                # Java Float/Double.compare: all NaNs tie above +inf, and
-                # -0.0 precedes +0.0. Primary-key equality is unchanged.
-                if math.isnan(val1):
-                    if not math.isnan(val2):
-                        return sign
-                    continue
-                if math.isnan(val2):
-                    return -sign
-                if val1 == val2 == 0.0:
-                    val1 = math.copysign(1.0, val1)
-                    val2 = math.copysign(1.0, val2)
-
-            if val1 < val2:
+                result = compare_values(val1, val2)
+                if result:
+                    return sign * result
+            elif val1 < val2:
                 return -sign
             elif val1 > val2:
                 return sign
@@ -335,4 +314,4 @@ def builtin_seq_comparator(
                 f"are not supported -- open an issue to track support.")
         indices.append(idx)
 
-    return _row_field_comparator(value_fields, indices, ascending, floating_sequence=True)
+    return _row_field_comparator(value_fields, indices, ascending)

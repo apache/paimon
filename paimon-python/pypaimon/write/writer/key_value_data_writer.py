@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Union
+from typing import List, Optional, Union
 
 import numpy as np
 import pyarrow as pa
@@ -223,8 +223,7 @@ class KeyValueDataWriter(DataWriter):
             return data
 
         col_names = data.schema.names
-        # ``to_pydict`` works on pyarrow >= 6 (Python 3.6 CI ships 6.0.1),
-        # unlike ``to_pylist`` which only landed in pyarrow 7.
+        # Use to_pydict for Arrow 6 compatibility; Table.to_pylist requires 7.
         col_dict = data.to_pydict()
         rows = [{name: col_dict[name][i] for name in col_names}
                 for i in range(n)]
@@ -249,13 +248,26 @@ class KeyValueDataWriter(DataWriter):
         # the resulting GC churn on large buffers.
         pooled_kv = KeyValue(key_arity, value_arity)
 
+        # Use the same canonical keys for sort and fold: NaNs tie, signed zeros differ.
+        key_columns = self._primary_key_sort_columns(data)
+        floating_keys = [pa.types.is_floating(data.schema.field(i).type)
+                         for i in range(len(key_columns))]
+        canonical_keys: Optional[List[tuple]] = None
+        if any(floating_keys):
+            key_values = [column.to_pylist() if floating_keys[i]
+                          else col_dict[col_names[i]]
+                          for i, column in enumerate(key_columns)]
+            canonical_keys = list(zip(*key_values))
+
         merged_rows: List[dict] = []
         i = 0
         while i < n:
             j = i
-            first_key = self._key_tuple(rows[i], col_names, key_arity)
+            first_key = (canonical_keys[i] if canonical_keys is not None
+                         else self._key_tuple(rows[i], col_names, key_arity))
             while j < n and \
-                    self._key_tuple(rows[j], col_names, key_arity) == first_key:
+                    (canonical_keys[j] if canonical_keys is not None
+                     else self._key_tuple(rows[j], col_names, key_arity)) == first_key:
                 j += 1
             run = rows[i:j]
             self._merge_function.reset()
@@ -332,10 +344,7 @@ class KeyValueDataWriter(DataWriter):
     def _sort_by_primary_key(
         self, data: Union[pa.RecordBatch, pa.Table]
     ) -> Union[pa.RecordBatch, pa.Table]:
-        # pc.sort_indices + .take work uniformly over RecordBatch and
-        # Table, so this serves both the per-batch entry path (legacy)
-        # and the buffer-wide sort path (used by ``_flush_all``).
-        sort_columns = [data.column(key) for key in self.trimmed_primary_keys]
+        sort_columns = self._primary_key_sort_columns(data)
         sort_orders = ['ascending'] * len(sort_columns)
         sequence_fields = self.options.sequence_field()
         if sequence_fields:
@@ -344,7 +353,7 @@ class KeyValueDataWriter(DataWriter):
             for field in sequence_fields:
                 column = data.column(field)
                 if pa.types.is_floating(column.type):
-                    column = self._floating_sequence_sort_key(column)
+                    column = self._floating_sort_key(column)
                 sort_columns.append(column)
                 sort_orders.append(sequence_order)
         if '_SEQUENCE_NUMBER' in data.schema.names:
@@ -354,16 +363,25 @@ class KeyValueDataWriter(DataWriter):
         # Sort a separate key table so temporary keys cannot collide with user
         # column names or change the stored values (including signed zero).
         names = [str(i) for i in range(len(sort_columns))]
-        # Java MergeTree comparators order null keys first. Keep Python-written files in the same
-        # order so their key ranges and sorted-run invariants are interoperable with Java readers.
-        sorted_indices = pc.sort_indices(
-            pa.table(sort_columns, names=names),
-            sort_keys=list(zip(names, sort_orders)), null_placement='at_start')
+        # Match Java's null-first ordering for file bounds and sorted runs.
+        sorted_indices = pc.call_function(
+            'sort_indices', [pa.table(sort_columns, names=names)],
+            pc.SortOptions(sort_keys=list(zip(names, sort_orders)), null_placement='at_start'))
         return data.take(sorted_indices)
 
+    def _primary_key_sort_columns(
+            self, data: Union[pa.RecordBatch, pa.Table]) -> List[Union[pa.Array, pa.ChunkedArray]]:
+        # Sort and fold use stored keys rather than the value projection.
+        columns = [data.column('_KEY_' + name) for name in self.trimmed_primary_keys]
+        return [self._floating_sort_key(column) if pa.types.is_floating(column.type) else column
+                for column in columns]
+
     @staticmethod
-    def _floating_sequence_sort_key(column):
-        """Unsigned keys in Java Float/Double.compare order, preserving nulls."""
+    def _floating_sort_key(column: Union[pa.Array, pa.ChunkedArray]) -> pa.Array:
+        """Unsigned keys in Java Float/Double.compare order, preserving nulls.
+
+        Older Python-written files may violate this order and are not rewritten.
+        """
         # The NumPy protocol supports Array and older ChunkedArray APIs alike.
         values = np.asarray(column)
         bits = values.view(np.dtype('uint{}'.format(column.type.bit_width)))
