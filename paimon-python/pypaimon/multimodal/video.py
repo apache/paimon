@@ -150,7 +150,7 @@ class VideoFrameCollator:
             decoder_factory,
             decode_fn=None,
             output_column="frame",
-            max_open_videos=8,
+            max_open_videos=16,
             collate_fn=None,
             decode_batch_fn=None,
             range_parallelism=4):
