@@ -164,6 +164,34 @@ def test_optimized_bitmap_like_filters_stay_exact_without_refinement(rest_catalo
 
 
 @pytest.mark.parametrize('refine', [False, True])
+@pytest.mark.parametrize('partial', [False, True])
+@pytest.mark.parametrize('index_type', ['btree', 'bitmap'])
+@pytest.mark.parametrize('method, literal', [
+    ('like', ''), ('like', '%'), ('like', '%%'), ('contains', ''), ('endswith', '')])
+def test_empty_string_filters_preserve_java_refinement(rest_catalog, refine, partial, index_type, method, literal):
+    catalog, _ = rest_catalog
+    table = indexes._create(catalog, schema=SCHEMA, partitioned=True, options={
+        'read.native.enabled': 'true', 'full-text-index.search-mode': 'full',
+        'scalar-index.search-mode': 'full', 'global-index.filter.refine-from-data': str(refine).lower()})
+    labels = ['', None, 'keep', 'drop', '', 'keep', 'drop', None]
+    indexes._append(table, [
+        {'id': i, 'content': 'paimon', 'label': label, 'pt': 0}
+        for i, label in enumerate(labels)], schema=SCHEMA)
+    table.create_global_index('content', index_type='full-text')
+    table.create_global_index('label', index_type=index_type)
+    if partial:
+        labels += ['', None, 'keep', 'drop']
+        indexes._append(table, [
+            {'id': i, 'content': 'paimon', 'label': label, 'pt': 0}
+            for i, label in enumerate(labels[8:], 8)], schema=SCHEMA)
+    predicate = getattr(table.new_read_builder().new_predicate_builder(), method)('label', literal)
+    indexed = {0, 4} if method == 'like' and literal == '' else {0, 2, 3, 4, 5, 6}
+    raw = ({8} if method == 'like' and literal == '' else {8, 10, 11}) if partial else set()
+    assert set(_compare(table, predicate=predicate)) == (indexed if refine else set()).union(raw)
+    assert indexes._ids(table) == list(range(len(labels)))
+
+
+@pytest.mark.parametrize('refine', [False, True])
 def test_escaped_bitmap_like_is_refined_without_prefix_rewrite(rest_catalog, refine):
     catalog, _ = rest_catalog
     table = indexes._create(catalog, schema=SCHEMA, partitioned=True, options={
