@@ -17,7 +17,7 @@
 
 """Splits of full-text search."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -36,6 +36,7 @@ class IndexFullTextSearchSplit(FullTextSearchSplit):
     row_range_start: int
     row_range_end: int
     full_text_index_files: List[IndexFileMeta]
+    scalar_index_files: List[IndexFileMeta] = field(default_factory=list)
 
 
 @dataclass

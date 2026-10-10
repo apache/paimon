@@ -17,10 +17,35 @@
 
 """Exact row filtering for data-evolution search candidates."""
 
+from pypaimon.common.like_optimization import try_optimize_like
 from pypaimon.read.table_read import _ClosableArrowBatchReader
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.global_index_live_row_filter import table_at_snapshot
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+
+def is_exact(predicate, result):
+    """Apply Java FilteredRowIdReader's predicate contract before search Top-K.
+
+    Reader exactness alone is insufficient: contains, endsWith and residual
+    LIKE must be refined even when a bitmap dictionary yields exact rows.
+    Simple LIKE rewrites to equality/prefix retain their usual exactness.
+    """
+    if result is None or not result.is_exact():
+        return False
+    pending = [predicate] if predicate is not None else []
+    while pending:
+        leaf = pending.pop()
+        if leaf.method in ('and', 'or'):
+            pending.extend(leaf.literals)
+            continue
+        method = leaf.method
+        if method == 'like':
+            optimized = try_optimize_like(leaf.literals[0])
+            method = optimized[0] if optimized is not None else 'like'
+        if method in ('contains', 'endsWith', 'ends_with', 'like'):
+            return False
+    return True
 
 
 def matching_rows(table, predicate, candidates, partition_filter=None, snapshot=None):
