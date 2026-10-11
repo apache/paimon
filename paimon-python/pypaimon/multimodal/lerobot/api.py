@@ -18,6 +18,7 @@
 
 import numbers
 import sys
+from functools import partial
 from typing import Mapping, Optional
 
 from pypaimon.catalog.catalog_exception import TableAlreadyExistException
@@ -68,6 +69,8 @@ def load_from_lerobot(
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None,
         tag_name: Optional[str] = None,
+        engine: str = "python",
+        concurrency: Optional[int] = None,
 ) -> None:
     """Import LeRobot Dataset v3 into a new Paimon table group.
 
@@ -75,7 +78,9 @@ def load_from_lerobot(
     info/stats metadata are stored in companion Paimon tables. If provided,
     ``tag_name`` pins all components to their imported snapshots.
     FileIO URI credentials come only from ``source_options`` and are not
-    inherited from the target Catalog.
+    inherited from the target Catalog. Set ``engine="ray"`` to distribute
+    Episode groups on an initialized Ray cluster; ``concurrency`` bounds
+    active tasks. All nodes must be able to access source and target storage.
     """
     if sys.version_info < (3, 10):
         raise RuntimeError(
@@ -84,6 +89,19 @@ def load_from_lerobot(
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) \
             or batch_size <= 0:
         raise ValueError("batch_size must be a positive integer.")
+
+    if engine not in ("python", "ray"):
+        raise ValueError("engine must be 'python' or 'ray'.")
+    if concurrency is not None and (
+            isinstance(concurrency, bool) or not isinstance(concurrency, int)
+            or concurrency <= 0):
+        raise ValueError("concurrency must be a positive integer.")
+    if engine == "python" and concurrency is not None:
+        raise ValueError("concurrency requires engine='ray'.")
+    if engine == "ray":
+        from pypaimon.multimodal.lerobot.ray_import import _require_ray, _ray_source_uri
+        _require_ray()
+        source = _ray_source_uri(source)
 
     if tag_name is not None:
         _validate_tag_name(tag_name)
@@ -102,7 +120,8 @@ def load_from_lerobot(
         _validated_counts(local_info, resolved_source.path)
         _validate_v3_required_features(local_info)
         video_fields = _video_feature_names(local_info)
-        LeRobotDataset = _import_lerobot_dataset()
+        LeRobotDataset = (_import_lerobot_dataset()
+                          if engine == "python" else None)
         dataset = _open_resolved_dataset(
             LeRobotDataset,
             resolved_source,
@@ -131,6 +150,9 @@ def load_from_lerobot(
                 metadata,
                 tag_name,
                 video_fields,
+                engine,
+                concurrency,
+                validated_source_options,
             )
         finally:
             close = getattr(dataset, "close", None)
@@ -149,7 +171,10 @@ def _import_dataset(
         options,
         metadata,
         tag_name,
-        video_fields):
+        video_fields,
+        engine="python",
+        concurrency=None,
+        source_options=None):
     table = _create_target_table(
         connection,
         table_name,
@@ -166,7 +191,14 @@ def _import_dataset(
     )
     frames_snapshot_id = None
     if int(info["total_frames"]) > 0:
-        frames_snapshot_id = _write_dataset(
+        if engine == "ray":
+            from pypaimon.multimodal.lerobot.ray_import import _write_dataset_ray
+            write_dataset = partial(
+                _write_dataset_ray, concurrency=concurrency,
+                source_options=source_options)
+        else:
+            write_dataset = _write_dataset
+        frames_snapshot_id = write_dataset(
             table,
             dataset,
             info,

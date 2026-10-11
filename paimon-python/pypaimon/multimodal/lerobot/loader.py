@@ -75,18 +75,35 @@ def _write_dataset(
         batch_size,
         metadata,
         video_fields=()):
-    target_schema = _target_schema(table.raw_table)
-    write_builder = table.raw_table.new_batch_write_builder()
+    messages = _prepare_dataset(
+        table.raw_table, dataset, info, source, source_schema, batch_size,
+        metadata, video_fields)
+    snapshot_recorder = _SnapshotRecorder()
+    table_commit = table.raw_table.new_batch_write_builder().new_commit()
+    try:
+        table_commit.add_commit_callback(snapshot_recorder)
+        table_commit.commit(messages)
+        if snapshot_recorder.snapshot_id is None:
+            raise RuntimeError(
+                "LeRobot append committed without reporting a snapshot id.")
+        return snapshot_recorder.snapshot_id
+    finally:
+        table_commit.close()
+
+
+def _prepare_dataset(
+        table, dataset, info, source, source_schema, batch_size, metadata,
+        video_fields=(), episode_indices=None):
+    target_schema = _target_schema(table)
+    write_builder = table.new_batch_write_builder()
     table_write = None
-    table_commit = None
-    commit_started = False
+    prepared = False
     batch_count = 0
     row_count = 0
     episodes = metadata["episodes"]
     current_episode = None
     expected_tasks = set()
     observed_tasks = set()
-    snapshot_recorder = _SnapshotRecorder()
     video_sources = {}
 
     try:
@@ -95,14 +112,13 @@ def _write_dataset(
             dataset, "video_uri_reader_factory", None)
         if video_fields and reader_factory is not None:
             table_write.with_blob_uri_reader_factory(reader_factory)
-        table_commit = write_builder.new_commit()
-        table_commit.add_commit_callback(snapshot_recorder)
         for source_episode, episode_index, episode_begin, task_indices, \
                 begin, end in _episode_batches(
                     info,
                     batch_size,
                     episodes,
                     video_fields,
+                    episode_indices,
                 ):
             if episode_index != current_episode:
                 if current_episode is not None:
@@ -147,43 +163,38 @@ def _write_dataset(
             _validate_episode_tasks(
                 current_episode, expected_tasks, observed_tasks)
 
-        expected_rows = int(info.get("total_frames", len(dataset)))
+        expected_rows = (int(info["total_frames"]) if episode_indices is None
+                         else sum(episodes[i]["length"] for i in episode_indices))
         if row_count != expected_rows:
             raise ValueError(
                 "LeRobot metadata reports %d frames but import produced %d."
                 % (expected_rows, row_count))
         messages = table_write.prepare_commit()
-        commit_started = True
-        table_commit.commit(messages)
-        if snapshot_recorder.snapshot_id is None:
-            raise RuntimeError(
-                "LeRobot append committed without reporting a snapshot id.")
-        return snapshot_recorder.snapshot_id
+        prepared = True
+        return messages
     except BaseException:
-        if table_write is not None and not commit_started:
+        if table_write is not None and not prepared:
             table_write.abort()
         raise
     finally:
-        try:
-            if table_write is not None:
-                table_write.close()
-        finally:
-            if table_commit is not None:
-                table_commit.close()
+        if table_write is not None:
+            table_write.close()
 
 
-def _episode_batches(info, batch_size, episodes, video_fields=()):
+def _episode_batches(
+        info, batch_size, episodes, video_fields=(), episode_indices=None):
     episode_count = int(info.get("total_episodes", 0))
     total_frames = int(info["total_frames"])
     expected_begin = 0
-    for ordinal in range(episode_count):
+    ordinals = range(episode_count) if episode_indices is None else episode_indices
+    for ordinal in ordinals:
         episode = episodes.iloc[ordinal] if hasattr(episodes, "iloc") \
             else episodes[ordinal]
         episode_index = int(_python_scalar(episode["episode_index"]))
         begin = int(_python_scalar(episode["dataset_from_index"]))
         end = int(_python_scalar(episode["dataset_to_index"]))
         length = int(_python_scalar(episode["length"]))
-        if episode_index != ordinal or begin != expected_begin \
+        if episode_index != ordinal or (episode_indices is None and begin != expected_begin) \
                 or end <= begin or length != end - begin:
             raise ValueError(
                 "LeRobot episode %d has an invalid index, range, or length."
@@ -203,7 +214,7 @@ def _episode_batches(info, batch_size, episodes, video_fields=()):
             )
             begin = batch_end
         expected_begin = end
-    if expected_begin != total_frames:
+    if episode_indices is None and expected_begin != total_frames:
         raise ValueError(
             "LeRobot episode ranges cover %d frames but metadata reports %d."
             % (expected_begin, total_frames))
