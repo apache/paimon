@@ -40,8 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** Tests JDBC locking through legacy option keys and the catalog's own policy. */
-@SuppressWarnings("deprecation")
+/** Tests JDBC locking through the catalog's own options and policy. */
 class JdbcCatalogLockConfigurationTest {
     @TempDir Path directory;
 
@@ -50,10 +49,10 @@ class JdbcCatalogLockConfigurationTest {
     void jdbcPreservesStorageDefaultAndExplicitOverride(
             boolean objectStore, Boolean enabled, boolean expected) throws Exception {
         Options options = options();
-        options.set(CatalogOptions.LOCK_ACQUIRE_TIMEOUT, Duration.ofSeconds(3));
-        options.set(CatalogOptions.LOCK_CHECK_MAX_SLEEP, Duration.ofMillis(17));
+        options.set(JdbcCatalogOptions.LOCK_ACQUIRE_TIMEOUT, Duration.ofSeconds(3));
+        options.set(JdbcCatalogOptions.LOCK_CHECK_MAX_SLEEP, Duration.ofMillis(17));
         if (enabled != null) {
-            options.set(CatalogOptions.LOCK_ENABLED, enabled);
+            options.set(JdbcCatalogOptions.LOCK_ENABLED, enabled);
         }
         try (JdbcCatalog catalog = catalog(options, objectStore);
                 Lock lock =
@@ -86,8 +85,8 @@ class JdbcCatalogLockConfigurationTest {
     @Test
     void configuredFactoryOverridesJdbcDefault() throws Exception {
         Options options = options();
-        options.set(CatalogOptions.LOCK_ENABLED, true);
-        options.set(CatalogOptions.LOCK_TYPE, TestCatalogLockFactory.IDENTIFIER);
+        options.set(JdbcCatalogOptions.LOCK_ENABLED, true);
+        options.set(JdbcCatalogOptions.LOCK_TYPE, TestCatalogLockFactory.IDENTIFIER);
         try (JdbcCatalog catalog = catalog(options, false);
                 Lock lock =
                         catalog.createLock(
@@ -101,8 +100,8 @@ class JdbcCatalogLockConfigurationTest {
     @Test
     void disabledJdbcLockDoesNotResolveFactoryOrCreateLeaseTable() throws Exception {
         Options options = options();
-        options.set(CatalogOptions.LOCK_ENABLED, false);
-        options.set(CatalogOptions.LOCK_TYPE, "not-installed");
+        options.set(JdbcCatalogOptions.LOCK_ENABLED, false);
+        options.set(JdbcCatalogOptions.LOCK_TYPE, "not-installed");
         try (JdbcCatalog catalog = catalog(options, true);
                 Lock lock =
                         catalog.createLock(

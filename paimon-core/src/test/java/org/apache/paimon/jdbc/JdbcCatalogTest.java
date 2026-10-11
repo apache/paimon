@@ -92,8 +92,8 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
         properties.put(CatalogOptions.WAREHOUSE.key(), warehouse);
-        properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
-        properties.put(CatalogOptions.LOCK_TYPE.key(), "jdbc");
+        properties.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "true");
+        properties.put(JdbcCatalogOptions.LOCK_TYPE.key(), "jdbc");
         properties.putAll(props);
         JdbcCatalog catalog =
                 new JdbcCatalog(
@@ -446,13 +446,13 @@ public class JdbcCatalogTest extends CatalogTestBase {
 
     private JdbcCatalog initCatalogWithoutLock() {
         Map<String, String> props = Maps.newHashMap();
-        props.put(CatalogOptions.LOCK_ENABLED.key(), "false");
+        props.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "false");
         return initCatalog(props);
     }
 
     private JdbcCatalog initCatalogWithoutLock(String uri) {
         Map<String, String> props = Maps.newHashMap();
-        props.put(CatalogOptions.LOCK_ENABLED.key(), "false");
+        props.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "false");
         return initCatalog(props, uri);
     }
 

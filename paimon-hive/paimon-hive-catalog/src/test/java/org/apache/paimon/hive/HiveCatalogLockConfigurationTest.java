@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TestCatalogLockFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -39,7 +38,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /** Tests Hive policy and factory context without connecting to a metastore. */
-@SuppressWarnings("deprecation")
 class HiveCatalogLockConfigurationTest {
     @ParameterizedTest
     @CsvSource({"false,,false", "true,,true", "false,true,true", "true,false,false"})
@@ -47,7 +45,7 @@ class HiveCatalogLockConfigurationTest {
             boolean objectStore, Boolean enabled, boolean expected) throws Exception {
         Options options = new Options();
         if (enabled != null) {
-            options.set(CatalogOptions.LOCK_ENABLED, enabled);
+            options.set(HiveCatalogOptions.LOCK_ENABLED, enabled);
         }
         try (HiveCatalog catalog = catalog(options, objectStore);
                 Lock lock =
@@ -67,8 +65,8 @@ class HiveCatalogLockConfigurationTest {
     @Test
     void configuredFactoryOverridesHiveDefault() throws Exception {
         Options options = new Options();
-        options.set(CatalogOptions.LOCK_ENABLED, true);
-        options.set(CatalogOptions.LOCK_TYPE, TestCatalogLockFactory.IDENTIFIER);
+        options.set(HiveCatalogOptions.LOCK_ENABLED, true);
+        options.set(HiveCatalogOptions.LOCK_TYPE, TestCatalogLockFactory.IDENTIFIER);
         try (HiveCatalog catalog = catalog(options, false);
                 Lock lock =
                         catalog.createLock(
@@ -81,8 +79,8 @@ class HiveCatalogLockConfigurationTest {
     @Test
     void disabledHiveLockDoesNotResolveFactory() throws Exception {
         Options options = new Options();
-        options.set(CatalogOptions.LOCK_ENABLED, false);
-        options.set(CatalogOptions.LOCK_TYPE, "not-installed");
+        options.set(HiveCatalogOptions.LOCK_ENABLED, false);
+        options.set(HiveCatalogOptions.LOCK_TYPE, "not-installed");
         try (HiveCatalog catalog = catalog(options, true);
                 Lock lock =
                         catalog.createLock(
@@ -92,10 +90,10 @@ class HiveCatalogLockConfigurationTest {
     }
 
     @Test
-    void legacyDurationKeysStillConfigureHiveLocks() {
+    void durationOptionsConfigureHiveLocks() {
         HiveConf conf = new HiveConf();
-        conf.set(CatalogOptions.LOCK_CHECK_MAX_SLEEP.key(), "17 ms");
-        conf.set(CatalogOptions.LOCK_ACQUIRE_TIMEOUT.key(), "3 s");
+        conf.set(HiveCatalogOptions.LOCK_CHECK_MAX_SLEEP.key(), "17 ms");
+        conf.set(HiveCatalogOptions.LOCK_ACQUIRE_TIMEOUT.key(), "3 s");
         assertThat(HiveCatalogLock.checkMaxSleep(conf)).isEqualTo(17);
         assertThat(HiveCatalogLock.acquireTimeout(conf)).isEqualTo(3000);
         HiveConf defaults = new HiveConf();
@@ -114,7 +112,7 @@ class HiveCatalogLockConfigurationTest {
                 "file:/warehouse") {
             @Override
             public Optional<CatalogLockFactory> defaultLockFactory() {
-                if (options.contains(CatalogOptions.LOCK_TYPE)) {
+                if (options.contains(HiveCatalogOptions.LOCK_TYPE)) {
                     throw new AssertionError("Explicit factory must override the default.");
                 }
                 return Optional.of(new TestCatalogLockFactory());

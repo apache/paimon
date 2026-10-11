@@ -37,8 +37,6 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
@@ -55,23 +53,6 @@ public class FileSystemCatalog extends AbstractCatalog {
     public FileSystemCatalog(FileIO fileIO, Path warehouse, CatalogContext context) {
         super(fileIO, context);
         this.warehouse = warehouse;
-    }
-
-    /** Preserve custom lock providers configured with the legacy filesystem catalog options. */
-    @Override
-    @SuppressWarnings("deprecation")
-    public Optional<CatalogLockFactory> lockFactory() {
-        if (!lockEnabled()) {
-            return Optional.empty();
-        }
-        String type = context.options().get(LOCK_TYPE);
-        return type == null ? defaultLockFactory() : Optional.of(CatalogLockFactory.discover(type));
-    }
-
-    @Override
-    @SuppressWarnings("deprecation")
-    protected boolean lockEnabled() {
-        return context.options().getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     @Override
