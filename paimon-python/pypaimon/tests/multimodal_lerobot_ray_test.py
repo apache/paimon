@@ -29,7 +29,7 @@ import pyarrow.parquet as pq
 from PIL import Image
 
 import pypaimon.multimodal as pm
-from pypaimon.multimodal.lerobot.ray_import import _episode_groups, _ray_source_uri
+from pypaimon.multimodal.lerobot.ray_loader import _episode_groups, _ray_source_uri
 
 
 class LeRobotRayPlanningTest(unittest.TestCase):

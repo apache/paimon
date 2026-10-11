@@ -18,8 +18,7 @@
 
 from pathlib import Path
 
-from pypaimon.multimodal.hdf5 import _SnapshotRecorder
-from pypaimon.multimodal.lerobot.loader import _prepare_dataset
+from pypaimon.multimodal.lerobot.loader import _commit_messages, _prepare_dataset
 from pypaimon.multimodal.lerobot.source import (
     _RemoteLeRobotDataset, _resolved_source,
 )
@@ -120,13 +119,4 @@ def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
         # Prepared files may outlive failed tasks; never delete committed data.
         raise
 
-    recorder = _SnapshotRecorder()
-    commit = table.raw_table.new_batch_write_builder().new_commit()
-    try:
-        commit.add_commit_callback(recorder)
-        commit.commit(messages)
-        if recorder.snapshot_id is None:
-            raise RuntimeError("LeRobot append committed without reporting a snapshot id.")
-        return recorder.snapshot_id
-    finally:
-        commit.close()
+    return _commit_messages(table.raw_table, messages)

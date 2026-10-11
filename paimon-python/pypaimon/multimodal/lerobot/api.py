@@ -92,7 +92,7 @@ def load_from_lerobot(
             or parallelism <= 0:
         raise ValueError("parallelism must be a positive integer.")
     if parallelism > 1:
-        from pypaimon.multimodal.lerobot.ray_import import _require_ray, _ray_source_uri
+        from pypaimon.multimodal.lerobot.ray_loader import _require_ray, _ray_source_uri
         _require_ray()
         source = _ray_source_uri(source)
 
@@ -183,7 +183,7 @@ def _import_dataset(
     frames_snapshot_id = None
     if int(info["total_frames"]) > 0:
         if parallelism > 1:
-            from pypaimon.multimodal.lerobot.ray_import import _write_dataset_ray
+            from pypaimon.multimodal.lerobot.ray_loader import _write_dataset_ray
             write_dataset = partial(
                 _write_dataset_ray, parallelism=parallelism,
                 source_options=source_options)

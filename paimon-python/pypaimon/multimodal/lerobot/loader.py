@@ -78,8 +78,12 @@ def _write_dataset(
     messages = _prepare_dataset(
         table.raw_table, dataset, info, source, source_schema, batch_size,
         metadata, video_fields)
+    return _commit_messages(table.raw_table, messages)
+
+
+def _commit_messages(table, messages):
     snapshot_recorder = _SnapshotRecorder()
-    table_commit = table.raw_table.new_batch_write_builder().new_commit()
+    table_commit = table.new_batch_write_builder().new_commit()
     try:
         table_commit.add_commit_callback(snapshot_recorder)
         table_commit.commit(messages)
