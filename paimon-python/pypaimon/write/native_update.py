@@ -86,6 +86,58 @@ def create_native_update_by_row_id(table, commit_user, commit_identifier):
         table, commit_user, commit_identifier, writer)
 
 
+def create_native_shard_updator(table, commit_user, projection, columns, shard, shard_count, stream=False):
+    """Core owns whole-file sharding, the captured reader and positional updates."""
+    from pypaimon.read.native_plan import native_method_available
+    if not native_method_available('BatchTableUpdate', 'new_shard_updator'):
+        return None
+    if not _native_update_columns_supported(table, columns):
+        return None
+    # Nested output aliases are interpreted by Python's read builder.
+    if projection is not None and any(
+            name not in table.field_names and name != '_ROW_ID' for name in projection):
+        return None
+    native_table = _native_row_id_table(table)
+    if native_table is None:
+        return None
+    builder = (native_table.new_stream_write_builder().with_commit_user(commit_user) if stream else
+               native_table.new_batch_write_builder()._with_commit_user(commit_user))
+    update = builder.new_update()
+    if projection is not None:
+        update.with_read_projection(projection)
+    if columns is not None:
+        update.with_update_type(columns)
+    return NativeShardTableUpdator(table, projection, update.new_shard_updator(shard, shard_count))
+
+
+class NativeShardTableUpdator:
+    """Transport Arrow batches and commit messages for a core shard updater."""
+
+    def __init__(self, table, projection, writer):
+        self.table = table
+        self.writer = writer
+        self.projection = projection
+
+    def arrow_reader(self):
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+        builder = self.table.new_read_builder()
+        if self.projection is not None:
+            builder.with_projection(self.projection)
+        read = builder.new_read()
+        schema = PyarrowFieldParser.from_paimon_schema(builder.read_type())
+        batches = read._convert_native_batches(self.writer.arrow_reader(), schema)
+        return _ClosableArrowBatchReader(pa.ipc.RecordBatchReader.from_batches(schema, batches), batches)
+
+    def update_by_arrow_batch(self, data):
+        self.writer.update_by_arrow_batch(data)
+
+    def prepare_commit(self):
+        return from_native_commit_messages(self.table, self.writer.prepare_commit())
+
+    def close(self):
+        self.writer.close()
+
+
 def _supported_upsert_key_type(data_type):
     return any(check(data_type) for check in (
         pa.types.is_boolean, pa.types.is_integer, pa.types.is_string,
