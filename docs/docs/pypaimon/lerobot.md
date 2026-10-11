@@ -72,24 +72,20 @@ conn.load_from_lerobot(
 )
 ```
 
-For distributed import, install `pypaimon[ray,lerobot]` on all workers:
+For distributed import, install `pypaimon[ray,lerobot]` on each worker:
 
 ```python
 import ray
 
 ray.init(address="auto")
-conn.load_from_lerobot(
-    "robot_data", "oss://source-bucket/lerobot_dataset",
-    parallelism=8,
-)
+conn.load_from_lerobot("robot_data", "oss://source-bucket/lerobot_dataset",
+                       parallelism=8)
 ```
 
-`parallelism=1` (default) uses the single-process importer. Larger values cap
-concurrent Ray tasks by independent Episode/video groups. All workers need
-source and target access; use FileIO URIs or shared directories, not Hub IDs.
-Pass OSS credentials through `source_options` as above. Keep the source unchanged.
-Failed imports may leave partial tables; retry with a new table name. Publishing
-companion tables is not atomic.
+The default `parallelism=1` uses one process. Workers need source and target
+storage access; pass OSS `source_options` as above. Ray accepts FileIO URIs or
+shared directories, not Hub IDs. Keep the source unchanged during import.
+Failed imports may leave partial tables; retry with a new name.
 
 Before training, finish any related data/metadata updates and pause writes to
 this table group. Create a common named tag over the current component snapshots:
