@@ -18,12 +18,14 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.LongArrayList;
 
@@ -83,65 +85,76 @@ public final class BTreeFixtureGenerator {
             throw new AssertionError("Expected Roaring across high-word buckets");
         }
         Files.write(directory.resolve("posting-high-buckets.bin"), crossingPosting);
+        String[] stringKeys = {"ke", "keep", "keeper", "key", "kf"};
         for (int version = 1; version <= 2; version++) {
             for (boolean bloom : new boolean[] {false, true}) {
-                final String name = "java-v" + version + (bloom ? "-bloom" : "") + ".btree";
-                final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                GlobalIndexFileWriter fileWriter =
-                        new GlobalIndexFileWriter() {
-                            @Override
-                            public String newFileName(String prefix) {
-                                return name;
-                            }
+                for (boolean string : new boolean[] {false, true}) {
+                    final String name =
+                            "java-v"
+                                    + version
+                                    + (string ? "-string" : "")
+                                    + (bloom ? "-bloom" : "")
+                                    + ".btree";
+                    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                    GlobalIndexFileWriter fileWriter =
+                            new GlobalIndexFileWriter() {
+                                @Override
+                                public String newFileName(String prefix) {
+                                    return name;
+                                }
 
-                            @Override
-                            public PositionOutputStream newOutputStream(String fileName) {
-                                return new PositionOutputStream() {
-                                    @Override
-                                    public long getPos() {
-                                        return bytes.size();
-                                    }
+                                @Override
+                                public PositionOutputStream newOutputStream(String fileName) {
+                                    return new PositionOutputStream() {
+                                        @Override
+                                        public long getPos() {
+                                            return bytes.size();
+                                        }
 
-                                    @Override
-                                    public void write(int value) {
-                                        bytes.write(value);
-                                    }
+                                        @Override
+                                        public void write(int value) {
+                                            bytes.write(value);
+                                        }
 
-                                    @Override
-                                    public void write(byte[] value) {
-                                        bytes.write(value, 0, value.length);
-                                    }
+                                        @Override
+                                        public void write(byte[] value) {
+                                            bytes.write(value, 0, value.length);
+                                        }
 
-                                    @Override
-                                    public void write(byte[] value, int offset, int length) {
-                                        bytes.write(value, offset, length);
-                                    }
+                                        @Override
+                                        public void write(byte[] value, int offset, int length) {
+                                            bytes.write(value, offset, length);
+                                        }
 
-                                    @Override
-                                    public void flush() {}
+                                        @Override
+                                        public void flush() {}
 
-                                    @Override
-                                    public void close() {}
-                                };
-                            }
-                        };
-                BTreeIndexWriter writer =
-                        new BTreeIndexWriter(
-                                fileWriter,
-                                KeySerializer.create(new IntType()),
-                                32,
-                                bloom ? BloomFilter.fixedBuilder(rows.length, 0.01) : null,
-                                null,
-                                version);
-                for (int i = 0; i < rows.length; i++) {
-                    for (long row : rows[i]) {
-                        writer.write(i + 1, row);
+                                        @Override
+                                        public void close() {}
+                                    };
+                                }
+                            };
+                    BTreeIndexWriter writer =
+                            new BTreeIndexWriter(
+                                    fileWriter,
+                                    string
+                                                ? KeySerializer.create(VarCharType.STRING_TYPE)
+                                            : KeySerializer.create(new IntType()),
+                                    32,
+                                    bloom ? BloomFilter.fixedBuilder(rows.length, 0.01) : null,
+                                    null,
+                                    version);
+                    for (int i = 0; i < rows.length; i++) {
+                        for (long row : rows[i]) {
+                            writer.write(
+                                    string ? BinaryString.fromString(stringKeys[i]) : i + 1, row);
+                        }
                     }
+                    writer.write(null, 999);
+                    ResultEntry entry = writer.finish().get(0);
+                    Files.write(directory.resolve(name), bytes.toByteArray());
+                    Files.write(directory.resolve(name + ".meta"), entry.meta());
                 }
-                writer.write(null, 999);
-                ResultEntry entry = writer.finish().get(0);
-                Files.write(directory.resolve(name), bytes.toByteArray());
-                Files.write(directory.resolve(name + ".meta"), entry.meta());
             }
         }
     }

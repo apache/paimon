@@ -172,6 +172,14 @@ class TableUpdate:
             shard_num: Index of this shard/subtask.
             total_shard_count: Total number of shards/subtasks.
         """
+        if total_shard_count <= 0 or shard_num < 0 or shard_num >= total_shard_count:
+            raise ValueError('Shard index must be smaller than a positive shard count')
+        from pypaimon.write.native_update import create_native_shard_updator
+        native = create_native_shard_updator(
+            self.table, self.commit_user, self.projection, self.update_cols,
+            shard_num, total_shard_count, stream=isinstance(self, StreamTableUpdate))
+        if native is not None:
+            return native
         return ShardTableUpdator(
             self.table,
             self.projection,

@@ -62,40 +62,67 @@ def query(table, predicate, batch=False):
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("mode", ["full", "fast"])
 @pytest.mark.parametrize("refine", [False, True])
-def test_btree_candidates_are_verified_before_top_k(table, caplog, pattern, batch, mode, refine):
+def test_btree_string_filters_follow_java_exactness_before_top_k(table, caplog, pattern, batch, mode, refine):
     scalar_index(table)
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
     result = query(table, "name LIKE '%s'" % pattern, batch).to_list()
-    expected = [{"id": 1}] if refine else []
+    candidate_only = pattern == "%zeta%"
+    expected = [{"id": 1}] if refine or not candidate_only else []
     assert result == ([expected, expected] if batch else expected)
-    assert ("global-index.filter.refine-from-data=true" in caplog.text) == (not refine)
+    assert ("global-index.filter.refine-from-data=true" in caplog.text) == (candidate_only and not refine)
 
 
 @pytest.mark.parametrize("kind, predicate", [
     ("btree", "name = 'beta zeta'"), ("btree", "name >= 'beta' AND name < 'gamma'"),
-    ("btree", "name LIKE 'beta zeta'"), ("bitmap", "name LIKE '%zeta%'"),
+    ("btree", "name LIKE 'beta zeta'"), ("btree", "name LIKE 'beta%'"), ("bitmap", "name = 'beta zeta'"),
+    ("bitmap", "name LIKE 'beta%'"),
 ])
-def test_exact_indexes_do_not_read_filter_columns(table, kind, predicate):
+@pytest.mark.parametrize("refine", [False, True])
+def test_exact_indexes_do_not_read_filter_columns(table, kind, predicate, refine):
     scalar_index(table, kind)
-    table.raw_table = table.raw_table.copy({"global-index.filter.refine-from-data": "true"})
+    table.raw_table = table.raw_table.copy({"global-index.filter.refine-from-data": str(refine).lower()})
     with patch.object(AbstractVectorSearchReadImpl, "_matching_candidate_rows",
                       side_effect=AssertionError("exact index recheck")):
         assert query(table, predicate).to_list() == [{"id": 1}]
 
 
+@pytest.mark.parametrize("method, literal", [("contains", "zeta"), ("endswith", "zeta"), ("like", "%zeta%")])
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("mode", ["full", "fast"])
 @pytest.mark.parametrize("refine", [False, True])
-def test_mixed_btree_and_bitmap_preserve_exact_matches(table, batch, mode, refine):
+def test_bitmap_string_filters_obey_search_refinement(table, method, literal, batch, mode, refine):
+    scalar_index(table, "bitmap")
+    table.raw_table = table.raw_table.copy({
+        "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
+    pb = table.raw_table.new_read_builder().new_predicate_builder()
+    predicate = getattr(pb, method)("name", literal)
+    if batch:
+        search = (table.raw_table.new_batch_vector_search_builder().with_vector_column("embedding")
+                  .with_query_vectors([[0., 1.], [0., 1.]]).with_filter(predicate).with_limit(1))
+        result = [list(value.results()) for value in search.execute_batch_local()]
+    else:
+        search = (table.raw_table.new_vector_search_builder().with_vector_column("embedding")
+                  .with_query_vector([0., 1.]).with_filter(predicate).with_limit(1))
+        result = list(search.execute_local().results())
+    expected = [1] if refine else []
+    assert result == ([expected, expected] if batch else expected)
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("mode", ["full", "fast"])
+@pytest.mark.parametrize("refine", [False, True])
+def test_mixed_btree_and_bitmap_obey_search_refinement(table, batch, mode, refine):
     scalar_index(table, "btree")
     scalar_index(table, "bitmap")
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
+    verify = AbstractVectorSearchReadImpl._matching_candidate_rows
     with patch.object(AbstractVectorSearchReadImpl, "_matching_candidate_rows",
-                      side_effect=AssertionError("exact index recheck")):
+                      autospec=True, side_effect=verify) as read:
         result = query(table, "name LIKE '%zeta%'", batch).to_list()
-    expected = [{"id": 1}]
+        assert read.call_count == (1 if refine else 0)
+    expected = [{"id": 1}] if refine else []
     assert result == ([expected, expected] if batch else expected)
 
 

@@ -23,6 +23,11 @@ tests check the tags and compare decoded row IDs against `expected.json`.
 `posting-high-buckets.bin` is an additional Java Roaring posting covering
 4294967232 through 4294967359, across two high-word buckets in one payload.
 
+`java-v{1,2}-string[-bloom].btree` and their `.meta` files use STRING keys
+`ke`, `keep`, `keeper`, `key`, and `kf`, with the same postings and null bitmap.
+These fixtures verify exact prefix queries across blocks, including all three
+v2 encodings and the exclusive prefix upper bound.
+
 To regenerate from the repository root with JDK 8, first build and run the Java
 posting tests to obtain the reactor's exact classpath:
 

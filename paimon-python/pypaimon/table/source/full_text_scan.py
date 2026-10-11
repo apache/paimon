@@ -62,10 +62,12 @@ class DataEvolutionFullTextScan(FullTextScan):
             self,
             table: 'FileStoreTable',
             text_columns,
-            partition_filter=None):
+            partition_filter=None,
+            filter_=None):
         self._table = table
         self._text_columns = list(text_columns)
         self._partition_filter = partition_filter
+        self._filter = filter_
 
     def scan(self) -> FullTextScanPlan:
         from pypaimon.index.index_file_handler import IndexFileHandler
@@ -96,8 +98,26 @@ class DataEvolutionFullTextScan(FullTextScan):
                 and _supports_full_text_search(entry.index_file.index_type)
             )
 
-        entries = index_file_handler.scan(snapshot, index_file_filter)
-        all_index_files = [entry.index_file for entry in entries]
+        from pypaimon.read.push_down_utils import _get_all_fields
+        filter_names = _get_all_fields(self._filter) if self._filter is not None else set()
+        filter_ids = {field.id for field in self._table.fields if field.name in filter_names}
+
+        def selected(entry):
+            if index_file_filter(entry):
+                return True
+            if partition_filter is not None and not partition_filter.test(entry.partition):
+                return False
+            file = entry.index_file
+            meta = file.global_index_meta
+            return (meta is not None and file.index_type in ('btree', 'bitmap')
+                    and bool(filter_ids.intersection([meta.index_field_id] + list(meta.extra_field_ids or []))))
+
+        entries = index_file_handler.scan(snapshot, selected)
+        all_index_files = [entry.index_file for entry in entries if index_file_filter(entry)]
+        scalar_files = [entry.index_file for entry in entries if entry.index_file.index_type in ('btree', 'bitmap')]
+        # Java requires an existing full-text definition before admitting raw ranges.
+        if not all_index_files:
+            return FullTextScanPlan([], snapshot)
 
         # Group full-text index files by column and (rowRangeStart, rowRangeEnd).
         by_column_and_range = defaultdict(lambda: defaultdict(list))
@@ -113,7 +133,10 @@ class DataEvolutionFullTextScan(FullTextScan):
             for range_key, files in by_range.items():
                 splits.append(
                     IndexFullTextSearchSplit(
-                        column_name, range_key.from_, range_key.to, files))
+                        column_name, range_key.from_, range_key.to, files,
+                        [file for file in scalar_files
+                         if file.global_index_meta.row_range_start <= range_key.to
+                         and file.global_index_meta.row_range_end >= range_key.from_]))
 
         raw_row_ranges = DataEvolutionGlobalIndexCoverage(
             self._table,

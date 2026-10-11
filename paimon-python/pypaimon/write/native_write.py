@@ -20,7 +20,7 @@ from importlib import import_module
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions, MergeEngine
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
@@ -53,15 +53,13 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
     """Return a native writer if the table can use the filesystem write path."""
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    # DV tables flush normal level-0 files using the configured merge engine.
+    # Batch visibility is controlled by deletion-vectors.merge-on-read.
     if (not native_write_available()
             or table.bucket_mode() not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC,
                                            BucketMode.BUCKET_UNAWARE,
                                            BucketMode.CROSS_PARTITION,
                                            BucketMode.POSTPONE_MODE)
-            or (fixed_bucket and table.options.deletion_vectors_enabled())
-            or (table.options.deletion_vectors_enabled()
-                and table.options.merge_engine() in (MergeEngine.PARTIAL_UPDATE,
-                                                     MergeEngine.AGGREGATE))
             or table.options.changelog_file_format() not in (None, 'parquet')
             or table.options.file_format() != 'parquet'
             or not _native_partition_types_supported(
