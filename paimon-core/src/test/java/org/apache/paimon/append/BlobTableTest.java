@@ -1600,6 +1600,14 @@ public class BlobTableTest extends TableTestBase {
         for (InternalRow row : read(getTableDefault())) {
             assertThat(row.isNullAt(3)).isTrue();
         }
+
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("video"), false);
+        assertThat(getTableDefault().schema().options().get("video-frame-field"))
+                .isEqualTo("second");
+        assertThat(read(getTableDefault()).size()).isEqualTo(3);
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("second"), false);
+        assertThat(getTableDefault().schema().options().containsKey("video-frame-field")).isFalse();
+        assertThat(read(getTableDefault()).size()).isEqualTo(3);
     }
 
     @Test

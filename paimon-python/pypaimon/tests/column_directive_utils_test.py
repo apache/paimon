@@ -286,6 +286,15 @@ class TestRemoveDroppedDirectiveOptions(unittest.TestCase):
         self.assertNotIn(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), opts)
         self.assertEqual(opts[CoreOptions.VECTOR_FIELD.key()], "v")
 
+    def test_drop_video(self):
+        opts = {CoreOptions.VIDEO_FRAME_FIELD.key(): "video,second",
+                CoreOptions.BLOB_FIELD.key(): "image"}
+        remove_dropped_directive_options("video", "BLOB", opts)
+        self.assertEqual(opts[CoreOptions.VIDEO_FRAME_FIELD.key()], "second")
+        remove_dropped_directive_options("second", "BLOB", opts)
+        self.assertNotIn(CoreOptions.VIDEO_FRAME_FIELD.key(), opts)
+        self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "image")
+
     def test_drop_vector(self):
         opts = {
             CoreOptions.VECTOR_FIELD.key(): "emb,emb2",

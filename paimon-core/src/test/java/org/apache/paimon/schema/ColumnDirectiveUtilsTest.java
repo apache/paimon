@@ -475,6 +475,18 @@ public class ColumnDirectiveUtilsTest {
     }
 
     @Test
+    public void testRemoveDroppedVideoOptions() {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video,second");
+        opts.put(CoreOptions.BLOB_FIELD.key(), "image");
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions("video", DataTypes.BLOB(), opts);
+        assertThat(opts).containsEntry(CoreOptions.VIDEO_FRAME_FIELD.key(), "second");
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions("second", DataTypes.BLOB(), opts);
+        assertThat(opts).doesNotContainKey(CoreOptions.VIDEO_FRAME_FIELD.key());
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "image");
+    }
+
+    @Test
     public void testRemoveDroppedArrayBlobOptions() {
         Map<String, String> opts = new HashMap<>();
         opts.put(CoreOptions.BLOB_FIELD.key(), "images,other");

@@ -1836,12 +1836,12 @@ class DataEvolutionSplitRead(SplitRead):
         if not file.write_cols or len(file.write_cols) == 0:
             raise ValueError("Blob/vector file must have write columns")
 
-        # Find the field by name in the table schema
+        # Resolve the original field ID even after the column is dropped or re-added.
         field_name = file.write_cols[0]
-        for field in self.table.fields:
+        for field in self._resolve_schema(file.schema_id).fields:
             if field.name == field_name:
                 return field.id
-        raise ValueError(f"Field {field_name} not found in table schema")
+        raise ValueError(f"Field {field_name} not found in file schema {file.schema_id}")
 
     def _get_field_ids_from_write_cols(self, write_cols: List[str]) -> List[int]:
         field_ids = []

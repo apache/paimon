@@ -345,7 +345,8 @@ public final class ColumnDirectiveUtils {
             new ConfigOption[] {
                 CoreOptions.BLOB_FIELD,
                 CoreOptions.BLOB_DESCRIPTOR_FIELD,
-                CoreOptions.BLOB_VIEW_FIELD
+                CoreOptions.BLOB_VIEW_FIELD,
+                CoreOptions.VIDEO_FRAME_FIELD
             };
 
     private static final ConfigOption<String>[] VECTOR_OPTIONS =

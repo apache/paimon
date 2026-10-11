@@ -173,6 +173,18 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual([0, 1], sorted(row["id"] for row in historical_rows))
         self.assertTrue(all(row.get("video") is None for row in historical_rows))
 
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("second", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        for column, remaining in (("video", "second"), ("second", None)):
+            self.conn.catalog.alter_table("default.evolved_video", [SchemaChange.drop_column(column)])
+            current = self.conn.get_table("evolved_video")
+            self.assertEqual(remaining, current.raw_table.table_schema.options.get("video-frame-field"))
+            self.assertEqual(4, len(current.scan().to_list()))
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        current = self.conn.get_table("evolved_video")
+        self.assertEqual([None] * 4, [row["video"] for row in current.scan().to_list()])
+
     def test_add_video_column_validation(self):
         from pypaimon.schema.data_types import AtomicType
         from pypaimon.schema.schema_change import SchemaChange as C

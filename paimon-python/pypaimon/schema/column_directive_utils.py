@@ -49,6 +49,7 @@ _BLOB_OPTIONS = [
     CoreOptions.BLOB_FIELD,
     CoreOptions.BLOB_DESCRIPTOR_FIELD,
     CoreOptions.BLOB_VIEW_FIELD,
+    CoreOptions.VIDEO_FRAME_FIELD,
 ]
 
 _VECTOR_OPTIONS = [
