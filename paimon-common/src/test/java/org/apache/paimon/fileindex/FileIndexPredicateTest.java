@@ -36,8 +36,6 @@ import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
@@ -67,13 +65,10 @@ public class FileIndexPredicateTest {
                 new BloomFilterFileIndex(DataTypes.DOUBLE(), new Options()).createWriter();
         indexWriter.writeRecord(Double.NaN);
 
-        Map<String, Map<String, byte[]>> indexes = new HashMap<>();
-        indexes.computeIfAbsent("d", column -> new HashMap<>())
-                .put(BLOOM_FILTER, indexWriter.serializedBytes());
-
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
-            writer.writeColumnIndexes(indexes);
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos, 1)) {
+            writer.writeIndex("d", BLOOM_FILTER, indexWriter::writeTo);
+            writer.finish();
         }
 
         try (FileIndexPredicate predicate = new FileIndexPredicate(baos.toByteArray(), rowType)) {
@@ -91,9 +86,9 @@ public class FileIndexPredicateTest {
 
     private static FileIndexPredicate emptyFileIndexPredicate() throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
-        writer.writeColumnIndexes(new HashMap<String, java.util.Map<String, byte[]>>());
-        writer.close();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos, 1)) {
+            writer.finish();
+        }
         return new FileIndexPredicate(baos.toByteArray(), RowType.builder().build());
     }
 

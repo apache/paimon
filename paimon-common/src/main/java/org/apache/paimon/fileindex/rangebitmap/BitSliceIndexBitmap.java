@@ -41,12 +41,12 @@ public class BitSliceIndexBitmap {
     private final ByteBuffer indexes;
     private final RoaringBitmap32[] slices;
     private final SeekableInputStream in;
-    private final int bodyOffset;
+    private final long bodyOffset;
 
     private RoaringBitmap32 ebm;
     private boolean initialized = false;
 
-    public BitSliceIndexBitmap(SeekableInputStream in, int offset) throws IOException {
+    public BitSliceIndexBitmap(SeekableInputStream in, long offset) throws IOException {
         in.seek(offset);
         byte[] headerLengthInBytes = new byte[Integer.BYTES];
         readFully(in, headerLengthInBytes);
