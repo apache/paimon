@@ -145,6 +145,32 @@ jobs:
           chmod +x paimon-python/dev/lint-python.sh
           ./paimon-python/dev/lint-python.sh -e pytest_torch
 
+  s3-delete-compatibility:
+    name: S3 deletion / PyArrow ${{ matrix.pyarrow }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        pyarrow: ['22.0.0', '23.0.0']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./paimon-python --group './paimon-python/pyproject.toml:test'
+          # Exercise the compatibility path before widening the package's Arrow range.
+          python -m pip install --no-deps 'pyarrow==${{ matrix.pyarrow }}'
+      - name: Test S3 compatibility
+        working-directory: paimon-python
+        run: |
+          python -m pytest -q pypaimon/tests/s3_delete_compatibility_test.py \
+            pypaimon/tests/s3_client_compatibility_test.py pypaimon/tests/oss_legacy_mode_test.py \
+            pypaimon/tests/file_io_test.py pypaimon/tests/filesystem_catalog_test.py
+
   rust-plan:
     name: Native CI
     timeout-minutes: 90
