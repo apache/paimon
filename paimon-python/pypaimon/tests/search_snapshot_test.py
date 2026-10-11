@@ -147,7 +147,7 @@ def test_time_travel_survives_concurrent_writes_and_retained_tag_snapshot(table,
         table.update("id = 1", {"category": "blocked"})
         if selector in ("tag", "version"):
             table.raw_table.replace_tag("training")
-            assert not execution._table.options.native_plan_enabled(default=True)
+            assert execution._table._read_snapshot.id == source.id
         # Read-option copies must retain the captured snapshot too.
         execution._table = execution._table.copy({"read.batch-size": "2"})
         return lookup(execution, result)

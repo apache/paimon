@@ -17,18 +17,14 @@
 
 """Local vector search through the Rust core Scan -> Plan -> Read path."""
 
-import logging
-
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.read.native_plan import (
     _catalog_metastore, _native_table, _partition_fields, _predicate_to_native,
-    _raise_if_native_fork_safety_error, native_method_available)
+    native_method_available)
 from pypaimon.read.split_serializer import deserialize_split_v1
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition)
-
-logger = logging.getLogger(__name__)
 
 
 def try_native_vector_search(builder, queries, batch=False):
@@ -39,47 +35,48 @@ def try_native_vector_search(builder, queries, batch=False):
     """
     table = builder._table
     reject_search_under_query_auth(table)
+    native_enabled = getattr(table.options, 'native_read_enabled', None)
+    if not callable(native_enabled) or not native_enabled():
+        return None
+    loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
+    if loader is None or _catalog_metastore(loader) != 'rest':
+        return None
+    context_fn = getattr(loader, 'context', None)
+    if not callable(context_fn):
+        return None
+    context = context_fn()
+    if any(getattr(context, attr, None) is not None for attr in (
+            'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
+        return None
+    # Python's batch reader currently supports only global row-ID results.
+    if batch and builder._is_primary_key_vector_search():
+        return None
+    method = 'new_batch_vector_search_builder' if batch else 'new_vector_search_builder'
+    if not native_method_available('Table', method):
+        return None
+    native = getattr(_native_table(table), method)()
+    if builder._vector_column is not None:
+        native.with_vector_column(builder._vector_column.name)
+    native.with_limit(builder._limit).with_options(builder._options)
     try:
-        native_enabled = getattr(table.options, 'native_read_enabled', None)
-        if not callable(native_enabled) or not native_enabled():
-            return None
-        loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
-        if loader is None or _catalog_metastore(loader) != 'rest':
-            return None
-        context_fn = getattr(loader, 'context', None)
-        if not callable(context_fn):
-            return None
-        context = context_fn()
-        if any(getattr(context, attr, None) is not None for attr in (
-                'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
-            return None
-        # Python's batch reader currently supports only global row-ID results.
-        if batch and builder._is_primary_key_vector_search():
-            return None
-        method = 'new_batch_vector_search_builder' if batch else 'new_vector_search_builder'
-        if not native_method_available('Table', method):
-            return None
-        native = getattr(_native_table(table), method)()
-        if builder._vector_column is not None:
-            native.with_vector_column(builder._vector_column.name)
-        native.with_limit(builder._limit).with_options(builder._options)
         if builder._filter is not None:
             native.with_filter(_predicate_to_native(builder._filter))
         if builder._partition_filter is not None:
             native.with_partition_filter(_predicate_to_native(builder._partition_filter))
-        if batch:
-            native.with_query_vectors(queries)
-            results = native.execute_batch_local()
-            return [DictBasedScoredIndexResult(result.row_ids()) for result in results]
-        native.with_query_vector(queries)
-        result = native.execute_local()
-        if builder._is_primary_key_vector_search():
-            return _NativePrimaryKeyScoredResult(table, result)
-        return DictBasedScoredIndexResult(result.row_ids())
-    except Exception as error:
-        _raise_if_native_fork_safety_error(error)
-        logger.warning('Native vector search failed, using the Python reader: %s', error)
+    except ValueError:
+        # Qualify unsupported typed literals before searching.
         return None
+    # Once the Native route is chosen, errors must not trigger another search
+    # against a potentially newer snapshot.
+    if batch:
+        native.with_query_vectors(queries)
+        results = native.execute_batch_local()
+        return [DictBasedScoredIndexResult(result.row_ids()) for result in results]
+    native.with_query_vector(queries)
+    result = native.execute_local()
+    if builder._is_primary_key_vector_search():
+        return _NativePrimaryKeyScoredResult(table, result)
+    return DictBasedScoredIndexResult(result.row_ids())
 
 
 class _NativePrimaryKeyScoredResult(PrimaryKeyScoredResult):
