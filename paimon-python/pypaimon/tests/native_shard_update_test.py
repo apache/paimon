@@ -17,6 +17,7 @@
 
 """End-to-end coverage of the optional native batch row-ID update bridge."""
 
+import json
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -54,7 +55,8 @@ def _append(table, rows, schema):
 def _updater(table, index=0, count=1, projection=('id',), columns=('value',), stream=False):
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     update = builder.new_update()
-    update.with_read_projection(list(projection))
+    if projection is not None:
+        update.with_read_projection(projection if isinstance(projection, dict) else list(projection))
     update.with_update_type(list(columns))
     with patch('pypaimon.write.table_update.ShardTableUpdator',
                side_effect=AssertionError('Python shard mapping was used')):
@@ -239,3 +241,99 @@ def test_native_shard_updates_existing_complex_column_types(native_rest_catalog,
     updater.update_by_arrow_batch(pa.record_batch([pa.array(replacement, type=data_type)], names=['value']))
     table.new_batch_write_builder().new_commit().commit(updater.prepare_commit())
     assert _rows(table) == dict(id=[1, 2], value=replacement)
+
+
+@pytest.mark.parametrize('projection, expected_names', [(None, ['p', 'id', 'value']), ((), [])])
+def test_native_shard_default_and_empty_projection_preserve_rows(native_rest_catalog, projection, expected_names):
+    table, _ = _table(native_rest_catalog, [dict(p='a', id=i, value=i * 10) for i in range(1, 4)])
+    updater = _updater(table, projection=projection)
+    with updater.arrow_reader() as reader:
+        count = 0
+        for batch in reader:
+            assert batch.schema.names == expected_names
+            count += batch.num_rows
+            updater.update_by_arrow_batch(pa.record_batch([
+                pa.array([99] * batch.num_rows, type=pa.int32())], names=['value']))
+    assert count == 3
+    table.new_batch_write_builder().new_commit().commit(updater.prepare_commit())
+    assert _rows(table) == dict(p=['a'] * 3, id=[1, 2, 3], value=[99] * 3)
+
+
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('projection, expected', [
+    (['payload.b'], {'payload_b': [3, None, 4]}),
+    (["attributes['key']"], {'attributes_key': [5, None, None]}),
+    ({'source': 'id'}, {'source': [1, 2, 3]}),
+])
+def test_native_shard_read_type_preserves_nested_map_and_alias_outputs(
+        native_rest_catalog, stream, projection, expected):
+    schema = pa.schema([
+        ('id', pa.int32()), ('value', pa.int32()),
+        ('payload', pa.struct([('a', pa.int32()), ('b', pa.int32())])),
+        ('attributes', pa.map_(pa.string(), pa.int32())),
+    ])
+    native_rest_catalog.create_table('default.projected_shards', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true', 'write.native.enabled': 'true',
+    }), False)
+    table = native_rest_catalog.get_table('default.projected_shards')
+    _append(table, [
+        dict(id=1, value=10, payload=dict(a=100, b=3), attributes=[('key', 5), ('other', 9)]),
+        dict(id=2, value=20, payload=None, attributes=None),
+        dict(id=3, value=30, payload=dict(a=200, b=4), attributes=[]),
+    ], schema)
+    updater = _updater(table, projection=projection, stream=stream)
+    with updater.arrow_reader() as reader:
+        data = pa.Table.from_batches(list(reader), schema=reader.schema)
+    assert data.to_pydict() == expected
+    replacement = data.column(0).combine_chunks()
+    updater.update_by_arrow_batch(pa.record_batch([replacement], names=['value']))
+    table.new_batch_write_builder().new_commit().commit(updater.prepare_commit())
+    result = _rows(table)
+    assert result['id'] == [1, 2, 3]
+    assert result['value'] == replacement.to_pylist()
+    assert result['payload'] == [dict(a=100, b=3), None, dict(a=200, b=4)]
+    assert result['attributes'] == [[('key', 5), ('other', 9)], None, []]
+
+
+def test_native_shard_rejects_malformed_read_type_before_starting(native_rest_catalog):
+    from pypaimon.write.native_commit import create_native_write_table
+    table, _ = _table(native_rest_catalog, [dict(p='a', id=1, value=10)])
+    native = create_native_write_table(table)
+    update = native.new_batch_write_builder().new_update().with_update_type(['value'])
+    for read_type in ('{', '{"type": "INT"}'):
+        with pytest.raises(ValueError, match='invalid Paimon read type'):
+            update.new_shard_updator(0, 1, read_type=read_type)
+    for fields in (
+            [{'id': 2147483642, 'name': '_ROW_ID', 'type': 'INT'}],
+            [{'id': 0, 'name': '_ROW_ID', 'type': 'BIGINT'}],
+            [{'id': 2147483642, 'name': '_ROW_ID', 'type': 'BIGINT'}] * 2):
+        with pytest.raises(ValueError, match='canonical BIGINT _ROW_ID'):
+            update.new_shard_updator(0, 1, read_type=json.dumps({'type': 'ROW', 'fields': fields}))
+    assert _rows(table)['value'] == [10]
+
+
+@pytest.mark.parametrize('stream', [False, True])
+def test_native_shard_read_type_preserves_variant_extraction(native_rest_catalog, stream):
+    from pypaimon.data.generic_variant import GenericVariant
+    payloads = [dict(v=1.5), None, dict(v=3.0)]
+    variants = GenericVariant.to_arrow_array([
+        GenericVariant.from_python(value) if value is not None else None for value in payloads])
+    schema = pa.schema([('id', pa.int32()), ('payload', variants.type), ('value', pa.float32())])
+    native_rest_catalog.create_table('default.variant_shards', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true', 'write.native.enabled': 'true',
+    }), False)
+    table = native_rest_catalog.get_table('default.variant_shards')
+    data = pa.table({'id': [1, 2, 3], 'payload': variants, 'value': [0.0] * 3}, schema=schema)
+    _append(table, data.to_pylist(), schema)
+    updater = _updater(table, projection={
+        'source': 'id', 'picked': "try_variant_get(payload, '$.v', 'float')"}, stream=stream)
+    with updater.arrow_reader() as reader:
+        data = pa.Table.from_batches(list(reader), schema=reader.schema)
+    assert data.to_pydict() == dict(source=[1, 2, 3], picked=[1.5, None, 3.0])
+    assert data.schema.field('picked').type == pa.float32()
+    updater.update_by_arrow_batch(pa.record_batch([data['picked'].combine_chunks()], names=['value']))
+    table.new_batch_write_builder().new_commit().commit(updater.prepare_commit())
+    result = _rows(table)
+    assert result['value'] == [1.5, None, 3.0]
+    assert [GenericVariant.from_arrow_struct(value).to_python() if value is not None else None
+            for value in result['payload']] == payloads
