@@ -33,6 +33,8 @@ import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.execution.SQLExecution
 import org.apache.spark.sql.execution.metric.SQLMetrics
 
+import java.util.Locale
+
 import scala.collection.JavaConverters._
 
 trait WriteHelper extends Logging {
@@ -52,7 +54,9 @@ trait WriteHelper extends Logging {
     val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
     val metricUpdates = executionMetrics.flatMap {
       m =>
-        commitMetrics.find(x => m.metricType.toLowerCase.contains(x.name.toLowerCase)) match {
+        commitMetrics.find(
+          x =>
+            m.metricType.toLowerCase(Locale.ROOT).contains(x.name.toLowerCase(Locale.ROOT))) match {
           case Some(customTaskMetric) => Some((m.accumulatorId, customTaskMetric.value()))
           case None => None
         }

@@ -50,6 +50,14 @@ public abstract class SynchronizationActionFactoryBase<T extends Synchronization
         T action = createAction();
 
         action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
+        if (params.has(CdcActionCommonUtils.TABLE_CONF_BY_TABLE)) {
+            checkArgument(
+                    "mysql_sync_database".equals(identifier()),
+                    "table_conf_by_table is only supported by mysql_sync_database.");
+            action.withTableConfigByTable(
+                    CdcActionCommonUtils.parseTableConfigByTable(
+                            params.getMultiParameter(CdcActionCommonUtils.TABLE_CONF_BY_TABLE)));
+        }
         withParams(params, action);
 
         return Optional.of(action);

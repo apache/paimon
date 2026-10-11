@@ -28,6 +28,7 @@ from pypaimon.common.options.config import CatalogOptions
 class DLFAuthProviderFactory:
 
     OPENAPI_IDENTIFIER = "openapi"
+    OPENAPI_V4_IDENTIFIER = "openapi-v4"
     DEFAULT_IDENTIFIER = "default"
 
     REGION_PATTERN = r'(?:pre-)?([a-z]+-[a-z]+(?:-\d+)?)'

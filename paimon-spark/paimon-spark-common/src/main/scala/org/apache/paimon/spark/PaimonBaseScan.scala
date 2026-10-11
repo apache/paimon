@@ -131,9 +131,7 @@ abstract class PaimonBaseScan(table: InnerTable)
       ftBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }
     if (pushedDataFilters.nonEmpty) {
-      throw new UnsupportedOperationException(
-        "Full-text search does not support non-partition filters because full-text indexes " +
-          "cannot apply row-id pre-filters before top-k ranking.")
+      ftBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
     }
     ftBuilder.newFullTextRead().read(ftBuilder.newFullTextScan().scan())
   }

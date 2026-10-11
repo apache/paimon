@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageLegacyV2Serializer;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
+import org.apache.paimon.utils.SerializationUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -133,8 +134,8 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
 
     private Map<String, String> deserializeProperties(DataInputDeserializer view)
             throws IOException {
-        int size = view.readInt();
-        Map<String, String> properties = new HashMap<>(size);
+        int size = SerializationUtils.readCount(view, getClass().getSimpleName());
+        Map<String, String> properties = new HashMap<>(SerializationUtils.presizedCapacity(size));
         for (int i = 0; i < size; i++) {
             properties.put(view.readUTF(), view.readUTF());
         }

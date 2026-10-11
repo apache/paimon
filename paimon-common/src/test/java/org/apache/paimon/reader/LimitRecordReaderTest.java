@@ -25,9 +25,27 @@ import org.junit.jupiter.api.Test;
 import javax.annotation.Nullable;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link LimitRecordReader}. */
 public class LimitRecordReaderTest {
+
+    @Test
+    public void testLimitAboveIntegerRangeDoesNotNarrow() throws Exception {
+        RecordReader<Integer> input = mock(RecordReader.class);
+        RecordReader.RecordIterator<Integer> inputBatch = mock(RecordReader.RecordIterator.class);
+        when(input.readBatch()).thenReturn(inputBatch, null);
+        when(inputBatch.next()).thenReturn(0, 1, 2, null);
+
+        try (RecordReader<Integer> reader = LimitRecordReader.limit(input, 4294967297L)) {
+            RecordReader.RecordIterator<Integer> batch = reader.readBatch();
+            assertThat(batch.next()).isEqualTo(0);
+            assertThat(batch.next()).isEqualTo(1);
+            assertThat(batch.next()).isEqualTo(2);
+            assertThat(batch.next()).isNull();
+        }
+    }
 
     @Test
     public void testPreservesFileRecordIterator() throws Exception {
@@ -74,7 +92,7 @@ public class LimitRecordReaderTest {
                     public void close() {}
                 };
 
-        try (RecordReader<Integer> reader = LimitRecordReader.limit(fileReader, 2)) {
+        try (RecordReader<Integer> reader = LimitRecordReader.limit(fileReader, 2L)) {
             RecordReader.RecordIterator<Integer> batch = reader.readBatch();
             assertThat(batch).isInstanceOf(FileRecordIterator.class);
 

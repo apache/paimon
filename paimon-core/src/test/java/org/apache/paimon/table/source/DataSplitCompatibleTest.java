@@ -221,7 +221,7 @@ public class DataSplitCompatibleTest {
         DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
         DataFileTestDataGenerator.Data data = gen.next();
         List<DataFileMeta> files = new ArrayList<>();
-        files.add(gen.next().meta.withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+        files.add(gen.next().meta.withWriteColsSequences(new long[] {3L, 42L}));
         for (int i = 0; i < ThreadLocalRandom.current().nextInt(10); i++) {
             files.add(gen.next().meta);
         }
@@ -833,7 +833,7 @@ public class DataSplitCompatibleTest {
                                 12L,
                                 Arrays.asList("a", "b", "c", "f"),
                                 null)
-                        .withColumnMaxSequenceNumbers(new long[] {15L, 100L, 150L, 200L});
+                        .withWriteColsSequences(new long[] {15L, 100L, 150L, 200L});
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);

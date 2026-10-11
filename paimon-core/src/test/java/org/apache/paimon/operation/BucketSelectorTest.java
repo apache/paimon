@@ -61,6 +61,40 @@ public class BucketSelectorTest {
     }
 
     @Test
+    public void testPostponeBucketIsNeverPruned() {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        RowType partType = RowType.of();
+        RowType bucketKeyType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        PredicateBuilder pb = new PredicateBuilder(rowType);
+        BucketSelector selector =
+                new BucketSelector(
+                        pb.equal(0, 5),
+                        BucketFunctionType.DEFAULT,
+                        rowType,
+                        partType,
+                        bucketKeyType);
+
+        // postpone entries carry bucket -2 and no bucket count; their pending rows cannot
+        // be pruned by bucket keys, so the selector must keep them, also when composed
+        // into the entry-level BucketFilter without onlyReadRealBuckets (streaming reads)
+        assertThat(selector.test(BinaryRow.EMPTY_ROW, -2, -2)).isTrue();
+        BucketFilter entryFilter = BucketFilter.create(false, null, null, selector);
+        assertThat(entryFilter.test(BinaryRow.EMPTY_ROW, -2, -2)).isTrue();
+
+        // a non-positive bucket count carries no bucket information, so it cannot be pruned
+        // either, and the selector must not divide by that count
+        assertThat(selector.test(BinaryRow.EMPTY_ROW, 3, 0)).isTrue();
+
+        // real buckets are still pruned: exactly the selected bucket passes
+        Set<Integer> selected = selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS);
+        assertThat(selected).hasSize(1);
+        for (int b = 0; b < NUM_BUCKETS; b++) {
+            assertThat(selector.test(BinaryRow.EMPTY_ROW, b, NUM_BUCKETS))
+                    .isEqualTo(selected.contains(b));
+        }
+    }
+
+    @Test
     public void testManifestBucketRange() {
         RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
         RowType partType = RowType.of();

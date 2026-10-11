@@ -31,6 +31,8 @@ from unittest.mock import Mock
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
 from pypaimon.read.reader.partial_update_merge_function import \
@@ -83,13 +85,16 @@ class _Harness(KeyValueDataWriter):
     """
 
     def __init__(self, merge_function, target_file_size: int = 10 ** 12):
+        self.options = CoreOptions(Options({}))
         self.trimmed_primary_keys = ['id']
         self._merge_function = merge_function
         # Large enough that ``_check_and_roll_if_needed`` does not
         # trigger on its own in tests that don't care about rolling.
         self.target_file_size = target_file_size
         self._buffer = WriteBuffer(self._merge_data)
+        self._input_changelog_buffer = None
         self.committed_files = []
+        self.committed_changelog_files = []
         self.written_chunks = []
 
     def _write_data_to_file(self, data):

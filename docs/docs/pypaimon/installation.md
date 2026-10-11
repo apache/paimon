@@ -90,22 +90,24 @@ Python module with:
 python -m pip install ./paimon-python
 ```
 
-For local Python development, use an editable installation:
-
-```shell
-python -m pip install -e './paimon-python'
-```
-
-To produce a source archive:
+For local Python development, use pip with dependency-group support to install
+the editable project and development tools together:
 
 ```shell
 cd paimon-python
-python setup.py sdist
+python -m pip install -e . --group dev
 ```
 
-Archives are written to `paimon-python/dist/`. Development builds can produce
-both a base development archive and a dated archive; select one archive when
-installing instead of passing `dist/*.tar.gz` to pip.
+To produce a source archive and wheel, run from `paimon-python/`:
+
+```shell
+python -m pip install --group build
+python -m build
+```
+
+The source archive and wheel are written to `dist/` with the same version.
+Development versions append the Git commit date, for example `2.2.dev20260927`.
+Install the wheel with `python -m pip install dist/*.whl`.
 
 ## Verify the installation
 

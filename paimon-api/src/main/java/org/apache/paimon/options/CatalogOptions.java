@@ -130,6 +130,16 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
+    public static final ConfigOption<MemorySize> CACHE_MANIFEST_SIDECAR_MAX_MEMORY =
+            key("cache.manifest-sidecar.max-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(64))
+                    .withDescription(
+                            "Controls the maximum memory for the separate manifest sidecar cache. "
+                                    + "This budget is additional to the manifest content cache. "
+                                    + "Set to 0 to reuse the manifest content cache. It uses "
+                                    + "'cache.expire-after-access' and 'cache.manifest.soft-values'.");
+
     public static final ConfigOption<Boolean> CACHE_MANIFEST_SOFT_VALUES =
             key("cache.manifest.soft-values")
                     .booleanType()
@@ -198,6 +208,31 @@ public class CatalogOptions {
                                     + "Paimon can read and write to external storage paths, such as OSS or S3. "
                                     + "In order to access these external paths correctly, you also need to configure the corresponding access key and secret key.");
 
+    public static final ConfigOption<String> USER_AGENT_MODULE =
+            ConfigOptions.key("user-agent.module")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The module of Paimon's unified User-Agent, module(transport;features) extended, "
+                                    + "sent on REST and object storage requests. Defaults to the Paimon client and its version. "
+                                    + "For OSS, fs.oss.user.agent.module takes precedence; for REST, header.User-Agent replaces the whole value.");
+
+    public static final ConfigOption<String> USER_AGENT_FEATURES =
+            ConfigOptions.key("user-agent.features")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Space-separated features of Paimon's unified User-Agent, sent on REST and object storage requests. "
+                                    + "For OSS, fs.oss.user.agent.features takes precedence; for REST, header.User-Agent replaces the whole value.");
+
+    public static final ConfigOption<String> USER_AGENT_EXTENDED =
+            ConfigOptions.key("user-agent.extended")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Free-form text appended to Paimon's unified User-Agent, sent on REST and object storage requests. "
+                                    + "For OSS, fs.oss.user.agent.extended takes precedence; for REST, header.User-Agent replaces the whole value.");
+
     public static final ConfigOption<Boolean> FILE_IO_ALLOW_CACHE =
             ConfigOptions.key("file-io.allow-cache")
                     .booleanType()
@@ -242,5 +277,6 @@ public class CatalogOptions {
                     .defaultValue("meta,global-index")
                     .withDescription(
                             "Comma-separated list of file types to cache. "
-                                    + "Supported values: meta, global-index, bucket-index, data, file-index.");
+                                    + "Supported values: meta, global-index, bucket-index, data, file-index, "
+                                    + "or * for all of them.");
 }

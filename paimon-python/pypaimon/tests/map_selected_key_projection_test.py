@@ -61,6 +61,91 @@ class MapSelectedKeyProjectionTest(unittest.TestCase):
             'attributes_missing': [None, None, None],
         }, result.to_pydict())
 
+    def test_dot_prefixed_map_keys_are_literal(self):
+        for file_format in ("parquet", "row"):
+            with self.subTest(file_format=file_format):
+                schema = pa.schema([("attrs", pa.map_(pa.string(), pa.int64()))])
+                identifier = "default.literal_dot_" + file_format
+                self.catalog.create_table(
+                    identifier,
+                    Schema.from_pyarrow_schema(
+                        schema,
+                        options={
+                            "bucket": "-1",
+                            "file.format": file_format,
+                        },
+                    ),
+                    False,
+                )
+                table = self.catalog.get_table(identifier)
+                builder = table.new_batch_write_builder()
+                writer = builder.new_write()
+                try:
+                    writer.write_arrow(
+                        pa.Table.from_pylist(
+                            [
+                                {"attrs": [("foo", 100), (".foo", 107), (".", 108)]},
+                                {"attrs": []},
+                                {"attrs": None},
+                            ],
+                            schema=schema,
+                        )
+                    )
+                    builder.new_commit().commit(writer.prepare_commit())
+                finally:
+                    writer.close()
+
+                result = self._read(table, ["attrs['foo']", "attrs['.foo']"])
+                self.assertEqual(
+                    {
+                        "attrs_foo": [100, None, None],
+                        "attrs__foo": [107, None, None],
+                    },
+                    result.to_pydict(),
+                )
+                for key, expected in ((".foo", 107), (".", 108)):
+                    result = self._read(table, [f"attrs[{key!r}]"])
+                    self.assertEqual(
+                        [expected, None, None], result.column(0).to_pylist()
+                    )
+
+    def test_map_selector_skips_invalid_longer_prefix(self):
+        map_type = pa.map_(pa.string(), pa.int64())
+        schema = pa.schema([("attrs", map_type), ("attrs['x", map_type)])
+        identifier = "default.map_prefix"
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(schema, options={"bucket": "-1"}),
+            False,
+        )
+        table = self.catalog.get_table(identifier)
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(
+                pa.Table.from_pylist(
+                    [
+                        {"attrs": [("x[0]", 42)], "attrs['x": [("other", 99)]},
+                    ],
+                    schema=schema,
+                )
+            )
+            builder.new_commit().commit(writer.prepare_commit())
+        finally:
+            writer.close()
+
+        for selector in ("attrs['x[0]']", 'attrs["x[0]"]'):
+            with self.subTest(selector=selector):
+                self.assertEqual(
+                    {"attrs_x[0]": [42]}, self._read(table, [selector]).to_pydict()
+                )
+        self.assertEqual(
+            {"attrs['x_other": [99]},
+            self._read(
+                table, ["attrs['x['other']", "attrs[123]", "attrs[other]"]
+            ).to_pydict(),
+        )
+
     def test_projects_map_key_from_data_evolution_table(self):
         table = self._write_table('data_evolution', {
             'row-tracking.enabled': 'true',

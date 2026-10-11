@@ -25,6 +25,8 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link NativeFullTextGlobalIndexerFactory}. */
@@ -37,7 +39,7 @@ public class NativeFullTextGlobalIndexerFactoryTest {
 
         Options options = new Options();
         options.set("full-text.searcher-pool.max-size", "0");
-        GlobalIndexer indexer = factory.create(field, options);
+        GlobalIndexer indexer = factory.create(Collections.singletonList(field), options);
 
         assertThat(indexer).isInstanceOf(NativeFullTextGlobalIndexer.class);
     }

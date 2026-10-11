@@ -328,14 +328,15 @@ public class DataEvolutionPartialWriteOperator
 
                 CommitMessage commitMessage =
                         new CommitMessageImpl(
-                                partition,
-                                0,
-                                null,
-                                new DataIncrement(
-                                        Collections.singletonList(fileMeta),
-                                        Collections.emptyList(),
-                                        Collections.emptyList()),
-                                CompactIncrement.emptyIncrement());
+                                        partition,
+                                        0,
+                                        null,
+                                        new DataIncrement(
+                                                Collections.singletonList(fileMeta),
+                                                Collections.emptyList(),
+                                                Collections.emptyList()),
+                                        CompactIncrement.emptyIncrement())
+                                .withCheckFromSnapshot(baseSnapshotId);
 
                 return new Committable(Long.MAX_VALUE, commitMessage);
             } finally {

@@ -182,7 +182,12 @@ class VindexInputTest(unittest.TestCase):
     def test_reader_releases_workers_when_native_close_fails(self):
         self._check_reader_cleanup("close")
 
-    def _check_reader_cleanup(self, phase):
+    def test_reader_releases_workers_when_initialization_is_interrupted(self):
+        for phase in ("constructor", "initialize"):
+            with self.subTest(phase=phase):
+                self._check_reader_cleanup(phase, KeyboardInterrupt)
+
+    def _check_reader_cleanup(self, phase, error_type=OSError):
         stream = mock.Mock(spec=["read_at", "close"])
         stream.read_at.return_value = b"x"
         io_ = mock.Mock()
@@ -199,7 +204,7 @@ class VindexInputTest(unittest.TestCase):
                 raise error
             return native
 
-        error = OSError("native reader failed")
+        error = error_type("native reader failed")
         if phase == "initialize":
             native.optimize_for_search.side_effect = error
         if phase == "close":
@@ -210,7 +215,7 @@ class VindexInputTest(unittest.TestCase):
             reader = VindexVectorGlobalIndexReader(
                 io_, "s3://bucket", [GlobalIndexIOMeta(file_name="index", file_size=2)])
             if phase in ("constructor", "initialize"):
-                with self.assertRaises(OSError) as raised:
+                with self.assertRaises(error_type) as raised:
                     reader._ensure_loaded()
                 self.assertIs(error, raised.exception)
             else:

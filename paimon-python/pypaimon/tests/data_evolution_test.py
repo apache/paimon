@@ -497,7 +497,9 @@ class DataEvolutionTest(unittest.TestCase):
             'f1': ['a'] * 100 + ['x'] + ['c'],
             'f2': ['b'] * 100 + ['y'] + ['d'],
         }, schema=simple_pa_schema)
-        self.assertEqual(actual, expect)
+        # A table scan does not guarantee row-id order. Native planning may
+        # pack merge-required and raw groups in a different split order.
+        self.assertEqual(actual.sort_by('f0'), expect.sort_by('f0'))
         self.assertEqual(len(actual.schema), len(expect.schema), 'Merge read output column count must match schema')
         self.assertEqual(actual.schema.names, expect.schema.names, 'Merge read output column names must match schema')
 

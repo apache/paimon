@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.CompactionBucketDistributionStrategy;
 import org.apache.paimon.flink.compact.AppendTableCompact;
+import org.apache.paimon.flink.compact.DataEvolutionTableCompact;
 import org.apache.paimon.flink.sink.BucketsRowChannelComputer;
 import org.apache.paimon.flink.sink.CombinedTableCompactorSink;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
@@ -48,6 +49,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -147,7 +149,7 @@ public class CompactDatabaseAction extends ActionBase {
         }
     }
 
-    private void buildForDividedMode() {
+    private void collectTables() {
         try {
             List<String> databases = catalog.listDatabases();
             for (String databaseName : databases) {
@@ -181,7 +183,10 @@ public class CompactDatabaseAction extends ActionBase {
         } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
+    }
 
+    private void buildForDividedMode() {
+        collectTables();
         Preconditions.checkState(
                 !tableMap.isEmpty(),
                 "no tables to be compacted. possible cause is that there are no tables detected after pattern matching");
@@ -205,12 +210,30 @@ public class CompactDatabaseAction extends ActionBase {
     }
 
     private void buildForCombinedMode() {
+        Pattern combinedIncludingPattern = includingPattern;
+        if (!isStreaming) {
+            collectTables();
+            List<String> combinedTables = new ArrayList<>();
+            for (Map.Entry<String, FileStoreTable> entry : tableMap.entrySet()) {
+                if (entry.getValue().coreOptions().dataEvolutionEnabled()) {
+                    buildForUnawareBucketCompaction(env, entry.getKey(), entry.getValue());
+                } else {
+                    combinedTables.add(Pattern.quote(entry.getKey()));
+                }
+            }
+            if (combinedTables.isEmpty() && !tableMap.isEmpty()) {
+                return;
+            }
+            // Batch table selection is fixed when building the job. Data-evolution tables
+            // already have dedicated compactors and must not enter the shared append path.
+            combinedIncludingPattern = Pattern.compile(String.join("|", combinedTables));
+        }
 
         CombinedTableCompactorSourceBuilder sourceBuilder =
                 new CombinedTableCompactorSourceBuilder(
                                 catalogLoader(),
                                 databasePattern,
-                                includingPattern,
+                                combinedIncludingPattern,
                                 excludingPattern,
                                 tableOptions
                                         .get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
@@ -285,6 +308,13 @@ public class CompactDatabaseAction extends ActionBase {
 
     private void buildForUnawareBucketCompaction(
             StreamExecutionEnvironment env, String fullName, FileStoreTable table) {
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Preconditions.checkArgument(
+                    !isStreaming, "Data evolution table compact only supports batch mode yet.");
+            new DataEvolutionTableCompact(env, fullName, table).build();
+            return;
+        }
+
         AppendTableCompact unawareBucketCompactionTopoBuilder =
                 new AppendTableCompact(env, fullName, table);
 

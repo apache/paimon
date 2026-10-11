@@ -33,6 +33,7 @@ _EXPECTED_SYSTEM_TABLES = (
     "branches",
     "file_key_ranges",
     "table_indexes",
+    "consumers",
 )
 
 # Short names recognised by the Paimon catalog that this loader does
@@ -41,7 +42,6 @@ _UNREGISTERED_NAMES = {
     "audit_log",
     "binlog",
     "read_optimized",
-    "consumers",
     "statistics",
     "aggregation_fields",
     "row_tracking",

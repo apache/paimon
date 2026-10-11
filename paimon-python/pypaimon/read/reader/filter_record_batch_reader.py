@@ -59,6 +59,7 @@ class FilterRecordBatchReader(RecordBatchReader):
             batch = self.reader.read_arrow_batch()
             if batch is None:
                 return None
+            self._refresh_blob_view_lookup(self.reader)
             if batch.num_rows == 0:
                 return batch
             filtered = self._filter_batch(batch)
@@ -69,7 +70,7 @@ class FilterRecordBatchReader(RecordBatchReader):
     def _filter_batch(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
         if not self._use_arrow_filter:
             return self._filter_batch_by_row(batch)
-        expr = self.predicate.to_arrow()
+        expr = self.predicate.to_arrow(batch.schema)
         if expr is None:
             return self._filter_batch_by_row(batch)
         result = ds.InMemoryDataset(pa.Table.from_batches([batch])).scanner(
@@ -98,6 +99,8 @@ class FilterRecordBatchReader(RecordBatchReader):
             self.file_io,
             self.blob_field_indices,
             self.vector_field_indices,
+            self.descriptor_field_indices,
+            self.blob_view_lookup,
         )
         selected = []
         pos = 0

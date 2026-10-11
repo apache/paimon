@@ -133,7 +133,10 @@ object stream. `get_object`, `head_object`, and `list_objects` expose non-key,
 non-BLOB table columns through `columns`. These columns are all returned by
 default. Pass `columns` to return only selected columns, or `[]` to skip them.
 `list_objects` requires a non-negative `limit`; `limit=0` returns an empty
-list.
+list. It reads object metadata in batches and stops after collecting `limit`
+matching objects. Prefix filtering can still require scanning nonmatching rows;
+object payloads are not fetched. Without a limit, the returned list holds all
+matching objects.
 
 ```python
 obj = store.get_object("images/cat.jpg", range="bytes=0-1023")
@@ -150,6 +153,20 @@ objects = store.list_objects(prefix="images/", columns=[])
 for obj_info in objects:
     print(obj_info.key, obj_info.size, obj_info.columns)
 ```
+
+### Create a Presigned URL
+
+For an OSS-backed object, generate a temporary URL without downloading its bytes:
+
+```python
+from datetime import timedelta
+
+video = table.blobs(column="video", key_column="id").get_object("video-001")
+video_url = video.to_presigned_url(timedelta(minutes=30))
+```
+
+The URL preserves the configured OSS endpoint and any byte range selected by
+`get_object`. The descriptor must belong to the table.
 
 ### Delete Objects
 

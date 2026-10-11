@@ -20,10 +20,12 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.PaimonSplitScan
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.source.DataSplit
 
+import org.apache.spark.metrics.source.PaimonMetricsSource
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -34,7 +36,75 @@ import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.paimon.Utils
 import org.junit.jupiter.api.Assertions
 
+import javax.management.ObjectName
+
+import java.lang.management.ManagementFactory
+
 class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
+
+  test("Paimon Metric: registered metrics are exposed through JMX") {
+    val tableName = "jmx-metric-test-" + System.nanoTime()
+    val registry = SparkMetricRegistry()
+    val group = registry.createTableMetricGroup("commit", tableName)
+    group.gauge("lastCommitDuration", () => 42L)
+    val counter = group.counter("recordsWritten")
+    counter.inc(3)
+    val histogram = group.histogram("commitDuration", 10)
+    histogram.update(7)
+
+    val server = ManagementFactory.getPlatformMBeanServer
+    val names = server.queryNames(new ObjectName("paimon:*"), null)
+    val metricName = names.toArray.collectFirst {
+      case name: ObjectName
+          if name.toString.contains(tableName) &&
+            name.toString.contains("lastCommitDuration") =>
+        name
+    }
+    assert(metricName.isDefined, s"JMX metric missing for $tableName: $names")
+    assert(server.getAttribute(metricName.get, "Value") == 42L)
+    assert(group.getMetrics.get("lastCommitDuration") != null)
+
+    val counterName = names.toArray.collectFirst {
+      case name: ObjectName
+          if name.toString.contains(tableName) &&
+            name.toString.contains("recordsWritten") =>
+        name
+    }.get
+    assert(server.getAttribute(counterName, "Value") == 3L)
+    val histogramName = names.toArray.collectFirst {
+      case name: ObjectName
+          if name.toString.contains(tableName) &&
+            name.toString.contains("commitDuration") =>
+        name
+    }.get
+    assert(server.getAttribute(histogramName, "Value") == 7.0)
+
+    val metricCount = PaimonMetricsSource.metricRegistry.getMetrics.size()
+    val nextGroup = registry.createTableMetricGroup("commit", tableName)
+    nextGroup.gauge("lastCommitDuration", () => 99L)
+    assert(server.getAttribute(metricName.get, "Value") == 99L)
+    assert(PaimonMetricsSource.metricRegistry.getMetrics.size() == metricCount)
+  }
+
+  test("Paimon Metric: V1 commit metrics are exposed through JMX") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("T_V1_JMX") {
+        sql("CREATE TABLE T_V1_JMX (id INT)")
+        sql("INSERT INTO T_V1_JMX VALUES (1), (2)")
+
+        val server = ManagementFactory.getPlatformMBeanServer
+        val names = server.queryNames(new ObjectName("paimon:*"), null)
+        val commitMetric = names.toArray.collectFirst {
+          case name: ObjectName
+              if name.toString.toLowerCase.contains("t_v1_jmx") &&
+                name.toString.contains("lastTableFilesAdded") =>
+            name
+        }
+        assert(commitMetric.isDefined, s"V1 commit JMX metric missing: $names")
+        assert(server.getAttribute(commitMetric.get, "Value").asInstanceOf[Long] > 0L)
+      }
+    }
+  }
 
   test(s"Paimon Metric: scan driver metric") {
     // Spark support reportDriverMetrics since Spark 3.4

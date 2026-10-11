@@ -158,10 +158,21 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":\"ENDS_WITH\",\"literals\":[\"z\"]}"),
 
-                // LeafPredicate - Like (non-negatable)
+                // LeafPredicate - Like
                 TestSpec.forPredicate(builder.like(2, BinaryString.fromString("%a%b%")))
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"LIKE\",\"literals\":[\"%a%b%\"]}"),
+
+                // LeafPredicate - NotLike
+                TestSpec.forPredicate(builder.notLike(2, BinaryString.fromString("%a%b%")))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_LIKE\",\"literals\":[\"%a%b%\"]}"),
+
+                // LeafPredicate - NotLike (negate of Like)
+                TestSpec.forPredicate(
+                                builder.like(2, BinaryString.fromString("%a%b%")).negate().get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_LIKE\",\"literals\":[\"%a%b%\"]}"),
 
                 // LeafPredicate - StartsWith (field index)
                 TestSpec.forPredicate(builder.startsWith(2, BinaryString.fromString("hello")))
@@ -177,6 +188,24 @@ class PredicateJsonSerdeTest {
                 TestSpec.forPredicate(builder.contains(2, BinaryString.fromString("foo")))
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"CONTAINS\",\"literals\":[\"foo\"]}"),
+
+                // LeafPredicate - negated string predicates
+                TestSpec.forPredicate(
+                                builder.startsWith(2, BinaryString.fromString("hello"))
+                                        .negate()
+                                        .get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_STARTS_WITH\",\"literals\":[\"hello\"]}"),
+                TestSpec.forPredicate(
+                                builder.endsWith(2, BinaryString.fromString("world"))
+                                        .negate()
+                                        .get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_ENDS_WITH\",\"literals\":[\"world\"]}"),
+                TestSpec.forPredicate(
+                                builder.contains(2, BinaryString.fromString("foo")).negate().get())
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"NOT_CONTAINS\",\"literals\":[\"foo\"]}"),
 
                 // LeafPredicate - ArrayContains uses the element type for literal serde
                 TestSpec.forPredicate(builder.arrayContains(4, BinaryString.fromString("vip")))

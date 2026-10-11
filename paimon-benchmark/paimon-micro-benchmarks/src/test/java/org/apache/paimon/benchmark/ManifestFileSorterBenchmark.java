@@ -301,6 +301,7 @@ public class ManifestFileSorterBenchmark {
                         pathFactory,
                         TARGET_MANIFEST_SIZE,
                         null,
+                        null,
                         new CoreOptions(new Options()))
                 .create();
     }

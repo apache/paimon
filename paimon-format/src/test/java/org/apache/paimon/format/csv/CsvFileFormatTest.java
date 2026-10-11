@@ -34,26 +34,32 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CsvFileFormat}. */
@@ -376,6 +382,45 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             assertThat(result.get(1).getString(1).toString()).isEqualTo("Normal Value");
             assertThat(result.get(2).getInt(0)).isEqualTo(3);
             assertThat(result.get(2).getString(1).toString()).isEqualTo("Special\\Characters");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testSingleNulQuoteOrEscapeWriteRead(boolean nulQuote) throws IOException {
+        Options options = new Options();
+        options.set(CsvOptions.QUOTE_CHARACTER, nulQuote ? "\0" : "\"");
+        options.set(CsvOptions.ESCAPE_CHARACTER, nulQuote ? "\\" : "\0");
+        RowType rowType = DataTypes.ROW(DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING());
+        List<InternalRow> testData = new ArrayList<>();
+        for (String value :
+                new String[] {
+                    "a,b",
+                    "say \"hello\"",
+                    "C:\\Users\\test\\",
+                    "\0start",
+                    "middle\0value",
+                    "end\0",
+                    "plain"
+                }) {
+            testData.add(
+                    GenericRow.of(fromString(value), fromString("middle"), fromString("tail")));
+            testData.add(GenericRow.of(fromString("first"), fromString(value), fromString("tail")));
+            testData.add(
+                    GenericRow.of(fromString("first"), fromString("middle"), fromString(value)));
+        }
+
+        // Use the real writer and reader: a NUL quote/escape is still emitted when only
+        // one of the two characters is NUL. Read multiple rows to exercise parser reuse.
+        List<InternalRow> result =
+                writeThenRead(options, rowType, rowType, testData, "single_nul_" + nulQuote);
+        assertThat(result).hasSize(testData.size());
+        for (int i = 0; i < testData.size(); i++) {
+            for (int column = 0; column < rowType.getFieldCount(); column++) {
+                assertThat(result.get(i).getString(column))
+                        .as("row %s, column %s", i, column)
+                        .isEqualTo(testData.get(i).getString(column));
+            }
         }
     }
 
@@ -712,6 +757,26 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         assertThat(parser.parseField("32768", DataTypes.SMALLINT()).getValue()).isNull();
     }
 
+    @Test
+    public void testCsvParserParseBoolean() {
+        RowType rowType = DataTypes.ROW(DataTypes.BOOLEAN());
+        CsvParser parser = new CsvParser(rowType, new int[] {0}, new CsvOptions(new Options()));
+
+        // Recognized boolean literals parse (case-insensitive), matching the writer output.
+        assertThat(parser.parseField("true", DataTypes.BOOLEAN()).getValue()).isEqualTo(true);
+        assertThat(parser.parseField("TRUE", DataTypes.BOOLEAN()).getValue()).isEqualTo(true);
+        assertThat(parser.parseField("false", DataTypes.BOOLEAN()).getValue()).isEqualTo(false);
+        assertThat(parser.parseField("False", DataTypes.BOOLEAN()).getValue()).isEqualTo(false);
+
+        // Unrecognized values are malformed, not silently false, so csv.mode can
+        // null/drop/fail them the same way it does for a malformed number.
+        for (String invalid : new String[] {"1", "0", "t", "yes", "abc"}) {
+            Pair<Boolean, Object> parsed = parser.parseField(invalid, DataTypes.BOOLEAN());
+            assertThat(parsed.getLeft()).as(invalid).isFalse();
+            assertThat(parsed.getValue()).as(invalid).isNull();
+        }
+    }
+
     private List<InternalRow> read(
             FileFormat format, RowType fullRowType, RowType readRowType, Path testFile)
             throws IOException {
@@ -872,8 +937,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     @Test
     public void testFieldsContainingTheEscapeCharacterRoundTrip() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
-        // every one of these is written unquoted or half-quoted unless the escape character is
-        // itself escaped, and CsvParser then drops it
+        // Quoted fields must escape both quotes and the escape character to round-trip.
         String[] inputs = {
             "Special\\Characters", "trailing\\", "a,b\\", "\\\\double", "\\\"quoteAfterEscape"
         };
@@ -894,6 +958,52 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         }
     }
 
+    @Test
+    public void testValueContainingRowSeparatorIsRejected() throws IOException {
+        // Quoting cannot rescue an embedded row separator: the line readers split on it without
+        // tracking quotes, and a split boundary may fall inside the value, so the row used to come
+        // back as two rows with NULLs and COUNT(*) changed.
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+        for (String value : Arrays.asList("hello\nworld", "hello\rworld")) {
+            List<InternalRow> row =
+                    Collections.singletonList(GenericRow.of(1, BinaryString.fromString(value)));
+            assertThatThrownBy(
+                            () ->
+                                    writeThenRead(
+                                            new Options(), rowType, rowType, row, "row_separator"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("f1");
+        }
+
+        // The configured line delimiter is a separator too, even when it is not CR or LF.
+        Options customLine = new Options();
+        customLine.set(CsvOptions.LINE_DELIMITER, "|||");
+        List<InternalRow> pipes =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("a|||b")));
+        assertThatThrownBy(
+                        () -> writeThenRead(customLine, rowType, rowType, pipes, "row_separator"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // A value that merely begins a delimiter match must still round-trip: CustomLineReader is
+        // leftmost-match, so the delimiter appended after the row would otherwise complete a match
+        // started by the value's own trailing bytes.
+        List<InternalRow> onePipe =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("x|")));
+        List<InternalRow> readBack =
+                writeThenRead(customLine, rowType, rowType, onePipe, "row_separator");
+        assertThat(readBack).hasSize(1);
+        assertThat(readBack.get(0).getString(1).toString()).isEqualTo("x|");
+
+        // Under a custom delimiter a line break is an ordinary byte, which is the documented way
+        // to carry one inside a value; it must not be rejected.
+        List<InternalRow> withBreak =
+                Collections.singletonList(GenericRow.of(1, BinaryString.fromString("a\nb")));
+        List<InternalRow> breakReadBack =
+                writeThenRead(customLine, rowType, rowType, withBreak, "row_separator");
+        assertThat(breakReadBack).hasSize(1);
+        assertThat(breakReadBack.get(0).getString(1).toString()).isEqualTo("a\nb");
+    }
+
     private List<InternalRow> writeThenRead(
             Options options,
             RowType fullRowType,
@@ -905,6 +1015,30 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
         Path testFile = write(format, fullRowType, testData, testPrefix);
         return read(format, fullRowType, rowType, testFile);
+    }
+
+    @Test
+    public void testSingleCharacterOptionsAreEnforced() {
+        // The writer emits the whole option string while CsvParser keeps only charAt(0), so a
+        // multi-character value silently wrote one delimiter and read back another.
+        for (ConfigOption<String> option :
+                Arrays.asList(
+                        CsvOptions.FIELD_DELIMITER,
+                        CsvOptions.QUOTE_CHARACTER,
+                        CsvOptions.ESCAPE_CHARACTER)) {
+            for (String bad : Arrays.asList("ab", "")) {
+                Options options = new Options();
+                options.set(option, bad);
+                assertThatThrownBy(() -> new CsvOptions(options))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining(option.key());
+            }
+        }
+
+        // A multi-character line delimiter stays supported; CustomLineReader matches all of it.
+        Options multiCharLine = new Options();
+        multiCharLine.set(CsvOptions.LINE_DELIMITER, "|||");
+        assertThatCode(() -> new CsvOptions(multiCharLine)).doesNotThrowAnyException();
     }
 
     /** Writes the given data to a new CSV file and returns its path. */

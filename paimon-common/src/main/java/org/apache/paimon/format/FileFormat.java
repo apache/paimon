@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -88,16 +89,19 @@ public abstract class FileFormat {
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
         return FormatFactoryUtil.discoverFactory(
-                        FileFormat.class.getClassLoader(), identifier.toLowerCase())
+                        FileFormat.class.getClassLoader(), identifier.toLowerCase(Locale.ROOT))
                 .create(context);
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {
         Map<String, String> result = new HashMap<>();
-        String prefix = formatIdentifier.toLowerCase() + ".";
+        // match against the identifier as written so the suffix is sliced at an offset the key
+        // actually has: lower-casing can lengthen a string, and U+0130 lower-cases to two chars
+        String prefix = formatIdentifier + ".";
+        String lowerCasePrefix = formatIdentifier.toLowerCase(Locale.ROOT) + ".";
         for (String key : options.keySet()) {
-            if (key.toLowerCase().startsWith(prefix)) {
-                result.put(prefix + key.substring(prefix.length()), options.get(key));
+            if (key.regionMatches(true, 0, prefix, 0, prefix.length())) {
+                result.put(lowerCasePrefix + key.substring(prefix.length()), options.get(key));
             }
         }
         return new Options(result);
@@ -117,6 +121,9 @@ public abstract class FileFormat {
     }
 
     public static FileFormat manifestFormat(CoreOptions options) {
-        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, options.toConfiguration());
+        // Manifest blocks retain the Avro default independently of data-file block sizing.
+        Options manifestOptions = new Options(options.toMap());
+        manifestOptions.remove(CoreOptions.FILE_BLOCK_SIZE);
+        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, manifestOptions);
     }
 }

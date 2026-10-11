@@ -20,7 +20,8 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-from pypaimon.common.options.core_options import GlobalIndexSearchMode
+from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
+from pypaimon.common.options.options import Options
 from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 from pypaimon.globalindex.data_evolution_global_index_scanner import (
     is_supported_scalar_index,
@@ -77,7 +78,6 @@ class DataEvolutionVectorScan(VectorSearchScan):
 
     def scan(self):
         # type: () -> VectorSearchScanPlan
-        from pypaimon.common.options.options import Options
         from pypaimon.index.index_file_handler import IndexFileHandler
         from pypaimon.read.push_down_utils import _get_all_fields
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
@@ -95,13 +95,9 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 if field is not None:
                     filter_field_ids.add(field.id)
 
-        snapshot = TimeTravelUtil.try_travel_to_snapshot(
-            Options(self._table.table_schema.options),
-            self._table.tag_manager(),
-            self._table.snapshot_manager(),
-        )
+        snapshot = TimeTravelUtil.resolve_snapshot(self._table)
         if snapshot is None:
-            snapshot = self._table.snapshot_manager().get_latest_snapshot()
+            return VectorSearchScanPlan([])
 
         index_file_handler = IndexFileHandler(table=self._table)
 
@@ -174,7 +170,12 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 )
             )
 
-        vector_search_mode = self._table.options.vector_index_search_mode()
+        # Java's DataEvolutionVectorScan overlays query options before resolving
+        # the family search modes, without changing the table's configuration.
+        effective_options = dict(self._table.options.options.to_map())
+        effective_options.update(self._options)
+        effective_core = CoreOptions(Options(effective_options))
+        vector_search_mode = effective_core.vector_index_search_mode()
         raw_row_ranges = DataEvolutionGlobalIndexCoverage(
             self._table,
             snapshot,
@@ -199,7 +200,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             ).unindexed_ranges(
                 self._table.fields,
                 self._filter,
-                search_mode=self._table.options.scalar_index_search_mode(),
+                search_mode=effective_core.scalar_index_search_mode(),
             )
             if vector_search_mode == GlobalIndexSearchMode.FAST:
                 scalar_unindexed_ranges = Range.and_(

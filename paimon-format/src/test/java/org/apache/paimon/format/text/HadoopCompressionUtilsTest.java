@@ -24,6 +24,8 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.apache.hadoop.io.compress.CodecPool;
+import org.apache.hadoop.io.compress.CompressionCodec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -46,6 +48,25 @@ class HadoopCompressionUtilsTest {
     @TempDir java.nio.file.Path tempDir;
 
     private static final String TEST_DATA = "This is test data for compression.";
+
+    @Test
+    void testCodecProbeDoesNotLeaseACompressor() {
+        // The codec probe opens an output stream to prove the codec is usable. Hadoop leases a
+        // Compressor from CodecPool for that stream and takes it back only on close(), so a
+        // discarded probe stream orphaned one compressor per call. DEFLATE is used here because
+        // it needs no native library.
+        String deflate = HadoopCompressionType.DEFLATE.value();
+        CompressionCodec codec =
+                HadoopCompressionUtils.getCompressionCodecByCompression(deflate)
+                        .orElseThrow(IllegalStateException::new);
+        int leasedAfterFirst = CodecPool.getLeasedCompressorsCount(codec);
+
+        for (int i = 0; i < 4; i++) {
+            HadoopCompressionUtils.getCompressionCodecByCompression(deflate);
+        }
+
+        assertThat(CodecPool.getLeasedCompressorsCount(codec)).isEqualTo(leasedAfterFirst);
+    }
 
     @Test
     void testCreateCompressedOutputStreamWithNoneCompression() throws IOException {

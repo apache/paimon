@@ -71,10 +71,26 @@ public class BitmapFileIndex implements FileIndexer {
     public FileIndexReader createReader(
             SeekableInputStream seekableInputStream, int start, int length) {
         try {
-            return new Reader(seekableInputStream, start, options);
+            Reader reader = new Reader(seekableInputStream, start, options);
+            return valuesAreTruncated(dataType) ? new TruncatedValueReader(reader) : reader;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Whether the value mapper loses information for this type. TIMESTAMP above microsecond
+     * precision is mapped with {@link Timestamp#toMicros()}, so two values that differ only below a
+     * microsecond share one bitmap key.
+     */
+    private static boolean valuesAreTruncated(DataType dataType) {
+        if (dataType instanceof TimestampType) {
+            return ((TimestampType) dataType).getPrecision() > 6;
+        }
+        if (dataType instanceof LocalZonedTimestampType) {
+            return ((LocalZonedTimestampType) dataType).getPrecision() > 6;
+        }
+        return false;
     }
 
     private static class Writer extends FileIndexWriter {
@@ -309,6 +325,33 @@ public class BitmapFileIndex implements FileIndexer {
                     throw new RuntimeException(e);
                 }
             }
+        }
+    }
+
+    /**
+     * Reader for a column whose values the mapper truncated, so looking a literal up by its bitmap
+     * key cannot answer the predicate: {@code visitNotIn} flips the matched rows over the whole row
+     * count, so {@code ts <> '...000000000'} would drop every row in the same microsecond, and
+     * {@code ts = '...'} would select them. Inheriting {@link FileIndexReader}'s {@code REMAIN} for
+     * those leaves the rows to be read and filtered. Null-ness survives truncation, so those two
+     * questions still come from the index.
+     */
+    private static class TruncatedValueReader extends FileIndexReader {
+
+        private final Reader reader;
+
+        public TruncatedValueReader(Reader reader) {
+            this.reader = reader;
+        }
+
+        @Override
+        public FileIndexResult visitIsNull(FieldRef fieldRef) {
+            return reader.visitIsNull(fieldRef);
+        }
+
+        @Override
+        public FileIndexResult visitIsNotNull(FieldRef fieldRef) {
+            return reader.visitIsNotNull(fieldRef);
         }
     }
 

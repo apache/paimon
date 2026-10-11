@@ -19,6 +19,7 @@
 
 from abc import ABC, abstractmethod
 
+from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
@@ -215,6 +216,7 @@ class AbstractVectorSearchBuilderImpl:
 
     def new_vector_search_scan(self):
         # type: () -> VectorSearchScan
+        reject_search_under_query_auth(self._table)
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
         scan_class = DataEvolutionVectorScan
@@ -248,8 +250,16 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
         self._query_vector = vector
         return self
 
+    def execute_local(self):
+        from pypaimon.table.source.native_vector_search import try_native_vector_search
+        result = try_native_vector_search(self, self._query_vector)
+        if result is not None:
+            return result
+        return super().execute_local()
+
     def new_vector_search_read(self):
         # type: () -> VectorSearchRead
+        reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
         if self._vector_column is None:

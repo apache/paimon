@@ -39,6 +39,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 
@@ -513,7 +514,9 @@ public class OrcFile {
             blockPaddingValue = OrcConf.BLOCK_PADDING.getBoolean(tableProperties, conf);
             compressValue =
                     CompressionKind.valueOf(
-                            OrcConf.COMPRESS.getString(tableProperties, conf).toUpperCase());
+                            OrcConf.COMPRESS
+                                    .getString(tableProperties, conf)
+                                    .toUpperCase(Locale.ROOT));
             enforceBufferSize =
                     OrcConf.ENFORCE_COMPRESSION_BUFFER_SIZE.getBoolean(tableProperties, conf);
             String versionName = OrcConf.WRITE_FORMAT.getString(tableProperties, conf);

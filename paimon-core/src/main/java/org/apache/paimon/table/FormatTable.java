@@ -50,6 +50,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -104,7 +105,7 @@ public interface FormatTable extends Table {
     /** Parses a file format string to a corresponding {@link Format} enum constant. */
     static Format parseFormat(String fileFormat) {
         try {
-            return Format.valueOf(fileFormat.toUpperCase());
+            return Format.valueOf(fileFormat.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new UnsupportedOperationException(
                     "Format table unsupported file format: "

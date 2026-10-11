@@ -458,14 +458,14 @@ class ManifestSidecarTest {
         Files.write(temp.resolve(sidecar.getName()), data);
         ManifestFileMeta meta = testMeta();
         FileIO io = spy(LocalFileIO.create());
-        SegmentsCache<Object> tooSmall =
+        SegmentsCache<Path> tooSmall =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), data.length - 1L, null, false);
         assertThat(readCached(io, path, meta, tooSmall).blocks()).hasSize(2);
         assertThat(readCached(io, path, meta, tooSmall).blocks()).hasSize(2);
         assertThat(tooSmall.getIfPresents(sidecar)).isNull();
         verify(io, times(2)).newInputStream(sidecar);
 
-        SegmentsCache<Object> cache =
+        SegmentsCache<Path> cache =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), data.length, null, false);
         assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
         assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
@@ -478,7 +478,7 @@ class ManifestSidecarTest {
         Path path = new Path(temp.toString(), "manifest-golden");
         Path sidecar = ManifestSidecar.path(path);
         Files.write(temp.resolve(sidecar.getName()), data);
-        SegmentsCache<Object> cache =
+        SegmentsCache<Path> cache =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), Long.MAX_VALUE, null, false);
         cache.put(sidecar, new SingleSegments(MemorySegment.wrap(data), data.length));
         FileIO io = spy(LocalFileIO.create());
@@ -499,7 +499,7 @@ class ManifestSidecarTest {
         Path sidecar = ManifestSidecar.path(path);
         ManifestFileMeta meta = testMeta();
         FileIO io = spy(LocalFileIO.create());
-        SegmentsCache<Object> cache =
+        SegmentsCache<Path> cache =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), Long.MAX_VALUE, null, false);
         assertThat(readCached(io, path, meta, cache)).isNull();
         assertThat(cache.getIfPresents(sidecar)).isNull();
@@ -521,7 +521,7 @@ class ManifestSidecarTest {
         Files.write(temp.resolve(sidecar.getName()), testSidecar());
         ManifestFileMeta meta = testMeta();
         FileIO io = spy(LocalFileIO.create());
-        SegmentsCache<Object> cache =
+        SegmentsCache<Path> cache =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), Long.MAX_VALUE, null, false);
         RowRangeIndex cancelled = mock(RowRangeIndex.class);
         when(cancelled.intersects(anyLong(), anyLong()))
@@ -544,7 +544,7 @@ class ManifestSidecarTest {
     }
 
     private ManifestSidecar.Selection readCached(
-            FileIO io, Path path, ManifestFileMeta meta, SegmentsCache<Object> cache) {
+            FileIO io, Path path, ManifestFileMeta meta, SegmentsCache<Path> cache) {
         return ManifestSidecar.read(
                 io,
                 path,

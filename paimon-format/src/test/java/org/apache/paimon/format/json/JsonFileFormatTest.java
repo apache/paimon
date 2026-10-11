@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FileFormat;
@@ -44,6 +45,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -191,6 +194,49 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testIgnoreParseErrorsNullsMalformedBoolean() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BOOLEAN());
+
+        Options options = new Options();
+        options.set(JsonOptions.JSON_IGNORE_PARSE_ERRORS, true);
+
+        FileFormat format =
+                new JsonFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        Path testFile = new Path(parent, "test_bool_" + UUID.randomUUID() + ".json");
+        try (PositionOutputStream out = fileIO.newOutputStream(testFile, false)) {
+            out.write("{\"f0\":1,\"f1\":true}\n".getBytes());
+            out.write("{\"f0\":2,\"f1\":\"FALSE\"}\n".getBytes());
+            out.write("{\"f0\":3,\"f1\":\"maybe\"}\n".getBytes());
+            out.write("{\"f0\":4,\"f1\":1}\n".getBytes());
+        }
+
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
+
+            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+
+            assertThat(result).hasSize(4);
+            // Recognized literals parse, case-insensitively.
+            assertThat(result.get(0).getBoolean(1)).isTrue();
+            assertThat(result.get(1).getBoolean(1)).isFalse();
+            // An unrecognized string or a non-boolean number is malformed, so it is
+            // nulled like any other bad value instead of silently becoming false.
+            assertThat(result.get(2).isNullAt(1)).isTrue();
+            assertThat(result.get(3).isNullAt(1)).isTrue();
+        }
+    }
+
+    @Test
     public void testIgnoreParseErrorsDisabled() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
 
@@ -329,25 +375,15 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
                 DataTypes.ROW(
                         DataTypes.INT().notNull(),
                         DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
-
-        // Test JSON_MAP_NULL_KEY_MODE = FAIL with actual data
         Options options = new Options();
         options.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.FAIL);
-
-        // Create test data with valid maps
         List<InternalRow> testData =
-                Arrays.asList(
-                        GenericRow.of(1, new GenericMap(createTestMap("key1", 1, "key2", 2))),
-                        GenericRow.of(2, new GenericMap(createTestMap("name", 100, "value", 200))));
+                Arrays.asList(GenericRow.of(1, new GenericMap(createTestMap(null, 1, "key", 2))));
 
-        List<InternalRow> result = writeThenRead(options, rowType, testData, "test_fail_mode");
-
-        // Verify results
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).getInt(0)).isEqualTo(1);
-        assertThat(result.get(0).getMap(1).size()).isEqualTo(2);
-        assertThat(result.get(1).getInt(0)).isEqualTo(2);
-        assertThat(result.get(1).getMap(1).size()).isEqualTo(2);
+        assertThatThrownBy(() -> writeThenRead(options, rowType, testData, "test_fail_mode"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("json.map-null-key-mode")
+                .hasMessageContaining("FAIL");
     }
 
     @Test
@@ -357,22 +393,18 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
                         DataTypes.INT().notNull(),
                         DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
 
-        // Test JSON_MAP_NULL_KEY_MODE = DROP with actual data
         Options options = new Options();
         options.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.DROP);
-
-        // Create test data
         List<InternalRow> testData =
                 Arrays.asList(
-                        GenericRow.of(
-                                1, new GenericMap(createTestMap("key1", 1, "key2", 2, "key3", 3))));
+                        GenericRow.of(1, new GenericMap(createTestMap(null, 1, "remaining", 2))));
 
         List<InternalRow> result = writeThenRead(options, rowType, testData, "test_drop_mode");
 
-        // Verify results
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).getInt(0)).isEqualTo(1);
-        assertThat(result.get(0).getMap(1).size()).isEqualTo(3);
+        InternalMap map = result.get(0).getMap(1);
+        assertThat(map.size()).isEqualTo(1);
+        assertThat(map.valueArray().getInt(findMapKey(map, "remaining"))).isEqualTo(2);
     }
 
     @Test
@@ -384,13 +416,11 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
         String[] literals = {"EMPTY", "MISSING", "UNDEFINED", "NULL_VALUE"};
 
-        // Create test data once (reused for all literals)
         List<InternalRow> testData =
                 Arrays.asList(
                         GenericRow.of(
                                 1,
-                                new GenericMap(
-                                        createTestMap("name", "Alice", "city", "New York"))));
+                                new GenericMap(createTestMap(null, "missing", "name", "Alice"))));
 
         for (String literal : literals) {
             Options options = new Options();
@@ -400,11 +430,120 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
             List<InternalRow> result =
                     writeThenRead(options, rowType, testData, "test_literal_" + literal);
 
-            // Verify results
             assertThat(result).hasSize(1);
-            assertThat(result.get(0).getInt(0)).isEqualTo(1);
-            assertThat(result.get(0).getMap(1).size()).isEqualTo(2);
+            InternalMap map = result.get(0).getMap(1);
+            assertThat(map.size()).isEqualTo(2);
+            assertThat(map.valueArray().getString(findMapKey(map, literal)).toString())
+                    .isEqualTo("missing");
+            assertThat(map.valueArray().getString(findMapKey(map, "name")).toString())
+                    .isEqualTo("Alice");
         }
+    }
+
+    @Test
+    public void testMapNullKeyLiteralInNestedMap() throws IOException {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.MAP(
+                                DataTypes.STRING(),
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
+        Options options = new Options();
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.LITERAL);
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_LITERAL, "null-key");
+        GenericMap nestedMap = new GenericMap(createTestMap(null, 1, "key", 2));
+        List<InternalRow> testData =
+                Arrays.asList(GenericRow.of(new GenericMap(createTestMap("outer", nestedMap))));
+
+        List<InternalRow> result = writeThenRead(options, rowType, testData, "test_nested_literal");
+
+        InternalMap outerMap = result.get(0).getMap(0);
+        InternalMap innerMap = outerMap.valueArray().getMap(findMapKey(outerMap, "outer"));
+        assertThat(innerMap.size()).isEqualTo(2);
+        assertThat(innerMap.valueArray().getInt(findMapKey(innerMap, "null-key"))).isEqualTo(1);
+        assertThat(innerMap.valueArray().getInt(findMapKey(innerMap, "key"))).isEqualTo(2);
+    }
+
+    @Test
+    public void testMapNullKeySerializedOutput() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
+        InternalRow row = GenericRow.of(new GenericMap(createTestMap(null, 1, "key", 2)));
+
+        Options dropOptions = new Options();
+        dropOptions.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.DROP);
+        assertThat(writeToJson(dropOptions, rowType, row, "test_drop_output"))
+                .isEqualTo("{\"f0\":{\"key\":\"2\"}}\n");
+
+        Options defaultLiteralOptions = new Options();
+        defaultLiteralOptions.set(
+                JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.LITERAL);
+        assertThat(writeToJson(defaultLiteralOptions, rowType, row, "test_default_literal_output"))
+                .isEqualTo("{\"f0\":{\"null\":\"1\",\"key\":\"2\"}}\n");
+
+        Options customLiteralOptions = new Options();
+        customLiteralOptions.set(
+                JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.LITERAL);
+        customLiteralOptions.set(JsonOptions.JSON_MAP_NULL_KEY_LITERAL, "missing");
+        assertThat(writeToJson(customLiteralOptions, rowType, row, "test_custom_literal_output"))
+                .isEqualTo("{\"f0\":{\"missing\":\"1\",\"key\":\"2\"}}\n");
+    }
+
+    @Test
+    public void testMapNullKeyLiteralCollisionUsesLastEntry() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
+        Options options = new Options();
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.LITERAL);
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_LITERAL, "key");
+
+        InternalRow realKeyLast = GenericRow.of(new GenericMap(createTestMap(null, 1, "key", 2)));
+        assertThat(writeToJson(options, rowType, realKeyLast, "test_real_key_last"))
+                .isEqualTo("{\"f0\":{\"key\":\"2\"}}\n");
+
+        InternalRow nullKeyLast = GenericRow.of(new GenericMap(createTestMap("key", 2, null, 1)));
+        assertThat(writeToJson(options, rowType, nullKeyLast, "test_null_key_last"))
+                .isEqualTo("{\"f0\":{\"key\":\"1\"}}\n");
+    }
+
+    @Test
+    public void testMapNullKeyLiteralMustMatchKeyType() {
+        RowType rowType = DataTypes.ROW(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        Options options = new Options();
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.LITERAL);
+        java.util.Map<Integer, Integer> map = new java.util.LinkedHashMap<>();
+        map.put(null, 1);
+        List<InternalRow> testData = Arrays.asList(GenericRow.of(new GenericMap(map)));
+
+        assertThatThrownBy(
+                        () ->
+                                writeThenRead(
+                                        options, rowType, testData, "test_invalid_literal_type"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("json.map-null-key-literal")
+                .hasMessageContaining("INT");
+    }
+
+    @Test
+    public void testMapNullKeyLiteralWithNonStringKeyType() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        Options options = new Options();
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_MODE, JsonOptions.MapNullKeyMode.LITERAL);
+        options.set(JsonOptions.JSON_MAP_NULL_KEY_LITERAL, "0");
+        java.util.Map<Integer, Integer> map = new java.util.LinkedHashMap<>();
+        map.put(null, 1);
+        map.put(2, 2);
+
+        List<InternalRow> result =
+                writeThenRead(
+                        options,
+                        rowType,
+                        Arrays.asList(GenericRow.of(new GenericMap(map))),
+                        "test_integer_literal");
+
+        InternalMap resultMap = result.get(0).getMap(0);
+        java.util.Map<Integer, Integer> actual = new java.util.HashMap<>();
+        for (int i = 0; i < resultMap.size(); i++) {
+            actual.put(resultMap.keyArray().getInt(i), resultMap.valueArray().getInt(i));
+        }
+        assertThat(actual).containsEntry(0, 1).containsEntry(2, 2).hasSize(2);
     }
 
     @Test
@@ -454,6 +593,65 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testJsonLineDelimiterFallbackKey() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+
+        Options options = new Options();
+        options.set("lineSep", "|");
+
+        assertThat(options.get(JsonOptions.LINE_DELIMITER)).isEqualTo("|");
+
+        // the writer uses the delimiter given by the fallback key
+        String json =
+                writeToJson(
+                        options,
+                        rowType,
+                        GenericRow.of(1, BinaryString.fromString("Alice")),
+                        "test_line_sep");
+        assertThat(json).endsWith("|").doesNotContain("\n");
+
+        // the reader splits a '|' delimited file into rows
+        Path testFile = new Path(parent, "test_line_sep_read_" + UUID.randomUUID() + ".json");
+        try (PositionOutputStream out = fileIO.newOutputStream(testFile, false)) {
+            out.write(
+                    "{\"f0\":1,\"f1\":\"Alice\"}|{\"f0\":2,\"f1\":\"Bob\"}|"
+                            .getBytes(StandardCharsets.UTF_8));
+        }
+        FileFormat format =
+                new JsonFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        }
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getInt(0)).isEqualTo(1);
+        assertThat(result.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(result.get(1).getInt(0)).isEqualTo(2);
+        assertThat(result.get(1).getString(1).toString()).isEqualTo("Bob");
+
+        List<InternalRow> roundTrip =
+                writeThenRead(
+                        options,
+                        rowType,
+                        Arrays.asList(
+                                GenericRow.of(1, BinaryString.fromString("Alice")),
+                                GenericRow.of(2, BinaryString.fromString("Bob"))),
+                        "test_line_sep_round_trip");
+        assertThat(roundTrip).hasSize(2);
+        assertThat(roundTrip.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(roundTrip.get(1).getString(1).toString()).isEqualTo("Bob");
+    }
+
+    @Test
     public void testVectorTypeReadWrite() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.VECTOR(3, DataTypes.FLOAT()));
 
@@ -479,17 +677,40 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
             throw new IllegalArgumentException("Key-value pairs must be even number of arguments");
         }
 
-        java.util.Map<BinaryString, Object> map = new java.util.HashMap<>();
+        java.util.Map<BinaryString, Object> map = new java.util.LinkedHashMap<>();
         for (int i = 0; i < keyValuePairs.length; i += 2) {
             String key = (String) keyValuePairs[i];
             Object value = keyValuePairs[i + 1];
             if (value instanceof String) {
-                map.put(BinaryString.fromString(key), BinaryString.fromString((String) value));
+                map.put(
+                        key == null ? null : BinaryString.fromString(key),
+                        BinaryString.fromString((String) value));
             } else {
-                map.put(BinaryString.fromString(key), value);
+                map.put(key == null ? null : BinaryString.fromString(key), value);
             }
         }
         return map;
+    }
+
+    private int findMapKey(InternalMap map, String key) {
+        for (int i = 0; i < map.size(); i++) {
+            if (map.keyArray().getString(i).toString().equals(key)) {
+                return i;
+            }
+        }
+        throw new AssertionError("Map key not found: " + key);
+    }
+
+    private String writeToJson(Options options, RowType rowType, InternalRow row, String testPrefix)
+            throws IOException {
+        FileFormat format =
+                new JsonFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        Path testFile = new Path(parent, testPrefix + "_" + UUID.randomUUID() + ".json");
+        try (PositionOutputStream out = fileIO.newOutputStream(testFile, false);
+                FormatWriter writer = format.createWriterFactory(rowType).create(out, "none")) {
+            writer.addElement(row);
+        }
+        return new String(Files.readAllBytes(Paths.get(testFile.toUri())), StandardCharsets.UTF_8);
     }
 
     private List<InternalRow> writeThenRead(

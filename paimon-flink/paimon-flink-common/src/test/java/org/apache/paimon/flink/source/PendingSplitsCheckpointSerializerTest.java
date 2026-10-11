@@ -164,8 +164,8 @@ public class PendingSplitsCheckpointSerializerTest {
         assertThat(incremental.afterFiles())
                 .extracting(DataFileMeta::fileName)
                 .containsExactly("after.parquet");
-        assertThat(incremental.beforeFiles().get(0).columnMaxSequenceNumbers()).isNull();
-        assertThat(incremental.afterFiles().get(0).columnMaxSequenceNumbers()).isNull();
+        assertThat(incremental.beforeFiles().get(0).writeColsSequences()).isNull();
+        assertThat(incremental.afterFiles().get(0).writeColsSequences()).isNull();
         assertThat(incremental.beforeDeletionFiles())
                 .containsExactly(new DeletionFile("before.dv", 0L, 1L, 1L));
         assertThat(incremental.afterDeletionFiles())
@@ -179,7 +179,7 @@ public class PendingSplitsCheckpointSerializerTest {
                 .extracting(DataFileMeta::fileName)
                 .containsExactly("before.parquet", "after.parquet");
         assertThat(chain.dataFiles())
-                .allSatisfy(file -> assertThat(file.columnMaxSequenceNumbers()).isNull());
+                .allSatisfy(file -> assertThat(file.writeColsSequences()).isNull());
         assertThat(chain.fileBranchMapping())
                 .containsOnly(
                         org.assertj.core.data.MapEntry.entry("before.parquet", "snapshot"),
@@ -209,7 +209,7 @@ public class PendingSplitsCheckpointSerializerTest {
     }
 
     private static DataFileMeta file(String fileName, long sequence) {
-        return newFile(0).rename(fileName).withColumnMaxSequenceNumbers(new long[] {sequence});
+        return newFile(0).rename(fileName).withWriteColsSequences(new long[] {sequence});
     }
 
     private static void assertIncrementalSplit(
@@ -217,8 +217,8 @@ public class PendingSplitsCheckpointSerializerTest {
         assertThat(sourceSplit.recordsToSkip()).isEqualTo(recordsToSkip);
         assertThat(sourceSplit.split()).isInstanceOf(IncrementalSplit.class);
         IncrementalSplit split = (IncrementalSplit) sourceSplit.split();
-        assertColumnSequences(split.beforeFiles(), 1L);
-        assertColumnSequences(split.afterFiles(), 2L);
+        assertWriteColsSequences(split.beforeFiles(), 1L);
+        assertWriteColsSequences(split.afterFiles(), 2L);
         assertThat(split.beforeDeletionFiles())
                 .containsExactly(new DeletionFile("before.dv", 0L, 1L, 1L));
         assertThat(split.afterDeletionFiles())
@@ -233,17 +233,17 @@ public class PendingSplitsCheckpointSerializerTest {
         assertThat(sourceSplit.recordsToSkip()).isEqualTo(recordsToSkip);
         assertThat(sourceSplit.split()).isInstanceOf(ChainSplit.class);
         ChainSplit split = (ChainSplit) sourceSplit.split();
-        assertColumnSequences(split.dataFiles(), 1L, 2L);
+        assertWriteColsSequences(split.dataFiles(), 1L, 2L);
         assertThat(split.fileBranchMapping()).isEqualTo(branchMapping);
         assertThat(split.fileBucketPathMapping()).isEqualTo(bucketPathMapping);
         assertThat(split.deletionFiles())
                 .hasValue(Arrays.asList(null, new DeletionFile("chain.dv", 2L, 1L, 1L)));
     }
 
-    private static void assertColumnSequences(List<DataFileMeta> files, long... sequences) {
+    private static void assertWriteColsSequences(List<DataFileMeta> files, long... sequences) {
         assertThat(files).hasSize(sequences.length);
         for (int i = 0; i < sequences.length; i++) {
-            assertThat(files.get(i).columnMaxSequenceNumbers()).containsExactly(sequences[i]);
+            assertThat(files.get(i).writeColsSequences()).containsExactly(sequences[i]);
         }
     }
 

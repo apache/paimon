@@ -60,7 +60,8 @@ and omit the brackets when submitting a job.
 | `--warehouse`, `--database`, `--table` | Locate the Paimon target; database actions do not take `--table`. |
 | `--<source>_conf key=value` | Configure the source connection, source names, and event format. Repeat for each property. |
 | `--catalog_conf key=value` | Configure the Paimon catalog, for example `metastore=hive` and `uri=thrift://hive-metastore:9083`. |
-| `--table_conf key=value` | Set target table properties and supported sink settings. Repeat for each property. |
+| `--table_conf key=value` | Set default target table properties and supported job settings. Repeat for each property. |
+| `--table_conf_by_table source_table:key=value` | MySQL database action only: override a table property for one source table. Repeat for each property. |
 | `--partition_keys`, `--primary_keys` | Set comma-separated keys where the action supports them. |
 | `--type_mapping` | Select [type mapping rules](./schema-evolution#mapping-options). |
 | `--computed_column` | Define a derived field where supported by the action. |
@@ -79,10 +80,17 @@ Set `-Dpipeline.name=<job-name>` to name the synchronization job.
 
 ### Table Configuration
 
-Use `--table_conf` for table properties and supported job settings such as `sink.parallelism`.
+Use `--table_conf` for global table properties and supported job settings such as `sink.parallelism`.
 For a new table, the action uses these properties when creating it. For an existing table, it
 alters mutable properties; it does not change immutable options such as `merge-engine`, or the
-bucket number. See [Configurations](../maintenance/configurations) for table and catalog options.
+bucket number.
+
+`mysql_sync_database` also supports repeated `--table_conf_by_table source_table:key=value`
+arguments. The source table name is the MySQL table name, and the per-table value overrides the
+matching key from `--table_conf`; tables without an override inherit the global configuration.
+Only table properties can be configured this way. Sink and job options such as `sink.parallelism`,
+writer resources, and committer resources must remain in the global `--table_conf`.
+See [Configurations](../maintenance/configurations) for table and catalog options.
 
 ## Computed Functions
 

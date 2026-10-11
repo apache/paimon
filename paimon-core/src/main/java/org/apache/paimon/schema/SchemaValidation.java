@@ -136,6 +136,8 @@ public class SchemaValidation {
 
     private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
 
+    private static final int MIN_ICEBERG_VARIANT_FORMAT_VERSION = 3;
+
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(
                     MapType.class,
@@ -251,8 +253,10 @@ public class SchemaValidation {
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
         validateGeospatialTypes(schema, options, tableRowType);
+        validateVariantTypes(schema, options);
         validateIcebergTimestampPrecisions(tableRowType, options);
         validateIcebergTimePrecisions(tableRowType, options);
+        validateIcebergPublishableTypes(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -492,6 +496,51 @@ public class SchemaValidation {
         }
     }
 
+    /**
+     * Only the Parquet format can store {@code VARIANT}, so every format the table may write data
+     * files with has to be parquet: the main format, each per-level override and the changelog
+     * format. Checking here reports the column and the option at DDL time, rather than the bare
+     * "unsupported type" a non-parquet writer raises on the first row.
+     */
+    private static void validateVariantTypes(TableSchema schema, CoreOptions options) {
+        List<String> variantColumns =
+                schema.fields().stream()
+                        .filter(
+                                field ->
+                                        containsType(
+                                                field.type(),
+                                                type -> type.is(DataTypeRoot.VARIANT)))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        if (variantColumns.isEmpty()) {
+            return;
+        }
+
+        checkArgument(
+                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
+                "Variant columns %s require '%s'='parquet', but was '%s'.",
+                variantColumns,
+                CoreOptions.FILE_FORMAT.key(),
+                options.formatType());
+        options.fileFormatPerLevel()
+                .forEach(
+                        (level, format) ->
+                                checkArgument(
+                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
+                                        "Variant columns %s require parquet at every level, but '%s' contains '%s:%s'.",
+                                        variantColumns,
+                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
+                                        level,
+                                        format));
+        checkArgument(
+                options.changelogFileFormat() == null
+                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
+                "Variant columns %s require '%s' to be parquet, but was '%s'.",
+                variantColumns,
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
+                options.changelogFileFormat());
+    }
+
     private static void validateGeospatialTypes(
             TableSchema schema, CoreOptions options, RowType rowType) {
         boolean hasGeospatial =
@@ -641,7 +690,49 @@ public class SchemaValidation {
             validateIcebergGeospatialTypes(schema.logicalRowType(), options);
             validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
             validateIcebergTimePrecisions(schema.logicalRowType(), options);
+            validateIcebergPublishableTypes(schema.logicalRowType(), options);
         }
+    }
+
+    /**
+     * Refuses the types the mirror cannot publish: the conversion that would catch them only runs
+     * once the snapshot is durable.
+     */
+    public static void validateIcebergPublishableTypes(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isUnpublishableType),
+                "Columns of type %s or %s cannot be published as Iceberg metadata. The schema "
+                        + "history counts too, so dropping such a column does not make an existing "
+                        + "table publishable; disable '%s' instead.",
+                DataTypeRoot.BLOB,
+                DataTypeRoot.VECTOR,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.FORMAT_VERSION)
+                                >= MIN_ICEBERG_VARIANT_FORMAT_VERSION
+                        || !containsType(dataType, type -> type.is(DataTypeRoot.VARIANT)),
+                "Columns of type %s require Iceberg format version %s. Set '%s' = '%s', or remove "
+                        + "them.",
+                DataTypeRoot.VARIANT,
+                MIN_ICEBERG_VARIANT_FORMAT_VERSION,
+                IcebergOptions.FORMAT_VERSION.key(),
+                MIN_ICEBERG_VARIANT_FORMAT_VERSION);
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                                != IcebergOptions.StorageType.REST_CATALOG
+                        || !containsType(dataType, type -> type.is(DataTypeRoot.VARIANT)),
+                "Variant columns do not support '%s'='%s' because the bundled Iceberg REST client "
+                        + "cannot parse the Iceberg variant type.",
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.REST_CATALOG);
+    }
+
+    private static boolean isUnpublishableType(DataType dataType) {
+        return dataType.isAnyOf(DataTypeRoot.BLOB, DataTypeRoot.VECTOR);
     }
 
     /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
@@ -1420,25 +1511,25 @@ public class SchemaValidation {
         for (String column : options.primaryKeyBTreeIndexColumns()) {
             GlobalIndexer.create(
                     BTreeGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyBTreeIndexOptions(column));
         }
         for (String column : options.primaryKeyBitmapIndexColumns()) {
             GlobalIndexer.create(
                     BitmapGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyBitmapIndexOptions(column));
         }
         for (String column : options.primaryKeyMultiValueIndexColumns()) {
             GlobalIndexer.create(
                     MultiValueGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyMultiValueIndexOptions(column));
         }
         for (String column : options.primaryKeyFMIndexColumns()) {
             GlobalIndexer.create(
                     FMGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyFMIndexOptions(column));
         }
     }

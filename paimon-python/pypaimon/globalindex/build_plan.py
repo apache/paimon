@@ -268,6 +268,9 @@ def append_shard_split(
     if not task_ranges:
         return
 
+    # Index the physical row-ID range, including DV-deleted rows, as in Java.
+    # Query-side live-row filtering applies DVs for the pinned query snapshot.
+    # Passing deletion files here would change the source coverage seen by writers.
     data_split = DataSplit(
         files=list(files),
         partition=partition,

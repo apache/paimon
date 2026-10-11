@@ -23,6 +23,7 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.utils.arrow_utils import as_blob_data, is_blob_data, zero_column_batch
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
@@ -110,11 +111,15 @@ class _BlobFileState:
 class ConcatBatchReader(RecordBatchReader):
 
     def __init__(self, reader_suppliers: List[Callable], file_io=None,
-                 blob_field_indices=None, vector_field_indices=None):
+                 blob_field_indices=None, vector_field_indices=None,
+                 descriptor_field_indices=None,
+                 blob_view_lookup=None):
         self.queue: collections.deque[Callable] = collections.deque(reader_suppliers)
         self.current_reader: Optional[RecordBatchReader] = None
         self.file_io = file_io
         self.blob_field_indices = blob_field_indices
+        self.descriptor_field_indices = descriptor_field_indices
+        self.blob_view_lookup = blob_view_lookup
         self.vector_field_indices = vector_field_indices
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
@@ -165,6 +170,11 @@ class MergeAllBatchReader(RecordBatchReader):
             if batch.num_rows == 0:
                 continue
 
+            # Do not combine reference and materialized-payload batches: one
+            # schema marker cannot describe two different BLOB representations.
+            if batches and not batch.schema.equals(batches[0].schema, check_metadata=True):
+                self._remainder = batch
+                break
             take = min(batch.num_rows, self._batch_size - num_rows)
             piece = batch.slice(0, take)
             piece_usage = _batch_offset_usage(piece)
@@ -194,6 +204,8 @@ class MergeAllBatchReader(RecordBatchReader):
             pa.concat_arrays([batch.column(i) for batch in batches])
             for i in range(batches[0].num_columns)
         ]
+        if not columns:
+            return zero_column_batch(num_rows, batches[0].schema.metadata)
         return pa.RecordBatch.from_arrays(columns, schema=batches[0].schema)
 
     def close(self) -> None:
@@ -263,11 +275,14 @@ class DataEvolutionMergeReader(RecordBatchReader):
             return None
 
         columns = []
+        fields = list(self.schema)
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
             if batch_index >= 0 and batches[batch_index] is not None:
                 columns.append(batches[batch_index].column(field_index).slice(0, min_rows))
+                if is_blob_data(batches[batch_index].schema.field(field_index)):
+                    fields[i] = as_blob_data(fields[i])
             else:
                 columns.append(pa.nulls(min_rows, type=self.schema.field(i).type))
 
@@ -275,7 +290,8 @@ class DataEvolutionMergeReader(RecordBatchReader):
             if batches[i] is not None and batches[i].num_rows > min_rows:
                 self._buffers[i] = batches[i].slice(min_rows, batches[i].num_rows - min_rows)
 
-        return pa.RecordBatch.from_arrays(columns, schema=self.schema)
+        return pa.RecordBatch.from_arrays(
+            columns, schema=pa.schema(fields, metadata=self.schema.metadata))
 
     def close(self) -> None:
         try:

@@ -101,6 +101,51 @@ public class RenamingSnapshotCommitTest {
         assertThat(fileIO.exists(snapshotManager.snapshotPath(snapshot.id()))).isFalse();
     }
 
+    /**
+     * Simulate the object storage scenario where rename actually succeeds but throws, for example
+     * when the response of a successful copy cannot be parsed. The commit should succeed and write
+     * the LATEST hint.
+     */
+    @Test
+    public void testCommitSucceedsAndRenameThrows(@TempDir java.nio.file.Path tmp)
+            throws Exception {
+        FileIO fileIO = new ThrowingRenameLocalFileIO(true);
+        Path tablePath = new Path(tmp.toUri());
+        SnapshotManager snapshotManager = new SnapshotManager(fileIO, tablePath, null, null, null);
+
+        RenamingSnapshotCommit commit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
+
+        Snapshot snapshot = createSnapshot(3L);
+
+        boolean committed = commit.commit(null, snapshot, "main", Collections.emptyList());
+
+        assertThat(committed).isTrue();
+        Path latestHint = new Path(snapshotManager.snapshotDirectory(), HintFileUtils.LATEST);
+        assertThat(fileIO.readOverwrittenFileUtf8(latestHint).orElse(null))
+                .isEqualTo(String.valueOf(snapshot.id()));
+    }
+
+    /** When rename throws and the target snapshot file is not created, the error is rethrown. */
+    @Test
+    public void testCommitRenameThrowsAndTargetMissing(@TempDir java.nio.file.Path tmp)
+            throws Exception {
+        FileIO fileIO = new ThrowingRenameLocalFileIO(false);
+        Path tablePath = new Path(tmp.toUri());
+        SnapshotManager snapshotManager = new SnapshotManager(fileIO, tablePath, null, null, null);
+
+        RenamingSnapshotCommit commit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
+
+        Snapshot snapshot = createSnapshot(4L);
+
+        IOException ex =
+                assertThrows(
+                        IOException.class,
+                        () -> commit.commit(null, snapshot, "main", Collections.emptyList()));
+
+        assertThat(ex).hasMessageContaining(ThrowingRenameLocalFileIO.MESSAGE);
+        assertThat(fileIO.exists(snapshotManager.snapshotPath(snapshot.id()))).isFalse();
+    }
+
     private static Snapshot createSnapshot(long id) throws IOException {
         long schemaId = 1L;
         String baseManifestList = "manifest-list-base";
@@ -169,6 +214,31 @@ public class RenamingSnapshotCommitTest {
                 Files.createDirectories(parent.getParent());
                 return false;
             }
+        }
+    }
+
+    /**
+     * A FileIO based on LocalFileIO that always throws from rename().
+     *
+     * <p>When {@code actuallyMove} is true, it performs the move then throws; otherwise it throws
+     * without moving.
+     */
+    private static class ThrowingRenameLocalFileIO extends LocalFileIO {
+
+        private static final String MESSAGE = "Failed to parse the rename response";
+
+        private final boolean actuallyMove;
+
+        ThrowingRenameLocalFileIO(boolean actuallyMove) {
+            this.actuallyMove = actuallyMove;
+        }
+
+        @Override
+        public boolean rename(Path src, Path dst) throws IOException {
+            if (actuallyMove) {
+                super.rename(src, dst);
+            }
+            throw new IOException(MESSAGE);
         }
     }
 }

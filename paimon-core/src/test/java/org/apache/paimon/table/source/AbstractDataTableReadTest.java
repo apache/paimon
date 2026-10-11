@@ -125,7 +125,8 @@ class AbstractDataTableReadTest {
                                                                 type.getFieldNames().get(2),
                                                                 DataTypes.STRING()))))));
         List<Integer> result = new ArrayList<>();
-        try (RecordReader<InternalRow> reader = read.createDataReader(mock(Split.class), auth)) {
+        try (RecordReader<InternalRow> reader =
+                read.createDataReader(mock(Split.class), auth, read.executeFilter)) {
             reader.forEachRemaining(
                     row -> {
                         assertThat(row.getFieldCount()).isEqualTo(1);
@@ -177,7 +178,8 @@ class AbstractDataTableReadTest {
                                                                 type.getFieldNames().get(2),
                                                                 DataTypes.STRING()))))));
         List<Integer> result = new ArrayList<>();
-        try (RecordReader<InternalRow> reader = read.createDataReader(mock(Split.class), auth)) {
+        try (RecordReader<InternalRow> reader =
+                read.createDataReader(mock(Split.class), auth, read.executeFilter)) {
             reader.forEachRemaining(row -> result.add(row.getInt(0)));
         }
         assertThat(result).containsExactly(1);
@@ -238,7 +240,8 @@ class AbstractDataTableReadTest {
                                                                 type.getFieldNames().get(3),
                                                                 DataTypes.STRING()))))));
         List<Integer> result = new ArrayList<>();
-        try (RecordReader<InternalRow> reader = read.createDataReader(mock(Split.class), auth)) {
+        try (RecordReader<InternalRow> reader =
+                read.createDataReader(mock(Split.class), auth, read.executeFilter)) {
             reader.forEachRemaining(
                     row -> {
                         assertThat(row.getFieldCount()).isEqualTo(1);
@@ -288,9 +291,10 @@ class AbstractDataTableReadTest {
                                                                 2,
                                                                 type.getFieldNames().get(2),
                                                                 DataTypes.STRING()))))));
-        try (RecordReader<InternalRow> first = read.createDataReader(mock(Split.class), firstAuth);
+        try (RecordReader<InternalRow> first =
+                        read.createDataReader(mock(Split.class), firstAuth, read.executeFilter);
                 RecordReader<InternalRow> second =
-                        read.createDataReader(mock(Split.class), secondAuth)) {
+                        read.createDataReader(mock(Split.class), secondAuth, read.executeFilter)) {
             List<String> firstRows = new ArrayList<>();
             first.forEachRemaining(row -> firstRows.add(row.getString(0).toString()));
             List<String> secondRows = new ArrayList<>();
@@ -495,7 +499,7 @@ class AbstractDataTableReadTest {
         }
 
         private void createAuthedReader(TableQueryAuthResult authResult) throws IOException {
-            createDataReader(mock(Split.class), authResult);
+            createDataReader(mock(Split.class), authResult, executeFilter);
         }
 
         private RowType appliedReadType() {

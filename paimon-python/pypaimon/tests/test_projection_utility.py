@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from itertools import product
 
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.utils.projection import (NestedProjection, Projection,
@@ -77,6 +78,25 @@ class TopLevelProjectionTest(unittest.TestCase):
 
 
 class NestedProjectionTest(unittest.TestCase):
+    def test_nullable_is_inherited_from_all_ancestors(self):
+        for outer_nullable, inner_nullable, leaf_nullable in product(
+            (False, True), repeat=3
+        ):
+            with self.subTest(
+                outer=outer_nullable, inner=inner_nullable, leaf=leaf_nullable
+            ):
+                leaf = DataField(3, "x", AtomicType("BIGINT", leaf_nullable))
+                inner = DataField(2, "inner", RowType(inner_nullable, [leaf]))
+                outer = DataField(1, "outer", RowType(outer_nullable, [inner]))
+                projected = Projection.of([[0, 0, 0]]).project([outer])
+                self.assertEqual(
+                    outer_nullable or inner_nullable or leaf_nullable,
+                    projected[0].type.nullable,
+                )
+                # Projection must not alter the source schema's constraints.
+                self.assertEqual(leaf_nullable, leaf.type.nullable)
+                self.assertEqual(inner_nullable, inner.type.nullable)
+                self.assertEqual(outer_nullable, outer.type.nullable)
 
     def test_factory_produces_nested(self):
         p = Projection.of([[1, 0], [1, 1]])

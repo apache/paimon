@@ -355,6 +355,7 @@ class FileScanner:
                     self._deletion_files_map(entries),
                     seed=seed,
                     chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
                 )
             else:
                 split_generator = AppendChunkShuffleSplitGenerator(
@@ -364,6 +365,7 @@ class FileScanner:
                     self._deletion_files_map(entries),
                     seed=seed,
                     chunk_size=chunk_size,
+                    snapshot_id=self._scanned_snapshot_id,
                 )
         elif self.table.is_primary_key_table:
             entries = self.plan_files()
@@ -371,7 +373,8 @@ class FileScanner:
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
         elif self.data_evolution:
             entries, split_generator = self._create_data_evolution_split_generator()
@@ -381,7 +384,8 @@ class FileScanner:
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                self._deletion_files_map(entries)
+                self._deletion_files_map(entries),
+                snapshot_id=self._scanned_snapshot_id,
             )
 
         if not entries:
@@ -400,7 +404,6 @@ class FileScanner:
                 while callable(getattr(split, 'data_split', None)):
                     split = split.data_split()
                 split.is_streaming = True
-                split.snapshot_id = self._scanned_snapshot_id
 
         if self.data_evolution and self.scan_stats is not None:
             # Data-evolution stats pruning happens on complete row-id groups
@@ -496,6 +499,7 @@ class FileScanner:
                 row_ranges,
                 score_getter,
                 None,
+                snapshot_id=self._scanned_snapshot_id,
             )
 
         # Position selection counts the complete candidate row-id space. Early
@@ -534,6 +538,7 @@ class FileScanner:
             row_ranges,
             score_getter,
             group_stats_filter,
+            snapshot_id=self._scanned_snapshot_id,
         )
 
     def plan_files(self) -> List[ManifestEntry]:
@@ -599,7 +604,7 @@ class FileScanner:
             self.scan_stats.manifest_files_after_partition += len(manifest_files)
             # Force single-threaded so we can mutate stats without locking.
             max_workers = 1
-        # Disable both early filters in explain mode (scan_stats) so all entries
+        # Disable early entry filters and sidecar pruning in explain mode so all entries
         # flow through _filter_manifest_entry for accurate funnel counting.
         early_row_filter = None if self.scan_stats is not None \
             else _build_early_row_range_filter(row_ranges)
@@ -613,6 +618,7 @@ class FileScanner:
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,
             partition_filter=partition_filter,
+            row_ranges=row_ranges if self.scan_stats is None else None,
         )
 
     def _build_early_bucket_filter(self):
@@ -646,6 +652,11 @@ class FileScanner:
             return True
 
         return _filter
+
+    def with_all_buckets(self) -> 'FileScanner':
+        """Include pending buckets for commit metadata scans, as in Java."""
+        self.only_read_real_buckets = False
+        return self
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
         validate_shard(idx_of_this_subtask, number_of_para_subtasks)
@@ -879,6 +890,8 @@ class FileScanner:
             stats.buckets_after_pruning.add((partition_key, entry.bucket))
         # Get SimpleStatsEvolution for this schema
         evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
+        stats_predicate = self.simple_stats_evolutions.filter_unsafe_filter(
+            entry.file.schema_id, self.predicate_for_stats)
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
@@ -892,7 +905,7 @@ class FileScanner:
                     return False
             # Java enables value filtering only when batch scans exclude L0.
             # With L0 present, pruning an update can expose an older value.
-            if self.skip_level0 and self.predicate_for_stats:
+            if self.skip_level0 and stats_predicate:
                 if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                     stats_fields = entry.file.write_cols
                 else:
@@ -902,7 +915,7 @@ class FileScanner:
                     entry.file.row_count,
                     stats_fields
                 )
-                if not self.predicate_for_stats.test_by_simple_stats(
+                if not stats_predicate.test_by_simple_stats(
                     evolved_stats,
                     entry.file.row_count
                 ):
@@ -911,7 +924,7 @@ class FileScanner:
                 stats.entries_after_stats += 1
             return True
         else:
-            if not self.predicate or self.predicate_for_stats is None:
+            if not self.predicate or stats_predicate is None:
                 if stats is not None:
                     stats.entries_after_stats += 1
                 return True
@@ -927,7 +940,7 @@ class FileScanner:
                 entry.file.row_count,
                 stats_fields
             )
-            kept = self.predicate_for_stats.test_by_simple_stats(
+            kept = stats_predicate.test_by_simple_stats(
                 evolved_stats,
                 entry.file.row_count
             )
@@ -980,7 +993,7 @@ class FileScanner:
             return deletion_files
 
         dv_file_path = self.table.path_factory().bucket_index_path(
-            tuple(index_entry.partition.values), index_entry.bucket, index_file, self.table.file_io)
+            tuple(index_entry.partition.values), index_entry.bucket, index_file)
 
         # Convert each DeletionVectorMeta to DeletionFile
         for data_file_name, dv_meta in index_file.dv_ranges.items():

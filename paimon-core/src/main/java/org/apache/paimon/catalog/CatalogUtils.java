@@ -62,6 +62,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -408,7 +409,7 @@ public class CatalogUtils {
 
     private static Table createGlobalSystemTable(String tableName, Catalog catalog)
             throws Catalog.TableNotExistException {
-        switch (tableName.toLowerCase()) {
+        switch (tableName.toLowerCase(Locale.ROOT)) {
             case ALL_TABLE_OPTIONS:
                 List<Table> tables = listAllTables(catalog);
                 Map<Identifier, Map<String, String>> allOptions = new HashMap<>();

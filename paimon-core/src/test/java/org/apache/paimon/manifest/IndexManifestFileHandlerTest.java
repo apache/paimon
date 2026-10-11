@@ -20,11 +20,13 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
@@ -34,10 +36,13 @@ import org.apache.paimon.utils.CloseableIterator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomDeletionVectorIndexFile;
@@ -237,6 +242,106 @@ public class IndexManifestFileHandlerTest {
     }
 
     @Test
+    public void testGlobalIndexDeleteRejectsStaleRowRange() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile manifestFile = createIndexManifestFile(fileStore);
+        IndexManifestEntry current = globalIndexEntry("index", 1000, 1099, 1);
+        String manifest =
+                manifestFile.writeIndexFiles(
+                        null, Arrays.asList(current), BucketMode.BUCKET_UNAWARE);
+
+        // The file name and row count match, but the DELETE predates row-id reassignment.
+        IndexManifestEntry stale = globalIndexEntry("index", 0, 99, 1).toDeleteEntry();
+        IndexManifestEntry replacement = globalIndexEntry("replacement", 0, 99, 1);
+        assertThatThrownBy(
+                        () ->
+                                manifestFile.writeIndexFiles(
+                                        manifest,
+                                        Arrays.asList(stale, replacement),
+                                        BucketMode.BUCKET_UNAWARE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Index file index metadata does not match");
+        assertThat(manifestFile.read(manifest)).containsExactly(current);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testIndexDeleteRejectsDifferentPartitionOrBucket(boolean deletionVector)
+            throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile manifestFile = createIndexManifestFile(fileStore);
+        IndexManifestEntry current =
+                deletionVector
+                        ? new IndexManifestEntry(
+                                FileKind.ADD,
+                                BinaryRow.EMPTY_ROW,
+                                0,
+                                randomDeletionVectorIndexFile())
+                        : globalIndexEntry("index", 0, 99, 1);
+        String manifest =
+                manifestFile.writeIndexFiles(
+                        null, Arrays.asList(current), BucketMode.BUCKET_UNAWARE);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, 1);
+        writer.complete();
+        List<IndexManifestEntry> invalidDeletes =
+                Arrays.asList(
+                        new IndexManifestEntry(FileKind.DELETE, partition, 0, current.indexFile()),
+                        new IndexManifestEntry(
+                                FileKind.DELETE, current.partition(), 1, current.indexFile()));
+        for (IndexManifestEntry deleted : invalidDeletes) {
+            assertThatThrownBy(
+                            () ->
+                                    manifestFile.writeIndexFiles(
+                                            manifest,
+                                            Arrays.asList(deleted),
+                                            BucketMode.BUCKET_UNAWARE))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("metadata does not match the current entry");
+        }
+        assertThat(manifestFile.read(manifest)).containsExactly(current);
+    }
+
+    @Test
+    public void testDeletionVectorDeleteRejectsIncompleteRanges() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile manifestFile = createIndexManifestFile(fileStore);
+        IndexFileMeta file = randomDeletionVectorIndexFile();
+        IndexManifestEntry current =
+                new IndexManifestEntry(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, file);
+        String manifest =
+                manifestFile.writeIndexFiles(
+                        null, Arrays.asList(current), BucketMode.BUCKET_UNAWARE);
+
+        LinkedHashMap<String, DeletionVectorMeta> incomplete = new LinkedHashMap<>(file.dvRanges());
+        incomplete.remove(incomplete.keySet().iterator().next());
+        IndexManifestEntry stale =
+                new IndexManifestEntry(
+                        FileKind.DELETE,
+                        current.partition(),
+                        current.bucket(),
+                        new IndexFileMeta(
+                                file.indexType(),
+                                file.fileName(),
+                                file.fileSize(),
+                                file.rowCount(),
+                                incomplete,
+                                file.externalPath()));
+        assertThatThrownBy(
+                        () ->
+                                manifestFile.writeIndexFiles(
+                                        manifest, Arrays.asList(stale), BucketMode.BUCKET_UNAWARE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("metadata does not match the current entry");
+        assertThat(manifestFile.read(manifest)).containsExactly(current);
+    }
+
+    @Test
     public void testDataEvolutionSourceMetaDoesNotDisableRangeValidation() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
@@ -336,6 +441,101 @@ public class IndexManifestFileHandlerTest {
                 .hasMessageContaining("previous-range")
                 .hasMessageContaining("overlapping-range")
                 .hasMessageContaining("overlapping row range");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "test-vector-ann", "test-fulltext"})
+    public void testDifferentOrderedFieldDefinitionsCoexist(String indexType) throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile manifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(manifestFile, BucketMode.BUCKET_UNAWARE);
+        List<IndexManifestEntry> definitions =
+                Arrays.asList(
+                        indexEntry(indexType, "single", 0, 99, 1),
+                        indexEntry(indexType, "pair", 0, 99, 1, 2),
+                        indexEntry(indexType, "triple", 0, 99, 1, 2, 3),
+                        indexEntry(indexType, "reordered", 0, 99, 1, 3, 2),
+                        indexEntry(indexType, "other-pair", 0, 99, 1, 3));
+        String manifest = null;
+        for (IndexManifestEntry definition : definitions) {
+            manifest = handler.write(manifest, Arrays.asList(definition));
+        }
+        assertThat(manifestFile.read(manifest)).containsExactlyInAnyOrderElementsOf(definitions);
+
+        String retainedManifest = manifest;
+        IndexManifestEntry replacement = indexEntry(indexType, "replacement", 50, 149, 1, 2);
+        assertThatThrownBy(() -> handler.write(retainedManifest, Arrays.asList(replacement)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pair")
+                .hasMessageContaining("replacement")
+                .hasMessageContaining("overlapping row range");
+
+        String replaced =
+                handler.write(
+                        manifest, Arrays.asList(definitions.get(1).toDeleteEntry(), replacement));
+        List<IndexManifestEntry> expected = new ArrayList<>(definitions);
+        expected.set(1, replacement);
+        assertThat(manifestFile.read(replaced)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "test-vector-ann", "test-fulltext"})
+    public void testNullAndEmptyExtraFieldsIdentifyTheSameDefinition(String indexType)
+            throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        IndexManifestFile manifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(manifestFile, BucketMode.BUCKET_UNAWARE);
+        IndexManifestEntry previous = indexEntry(indexType, "null-extra", 0, 99, 1);
+        String manifest = handler.write(null, Arrays.asList(previous));
+        IndexManifestEntry tail =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        new IndexFileMeta(
+                                indexType,
+                                "empty-extra",
+                                1L,
+                                100L,
+                                new GlobalIndexMeta(100, 199, 1, new int[0], null),
+                                null));
+        String extended = handler.write(manifest, Arrays.asList(tail));
+        assertThat(manifestFile.read(extended)).containsExactlyInAnyOrder(previous, tail);
+        assertThatThrownBy(
+                        () ->
+                                handler.write(
+                                        extended,
+                                        Arrays.asList(
+                                                indexEntry(indexType, "overlap", 100, 199, 1))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("empty-extra")
+                .hasMessageContaining("overlapping row range");
+    }
+
+    private IndexManifestEntry indexEntry(
+            String indexType, String fileName, long start, long end, int... fieldIds) {
+        return new IndexManifestEntry(
+                FileKind.ADD,
+                BinaryRow.EMPTY_ROW,
+                0,
+                new IndexFileMeta(
+                        indexType,
+                        fileName,
+                        1L,
+                        end - start + 1,
+                        new GlobalIndexMeta(
+                                start,
+                                end,
+                                fieldIds[0],
+                                fieldIds.length == 1
+                                        ? null
+                                        : Arrays.copyOfRange(fieldIds, 1, fieldIds.length),
+                                null),
+                        null));
     }
 
     private IndexManifestFile createIndexManifestFile(TestAppendFileStore fileStore) {

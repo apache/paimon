@@ -19,6 +19,7 @@
 
 from abc import ABC, abstractmethod
 
+from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.table.source.vector_search_builder import (
     AbstractVectorSearchBuilderImpl,
 )
@@ -108,8 +109,16 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         self._query_vectors = vectors
         return self
 
+    def execute_batch_local(self):
+        from pypaimon.table.source.native_vector_search import try_native_vector_search
+        results = try_native_vector_search(self, self._query_vectors, batch=True)
+        if results is not None:
+            return results
+        return super().execute_batch_local()
+
     def new_batch_vector_search_read(self):
         # type: () -> BatchVectorSearchRead
+        reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
         if self._vector_column is None:

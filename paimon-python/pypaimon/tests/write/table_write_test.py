@@ -26,6 +26,7 @@ from unittest.mock import Mock, patch
 
 from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
+import pytest
 from parameterized import parameterized
 
 from pypaimon.build_info import full_version as build_full_version
@@ -37,6 +38,72 @@ from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableWriteTest(unittest.TestCase):
+    def test_large_string_compatibility_rejects_other_type_changes(self):
+        writer = object.__new__(TableWrite)
+        writer.file_store_write = Mock(write_cols=None)
+        writer.table_pyarrow_schema = pa.schema([
+            ('id', pa.int32()),
+            ('nested', pa.struct([pa.field('text', pa.string(), nullable=False)])),
+        ])
+        valid = pa.schema([
+            ('id', pa.int32()),
+            ('nested', pa.struct([pa.field('text', pa.large_string(), nullable=False)])),
+        ])
+        writer._validate_pyarrow_schema(valid)
+        invalid = [
+            valid.set(0, pa.field('id', pa.int64())),
+            pa.schema(list(reversed(list(valid)))),
+            valid.set(1, pa.field('nested', pa.struct([
+                pa.field('text', pa.large_string(), nullable=True)]))),
+            valid.set(1, pa.field('nested', pa.struct([
+                pa.field('renamed', pa.large_string(), nullable=False)]))),
+        ]
+        for schema in invalid:
+            with self.subTest(schema=schema):
+                with self.assertRaisesRegex(ValueError, 'consistent'):
+                    writer._validate_pyarrow_schema(schema)
+
+    @parameterized.expand([('append', False, '-1'), ('primary', True, '1'), ('postpone', True, '-2')])
+    def test_large_string_input_roundtrip(self, mode, primary_key, bucket):
+        name = 'default.large_strings_' + mode
+
+        def arrow_schema(string_type):
+            return pa.schema([
+                pa.field('id', pa.int64(), nullable=False),
+                pa.field('text', string_type),
+                pa.field('nested', pa.struct([
+                    pa.field('labels', pa.list_(string_type)),
+                    pa.field('mapping', pa.map_(string_type, string_type)),
+                ])),
+            ])
+
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(
+            arrow_schema(pa.large_string()),
+            primary_keys=['id'] if primary_key else [],
+            options={'bucket': bucket},
+        ), False)
+        table = self.catalog.get_table(name)
+        builder = (table.new_postpone_fixed_bucket_write_builder()
+                   if mode == 'postpone' else table.new_batch_write_builder())
+        write, commit = builder.new_write(), builder.new_commit()
+        expected = []
+        try:
+            for index, (dtype, text) in enumerate([
+                    (pa.string(), '抓笔'), (pa.large_string(), ''),
+                    (pa.string(), None), (pa.large_string(), 'x' * 100)]):
+                row = {'id': index, 'text': text, 'nested': {
+                    'labels': [text, None], 'mapping': [('任务', text)],
+                }}
+                expected.append(row)
+                write.write_arrow(pa.Table.from_pylist([row], schema=arrow_schema(dtype)))
+            commit.commit(write.prepare_commit())
+        finally:
+            write.close()
+            commit.close()
+        actual = self._read_sorted(table, [('id', 'ascending')])
+        self.assertEqual(actual.to_pylist(), expected)
+        self.assertEqual(actual.schema.remove_metadata(), arrow_schema(pa.string()))
+
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
@@ -158,8 +225,10 @@ class TableWriteTest(unittest.TestCase):
         return out
 
     @staticmethod
-    def _mock_table_write(partitions, buckets):
+    def _mock_table_write(partitions, buckets, schema):
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
+        table_write.table_pyarrow_schema = schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
         table_write.file_store_write = Mock()
@@ -174,7 +243,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b'],
         })
         table_write = self._mock_table_write(
-            [('p1',), ('p1',)], [0, 0])
+            [('p1',), ('p1',)], [0, 0], data.schema)
 
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
@@ -190,7 +259,7 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = self._mock_table_write(
             [('p1',), ('p1',), ('p2',), ('p2',)],
-            [0, 0, 1, 1])
+            [0, 0, 1, 1], data.schema)
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
 
@@ -212,7 +281,7 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = self._mock_table_write(
             [('p1',), ('p2',), ('p1',), ('p2',)],
-            [0, 1, 0, 1])
+            [0, 1, 0, 1], data.schema)
 
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
@@ -234,6 +303,8 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
+        table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -258,6 +329,8 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write.table = Mock(is_primary_key_table=False)
+        table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -405,6 +478,7 @@ class TableWriteTest(unittest.TestCase):
         with patch.object(pa.TableGroupBy, 'aggregate', raise_missing_kernel):
             self.assertFalse(rk._probe_arrow_group_by())
 
+    @pytest.mark.python_commit
     def test_write_snapshot(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_write_snapshot', schema, False)
@@ -525,6 +599,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(
             expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
 
+    @pytest.mark.python_write
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_parquet', schema, False)
@@ -542,7 +617,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(0)
+        cm = table_write.prepare_commit(0)
         # write 2
         data2 = {
             'user_id': [5, 6, 7, 8],
@@ -552,7 +627,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(1)
+        cm.extend(table_write.prepare_commit(1))
         # write 3
         data3 = {
             'user_id': [9, 10],
@@ -562,7 +637,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data3, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        cm = table_write.prepare_commit(2)
+        cm.extend(table_write.prepare_commit(2))
         # commit
         table_commit.commit(cm, 2)
         table_write.close()
@@ -576,17 +651,18 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(self.expected, actual)
 
     @parameterized.expand([
-        ('default', None, None, True),
-        ('not_write_only_default', 'false', None, True),
-        ('write_only_default', 'true', None, True),
-        ('skip_enabled', None, 'true', True),
-        ('not_write_only_skip_enabled', 'false', 'true', True),
-        ('write_only_skip_enabled', 'true', 'true', False),
-        ('skip_disabled', None, 'false', True),
-        ('not_write_only_skip_disabled', 'false', 'false', True),
-        ('write_only_skip_disabled', 'true', 'false', True),
+        ('default', None, None),
+        ('not_write_only_default', 'false', None),
+        ('write_only_default', 'true', None),
+        ('skip_enabled', None, 'true'),
+        ('not_write_only_skip_enabled', 'false', 'true'),
+        ('write_only_skip_enabled', 'true', 'true'),
+        ('skip_disabled', None, 'false'),
+        ('not_write_only_skip_disabled', 'false', 'false'),
+        ('write_only_skip_disabled', 'true', 'false'),
     ])
-    def test_commit_manifest_merge(self, name, write_only, skip_on_write_only, merge_enabled):
+    def test_commit_preserves_existing_manifests(self, name, write_only, skip_on_write_only):
+        # Shared tables may still carry Java manifest maintenance options.
         options = {'manifest.merge-min-count': '2'}
         if write_only is not None:
             options['write-only'] = write_only
@@ -634,16 +710,11 @@ class TableWriteTest(unittest.TestCase):
         base_manifests = manifest_list_manager.read(snapshot.base_manifest_list)
         delta_manifests = manifest_list_manager.read(snapshot.delta_manifest_list)
 
-        if merge_enabled:
-            self.assertEqual(len(base_manifests), 1)
-            self.assertEqual(base_manifests[0].num_added_files, 2)
-            self.assertEqual(base_manifests[0].num_deleted_files, 0)
-        else:
-            self.assertEqual(len(base_manifests), 2)
-            self.assertEqual(
-                [manifest.file_name for manifest in previous_manifests],
-                [manifest.file_name for manifest in base_manifests],
-            )
+        self.assertEqual(len(base_manifests), 2)
+        self.assertEqual(
+            [manifest.file_name for manifest in previous_manifests],
+            [manifest.file_name for manifest in base_manifests],
+        )
         self.assertEqual(len(delta_manifests), 1)
 
         expected = pa.Table.from_pydict(expected_data, schema=self.pa_schema)
@@ -653,6 +724,7 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_write
     def test_multi_prepare_commit_pk(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], primary_keys=['user_id', 'dt'],
                                             options={'bucket': '2'})
@@ -671,7 +743,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(0)
+        cm = table_write.prepare_commit(0)
         # write 2
         data2 = {
             'user_id': [5, 6, 7, 8],
@@ -681,7 +753,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit(1)
+        cm.extend(table_write.prepare_commit(1))
         # write 3
         data3 = {
             'user_id': [9, 10],
@@ -691,7 +763,7 @@ class TableWriteTest(unittest.TestCase):
         }
         pa_table = pa.Table.from_pydict(data3, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
-        cm = table_write.prepare_commit(2)
+        cm.extend(table_write.prepare_commit(2))
         # commit
         table_commit.commit(cm, 2)
         table_write.close()
@@ -796,16 +868,12 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1'],
         }, schema=self.pk_pa_schema)
 
-        self._commit_arrow(table, expected)
-
-        self.assertEqual(
-            1,
-            len(glob.glob(
-                self.warehouse
-                + "/default.db/test_postpone_default_builder/user_id=1/"
-                + "bucket-postpone/*.avro"
-            )),
-        )
+        messages = self._commit_arrow(table, expected)
+        self.assertEqual({-2}, {message.bucket for message in messages})
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual(1, len(files))
+        self.assertIn('/bucket-postpone/', files[0].file_path)
+        self.assertTrue(table.file_io.exists(files[0].file_path))
         splits = table.new_read_builder().new_scan().plan().splits()
         self.assertTrue(not table.new_read_builder().new_read().to_arrow(splits))
 
@@ -1686,7 +1754,8 @@ class TableWriteTest(unittest.TestCase):
 
         # Verify file name format: {table_prefix}-u-{commit_user}-s-{random_number}-w--{uuid}-0.{format}
         # Expected pattern: data--u-{user}-s-{random}-w--{uuid}-0.{format}
-        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.avro$'
+        # Native postpone writes use Parquet; the Python writer may select Avro.
+        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.(avro|parquet)$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
@@ -1908,6 +1977,7 @@ class TableWriteTest(unittest.TestCase):
         actual = self._read_sorted(table, 'id')
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_write
     def test_validate_schema_allows_binary_family_for_write_cols(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),

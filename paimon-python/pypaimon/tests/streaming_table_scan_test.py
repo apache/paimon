@@ -51,6 +51,7 @@ def _create_mock_table(latest_snapshot_id: int = 5):
     table.options.data_evolution_enabled.return_value = False
     table.options.deletion_vectors_enabled.return_value = False
     table.options.changelog_producer.return_value = ChangelogProducer.NONE
+    table.options.native_plan_enabled.return_value = False
     table.field_names = ['col1', 'col2']
     table.trimmed_primary_keys = []
     table.partition_keys = []

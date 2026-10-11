@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.predicate.{BitLengthTransform, DateAddTransform, DateDiffTransform, DateTruncTransform, DayOfWeekTransform, DayOfYearTransform, DayTransform, FieldRef, FieldTransform, HourTransform, LeafPredicate, LengthTransform, MinuteTransform, MonthTransform, NestedFieldTransform, OverlayTransform, PadTransform, PredicateBuilder, QuarterTransform, SecondTransform, Transform, TranslateTransform, WeekdayTransform, WeekTransform, YearOfWeekTransform, YearTransform}
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkV2FilterConverter}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.table.source.DataSplit
@@ -89,6 +89,34 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
   lazy val builder = new PredicateBuilder(rowType)
 
   lazy val converter: SparkV2FilterConverter = SparkV2FilterConverter(rowType)
+
+  test("V2Filter: legacy timestamp mapping does not push down extract") {
+    if (gteqSpark3_4) {
+      withTimeZone("UTC") {
+        withSparkSQLConf(
+          "spark.paimon.legacy-timestamp-mapping.enabled" -> "true",
+          "spark.sql.session.timeZone" -> "America/Los_Angeles") {
+          withTable("legacy_extract") {
+            sql("""
+                  |CREATE TABLE legacy_extract (id INT, ts TIMESTAMP)
+                  |USING paimon PARTITIONED BY (ts)
+                  |""".stripMargin)
+
+            val legacyRowType = loadTable("legacy_extract").rowType()
+            val legacyConverter = SparkV2FilterConverter(legacyRowType)
+            val filter = "hour(ts) = 1"
+            val condition =
+              sql(s"SELECT * FROM legacy_extract WHERE $filter").queryExecution.analyzed
+                .collectFirst { case f: Filter => f }
+                .get
+                .condition
+            val sparkPredicate = translateFilterV2(condition).get
+            assert(legacyConverter.convert(sparkPredicate).isEmpty)
+          }
+        }
+      }
+    }
+  }
 
   test("V2Filter: all types") {
     var filter = "string_col = 'hello'"
@@ -380,6 +408,237 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 2)
   }
 
+  test("V2Filter: NotEqual") {
+    val filter = "int_col <> 1"
+    val actual = converter.convert(v2Filter(filter)).get
+    assert(actual.equals(builder.notEqual(3, 1)))
+    checkAnswer(
+      sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
+      Seq(Row(2), Row(3)))
+    assert(scanFilesCount(filter) == 2)
+  }
+
+  test("V2Filter: CharLength") {
+    if (gteqSpark3_4) {
+      val filter = "char_length(string_col) = 2"
+      val transform = new LengthTransform(
+        List[Object](new FieldRef(0, "string_col", rowType.getTypeAt(0))).asJava)
+      val actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(transform, 2)))
+      checkAnswer(sql(s"SELECT string_col from test_tbl WHERE $filter"), Seq(Row("hi")))
+      // CHAR_LENGTH cannot prune files by column stats.
+      assert(scanFilesCount(filter) == 4)
+    }
+  }
+
+  test("V2Filter: remaining Spark string scalar expressions") {
+    if (gteqSpark3_4) {
+      val stringFieldRef = new FieldRef(0, "string_col", rowType.getTypeAt(0))
+      val specs: Seq[(String, Transform, Object, Seq[Row])] = Seq(
+        (
+          "bit_length(string_col) = 16",
+          new BitLengthTransform(List[Object](stringFieldRef).asJava),
+          Int.box(16),
+          Seq(Row("hi"))),
+        (
+          "translate(string_col, 'hel', 'xyz') = 'xyzzo'",
+          new TranslateTransform(
+            List[Object](
+              stringFieldRef,
+              BinaryString.fromString("hel"),
+              BinaryString.fromString("xyz")).asJava),
+          BinaryString.fromString("xyzzo"),
+          Seq(Row("hello"))),
+        (
+          "overlay(string_col, 'XX', 2, 2) = 'hXXlo'",
+          new OverlayTransform(
+            List[Object](
+              stringFieldRef,
+              BinaryString.fromString("XX"),
+              Int.box(2),
+              Int.box(2)).asJava),
+          BinaryString.fromString("hXXlo"),
+          Seq(Row("hello")))
+      )
+      specs.foreach {
+        case (filter, transform, expectedValue, expectedRows) =>
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          checkAnswer(
+            sql(s"SELECT string_col FROM test_tbl WHERE $filter ORDER BY string_col"),
+            expectedRows)
+      }
+    }
+  }
+
+  test("V2Filter: Spark 4.1 pad expressions") {
+    if (gteqSpark4_1) {
+      val stringFieldRef = new FieldRef(0, "string_col", rowType.getTypeAt(0))
+      Seq(
+        (
+          "lpad(string_col, 7, '_') = '__hello'",
+          PadTransform.Direction.LEFT,
+          BinaryString.fromString("__hello"),
+          Seq(Row("hello"))),
+        (
+          "rpad(string_col, 7, '_') = 'hello__'",
+          PadTransform.Direction.RIGHT,
+          BinaryString.fromString("hello__"),
+          Seq(Row("hello")))
+      ).foreach {
+        case (filter, direction, expectedValue, expectedRows) =>
+          val transform = new PadTransform(
+            List[Object](stringFieldRef, Int.box(7), BinaryString.fromString("_")).asJava,
+            direction)
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          checkAnswer(
+            sql(s"SELECT string_col FROM test_tbl WHERE $filter ORDER BY string_col"),
+            expectedRows)
+      }
+    }
+  }
+
+  test("V2Filter: Year, Month and Day") {
+    if (gteqSpark3_4) {
+      val dateFieldRef = new FieldRef(9, "date_col", rowType.getTypeAt(9))
+
+      var filter = "year(date_col) = 2025"
+      var actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(new YearTransform(dateFieldRef), 2025)))
+      checkAnswer(
+        sql(s"SELECT date_col from test_tbl WHERE $filter"),
+        sql("SELECT date_col from test_tbl"))
+      // Extracted fields cannot prune files by column stats.
+      assert(scanFilesCount(filter) == 4)
+
+      filter = "month(date_col) = 1"
+      actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(new MonthTransform(dateFieldRef), 1)))
+      checkAnswer(
+        sql(s"SELECT date_col from test_tbl WHERE $filter"),
+        sql("SELECT date_col from test_tbl"))
+      assert(scanFilesCount(filter) == 4)
+
+      filter = "day(date_col) = 15"
+      actual = converter.convert(v2Filter(filter)).get
+      assert(actual.equals(builder.equal(new DayTransform(dateFieldRef), 15)))
+      checkAnswer(
+        sql(s"SELECT date_col from test_tbl WHERE $filter"),
+        sql("SELECT date('2025-01-15')"))
+      assert(scanFilesCount(filter) == 4)
+    }
+  }
+
+  test("V2Filter: Hour, Minute and Second") {
+    if (gteqSpark3_4) {
+      withTable("extract_tbl", "extract_ltz_tbl") {
+        sql("CREATE TABLE extract_tbl (ts_col TIMESTAMP_NTZ) USING paimon")
+        sql("INSERT INTO extract_tbl VALUES (timestamp_ntz'2025-01-15 01:02:03')")
+        sql("INSERT INTO extract_tbl VALUES (timestamp_ntz'2025-01-16 04:05:06')")
+
+        val ntzRowType = loadTable("extract_tbl").rowType()
+        val ntzBuilder = new PredicateBuilder(ntzRowType)
+        val ntzConverter = SparkV2FilterConverter(ntzRowType)
+        val tsFieldRef = new FieldRef(0, "ts_col", ntzRowType.getTypeAt(0))
+
+        var filter = "hour(ts_col) = 1"
+        var actual = ntzConverter.convert(v2Filter(filter, "extract_tbl")).get
+        assert(actual.equals(ntzBuilder.equal(new HourTransform(tsFieldRef), 1)))
+        checkAnswer(
+          sql(s"SELECT ts_col from extract_tbl WHERE $filter"),
+          sql("SELECT timestamp_ntz'2025-01-15 01:02:03'"))
+        assert(scanFilesCount(filter, "extract_tbl") == 2)
+
+        filter = "minute(ts_col) = 2"
+        actual = ntzConverter.convert(v2Filter(filter, "extract_tbl")).get
+        assert(actual.equals(ntzBuilder.equal(new MinuteTransform(tsFieldRef), 2)))
+        checkAnswer(
+          sql(s"SELECT ts_col from extract_tbl WHERE $filter"),
+          sql("SELECT timestamp_ntz'2025-01-15 01:02:03'"))
+        assert(scanFilesCount(filter, "extract_tbl") == 2)
+
+        filter = "second(ts_col) = 3"
+        actual = ntzConverter.convert(v2Filter(filter, "extract_tbl")).get
+        assert(actual.equals(ntzBuilder.equal(new SecondTransform(tsFieldRef), 3)))
+        checkAnswer(
+          sql(s"SELECT ts_col from extract_tbl WHERE $filter"),
+          sql("SELECT timestamp_ntz'2025-01-15 01:02:03'"))
+        assert(scanFilesCount(filter, "extract_tbl") == 2)
+
+        // Spark TIMESTAMP maps to a Paimon local-time-zone timestamp by default, which the
+        // date/time extract transforms do not support, so the conversion degrades.
+        sql("CREATE TABLE extract_ltz_tbl (ts_col TIMESTAMP) USING paimon")
+        val ltzRowType = loadTable("extract_ltz_tbl").rowType()
+        val ltzConverter = SparkV2FilterConverter(ltzRowType)
+        assert(ltzConverter.convert(v2Filter("hour(ts_col) = 1", "extract_ltz_tbl")).isEmpty)
+      }
+    }
+  }
+
+  test("V2Filter: remaining date fields") {
+    if (gteqSpark3_4) {
+      val dateFieldRef = new FieldRef(9, "date_col", rowType.getTypeAt(9))
+      val specs: Seq[(String, Transform, Object, Int)] = Seq(
+        ("quarter(date_col) = 1", new QuarterTransform(dateFieldRef), Int.box(1), 4),
+        ("dayofweek(date_col) = 4", new DayOfWeekTransform(dateFieldRef), Int.box(4), 1),
+        ("weekday(date_col) = 2", new WeekdayTransform(dateFieldRef), Int.box(2), 1),
+        ("dayofyear(date_col) = 15", new DayOfYearTransform(dateFieldRef), Int.box(15), 1),
+        ("weekofyear(date_col) = 3", new WeekTransform(dateFieldRef), Int.box(3), 4),
+        (
+          "extract(YEAROFWEEK FROM date_col) = 2025",
+          new YearOfWeekTransform(dateFieldRef),
+          Int.box(2025),
+          4)
+      )
+      specs.foreach {
+        case (filter, transform, expectedValue, expectedCount) =>
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          assert(sql(s"SELECT date_col FROM test_tbl WHERE $filter").count() == expectedCount)
+      }
+    }
+  }
+
+  test("V2Filter: date scalar expressions") {
+    if (gteqSpark3_4) {
+      val dateFieldRef = new FieldRef(9, "date_col", rowType.getTypeAt(9))
+      val specs: Seq[(String, Transform, Object, String)] = Seq(
+        (
+          "date_add(date_col, 1) = date('2025-01-16')",
+          new DateAddTransform(List[Object](dateFieldRef, Int.box(1)).asJava),
+          Int.box(LocalDate.parse("2025-01-16").toEpochDay.toInt),
+          "SELECT date('2025-01-15')"),
+        (
+          "datediff(date_col, date('2025-01-01')) = 14",
+          new DateDiffTransform(
+            List[Object](
+              dateFieldRef,
+              Int.box(LocalDate.parse("2025-01-01").toEpochDay.toInt)).asJava),
+          Int.box(14),
+          "SELECT date('2025-01-15')"),
+        (
+          "trunc(date_col, 'MONTH') = date('2025-01-01')",
+          new DateTruncTransform(
+            List[Object](dateFieldRef, BinaryString.fromString("MONTH")).asJava),
+          Int.box(LocalDate.parse("2025-01-01").toEpochDay.toInt),
+          "SELECT date_col FROM test_tbl ORDER BY date_col")
+      )
+      specs.foreach {
+        case (filter, transform, expectedValue, expectedSql) =>
+          assert(
+            converter.convert(v2Filter(filter)).contains(builder.equal(transform, expectedValue)),
+            filter)
+          checkAnswer(
+            sql(s"SELECT date_col FROM test_tbl WHERE $filter ORDER BY date_col"),
+            sql(expectedSql))
+      }
+    }
+  }
+
   test("V2Filter: StartWith") {
     val filter = "string_col LIKE 'h%'"
     val actual = converter.convert(v2Filter(filter)).get
@@ -410,6 +669,29 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
       Seq(Row("hello")))
     // Contains does not have file skipping effect now.
     assert(scanFilesCount(filter) == 4)
+  }
+
+  test("V2Filter: Not string predicates") {
+    Seq(
+      (
+        "string_col NOT LIKE 'h%'",
+        builder.startsWith(0, BinaryString.fromString("h")).negate().get(),
+        Seq(Row("paimon"), Row("world"))),
+      (
+        "string_col NOT LIKE '%d'",
+        builder.endsWith(0, BinaryString.fromString("d")).negate().get(),
+        Seq(Row("hello"), Row("hi"), Row("paimon"))),
+      (
+        "string_col NOT LIKE '%orl%'",
+        builder.contains(0, BinaryString.fromString("orl")).negate().get(),
+        Seq(Row("hello"), Row("hi"), Row("paimon")))
+    ).foreach {
+      case (filter, expectedPredicate, expectedRows) =>
+        assert(converter.convert(v2Filter(filter)).contains(expectedPredicate))
+        checkAnswer(
+          sql(s"SELECT string_col from test_tbl WHERE $filter ORDER BY string_col"),
+          expectedRows)
+    }
   }
 
   private def paimonAlwaysTrue: org.apache.paimon.predicate.Predicate =
@@ -562,6 +844,63 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     val filesScanned = scanFilesWithPredicate(paimonPredicate)
     // All 4 files should be scanned because AlwaysTrue in OR matches everything
     assert(filesScanned == 4, s"Expected 4 files but scanned $filesScanned files")
+  }
+
+  test("V2Filter: nested field") {
+    withTable("nested_tbl") {
+      sql("""
+            |CREATE TABLE nested_tbl (
+            | id INT,
+            | info STRUCT<uid: INT, addr: STRUCT<city: STRING, zip: STRING>>
+            |) USING paimon
+            |""".stripMargin)
+      sql("INSERT INTO nested_tbl VALUES (1, struct(10, struct('Beijing', '100080')))")
+      sql("INSERT INTO nested_tbl VALUES (2, struct(20, struct('Shanghai', '200000')))")
+
+      val nestedConverter = SparkV2FilterConverter(loadTable("nested_tbl").rowType())
+
+      Seq("info.uid = 10" -> "info.uid", "info.addr.city = 'Beijing'" -> "info.addr.city")
+        .foreach {
+          case (filter, expectedName) =>
+            val predicate =
+              nestedConverter
+                .convert(v2Filter(filter, "nested_tbl"))
+                .get
+                .asInstanceOf[LeafPredicate]
+            val transform = predicate.transform().asInstanceOf[NestedFieldTransform]
+            assert(transform.fieldName() == expectedName)
+            // no FieldRef is handed out, so nothing mistakes this for a top-level column
+            assert(!predicate.fieldRefOptional().isPresent)
+            // the enclosing column is what field-name based rewrites see
+            assert(predicate.fieldNames().asScala == Seq("info"))
+
+            checkAnswer(sql(s"SELECT id FROM nested_tbl WHERE $filter"), Seq(Row(1)))
+            assert(
+              getPaimonScan(s"SELECT * FROM nested_tbl WHERE $filter").pushedDataFilters
+                .exists(_.toString.contains(expectedName)))
+        }
+
+      // a nested field still reads correctly alongside a projection of a sibling field
+      checkAnswer(
+        sql("SELECT info.addr.zip FROM nested_tbl WHERE info.addr.city = 'Shanghai'"),
+        Seq(Row("200000")))
+    }
+  }
+
+  test("V2Filter: a top-level column whose name contains a dot") {
+    withTable("dotted_tbl") {
+      sql("CREATE TABLE dotted_tbl (id INT, `a.b` STRING) USING paimon")
+
+      val dottedConverter = SparkV2FilterConverter(loadTable("dotted_tbl").rowType())
+      val predicate = dottedConverter
+        .convert(v2Filter("`a.b` = 'x'", "dotted_tbl"))
+        .get
+        .asInstanceOf[LeafPredicate]
+
+      // resolves as the flat column it is, not as a path into a struct named "a"
+      assert(predicate.transform().isInstanceOf[FieldTransform])
+      assert(predicate.fieldNames().asScala == Seq("a.b"))
+    }
   }
 
   private def v2Filter(str: String, tableName: String = "test_tbl"): SparkPredicate = {

@@ -120,7 +120,8 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
-        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+        return createDataReader(
+                queryAuthContext.split(), queryAuthContext.authResult(), executeFilter);
     }
 
     protected final QueryAuthContext unwrapQueryAuthSplit(Split split) {
@@ -132,8 +133,9 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     protected final RecordReader<InternalRow> createDataReader(
-            Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
-        if (authResult == null && !(executeFilter && predicate != null)) {
+            Split split, @Nullable TableQueryAuthResult authResult, boolean filterOnRead)
+            throws IOException {
+        if (authResult == null && !(filterOnRead && predicate != null)) {
             // Restore an explicit projection after a previous split needed authorization columns.
             // Without a projection, preserve the underlying reader's default read type.
             if (readType != null) {
@@ -146,7 +148,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
                         schema.logicalRowType(),
                         currentReadType(),
                         predicate,
-                        executeFilter,
+                        filterOnRead,
                         authResult,
                         resolvedBlobViewFields);
         if (readType != null || !transform.readType().equals(currentReadType())) {

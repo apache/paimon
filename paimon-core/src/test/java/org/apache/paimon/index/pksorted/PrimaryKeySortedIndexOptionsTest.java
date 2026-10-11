@@ -81,6 +81,7 @@ class PrimaryKeySortedIndexOptionsTest {
     @Test
     void testResolvesBTreeIndexAndSortOptions() {
         Map<String, String> values = new HashMap<>();
+        values.put("sorted-index.records-per-file", "20");
         values.put("sorted-index.records-per-range", "10");
         values.put("write-buffer-size", "8 mb");
         values.put("page-size", "32 kb");
@@ -97,6 +98,7 @@ class PrimaryKeySortedIndexOptionsTest {
         assertThat(options.get("local-sort.max-num-file-handles")).isEqualTo("16");
         assertThat(options.get("spill-compression")).isEqualTo("lz4");
         assertThat(options.get("write-buffer-spill.max-disk-size")).isEqualTo("1 gb");
+        assertThat(options.get("sorted-index.records-per-file")).isNull();
         assertThat(options.get("sorted-index.records-per-range")).isNull();
     }
 

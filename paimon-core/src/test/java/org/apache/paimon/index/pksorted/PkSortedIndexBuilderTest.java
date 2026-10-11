@@ -142,11 +142,12 @@ class PkSortedIndexBuilderTest {
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
         try (GlobalIndexReader reader =
-                GlobalIndexer.create("multivalue", tags, options)
+                GlobalIndexer.create("multivalue", Collections.singletonList(tags), options)
                         .createReader(
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,
                                 payload.rowCount(),
+                                null,
                                 executor)) {
             FieldRef fieldRef = new FieldRef(8, "tags", tags.type());
             assertThat(reader.visitArrayContains(fieldRef, 2).join().get().results())
@@ -390,11 +391,12 @@ class PkSortedIndexBuilderTest {
                                 payload.globalIndexMeta().indexMeta()));
         ExecutorService executor = newDirectExecutorService();
         try (GlobalIndexReader reader =
-                GlobalIndexer.create(indexType, field(), options)
+                GlobalIndexer.create(indexType, Collections.singletonList(field()), options)
                         .createReader(
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,
                                 payload.rowCount(),
+                                null,
                                 executor)) {
             FieldRef fieldRef = new FieldRef(7, "indexed", DataTypes.INT());
             GlobalIndexResult result =

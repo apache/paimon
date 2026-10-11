@@ -19,6 +19,8 @@ import unittest
 from unittest import mock
 
 from pypaimon.api.client import HttpClient, _parse_error_response
+from pypaimon.api.rest_exception import (AlreadyExistsException, NoSuchResourceException,
+                                         ServiceUnavailableException)
 
 
 class HttpClientTest(unittest.TestCase):
@@ -34,6 +36,26 @@ class HttpClientTest(unittest.TestCase):
         self.assertEqual(error.code, 404)
         self.assertEqual(error.resource_type, "table")
         self.assertEqual(error.resource_name, "my_table")
+
+    def test_parse_error_response_uses_http_status_when_code_is_missing(self):
+        response_body = (
+            '{"message": "request failed", '
+            '"resourceType": "TABLE", "resourceName": "db.t"}'
+        )
+
+        for status_code in (404, 409, 503):
+            with self.subTest(status_code=status_code):
+                error = _parse_error_response(response_body, status_code)
+
+                self.assertEqual(error.message, "request failed")
+                self.assertEqual(error.code, status_code)
+                self.assertEqual(error.resource_type, "TABLE")
+                self.assertEqual(error.resource_name, "db.t")
+
+    def test_parse_error_response_preserves_explicit_zero_code(self):
+        error = _parse_error_response('{"message": "request failed", "code": 0}', 500)
+
+        self.assertEqual(error.code, 0)
 
     def test_parse_error_response_with_unparsable_json(self):
         # Test unparsable JSON with uppercase fields
@@ -58,6 +80,33 @@ class HttpClientTest(unittest.TestCase):
         self.assertEqual(error.code, 500)
         self.assertEqual(error.resource_type, '')
         self.assertEqual(error.resource_name, '')
+
+    def test_execute_request_uses_http_status_for_typed_exception(self):
+        client = HttpClient("http://localhost:8080")
+        response_body = (
+            '{"message": "request failed", '
+            '"resourceType": "TABLE", "resourceName": "db.t"}'
+        )
+        cases = (
+            (404, NoSuchResourceException),
+            (409, AlreadyExistsException),
+            (503, ServiceUnavailableException),
+        )
+
+        for status_code, exception_type in cases:
+            with self.subTest(status_code=status_code):
+                response = mock.Mock(
+                    ok=False,
+                    status_code=status_code,
+                    text=response_body,
+                    headers={},
+                    url="http://localhost:8080/test",
+                )
+                response.request.method = "GET"
+
+                with mock.patch.object(client.session, 'request', return_value=response):
+                    with self.assertRaises(exception_type):
+                        client._execute_request("GET", response.url)
 
 
 class HttpClientTimeoutTest(unittest.TestCase):

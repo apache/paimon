@@ -26,6 +26,7 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** IT Case for {@link RollbackToProcedure} and {@link RollbackToTimestampProcedure}. */
@@ -57,6 +58,79 @@ public class RollbackProcedureITCase extends CatalogITCaseBase {
         latestSnapshotId = snapshotManager.latestSnapshot().id();
         assertThat(sql("CALL sys.rollback_to(`table` => 'default.T', tag => 'tag-2')"))
                 .containsExactly(Row.of(latestSnapshotId, 2L));
+    }
+
+    @Test
+    public void testRollbackToRequiresExactlyOneOfTagAndSnapshotId() throws Exception {
+        sql(
+                "CREATE TABLE T (id STRING, name STRING,"
+                        + " PRIMARY KEY (id) NOT ENFORCED)"
+                        + " WITH ('bucket'='1', 'write-only'='true')");
+
+        FileStoreTable table = paimonTable("T");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        for (int i = 1; i <= 3; i++) {
+            sql("INSERT INTO T VALUES ('" + i + "', '" + i + "')");
+        }
+        assertEquals(3, snapshotManager.latestSnapshotId());
+        sql("CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot_id => 1)");
+
+        // neither tag nor snapshot_id
+        assertThatThrownBy(() -> sql("CALL sys.rollback_to(`table` => 'default.T')"))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Must specify exactly one of tag and snapshot_id.");
+
+        // both tag and snapshot_id
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.rollback_to(`table` => 'default.T', tag => 'tag-1', snapshot_id => 2)"))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Must specify exactly one of tag and snapshot_id.");
+
+        // nothing was rolled back
+        assertEquals(3, snapshotManager.latestSnapshotId());
+    }
+
+    @Test
+    public void testRollbackToTreatsBlankTagAsMissing() throws Exception {
+        sql(
+                "CREATE TABLE T (id STRING, name STRING,"
+                        + " PRIMARY KEY (id) NOT ENFORCED)"
+                        + " WITH ('bucket'='1', 'write-only'='true')");
+
+        FileStoreTable table = paimonTable("T");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        for (int i = 1; i <= 3; i++) {
+            sql("INSERT INTO T VALUES ('" + i + "', '" + i + "')");
+        }
+        assertEquals(3, snapshotManager.latestSnapshotId());
+
+        // a whitespace-only tag alone: neither argument is usable
+        assertThatThrownBy(() -> sql("CALL sys.rollback_to(`table` => 'default.T', tag => '   ')"))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Must specify exactly one of tag and snapshot_id.");
+        assertEquals(3, snapshotManager.latestSnapshotId());
+
+        // explicit NULLs for both arguments behave like omitting them
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.rollback_to(`table` => 'default.T', tag => CAST(NULL AS STRING), snapshot_id => CAST(NULL AS BIGINT))"))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Must specify exactly one of tag and snapshot_id.");
+        assertEquals(3, snapshotManager.latestSnapshotId());
+
+        // an empty tag next to a snapshot_id keeps the old behaviour: the snapshot wins
+        assertThat(sql("CALL sys.rollback_to(`table` => 'default.T', tag => '', snapshot_id => 2)"))
+                .containsExactly(Row.of(3L, 2L));
+        assertEquals(2, snapshotManager.latestSnapshotId());
     }
 
     @Test

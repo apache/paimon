@@ -81,8 +81,7 @@ public class DataEvolutionDeleteSink implements Serializable {
                         : (FileStoreTable)
                                 table.copy(
                                         Collections.singletonMap(
-                                                CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT
-                                                        .key(),
+                                                CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
                                                 String.valueOf(baseSnapshotId)));
         this.baseSnapshotId = baseSnapshotId;
         this.sinkParallelism = sinkParallelism;
@@ -130,8 +129,7 @@ public class DataEvolutionDeleteSink implements Serializable {
                                 new StoreCommitter(
                                         table,
                                         table.newCommit(context.commitUser())
-                                                .withOperation(Snapshot.Operation.DELETE)
-                                                .rowIdCheckConflict(baseSnapshotId),
+                                                .withOperation(Snapshot.Operation.DELETE),
                                         context),
                         new NoopCommittableStateManager());
 

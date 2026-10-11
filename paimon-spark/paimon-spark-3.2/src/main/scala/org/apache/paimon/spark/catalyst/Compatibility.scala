@@ -19,7 +19,8 @@
 package org.apache.paimon.spark.catalyst
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Cast, Expression}
+import org.apache.spark.sql.catalyst.analysis.TableOutputResolver
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Cast, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, V2WriteCommand}
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.execution.ui.SQLPlanMetric
@@ -27,6 +28,26 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.DataType
 
 object Compatibility {
+
+  def resolveTableOutputColumns(
+      tableName: String,
+      expected: Seq[Attribute],
+      query: LogicalPlan,
+      byName: Boolean,
+      conf: SQLConf): LogicalPlan = {
+    // SPARK-38228 fixed this separation in 3.3: LEGACY assignment must use non-ANSI casts even
+    // when ANSI expression evaluation is enabled. Scope the override to this resolution only.
+    val assignmentConf = if (conf.storeAssignmentPolicy == SQLConf.StoreAssignmentPolicy.LEGACY) {
+      val legacyConf = conf.clone()
+      legacyConf.setConf(SQLConf.ANSI_ENABLED, false)
+      legacyConf
+    } else {
+      conf
+    }
+    SQLConf.withExistingConf(assignmentConf) {
+      TableOutputResolver.resolveOutputColumns(tableName, expected, query, byName, assignmentConf)
+    }
+  }
 
   def withNewQuery(o: V2WriteCommand, query: LogicalPlan): V2WriteCommand = {
     o.withNewQuery(query)

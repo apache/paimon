@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex.bitmapindex;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
@@ -32,6 +33,8 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.StringUtils;
@@ -44,6 +47,8 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.util.Arrays;
 import java.util.function.Consumer;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** test for {@link BitmapFileIndex}. */
 public class BitmapFileIndexTest {
@@ -182,6 +187,70 @@ public class BitmapFileIndexTest {
         assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(1));
+    }
+
+    @Test
+    public void testSubMicrosecondTimestampIndexAnswersNoValuePredicate() throws Exception {
+        // The value mapper stores micros, so these two rows share one bitmap key.
+        Timestamp second = Timestamp.fromEpochMillis(1000, 0);
+        Timestamp secondAndHalfMicro = Timestamp.fromEpochMillis(1000, 500);
+        Object[] dataColumn = {second, secondAndHalfMicro, null};
+
+        for (DataType nanos :
+                new DataType[] {new TimestampType(9), new LocalZonedTimestampType(9)}) {
+            FieldRef fieldRef = new FieldRef(0, "", nanos);
+            FileIndexReader reader =
+                    createTestReaderOnWriter(
+                            BitmapFileIndex.VERSION_2,
+                            null,
+                            nanos,
+                            writer -> {
+                                for (Object o : dataColumn) {
+                                    writer.write(o);
+                                }
+                            });
+
+            // Answering these from the index would select row 1 for the = and drop it from the
+            // <>, since the bitmap is the exact row set the scan reads.
+            assertThat(reader.visitEqual(fieldRef, second)).isSameAs(FileIndexResult.REMAIN);
+            assertThat(reader.visitNotEqual(fieldRef, second)).isSameAs(FileIndexResult.REMAIN);
+            assertThat(reader.visitIn(fieldRef, Arrays.asList(second, secondAndHalfMicro)))
+                    .isSameAs(FileIndexResult.REMAIN);
+            assertThat(reader.visitNotIn(fieldRef, Arrays.asList(second)))
+                    .isSameAs(FileIndexResult.REMAIN);
+
+            // Null-ness does not depend on the truncated digits, so it still prunes.
+            assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
+                    .isEqualTo(RoaringBitmap32.bitmapOf(2));
+            assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
+                    .isEqualTo(RoaringBitmap32.bitmapOf(0, 1));
+        }
+    }
+
+    @Test
+    public void testMicrosecondTimestampIndexStillAnswersValuePredicates() throws Exception {
+        // Precision 6 is exactly what the mapper stores, so nothing is given up there.
+        Timestamp second = Timestamp.fromEpochMillis(1000, 0);
+        Timestamp secondAndMicro = Timestamp.fromEpochMillis(1000, 1000);
+        Object[] dataColumn = {second, secondAndMicro};
+
+        TimestampType micros = new TimestampType(6);
+        FieldRef fieldRef = new FieldRef(0, "", micros);
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        BitmapFileIndex.VERSION_2,
+                        null,
+                        micros,
+                        writer -> {
+                            for (Object o : dataColumn) {
+                                writer.write(o);
+                            }
+                        });
+
+        assertThat(((BitmapIndexResult) reader.visitEqual(fieldRef, second)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0));
+        assertThat(((BitmapIndexResult) reader.visitNotEqual(fieldRef, second)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(1));
     }
 
     private void testStringType(int version) throws Exception {

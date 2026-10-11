@@ -478,6 +478,109 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
+    public void testMergeMapTypesWithDifferentKeyTypes() {
+        AtomicInteger highestFieldId = new AtomicInteger(1);
+
+        // widening a map key must be rejected at merge time: the read layer cannot cast map
+        // keys (SchemaEvolutionUtil.createMapCastExecutor requires equal key types), so a
+        // widened key would make every pre-change file unreadable
+        DataType source = new MapType(new IntType(), new VarCharType(VarCharType.MAX_LENGTH));
+        DataType widenedKey =
+                new MapType(new BigIntType(), new VarCharType(VarCharType.MAX_LENGTH));
+        assertThatThrownBy(
+                        () ->
+                                SchemaMergingUtils.merge(
+                                        source, widenedKey, highestFieldId, true, false, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("different key types");
+
+        // same rejection when explicit casts are allowed: no cast can make old keys readable
+        assertThatThrownBy(
+                        () ->
+                                SchemaMergingUtils.merge(
+                                        source, widenedKey, highestFieldId, true, true, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("different key types");
+
+        // without type widening the key change is rejected too: the old behavior silently
+        // kept the base key type, deferring the same crash to the write-alignment/read layer
+        assertThatThrownBy(
+                        () ->
+                                SchemaMergingUtils.merge(
+                                        source, widenedKey, highestFieldId, false, false, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("different key types");
+
+        // a nullable map with equal keys still merges normally: nullability flows, the value
+        // widens, and the key check does not reject same-key merges
+        MapType nonNullableSource = new MapType(false, new IntType(), new IntType());
+        MapType nullableSameKey = new MapType(true, new IntType(), new BigIntType());
+        MapType merged =
+                (MapType)
+                        SchemaMergingUtils.merge(
+                                nonNullableSource,
+                                nullableSameKey,
+                                highestFieldId,
+                                true,
+                                false,
+                                true);
+        assertThat(merged.isNullable()).isFalse();
+        assertThat(merged.getKeyType() instanceof IntType).isTrue();
+        assertThat(merged.getValueType() instanceof BigIntType).isTrue();
+    }
+
+    @Test
+    public void testMergeMapKeysDifferingOnlyInNullabilityStillMerges() {
+        AtomicInteger highestFieldId = new AtomicInteger(1);
+
+        // a key that changes only nullability is not a key type change: merge ignores
+        // nullability and the read layer sees identical keys. Spark forces map keys to
+        // NOT NULL while core/Flink default to nullable, so this must stay a benign merge.
+        MapType nullableKey = new MapType(new IntType(), new IntType());
+        MapType nonNullKey = new MapType(new IntType(false), new BigIntType());
+        MapType merged =
+                (MapType)
+                        SchemaMergingUtils.merge(
+                                nullableKey, nonNullKey, highestFieldId, true, false, true);
+        // the base key's nullability flows to the result, so pre-change files stay readable
+        assertThat(merged.getKeyType() instanceof IntType).isTrue();
+        assertThat(merged.getKeyType().isNullable()).isTrue();
+        assertThat(merged.getValueType() instanceof BigIntType).isTrue();
+    }
+
+    @Test
+    public void testMergeMapKeyChangeNestedInRowIsRejected() {
+        AtomicInteger highestFieldId = new AtomicInteger(1);
+
+        // the guard must fire on the recursive path too: a map key change nested inside a
+        // row (how a real column evolves) is rejected the same as a top-level map
+        RowType base =
+                new RowType(
+                        Lists.newArrayList(
+                                new DataField(
+                                        0,
+                                        "m",
+                                        new MapType(
+                                                new IntType(),
+                                                new VarCharType(VarCharType.MAX_LENGTH)))));
+        RowType widenedKey =
+                new RowType(
+                        Lists.newArrayList(
+                                new DataField(
+                                        0,
+                                        "m",
+                                        new MapType(
+                                                new BigIntType(),
+                                                new VarCharType(VarCharType.MAX_LENGTH)))));
+        assertThatThrownBy(
+                        () ->
+                                SchemaMergingUtils.merge(
+                                        base, widenedKey, highestFieldId, true, false, true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("different key types");
+    }
+
+    @Test
     public void testMergeMultisetTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 

@@ -53,7 +53,6 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 
@@ -1145,23 +1144,78 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testSplitMapEntriesWithQuotes() {
-        String content = "1, \"abc\"";
-        List<String> result = StringToMapCastRule.INSTANCE.splitMapEntries(content);
-        assertThat(result).containsExactly("1", "abc");
+    public void testStringToMapQuotingAndEscaping() {
+        CastExecutor<?, ?> cast =
+                CastExecutors.resolve(
+                        VarCharType.STRING_TYPE,
+                        new MapType(DataTypes.STRING(), DataTypes.STRING()));
+
+        // quoting is how an empty key or value is written
+        Map<Object, Object> emptyKey = new HashMap<>();
+        emptyKey.put(BinaryString.fromString(""), BinaryString.fromString("a"));
+        compareCastResult(cast, BinaryString.fromString("{\"\" -> a}"), new GenericMap(emptyKey));
+        Map<Object, Object> emptyValue = new HashMap<>();
+        emptyValue.put(BinaryString.fromString("k"), BinaryString.fromString(""));
+        compareCastResult(cast, BinaryString.fromString("{k -> \"\"}"), new GenericMap(emptyValue));
+
+        // an unquoted null is SQL NULL; a quoted one is the four-character string
+        Map<Object, Object> quotedNullValue = new HashMap<>();
+        quotedNullValue.put(BinaryString.fromString("k"), BinaryString.fromString("null"));
+        compareCastResult(
+                cast, BinaryString.fromString("{k -> \"null\"}"), new GenericMap(quotedNullValue));
+        Map<Object, Object> sqlNullValue = new HashMap<>();
+        sqlNullValue.put(BinaryString.fromString("k"), null);
+        compareCastResult(
+                cast, BinaryString.fromString("{k -> null}"), new GenericMap(sqlNullValue));
+        Map<Object, Object> quotedNullKey = new HashMap<>();
+        quotedNullKey.put(BinaryString.fromString("null"), BinaryString.fromString("a"));
+        compareCastResult(
+                cast, BinaryString.fromString("{\"null\" -> a}"), new GenericMap(quotedNullKey));
+        Map<Object, Object> sqlNullKey = new HashMap<>();
+        sqlNullKey.put(null, BinaryString.fromString("a"));
+        compareCastResult(cast, BinaryString.fromString("{null -> a}"), new GenericMap(sqlNullKey));
+
+        // escaping, like quoting, writes the four-character string rather than SQL NULL
+        Map<Object, Object> escapedNullValue = new HashMap<>();
+        escapedNullValue.put(BinaryString.fromString("k"), BinaryString.fromString("null"));
+        compareCastResult(
+                cast, BinaryString.fromString("{k -> \\null}"), new GenericMap(escapedNullValue));
+
+        // quotes group a token across the arrow and the entry separator
+        Map<Object, Object> quotedArrow = new HashMap<>();
+        quotedArrow.put(BinaryString.fromString("a->b"), BinaryString.fromString("c"));
+        compareCastResult(
+                cast, BinaryString.fromString("{\"a->b\" -> c}"), new GenericMap(quotedArrow));
+        Map<Object, Object> quotedComma = new HashMap<>();
+        quotedComma.put(BinaryString.fromString("a,b"), BinaryString.fromString("c"));
+        compareCastResult(
+                cast, BinaryString.fromString("{\"a,b\" -> c}"), new GenericMap(quotedComma));
     }
 
     @Test
-    public void testSplitMapEntriesWithEscapes() {
-        // the escaped separator must survive as a literal instead of vanishing
-        assertThat(StringToMapCastRule.INSTANCE.splitMapEntries("a\\,b, c"))
-                .containsExactly("a,b", "c");
-        // an escaped backslash yields one literal backslash
-        assertThat(StringToMapCastRule.INSTANCE.splitMapEntries("x\\\\y, z"))
-                .containsExactly("x\\y", "z");
-        // an escaped quote is a literal and does not toggle quote state
-        assertThat(StringToMapCastRule.INSTANCE.splitMapEntries("\"q\\\"z, w\""))
-                .containsExactly("q\"z, w");
+    public void testStringToMapFunctionQuoting() {
+        CastExecutor<?, ?> cast =
+                CastExecutors.resolve(
+                        VarCharType.STRING_TYPE,
+                        new MapType(DataTypes.STRING(), DataTypes.STRING()));
+
+        Map<Object, Object> emptyKey = new HashMap<>();
+        emptyKey.put(BinaryString.fromString(""), BinaryString.fromString("a"));
+        compareCastResult(cast, BinaryString.fromString("MAP(\"\", a)"), new GenericMap(emptyKey));
+
+        Map<Object, Object> emptyValue = new HashMap<>();
+        emptyValue.put(BinaryString.fromString("k"), BinaryString.fromString(""));
+        compareCastResult(
+                cast, BinaryString.fromString("MAP(k, \"\")"), new GenericMap(emptyValue));
+
+        Map<Object, Object> quotedNullValue = new HashMap<>();
+        quotedNullValue.put(BinaryString.fromString("k"), BinaryString.fromString("null"));
+        compareCastResult(
+                cast, BinaryString.fromString("MAP(k, \"null\")"), new GenericMap(quotedNullValue));
+        Map<Object, Object> quotedNullKey = new HashMap<>();
+        quotedNullKey.put(BinaryString.fromString("null"), BinaryString.fromString("a"));
+        compareCastResult(
+                cast, BinaryString.fromString("MAP(\"null\", a)"), new GenericMap(quotedNullKey));
     }
 
     @Test
@@ -1174,6 +1228,15 @@ public class CastExecutorTest {
                         new MapType(DataTypes.STRING(), DataTypes.STRING())),
                 BinaryString.fromString("{a\\,b -> v\\\\1}"),
                 new GenericMap(expected));
+
+        Map<Object, Object> escapedQuote = new HashMap<>();
+        escapedQuote.put(BinaryString.fromString("q\"z, w"), BinaryString.fromString("v"));
+        compareCastResult(
+                CastExecutors.resolve(
+                        VarCharType.STRING_TYPE,
+                        new MapType(DataTypes.STRING(), DataTypes.STRING())),
+                BinaryString.fromString("{\"q\\\"z, w\" -> v}"),
+                new GenericMap(escapedQuote));
     }
 
     @SuppressWarnings("rawtypes")

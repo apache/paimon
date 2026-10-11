@@ -620,6 +620,8 @@ create a table with the desired definition and migrate the data.
 - FAST is the default search mode and excludes uncovered files from primary-key Vector and Full
   Text results. Vector supports exact fallback for uncovered files in FULL and DETAIL modes;
   primary-key Full Text supports only FAST until compaction creates persistent archives.
-- Full Text routes support partition pruning but not arbitrary row predicates before Top-K.
+- Primary-key Full Text routes support partition pruning but not arbitrary row predicates
+  before Top-K. Row filters on full-text search are supported for Data Evolution tables only; see
+  [Row Filters](../multimodal-table/global-index/full-text#row-filters).
 - Hybrid search cannot mix source-backed physical routes with global row-ID routes.
 - Online replacement between two definitions on the same column is not supported.

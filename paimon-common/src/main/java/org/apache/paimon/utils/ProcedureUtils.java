@@ -95,4 +95,33 @@ public class ProcedureUtils {
         }
         return builder;
     }
+
+    public static ExpireConfig.Builder fillInChangelogOptions(
+            CoreOptions tableOptions,
+            Integer retainMax,
+            Integer retainMin,
+            String olderThanStr,
+            Integer maxDeletes) {
+
+        ExpireConfig.Builder builder = ExpireConfig.builder();
+        builder.snapshotRetainMax(tableOptions.snapshotNumRetainMax())
+                .snapshotRetainMin(tableOptions.snapshotNumRetainMin())
+                .snapshotTimeRetain(tableOptions.snapshotTimeRetain())
+                .snapshotMaxDeletes(tableOptions.snapshotExpireLimit())
+                .changelogRetainMax(
+                        Optional.ofNullable(retainMax).orElse(tableOptions.changelogNumRetainMax()))
+                .changelogRetainMin(
+                        Optional.ofNullable(retainMin).orElse(tableOptions.changelogNumRetainMin()))
+                .changelogMaxDeletes(
+                        Optional.ofNullable(maxDeletes).orElse(tableOptions.snapshotExpireLimit()))
+                .changelogTimeRetain(tableOptions.changelogTimeRetain());
+        if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
+            long olderThanMills =
+                    DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())
+                            .getMillisecond();
+            builder.changelogTimeRetain(
+                    Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
+        }
+        return builder;
+    }
 }

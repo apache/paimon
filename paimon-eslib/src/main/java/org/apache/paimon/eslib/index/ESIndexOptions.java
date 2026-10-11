@@ -159,6 +159,21 @@ public class ESIndexOptions {
         return fieldConfigs.get(fieldName);
     }
 
+    /**
+     * Resolves the vector metric configured for {@code field} in Paimon's exact-search vocabulary,
+     * or {@code null} when the field is not indexed as a vector. Unlike the constructor, this does
+     * not require the options to fully describe a build (for example an ARRAY&lt;FLOAT&gt;
+     * dimension), so it is usable when the options only need to describe reads.
+     */
+    static String configuredVectorMetric(DataField field, Options options) {
+        String explicitType = resolve(options, field.name(), "type", null);
+        boolean vector =
+                explicitType == null
+                        ? isVectorType(field.type())
+                        : "vector".equalsIgnoreCase(explicitType);
+        return vector ? toPaimonVectorMetric(resolveVectorMetric(field.name(), options)) : null;
+    }
+
     /** Maps an ESLib/Lucene vector metric name to Paimon's exact-search metric vocabulary. */
     static String toPaimonVectorMetric(String metric) {
         String normalized = metric == null ? "l2" : metric.toLowerCase(Locale.ROOT);
@@ -345,7 +360,7 @@ public class ESIndexOptions {
                             + MAX_VECTOR_DIMENSION
                             + ".");
         }
-        String metric = validateMetric(fieldName, resolve(options, fieldName, "metric", "cosine"));
+        String metric = resolveVectorMetric(fieldName, options);
 
         Map<String, String> params = new LinkedHashMap<>();
         // Table-level algorithm parameters are defaults only for fields using that algorithm. A
@@ -527,6 +542,10 @@ public class ESIndexOptions {
                     "Invalid " + key + " for vector field '" + fieldName + "': must be positive.");
         }
         return value;
+    }
+
+    private static String resolveVectorMetric(String fieldName, Options options) {
+        return validateMetric(fieldName, resolve(options, fieldName, "metric", "cosine"));
     }
 
     private static String validateMetric(String fieldName, String metric) {

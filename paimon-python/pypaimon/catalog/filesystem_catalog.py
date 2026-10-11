@@ -17,7 +17,7 @@
 
 from typing import Dict, List, Optional, Union
 
-from pypaimon.api.api_response import GetTagResponse, PagedList
+from pypaimon.api.api_response import GetTagResponse, PagedList, Partition
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -35,30 +35,39 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.time_utils import (duration_to_iso8601,
                                         local_datetime_to_system_zone_millis)
 from pypaimon.filesystem.caching_file_io import CachingFileIO
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
 
 
 class FileSystemCatalog(Catalog):
-    def __init__(self, catalog_options: Options):
+    def __init__(self, catalog_options: Options,
+                 catalog_context: Optional[CatalogContext] = None):
         if not catalog_options.contains(CatalogOptions.WAREHOUSE):
             raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE.key()}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
-        self.catalog_context = CatalogContext.create_from_options(catalog_options)
+        self.catalog_context = (
+            catalog_context
+            if catalog_context is not None
+            else CatalogContext.create_from_options(catalog_options)
+        )
         self._cache_manager = CachingFileIO.create_cache_manager(self.catalog_options)
         self.file_io = CachingFileIO.wrap_with_caching_if_needed(
             FileIO.get(self.warehouse, self.catalog_options), self.catalog_options,
             self._cache_manager)
 
-    def list_databases(self) -> list:
+    def list_databases(self) -> List[str]:
         statuses = self.file_io.list_status(self.warehouse)
         database_names = []
         for status in statuses:
@@ -75,7 +84,8 @@ class FileSystemCatalog(Catalog):
         else:
             raise DatabaseNotExistException(name)
 
-    def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
+    def create_database(self, name: str, ignore_if_exists: bool,
+                        properties: Optional[Dict[str, str]] = None) -> None:
         try:
             self.get_database(name)
             if not ignore_if_exists:
@@ -86,7 +96,7 @@ class FileSystemCatalog(Catalog):
             path = self.get_database_path(name)
             self.file_io.mkdirs(path)
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
         try:
             self.get_database(name)
         except DatabaseNotExistException:
@@ -105,14 +115,16 @@ class FileSystemCatalog(Catalog):
         remaining_tables = self.list_tables(name)
         if remaining_tables:
             if cascade:
-                raise OSError(f"Database {name} changed during drop; remaining tables: "
-                              f"{remaining_tables}")
-            raise ValueError(f"Database {name} is not empty. "
-                             "Use cascade=True to drop all tables first.")
+                raise OSError(f"Database {name} changed during drop; "
+                              f"remaining tables: {remaining_tables}")
+            raise ValueError(
+                f"Database {name} is not empty. "
+                f"Use cascade=True to drop all tables first."
+            )
 
-        self.file_io.delete(db_path, False)
+        self.file_io.delete(db_path, True)
 
-    def list_tables(self, database_name: str) -> list:
+    def list_tables(self, database_name: str) -> List[str]:
         try:
             self.get_database(database_name)
         except DatabaseNotExistException:
@@ -170,8 +182,9 @@ class FileSystemCatalog(Catalog):
             raise TableNotExistException(identifier)
         return sys_table
 
-    def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
-        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
+    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
+        auto_create = schema.options.get(CoreOptions.AUTO_CREATE.key()) if schema.options else None
+        if auto_create is not None and OptionsUtils.convert_to_boolean(auto_create):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 
         if not isinstance(identifier, Identifier):
@@ -189,7 +202,7 @@ class FileSystemCatalog(Catalog):
             schema_manager = SchemaManager(self.file_io, table_path)
             schema_manager.create_table(schema)
 
-    def get_table_schema(self, identifier: Identifier):
+    def get_table_schema(self, identifier: Identifier) -> TableSchema:
         table_path = self.get_table_path(identifier)
         table_schema = SchemaManager(
             self.file_io,
@@ -213,7 +226,7 @@ class FileSystemCatalog(Catalog):
         identifier: Union[str, Identifier],
         changes: List[SchemaChange],
         ignore_if_not_exists: bool = False
-    ):
+    ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
@@ -234,7 +247,8 @@ class FileSystemCatalog(Catalog):
         except Exception as e:
             raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
 
-    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+    def rename_table(self, source_identifier: Union[str, Identifier],
+                     target_identifier: Union[str, Identifier]) -> None:
         if not isinstance(source_identifier, Identifier):
             source_identifier = Identifier.from_string(source_identifier)
         if not isinstance(target_identifier, Identifier):
@@ -260,7 +274,7 @@ class FileSystemCatalog(Catalog):
         target_path = self.get_table_path(target_identifier)
         self.file_io.rename(source_path, target_path)
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
 
@@ -286,7 +300,7 @@ class FileSystemCatalog(Catalog):
     ) -> bool:
         raise NotImplementedError("This catalog does not support commit catalog")
 
-    def load_snapshot(self, identifier: Identifier):
+    def load_snapshot(self, identifier: Identifier) -> Optional[TableSnapshot]:
         raise NotImplementedError("Filesystem catalog does not support load_snapshot")
 
     def list_partitions_paged(
@@ -295,97 +309,15 @@ class FileSystemCatalog(Catalog):
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
-    ):
-        from pypaimon.api.api_response import PagedList, Partition
-        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+    ) -> PagedList[Partition]:
+        from pypaimon.catalog.catalog_utils import list_partitions_from_file_system
 
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
 
         table = self.get_table(identifier)
-        snapshot = table.snapshot_manager().get_latest_snapshot()
-        if snapshot is None:
-            return PagedList(elements=[])
-
-        # Read all manifest entries (ADD - DELETE merged)
-        manifest_list_manager = ManifestListManager(table)
-        manifest_file_manager = ManifestFileManager(table)
-        manifest_files = manifest_list_manager.read_all(snapshot)
-        entries = manifest_file_manager.read_entries_parallel(manifest_files, drop_stats=True)
-
-        # Group entries by partition spec
-        partition_map = {}  # spec_key -> aggregated stats
-        for entry in entries:
-            spec = {field.name: str(v) for field, v in
-                    zip(entry.partition.fields, entry.partition.values)}
-            spec_key = tuple(sorted(spec.items()))
-
-            if spec_key not in partition_map:
-                partition_map[spec_key] = {
-                    'spec': spec,
-                    'record_count': 0,
-                    'file_size_in_bytes': 0,
-                    'file_count': 0,
-                    'last_file_creation_time': 0,
-                    'buckets': set(),
-                }
-            stats = partition_map[spec_key]
-            stats['record_count'] += entry.file.row_count
-            stats['file_size_in_bytes'] += entry.file.file_size
-            stats['file_count'] += 1
-            if entry.file.creation_time is not None:
-                ct = entry.file.creation_time.get_millisecond()
-                if ct > stats['last_file_creation_time']:
-                    stats['last_file_creation_time'] = ct
-            stats['buckets'].add(entry.bucket)
-
-        # Convert to Partition objects
-        partitions = []
-        for stats in partition_map.values():
-            partitions.append(Partition(
-                spec=stats['spec'],
-                record_count=stats['record_count'],
-                file_size_in_bytes=stats['file_size_in_bytes'],
-                file_count=stats['file_count'],
-                last_file_creation_time=stats['last_file_creation_time'],
-                total_buckets=len(stats['buckets']),
-            ))
-
-        # Apply pattern filter with proper regex escaping
-        if partition_name_pattern:
-            import re
-
-            # Escape special regex chars except '*', then replace '*' with '.*'
-            escaped_pattern = re.escape(partition_name_pattern).replace(r'\*', '.*')
-            regex = re.compile(escaped_pattern)
-            partitions = [
-                p for p in partitions
-                if regex.fullmatch(','.join(f'{k}={v}' for k, v in p.spec.items()))
-            ]
-
-        # Sort partitions by name (partition spec string)
-        partitions.sort(key=lambda p: ','.join(f'{k}={v}' for k, v in sorted(p.spec.items())))
-
-        # Apply pagination
-        start_index = 0
-        if page_token is not None:
-            try:
-                start_index = int(page_token)
-            except ValueError:
-                # Invalid token, start from beginning
-                start_index = 0
-
-        end_index = len(partitions)
-        if max_results is not None and max_results > 0:
-            end_index = min(start_index + max_results, len(partitions))
-
-        result_partitions = partitions[start_index:end_index]
-        next_page_token = None
-        if max_results is not None and end_index < len(partitions):
-            next_page_token = str(end_index)
-
-        return PagedList(elements=result_partitions, next_page_token=next_page_token)
+        return list_partitions_from_file_system(
+            table, max_results, page_token, partition_name_pattern)
 
     def drop_partitions(
             self,

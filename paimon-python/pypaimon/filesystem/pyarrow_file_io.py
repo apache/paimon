@@ -41,6 +41,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options, SecurityOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
@@ -51,8 +52,6 @@ def _pyarrow_lt_7():
     return parse(pyarrow.__version__) < parse("7.0.0")
 
 
-_S3_CHECKSUM_LOCK = threading.Lock()
-_S3_CHECKSUM_ENV = "AWS_REQUEST_CHECKSUM_CALCULATION"
 _S3_DELETE_TIMEOUT_SECONDS = 3600
 
 
@@ -73,13 +72,13 @@ class PyArrowFileIO(FileIO):
             self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
             if self._is_s3 else None
         )
+        self._s3_delete_client = None
         self._oss_bucket = None
         _oss_impl = self.properties.get(OssOptions.OSS_IMPL)
         self._use_jindo = False
         self._legacy_bucket_checked = False
         self._legacy_bucket_error = None
         self._legacy_bucket_lock = threading.Lock()
-        self._s3_delete_client = None
 
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
@@ -107,13 +106,27 @@ class PyArrowFileIO(FileIO):
             raise ValueError(f"Unrecognized filesystem type in URI: {scheme}")
 
     def _set_pyarrow_version(self):
+        self._pyarrow_gte_22 = parse(pyarrow.__version__) >= parse("22.0.0")
         self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
         # force_virtual_addressing landed in PyArrow 16; below it the OSS bucket
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
         self._pyarrow_gte_16 = parse(pyarrow.__version__) >= parse("16.0.0")
-        self._pyarrow_gte_22 = parse(pyarrow.__version__) >= parse("22.0.0")
         self._oss_bucket_in_endpoint = not self._pyarrow_gte_16
+
+    def _uses_s3_compatibility(self) -> bool:
+        return (not self._use_jindo
+                and (self._is_oss or bool(self._s3_endpoint)))
+
+    def _uses_s3_delete_fallback(self) -> bool:
+        return self._uses_s3_compatibility() and self._pyarrow_gte_22
+
+    def _configure_s3_checksums(self):
+        if parse(pyarrow.__version__) < parse("22.0.0"):
+            return
+        if self._uses_s3_compatibility() and self.properties.get(S3Options.CHECKSUM_COMPATIBILITY_AUTO_CONFIGURE):
+            # Process-wide default; preserve explicit settings and do not restore it.
+            os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -128,6 +141,7 @@ class PyArrowFileIO(FileIO):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        self._s3_delete_client = None
         self.logger = logging.getLogger(__name__)
         self._set_pyarrow_version()
         if "_is_s3" not in state:
@@ -138,7 +152,6 @@ class PyArrowFileIO(FileIO):
                 self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
                 if self._is_s3 else None)
         self._legacy_bucket_lock = threading.Lock()
-        self._s3_delete_client = None
         if self._uses_s3_compatibility():
             self.filesystem = (
                 self._initialize_oss_fs(None)
@@ -204,32 +217,6 @@ class PyArrowFileIO(FileIO):
             return value
         return OptionsUtils.convert_to_boolean(value)
 
-    def _uses_s3_compatibility(self) -> bool:
-        return (not self._use_jindo
-                and (self._is_oss or bool(self._s3_endpoint)))
-
-    def _uses_s3_delete_fallback(self) -> bool:
-        return (self._uses_s3_compatibility()
-                and self._pyarrow_gte_22
-                and not (self._is_s3 and self._get_s3_boolean_property(
-                    "delete.batch-enabled")))
-
-    @staticmethod
-    def _create_s3_filesystem(client_kwargs, compatible: bool) -> FileSystem:
-        with _S3_CHECKSUM_LOCK:
-            if not compatible:
-                return pafs.S3FileSystem(**client_kwargs)
-            # PyArrow has no per-client checksum option; AWS reads this at construction.
-            previous = os.environ.get(_S3_CHECKSUM_ENV)
-            os.environ[_S3_CHECKSUM_ENV] = "WHEN_REQUIRED"
-            try:
-                return pafs.S3FileSystem(**client_kwargs)
-            finally:
-                if previous is None:
-                    os.environ.pop(_S3_CHECKSUM_ENV, None)
-                else:
-                    os.environ[_S3_CHECKSUM_ENV] = previous
-
     def _extract_oss_bucket(self, location) -> str:
         uri = urlparse(location)
         if uri.scheme and uri.scheme != "oss":
@@ -259,12 +246,15 @@ class PyArrowFileIO(FileIO):
         return pafs.PyFileSystem(fs_handler)
 
     def _initialize_oss_fs(self, path) -> FileSystem:
+        self._configure_s3_checksums()
         if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
             # Uses setdefault so that an explicit user setting is never overridden.
             # Note: this is process-wide and affects all AWS SDK clients.
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+        # S3FileSystem takes no User-Agent; this adds app/pypaimon/<version> to it, process-wide.
+        os.environ.setdefault("AWS_SDK_UA_APP_ID", oss_user_agent.identity())
 
         client_kwargs = {
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
@@ -283,12 +273,25 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return self._create_s3_filesystem(client_kwargs, compatible=True)
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
-        connection = self._s3_connection_options()
+        self._configure_s3_checksums()
+        access_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_ID.key(),
+            *self._s3_key_variants("access-key", "access.key"))
+        secret_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_SECRET.key(),
+            *self._s3_key_variants("secret-key", "secret.key"))
+        session_token = self._get_property(
+            S3Options.S3_SECURITY_TOKEN.key(),
+            *self._s3_key_variants(
+                "session-token", "session.token",
+                "security-token", "security.token"))
+        endpoint = self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
+        region = self._get_s3_property("region", S3Options.S3_REGION.key())
 
-        if connection["access_key"]:
+        if access_key:
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
             # Uses setdefault so that an explicit user setting is never overridden.
@@ -296,20 +299,22 @@ class PyArrowFileIO(FileIO):
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
-            "endpoint_override": self._s3_endpoint,
-            "access_key": connection["access_key"],
-            "secret_key": connection["secret_key"],
-            "session_token": connection["session_token"],
-            "region": connection["region"],
+            "endpoint_override": endpoint,
+            "access_key": access_key,
+            "secret_key": secret_key,
+            "session_token": session_token,
+            "region": region,
         }
         if self._pyarrow_gte_16:
-            client_kwargs["force_virtual_addressing"] = not connection["path_style"]
+            path_style_access = (
+                self._get_s3_boolean_property("path-style-access") or
+                self._get_s3_boolean_property("path.style.access"))
+            client_kwargs["force_virtual_addressing"] = not path_style_access
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return self._create_s3_filesystem(
-            client_kwargs, compatible=bool(self._s3_endpoint))
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _s3_connection_options(self):
         return {
@@ -516,23 +521,27 @@ class PyArrowFileIO(FileIO):
         }
 
     def delete(self, path: str, recursive: bool = False) -> bool:
+        use_fallback = self._uses_s3_delete_fallback()
+        if use_fallback and self._is_oss:
+            parsed = urlparse(path)
+            if parsed.scheme == "oss" and parsed.netloc:
+                bucket = self._extract_oss_bucket(path)
+                key = parsed.path.lstrip("/")
+                if "@" in parsed.netloc:
+                    _, _, key = key.partition("/")
+                path = "oss://" + bucket + "/" + key
         path_str = self.to_filesystem_path(path)
-        if self._is_oss and (self._use_jindo or self._oss_bucket_in_endpoint):
-            bucket_root = path_str.strip("/") in ("", ".")
-        elif self._is_s3 or self._is_oss:
+        if use_fallback:
             bucket, key = self._split_s3_path(path_str)
-            bucket_root = not bucket or not key.strip("/")
-        else:
-            bucket_root = False
-        if bucket_root:
-            raise OSError(f"Refusing to delete bucket root: {path}")
+            if not bucket or not key.strip("/"):
+                raise OSError(f"Refusing to delete bucket root: {path}")
         file_info = self._get_file_info(path_str)
 
         if file_info.type == pafs.FileType.NotFound:
             return False
 
         if file_info.type == pafs.FileType.Directory:
-            if self._uses_s3_delete_fallback():
+            if use_fallback:
                 if recursive:
                     return self._delete_s3_compatible_directory(path_str)
                 selector = pafs.FileSelector(
@@ -541,9 +550,8 @@ class PyArrowFileIO(FileIO):
                     raise OSError(f"Directory {path} is not empty")
                 bucket, key = self._split_s3_path(path_str)
                 if key:
-                    client = self._get_s3_delete_client()
-                    client.delete_object(Bucket=bucket, Key=key.rstrip("/") + "/")
-                    self._ensure_s3_parent_exists(client, bucket, key)
+                    self._get_s3_delete_client().delete_object(
+                        Bucket=bucket, Key=key.rstrip("/") + "/")
                 return True
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
@@ -566,54 +574,17 @@ class PyArrowFileIO(FileIO):
         if prefix:
             prefix += "/"
         deadline = time.monotonic() + _S3_DELETE_TIMEOUT_SECONDS
-        with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as listed, \
-                tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as schemas:
+        # Finish listing before deleting: mutating a paginated listing may skip keys.
+        with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as listed:
             for name in self._list_s3_keys(client, bucket, prefix, deadline, path_str):
-                if name == prefix:
-                    continue
-                target = schemas if "/schema/schema-" in name else listed
-                target.write(json.dumps(name) + "\n")
-
+                listed.write(json.dumps(name) + "\n")
             listed.seek(0)
             self._delete_s3_objects(
                 client, bucket, (json.loads(line) for line in listed),
                 deadline, path_str)
-
-            known_schemas = self._staged_keys(schemas)
-            expected = next(known_schemas, None)
-            for name in self._list_s3_keys(client, bucket, prefix, deadline, path_str):
-                if name == prefix:
-                    continue
-                while expected is not None and expected < name:
-                    expected = next(known_schemas, None)
-                if name != expected:
-                    raise OSError(f"S3 directory {path_str} changed during deletion")
-                expected = next(known_schemas, None)
-
-            self._check_s3_delete_deadline(deadline, path_str)
-            self._ensure_s3_parent_exists(client, bucket, key)
-            if prefix:
-                self._check_s3_delete_deadline(deadline, path_str)
-                client.delete_object(Bucket=bucket, Key=prefix)
-            self._delete_s3_objects(
-                client, bucket, self._staged_schema_keys(schemas, zero=False),
-                deadline, path_str)
-            self._delete_s3_objects(
-                client, bucket, self._staged_schema_keys(schemas, zero=True),
-                deadline, path_str)
+        if any(self._list_s3_keys(client, bucket, prefix, deadline, path_str)):
+            raise OSError(f"S3 directory {path_str} changed during deletion")
         return True
-
-    @staticmethod
-    def _staged_keys(staged):
-        staged.seek(0)
-        for line in staged:
-            yield json.loads(line)
-
-    @staticmethod
-    def _staged_schema_keys(staged, zero: bool):
-        for name in PyArrowFileIO._staged_keys(staged):
-            if name.endswith("/schema/schema-0") == zero:
-                yield name
 
     def _list_s3_keys(self, client, bucket: str, prefix: str,
                       deadline: float, path_str: str):
@@ -641,14 +612,6 @@ class PyArrowFileIO(FileIO):
         if any(not key.startswith(prefix) for key in keys):
             raise OSError(f"S3 listing returned a key outside prefix {prefix}")
         return keys
-
-    @staticmethod
-    def _ensure_s3_parent_exists(client, bucket: str, key: str):
-        parent, _, _ = key.rstrip("/").rpartition("/")
-        if parent:
-            client.put_object(
-                Bucket=bucket, Key=parent + "/", Body=b"",
-                ContentType="application/x-directory")
 
     @staticmethod
     def _check_s3_delete_deadline(deadline: float, path_str: str):
@@ -736,7 +699,7 @@ class PyArrowFileIO(FileIO):
             config = Config(**config_args)
             uses_new_checksums = False
 
-        self._s3_delete_client = boto3.session.Session().client(
+        client = boto3.session.Session().client(
             "s3",
             endpoint_url=endpoint,
             aws_access_key_id=access_key,
@@ -749,15 +712,17 @@ class PyArrowFileIO(FileIO):
             # OSS requires Content-MD5; newer Botocore defaults to CRC32.
             def use_content_md5(request, **kwargs):
                 request.headers["Content-MD5"] = base64.b64encode(
-                    hashlib.md5(request.body).digest()).decode("ascii")
+                    hashlib.md5(request.body, usedforsecurity=False).digest()
+                ).decode("ascii")
                 for name in list(request.headers):
                     if (name.lower().startswith("x-amz-checksum-") or
                             name.lower() == "x-amz-sdk-checksum-algorithm"):
                         del request.headers[name]
 
-            self._s3_delete_client.meta.events.register(
+            client.meta.events.register(
                 "before-sign.s3.DeleteObjects", use_content_md5)
-        return self._s3_delete_client
+        self._s3_delete_client = client
+        return client
 
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
@@ -817,11 +782,12 @@ class PyArrowFileIO(FileIO):
         return None
 
     def rename(self, src: str, dst: str) -> bool:
-        src_str = self.to_filesystem_path(src)
         dst_str = self.to_filesystem_path(dst)
         dst_parent = PurePosixPath(dst_str).parent
         if str(dst_parent) and not self.exists(str(dst_parent)):
             self.mkdirs(str(dst_parent))
+
+        src_str = self.to_filesystem_path(src)
 
         try:
             if hasattr(self.filesystem, 'rename'):
@@ -1082,20 +1048,6 @@ class PyArrowFileIO(FileIO):
 
         parsed = urlparse(path)
         normalized_path = re.sub(r'/+', '/', parsed.path) if parsed.path else ''
-
-        if self._is_oss and parsed.scheme == "oss" and "@" in parsed.netloc:
-            if self._extract_oss_bucket(path) != self._oss_bucket:
-                raise OSError("OSS path is outside current bucket")
-            _, _, key = normalized_path.lstrip('/').partition('/')
-            parsed = parsed._replace(netloc=self._oss_bucket, path='/' + key)
-            normalized_path = '/' + key
-
-        if (self._is_oss and (self._use_jindo or self._oss_bucket_in_endpoint)
-                and (parsed.scheme or parsed.netloc)):
-            if (not parsed.netloc
-                    or (parsed.scheme and parsed.scheme != "oss")
-                    or self._extract_oss_bucket(path) != self._oss_bucket):
-                raise OSError("OSS path is outside current bucket")
 
         if parsed.scheme and len(parsed.scheme) == 1 and not parsed.netloc:
             return str(path)

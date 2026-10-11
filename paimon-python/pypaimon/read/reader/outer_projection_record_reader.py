@@ -45,9 +45,8 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         file_io=None,
         blob_field_indices=None,
         vector_field_indices=None,
+        descriptor_field_indices=None,
     ):
-        if not name_paths:
-            raise ValueError("name_paths must be non-empty")
         for path in name_paths:
             if not path:
                 raise ValueError("each name path must contain at least one name")
@@ -65,16 +64,26 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         self._file_io = file_io
         self._blob_field_indices = project_top_level_field_indices(
             blob_field_indices, self._specs)
+        self._descriptor_field_indices = project_top_level_field_indices(
+            descriptor_field_indices, self._specs)
         self._vector_field_indices = project_top_level_field_indices(
             vector_field_indices, self._specs)
+        self.file_io = self._file_io
+        self.blob_field_indices = self._blob_field_indices
+        self.descriptor_field_indices = self._descriptor_field_indices
+        self.vector_field_indices = self._vector_field_indices
+        self.blob_view_lookup = getattr(inner, 'blob_view_lookup', None)
 
     def read_batch(self) -> Optional[RecordIterator[InternalRow]]:
         inner_batch = self._inner.read_batch()
         if inner_batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
         return _OuterProjectionIterator(
             inner_batch, self._specs, self._flat_arity, self._file_io,
-            self._blob_field_indices, self._vector_field_indices)
+            self._blob_field_indices, self._vector_field_indices,
+            self._descriptor_field_indices,
+            blob_view_lookup=self.blob_view_lookup)
 
     def close(self) -> None:
         self._inner.close()
@@ -91,6 +100,8 @@ class _OuterProjectionIterator(RecordIterator[InternalRow]):
         file_io=None,
         blob_field_indices=None,
         vector_field_indices=None,
+        descriptor_field_indices=None,
+        blob_view_lookup=None,
     ):
         self._inner = inner
         self._specs = specs
@@ -98,7 +109,9 @@ class _OuterProjectionIterator(RecordIterator[InternalRow]):
         self._reused_row = OffsetRow(None, 0, flat_arity,
                                      file_io=file_io,
                                      blob_field_indices=blob_field_indices,
-                                     vector_field_indices=vector_field_indices)
+                                     vector_field_indices=vector_field_indices,
+                                     descriptor_field_indices=descriptor_field_indices,
+                                     blob_view_lookup=blob_view_lookup)
 
     def next(self) -> Optional[InternalRow]:
         inner_row = self._inner.next()
@@ -132,15 +145,21 @@ def _extract(row: InternalRow, spec: _PathSpec) -> Any:
 
 
 def _step_into(value: Any, name: str) -> Any:
-    """Take one step into a ROW sub-structure by sub-field name.
+    """Take one step into a ROW field or a selected string MAP key.
 
     Upstream materialises nested ROW values as plain Python dicts (e.g.
-    polars row-by-row iteration produces a dict for each struct slot),
-    so dict access is the only supported form here. Anything else is
-    rejected loudly to surface schema/wiring mismatches early.
+    polars row-by-row iteration produces a dict for each struct slot).
+    Arrow MAPs use key/value pairs; Polars materialises those entries as
+    key/value dicts. Match the first key, including a null first value.
     """
     if isinstance(value, dict):
         return value.get(name)
+    if isinstance(value, list):
+        for entry in value:
+            key, item = (entry['key'], entry['value']) if isinstance(entry, dict) else entry
+            if key == name:
+                return item
+        return None
     if isinstance(value, InternalRow):
         # Defensive: if the upstream reader handed us a wrapped sub-row,
         # we cannot index it by name without its schema, so fail fast

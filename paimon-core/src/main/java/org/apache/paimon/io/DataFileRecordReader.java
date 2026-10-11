@@ -32,6 +32,7 @@ import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -128,15 +129,18 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         try {
             return readerFactory.createReader(context);
         } catch (Exception e) {
-            boolean exists = context.fileIO().exists(context.filePath());
+            Path actualPath =
+                    CompactedChangelogPathResolver.resolveCompactedChangelogPath(
+                            context.filePath());
+            boolean exists = context.fileIO().exists(actualPath);
             if (!exists) {
                 if (ignoreLostFiles) {
                     LOG.warn(
                             "Failed to create FileRecordReader for file: {}, file lost",
-                            context.filePath());
+                            actualPath);
                     return null;
                 } else {
-                    throw FileUtils.newFileNotFoundException(context.filePath());
+                    throw FileUtils.newFileNotFoundException(actualPath);
                 }
             } else {
                 if (ignoreCorruptException(e, ignoreCorruptFiles)) {

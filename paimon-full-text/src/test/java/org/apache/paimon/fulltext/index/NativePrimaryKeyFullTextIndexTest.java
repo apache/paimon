@@ -128,7 +128,8 @@ class NativePrimaryKeyFullTextIndexTest {
         deletionVector.delete(2);
         Map<String, DeletionVector> deletionVectors =
                 Collections.singletonMap(dataFile.fileName(), deletionVector);
-        GlobalIndexer indexer = GlobalIndexer.create("full-text", TEXT_FIELD, options);
+        GlobalIndexer indexer =
+                GlobalIndexer.create("full-text", Collections.singletonList(TEXT_FIELD), options);
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
                         (payload, totalRowCount) ->
@@ -136,6 +137,7 @@ class NativePrimaryKeyFullTextIndexTest {
                                         fileReader(),
                                         Collections.singletonList(toIOMeta(payload)),
                                         totalRowCount,
+                                        null,
                                         newDirectExecutorService()));
 
         List<List<PrimaryKeySearchPosition>> rankings =
@@ -168,7 +170,8 @@ class NativePrimaryKeyFullTextIndexTest {
     }
 
     private IndexFileMeta buildArchive(List<BinaryString> texts, Options options) throws Exception {
-        GlobalIndexer indexer = GlobalIndexer.create("full-text", TEXT_FIELD, options);
+        GlobalIndexer indexer =
+                GlobalIndexer.create("full-text", Collections.singletonList(TEXT_FIELD), options);
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter) indexer.createWriter(fileWriter());
         for (int i = 0; i < texts.size(); i++) {

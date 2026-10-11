@@ -392,7 +392,7 @@ class FileStoreTable(Table):
             legacy_partition_name=self.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME),
             file_suffix_include_compression=False,
             file_compression=file_compression,
-            data_file_path_directory=None,
+            data_file_path_directory=self.options.data_file_path_directory(),
             external_paths=external_paths,
             external_path_strategy=self.options.data_file_external_paths_strategy(),
             external_path_weights=self.options.data_file_external_paths_weights(),
@@ -461,7 +461,8 @@ class FileStoreTable(Table):
 
     def create_global_index(self, index_column, index_type: str = "btree",
                             partition_filter=None, partitions=None,
-                            options: Optional[dict] = None) -> int:
+                            options: Optional[dict] = None, *, execution="local",
+                            concurrency=None, ray_remote_args=None) -> int:
         from pypaimon.globalindex.create_global_index import \
             create_global_index
         return create_global_index(
@@ -471,6 +472,7 @@ class FileStoreTable(Table):
             partition_filter=partition_filter,
             partitions=partitions,
             options=options,
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args,
         )
 
     def drop_global_index(self, index_column, index_type: str = "btree",
@@ -517,13 +519,32 @@ class FileStoreTable(Table):
         """Copy this table while preserving its already resolved schema."""
         return self._copy(options, resolve_time_travel=False)
 
+    def _copy_with_snapshot(self, snapshot):
+        """Keep one resolved read view, including tag metadata and empty tables."""
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        selectors = SCAN_KEYS + [
+            CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(),
+            CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
+            CoreOptions.SCAN_CREATION_TIME_MILLIS.key(),
+        ]
+        options = {key: None for key in selectors if key in self.table_schema.options}
+        options[CoreOptions.SCAN_MODE.key()] = "from-snapshot" if snapshot is not None else "default"
+        if snapshot is not None:
+            options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot.id)
+        table = self.copy_without_time_travel(options)
+        table._read_snapshot = snapshot
+        return table
+
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
+        directory_key = CoreOptions.DATA_FILE_PATH_DIRECTORY.key()
+        if directory_key in options and options[directory_key] != self.options.data_file_path_directory():
+            raise ValueError('Cannot change immutable option ' + directory_key)
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
             if v is None:
-                new_options.pop(k)
+                new_options.pop(k, None)
             else:
                 new_options[k] = v
 
@@ -532,7 +553,12 @@ class FileStoreTable(Table):
         # Cumulative copy() overrides (removals kept as None) vs the on-disk schema.
         applied_options = {**getattr(self, '_applied_dynamic_options', {}), **options}
 
-        if resolve_time_travel:
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        preserve_snapshot = hasattr(self, "_read_snapshot") and not any(
+            key in options for key in SCAN_KEYS + [
+                CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
+                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
+        if resolve_time_travel and not preserve_snapshot:
             time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
             if time_travel_schema is not None:
                 new_table_schema = time_travel_schema
@@ -555,6 +581,8 @@ class FileStoreTable(Table):
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
         new_table._applied_dynamic_options = applied_options
+        if preserve_snapshot:
+            new_table._read_snapshot = self._read_snapshot
         return new_table
 
     def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:
@@ -587,21 +615,19 @@ class FileStoreTable(Table):
             historical_schema: TableSchema, options: Options, dynamic_option_keys: Set[str]) -> dict:
         # Keep scan and runtime options, but restore column declarations to match historical fields.
         historical_options = dict(options.to_map())
-        for key in (
-                CoreOptions.VECTOR_FIELD.key(),
-                CoreOptions.BLOB_FIELD.key(),
-                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
-                CoreOptions.BLOB_VIEW_FIELD.key(),
-                # Restore the legacy key verbatim, not as a canonical descriptor option:
-                # Python intentionally ignores it when choosing the read layout.
-                'blob.stored-descriptor-fields'):
-            if key in dynamic_option_keys:
+        for keys in (
+                (CoreOptions.VECTOR_FIELD.key(),),
+                (CoreOptions.BLOB_FIELD.key(),),
+                (CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), 'blob.stored-descriptor-fields'),
+                (CoreOptions.BLOB_VIEW_FIELD.key(),)):
+            if any(key in dynamic_option_keys for key in keys):
                 # Preserve explicit overrides and removals, including those from earlier copies.
                 continue
-            if key in historical_schema.options:
-                historical_options[key] = historical_schema.options[key]
-            else:
-                historical_options.pop(key, None)
+            for key in keys:
+                if key in historical_schema.options:
+                    historical_options[key] = historical_schema.options[key]
+                else:
+                    historical_options.pop(key, None)
         return historical_options
 
     def _create_external_paths(self) -> List[str]:

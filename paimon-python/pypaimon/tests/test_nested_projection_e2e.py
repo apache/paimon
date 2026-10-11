@@ -21,6 +21,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
 
@@ -97,6 +98,38 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
         got = rb.new_read().to_arrow(rb.new_scan().plan().splits())
 
         self.assertEqual([100, None], got.column(0).to_pylist())
+
+    def test_required_leaf_under_nullable_row_can_be_exported(self):
+        schema = pa.schema(
+            [
+                ("r", pa.struct([pa.field("x", pa.int64(), nullable=False)])),
+            ]
+        )
+        identifier = "default.nullable_row_required_leaf"
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(schema, options={"bucket": "-1"}),
+            False,
+        )
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        try:
+            writer.write_arrow(
+                pa.Table.from_pylist([{"r": None}, {"r": {"x": 7}}], schema=schema)
+            )
+            wb.new_commit().commit(writer.prepare_commit())
+        finally:
+            writer.close()
+
+        rb = table.new_read_builder().with_projection(["r.x"])
+        result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual([None, 7], result.column(0).to_pylist())
+        sink = pa.BufferOutputStream()
+        pq.write_table(result, sink)
+        restored = pq.read_table(pa.BufferReader(sink.getvalue()))
+        self.assertTrue(restored.schema.field("r_x").nullable)
+        self.assertEqual(result.to_pydict(), restored.to_pydict())
 
     def test_mixed_nested_and_top_level_preserves_order(self):
         table = self._create_table('ao_mixed_order')

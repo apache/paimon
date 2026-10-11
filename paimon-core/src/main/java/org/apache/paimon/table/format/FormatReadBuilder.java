@@ -78,7 +78,9 @@ public class FormatReadBuilder implements ReadBuilder {
     private final CoreOptions options;
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
+    // Keep the legacy field for Java serialization compatibility.
     @Nullable private Integer limit;
+    @Nullable private Long longLimit;
     @Nullable private transient FormatTableFileIOResolver fileIOResolver;
 
     public FormatReadBuilder(FormatTable table) {
@@ -161,6 +163,14 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withLimit(int limit) {
         this.limit = limit;
+        this.longLimit = (long) limit;
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withLimit(long limit) {
+        this.longLimit = limit;
+        this.limit = limit >= Integer.MIN_VALUE && limit <= Integer.MAX_VALUE ? (int) limit : null;
         return this;
     }
 
@@ -176,12 +186,17 @@ public class FormatReadBuilder implements ReadBuilder {
                 partitionFilter = partitionPredicateOpt.get();
             }
         }
-        return new FormatTableScan(table, partitionFilter, limit);
+        return new FormatTableScan(table, partitionFilter, effectiveLimit());
     }
 
     @Override
     public TableRead newRead() {
-        return new FormatTableRead(readType(), table.rowType(), this, filter, limit);
+        return new FormatTableRead(readType(), table.rowType(), this, filter, effectiveLimit());
+    }
+
+    @Nullable
+    private Long effectiveLimit() {
+        return longLimit != null ? longLimit : limit == null ? null : limit.longValue();
     }
 
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
@@ -202,9 +217,18 @@ public class FormatReadBuilder implements ReadBuilder {
                         PredicateBuilder.splitAnd(filter), new HashSet<>(table.partitionKeys()));
         RowType dataRowType = getRowTypeWithoutPartition(table.rowType(), table.partitionKeys());
         RowType readRowType = getRowTypeWithoutPartition(readType, table.partitionKeys());
+        Options fileOptions = new Options(options.toConfiguration().toMap());
+        fileOptions.set(
+                CoreOptions.FILE_FORMAT,
+                FormatTablePartitionOptions.fileFormat(
+                        fileOptions.toMap(),
+                        dataSplit.fileFormat() == null
+                                ? null
+                                : Collections.singletonMap(
+                                        CoreOptions.FILE_FORMAT.key(), dataSplit.fileFormat())));
         FormatReaderFactory readerFactory =
-                FileFormatDiscover.of(options)
-                        .discover(options.formatType())
+                FileFormatDiscover.of(new CoreOptions(fileOptions))
+                        .discover(fileOptions.get(CoreOptions.FILE_FORMAT))
                         .createReaderFactory(dataRowType, readRowType, readFilters);
 
         Pair<int[], RowType> partitionMapping =

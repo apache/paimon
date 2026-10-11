@@ -215,13 +215,15 @@ public class CdcRecordStoreMultiWriteOperator
             } else {
                 throw new RuntimeException(
                         "Unable to process element. Possibly a corrupt record: "
-                                + (logCorruptRecord ? record : "<redacted>"));
+                                + (logCorruptRecord ? record : "<redacted>")
+                                + ", table "
+                                + tableId);
             }
         } else {
             try {
                 write.write(optionalConverted.get());
             } catch (Exception e) {
-                throw new IOException(e);
+                throw new IOException("Failed to write record for table " + tableId, e);
             }
         }
     }

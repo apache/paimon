@@ -91,5 +91,9 @@
         <td><h5>--table_conf</h5></td>
         <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="../maintenance/configurations">here</a> for a complete list of table configurations.</td>
     </tr>
+    <tr>
+        <td><h5>--table_conf_by_table</h5></td>
+        <td>The configuration for one Paimon table sink, overriding the same key from --table_conf for that table. Each configuration should be specified in the format "source_table:key=value", where source_table is the MySQL table name. Only table properties can be overridden per table; options prefixed with "sink." must be set with --table_conf.</td>
+    </tr>
     </tbody>
 </table>

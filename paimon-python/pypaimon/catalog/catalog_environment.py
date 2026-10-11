@@ -39,12 +39,14 @@ class CatalogEnvironment:
             identifier: Optional[Identifier] = None,
             uuid: Optional[str] = None,
             catalog_loader: Optional[CatalogLoader] = None,
-            supports_version_management: bool = False
+            supports_version_management: bool = False,
+            rest_table_response: Optional[str] = None
     ):
         self.identifier = identifier
         self.uuid = uuid
         self.catalog_loader = catalog_loader
         self.supports_version_management = supports_version_management
+        self.rest_table_response = rest_table_response
 
     def snapshot_commit(self, snapshot_manager) -> Optional[SnapshotCommit]:
         """
@@ -99,6 +101,9 @@ class CatalogEnvironment:
         context = getattr(self.catalog_loader, "context", None)
         return context() if callable(context) else None
 
+    def blob_index_cache(self):
+        return getattr(self.catalog_context(), "blob_index_cache", None)
+
     def dependency_read_context(self) -> Optional[CatalogContext]:
         context = self.catalog_context()
         if self.identifier is None or context is None:
@@ -121,12 +126,7 @@ class CatalogEnvironment:
         dependency_options.to_map()[self._READ_VIA_OPTION] = RESTUtil.encode_string(
             JSON.to_json(self.identifier, separators=(",", ":"))
         )
-        return CatalogContext.create(
-            dependency_options,
-            context.hadoop_conf,
-            context.prefer_io_loader,
-            context.fallback_io_loader,
-        )
+        return context.with_options(dependency_options)
 
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """
@@ -142,7 +142,8 @@ class CatalogEnvironment:
             identifier=identifier,
             uuid=self.uuid,
             catalog_loader=self.catalog_loader,
-            supports_version_management=self.supports_version_management
+            supports_version_management=self.supports_version_management,
+            rest_table_response=getattr(self, 'rest_table_response', None)
         )
 
     @staticmethod

@@ -61,10 +61,14 @@ class ProcessRowIdRangesTest(unittest.TestCase):
         table = self.catalog.get_table(target)
         builder = table.new_batch_write_builder()
         writer = builder.new_write()
-        writer.write_arrow(pa.Table.from_pydict({
+        data = pa.Table.from_pydict({
             "id": list(range(row_count)),
             "name": ["n{}".format(i) for i in range(row_count)],
-        }, schema=self.schema))
+        }, schema=self.schema)
+        # Keep fixture file groups stable for writers that roll at batch boundaries.
+        chunk_size = min(row_count, table.options.target_file_row_num())
+        for batch in data.to_batches(max_chunksize=chunk_size):
+            writer.write_arrow_batch(batch)
         commit = builder.new_commit()
         commit.commit(writer.prepare_commit())
         writer.close()

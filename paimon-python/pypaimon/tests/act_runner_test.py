@@ -50,9 +50,10 @@ from pypaimon.benchmark.act.paimon import (
     QPOS_COLUMNS,
     create_datasets as create_paimon_datasets,
     latest_snapshot_id,
+    episode_indices,
 )
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
-from pypaimon.sample import robomind_agilex as agilex
+from pypaimon.benchmark.act import robomind_agilex as agilex
 
 
 def test_logical_batches_coalesce_one_physical_fetch():
@@ -257,6 +258,15 @@ def benchmark_input(tmp_path, monkeypatch):
     return root, warehouse
 
 
+def _frame_for_append(frames, predicate):
+    # A full-row append must retain all required Blob fields, including depth
+    # images outside the RGB-only ACT input projection.
+    scalar, blobs = frames.scan().where(predicate).read_blobs()
+    row = scalar.to_pylist()[0]
+    row.update({name: values[0] for name, values in blobs.items()})
+    return row
+
+
 class _Policy(torch.nn.Module):
 
     def __init__(self):
@@ -408,17 +418,29 @@ def test_backends_match_the_golden_act_window_contract(benchmark_input):
         options={"warehouse": str(warehouse)},
     )
     frames = connection.get_table(agilex.FRAMES_TABLE)
+    indices = episode_indices(connection, "act-test@1")
     paimon, _ = create_paimon_datasets(
         frames,
         latest_snapshot_id(frames),
-        "train-a",
-        "val-a",
+        indices["train-a"],
+        indices["val-a"],
         normalization,
         BenchmarkConfig(action_horizon=3),
+        {index: source_id for source_id, index in indices.items()},
     )
 
     expected = hdf5[1]
-    actual = paimon[1]
+    with patch.object(paimon, "adapter", wraps=paimon.adapter) as adapt:
+        actual = paimon[1]
+    generic_sample = adapt.call_args.args[0]
+    assert generic_sample["episode_index"] == indices["train-a"]
+    assert "is_pad" not in generic_sample
+    assert len(generic_sample["action"]) == 3
+    assert generic_sample["action_is_pad"].tolist() == [False] * 3
+    for name in QPOS_COLUMNS + IMAGE_COLUMNS:
+        assert len(generic_sample[name]) == 1
+        assert generic_sample[name + "_is_pad"].tolist() == [False]
+    assert actual["is_pad"] is generic_sample["action_is_pad"]
 
     assert set(expected) == {
         "sample_id", "episode_id", "frame_index", "qpos", "action",
@@ -580,6 +602,7 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
     assert frames.raw_table.table_schema.options["vector.file.format"] == (
         "parquet")
     snapshot_id = latest_snapshot_id(frames)
+    indices = episode_indices(connection, "act-test@1")
 
     with patch(
             "pypaimon.multimodal.window_dataset.fetch_blob_bodies",
@@ -587,8 +610,8 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
         train, validation = create_paimon_datasets(
             frames,
             snapshot_id,
-            "train-a",
-            "val-a",
+            indices["train-a"],
+            indices["val-a"],
             normalization,
             BenchmarkConfig(
                 action_horizon=3,
@@ -598,6 +621,7 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
                 image_width=10,
                 rounds=3,
             ),
+            {index: source_id for source_id, index in indices.items()},
         )
         assert fetch.call_count == 0
         assert isinstance(train, ContiguousWindowDataset)
@@ -605,24 +629,20 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
         with patch.object(
                 train, "_read_rows", wraps=train._read_rows) as read_rows:
             sample_before_append = train[0]
-        assert [call.args[1] for call in read_rows.call_args_list] == [
-            list(ACTION_COLUMNS),
-            list(QPOS_COLUMNS + IMAGE_COLUMNS),
-        ]
-        assert [len(call.args[0]) for call in read_rows.call_args_list] == [3, 1]
+        assert {
+            tuple(call.args[1]): len(call.args[0])
+            for call in read_rows.call_args_list
+        } == {ACTION_COLUMNS: 3, QPOS_COLUMNS + IMAGE_COLUMNS: 1}
         assert fetch.call_count == 1
         assert {
             name: len(fetch.call_args.args[1][name])
             for name in IMAGE_COLUMNS
         } == {name: 1 for name in IMAGE_COLUMNS}
 
-    scalar, blobs = frames.scan().where(
-        "episode_id = 'train-a' AND frame_index = 5"
-    ).read_blobs(IMAGE_COLUMNS)
-    appended = scalar.to_pylist()[0]
+    appended = _frame_for_append(frames, "episode_id = 'train-a' AND frame_index = 5")
     appended["frame_index"] = 6
-    for name in IMAGE_COLUMNS:
-        appended[name] = blobs[name][0]
+    appended["index"] = max(
+        row["index"] for row in frames.scan().select(["index"]).to_list()) + 1
     frames.add([appended])
 
     assert train.snapshot_id == snapshot_id
@@ -707,3 +727,94 @@ def test_runtime_environment_uses_package_identity_outside_git_checkout(
         pytest.raises(RuntimeError, match="source identity"),
     ):
         act_runner._runtime_environment(tmp_path)
+
+
+def test_cli_ingest_delegates_the_complete_pipeline():
+    argv = ["--input", "/source", "--warehouse", "/lake",
+            "--statistics-version", "release-1"]
+    with patch.object(agilex, "main", return_value=0) as ingest:
+        assert act_cli.main(["ingest"] + argv) == 0
+    ingest.assert_called_once_with(argv)
+
+
+def test_preparation_uses_published_group_after_new_episode_commit(
+        benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"]["action_horizon"] = 3
+    before = prepare_experiment(
+        input_root, warehouse, tmp_path / "before.json", definition=definition)
+    connection = pmm.connect(
+        database=agilex.DEFAULT_DATABASE,
+        options={"warehouse": str(warehouse)})
+    episodes = connection.get_table(agilex.EPISODES_TABLE)
+    changed = episodes.scan().to_list()[0]
+    changed["split"] = "test"
+    episodes.add([changed])
+    frames = connection.get_table(agilex.FRAMES_TABLE)
+    changed_frame = _frame_for_append(frames, "episode_id = 'train-a' AND frame_index = 0")
+    changed_frame["action"] = [0.0] * 14
+    frames.add([changed_frame])
+    assert latest_snapshot_id(frames) != before["paimon"]["frames_snapshot_id"]
+
+    after = prepare_experiment(
+        input_root, warehouse, tmp_path / "after.json", definition=definition)
+
+    assert before == after
+    assert after["paimon"]["tag_name"] == "act-test@1"
+
+
+@pytest.mark.parametrize("broken", ["member_tag", "info_tag"])
+def test_prepare_rejects_incomplete_group(benchmark_input, tmp_path, broken):
+    input_root, warehouse = benchmark_input
+    connection = pmm.connect(
+        database=agilex.DEFAULT_DATABASE,
+        options={"warehouse": str(warehouse)})
+    if broken == "member_tag":
+        connection.get_table(agilex.STAT_TABLE).raw_table.delete_tag("act-test@1")
+        tag_name, message = "act-test@1", "missing.*Tag"
+    else:
+        connection.get_table(agilex.INFO_TABLE).raw_table.create_tag("other-tag")
+        tag_name, message = "other-tag", "info tag differs"
+    definition = load_experiment()
+    definition["statistics_version"] = tag_name
+    definition["config"]["action_horizon"] = 3
+
+    with pytest.raises(ValueError, match=message):
+        prepare_experiment(
+            input_root, warehouse, tmp_path / "experiment.json",
+            definition=definition)
+
+
+def test_episode_quality_does_not_remove_source_identity():
+    source = SimpleNamespace(
+        path=__file__, source_key="train-a/data/trajectory.hdf5",
+        episode_id="train-a", split="train", success=True)
+    rows = [{"episode_id": source.episode_id, "source_key": source.source_key,
+             "split": "train", "success": True, "frame_count": 6,
+             "quality_status": 2}]
+    episodes, _ = act_runner._validate_source_identity([source], rows)
+
+    assert len(episodes) == 1
+    with pytest.raises(ValueError, match="No successful train episode"):
+        act_runner._select_episode(
+            {source.episode_id: episodes[0]}, "train", None, 3)
+
+
+def test_dense_comparison_rejects_selected_episode_with_invalid_frames(
+        benchmark_input):
+    _, warehouse = benchmark_input
+    connection = pmm.connect(
+        database=agilex.DEFAULT_DATABASE,
+        options={"warehouse": str(warehouse)})
+    frames = connection.get_table(agilex.FRAMES_TABLE)
+    indices = episode_indices(connection, "act-test@1")
+    invalid = _frame_for_append(frames, "episode_id = 'val-a' AND frame_index = 0")
+    invalid["quality_status"] = 2
+    frames.add([invalid])
+    frames.raw_table.create_tag("invalid-frames")
+
+    with pytest.raises(ValueError, match="select a clean episode"):
+        act_runner._require_valid_frames(
+            frames, "invalid-frames", ["val-a"], indices)

@@ -56,33 +56,36 @@ class FormatAvroReader(RecordBatchReader):
             nested_name_paths and any(len(p) > 1 for p in nested_name_paths))
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        pydict_data = {name: [] for name in self._fields}
-        records_in_batch = 0
+        while True:
+            pydict_data = {name: [] for name in self._fields}
+            records_in_batch = 0
 
-        for record in self._avro_reader:
-            if self._has_nested:
-                for col_name, path in zip(self._fields, self._nested_name_paths):
-                    pydict_data[col_name].append(_walk_avro_record(record, path))
-            else:
-                for col_name in self._fields:
-                    pydict_data[col_name].append(record.get(col_name))
-            records_in_batch += 1
-            if records_in_batch >= self._batch_size:
-                break
+            for record in self._avro_reader:
+                if self._has_nested:
+                    for col_name, path in zip(self._fields, self._nested_name_paths):
+                        pydict_data[col_name].append(_walk_avro_record(record, path))
+                else:
+                    for col_name in self._fields:
+                        pydict_data[col_name].append(record.get(col_name))
+                records_in_batch += 1
+                if records_in_batch >= self._batch_size:
+                    break
 
-        if records_in_batch == 0:
-            return None
-        if self._push_down_predicate is None:
-            return pa.RecordBatch.from_pydict(pydict_data, self._schema)
-        else:
+            # No more records in the file: this is the only real end-of-input.
+            if records_in_batch == 0:
+                return None
+            if self._push_down_predicate is None:
+                return pa.RecordBatch.from_pydict(pydict_data, self._schema)
+
             pa_batch = pa.Table.from_pydict(pydict_data, self._schema)
             dataset = ds.InMemoryDataset(pa_batch)
             scanner = dataset.scanner(filter=self._push_down_predicate)
             combine_chunks = scanner.to_table().combine_chunks()
             if combine_chunks.num_rows > 0:
                 return combine_chunks.to_batches()[0]
-            else:
-                return None
+            # This batch matched no rows but the file has more; keep reading rather
+            # than returning None, which the caller treats as end-of-input and would
+            # silently drop every remaining row.
 
     def close(self):
         if self._file:

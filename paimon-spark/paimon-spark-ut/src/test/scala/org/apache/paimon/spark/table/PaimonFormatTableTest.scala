@@ -28,7 +28,61 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.connector.catalog.TableCatalog
 
+import scala.collection.JavaConverters._
+
 class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
+
+  test("PaimonFormatTable: partition file formats survive reads statistics and overwrite") {
+    val tableName = "partition_file_formats"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (id INT, pt STRING) USING parquet PARTITIONED BY (pt) " +
+        "TBLPROPERTIES ('metastore.partitioned-table'='true', 'format-table.implementation'='paimon')")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      spark
+        .sql("SELECT 1 AS id")
+        .write
+        .format("orc")
+        .save(new Path(table.location(), "pt=old").toString)
+      spark.sql("SELECT 2 AS id").write.parquet(new Path(table.location(), "pt=new").toString)
+      val specs = Seq(Map("pt" -> "old").asJava, Map("pt" -> "new").asJava).asJava
+      table
+        .partitionManager()
+        .createPartitions(
+          specs,
+          false,
+          null,
+          false,
+          Seq(Map("file.format" -> "orc").asJava, Map.empty[String, String].asJava).asJava)
+      checkAnswer(sql(s"SELECT id, pt FROM $tableName"), Seq(Row(1, "old"), Row(2, "new")))
+      checkAnswer(sql(s"SELECT id FROM $tableName WHERE pt='old' AND id=1"), Seq(Row(1)))
+      sql(s"ANALYZE TABLE $tableName COMPUTE STATISTICS")
+      assert(
+        table.partitionManager().listPartitionsByNames(specs).asScala.forall(_.recordCount() == 1))
+      sql(s"INSERT INTO $tableName PARTITION (pt='new') VALUES (4)")
+      sql(s"INSERT OVERWRITE $tableName PARTITION (pt='new') VALUES (5)")
+      sql(s"INSERT INTO $tableName PARTITION (pt='created') VALUES (6)")
+      val writtenSpecs = Seq(specs.get(1), Map("pt" -> "created").asJava).asJava
+      val writtenPartitions =
+        table
+          .partitionManager()
+          .listPartitionsByNames(writtenSpecs)
+      assert(writtenPartitions.size() == 2)
+      assert(writtenPartitions.get(0).options().get("file.format") == "parquet")
+      assert(Option(writtenPartitions.get(1).options()).forall(_.isEmpty))
+      sql(s"INSERT OVERWRITE $tableName PARTITION (pt='old') VALUES (3)")
+      checkAnswer(
+        sql(s"SELECT id, pt FROM $tableName"),
+        Seq(Row(3, "old"), Row(5, "new"), Row(6, "created")))
+      assert(
+        table
+          .partitionManager()
+          .listPartitionsByNames(Seq(specs.get(0)).asJava)
+          .get(0)
+          .options()
+          .get("file.format") == "parquet")
+    }
+  }
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()
@@ -278,18 +332,17 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("PaimonFormatTable: max_pt skips the default partition") {
+  test("PaimonFormatTable: max_pt ranks the default partition lowest") {
     val tableName = "max_pt_null"
     withTable(tableName) {
       sql(
         s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (ds STRING) " +
           "TBLPROPERTIES ('format-table.implementation'='paimon', " +
           "'metastore.partitioned-table'='true')")
-      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
-      // A null partition value comes back as a real null, which the typed comparator would
-      // dereference; it is also not what anyone means by the max partition.
       sql(s"INSERT INTO $tableName VALUES (2, null)")
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row(null)))
 
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
       checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
     }
   }
@@ -324,16 +377,14 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("max_pt on a FileStoreTable skips a null partition instead of failing") {
+  test("max_pt on a FileStoreTable ranks a null partition lowest") {
     val tableName = "max_pt_fst_null"
     withTable(tableName) {
       sql(s"CREATE TABLE $tableName (id INT, ds STRING) USING paimon PARTITIONED BY (ds)")
-      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
       sql(s"INSERT INTO $tableName VALUES (2, null)")
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row(null)))
 
-      // This is a behaviour change for FileStoreTable, not only for format tables: a null
-      // top-level partition value used to reach InternalRowUtils.compare and throw, and is now
-      // skipped. Pinned here so the change is visible rather than incidental.
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
       checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
     }
   }

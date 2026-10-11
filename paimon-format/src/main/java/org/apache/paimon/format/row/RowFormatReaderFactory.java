@@ -55,6 +55,13 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
         // before it parses lengths and offsets taken from the file itself, so a truncated or
         // corrupt file can throw anywhere in between and would otherwise leak the stream.
         try {
+            if (fileSize < RowFileFooter.FOOTER_SIZE) {
+                throw new IOException(
+                        String.format(
+                                "Row file %s holds %d bytes, too few for a %d-byte footer.",
+                                path, fileSize, RowFileFooter.FOOTER_SIZE));
+            }
+
             int tailSize = (int) Math.min(TAIL_PREFETCH_SIZE, fileSize);
             long tailOffset = fileSize - tailSize;
             in.seek(tailOffset);
@@ -63,6 +70,7 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
 
             RowFileFooter footer =
                     RowFileFooter.readFrom(tailBuf, tailSize - RowFileFooter.FOOTER_SIZE);
+            footer.validate(fileSize);
 
             RowBlockIndex blockIndex;
             if (footer.indexOffset >= tailOffset) {
@@ -73,6 +81,7 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
             } else {
                 blockIndex = RowBlockIndex.readFrom(in, footer.indexOffset, footer.indexLength);
             }
+            blockIndex.validate(footer);
 
             return new RowFormatReader(
                     in,

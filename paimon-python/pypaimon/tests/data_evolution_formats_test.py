@@ -197,6 +197,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         for file_meta in all_files:
             self.assertEqual([], self._row_sidecar_files(file_meta))
 
+    @pytest.mark.python_read
     def test_row_sidecar_serves_sparse_row_id_read(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -494,7 +495,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
             {'a': [1, 2, 3, 4], 'b': ['x', 'y', 'z', 'w'],
              'c': [0.1, 0.2, 0.3, 0.4]},
             schema=pa_schema)
-        self.assertEqual(actual, expect)
+        # Table scans are unordered; native planning may emit merged groups
+        # before raw groups.
+        self.assertEqual(actual.sort_by('a'), expect.sort_by('a'))
 
     # ------------------------------------------------------------------
     # Blob-format data evolution
@@ -537,7 +540,8 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
         self.assertEqual(actual.column('payload').to_pylist(), blobs)
 
-    def test_blob_abort_deletes_uncommitted_files(self):
+    @pytest.mark.python_write
+    def test_blob_abort_preserves_prepared_files_until_committer_aborts(self):
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('payload', pa.large_binary()),
@@ -566,6 +570,13 @@ class DataEvolutionFormatsTest(unittest.TestCase):
 
         writer.abort()
 
+        for file_meta in all_files:
+            self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.abort(commit_messages)
+        finally:
+            commit.close()
         for file_meta in all_files:
             self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),
@@ -899,7 +910,8 @@ class DataEvolutionFormatsTest(unittest.TestCase):
     # Vector (vortex) file format for embedding columns
     # ------------------------------------------------------------------
 
-    def test_vector_abort_deletes_uncommitted_files(self):
+    @pytest.mark.python_write
+    def test_vector_abort_preserves_prepared_files_until_committer_aborts(self):
         pa_schema = pa.schema([
             ('id', pa.int64()),
             ('embed', pa.list_(pa.float32(), 3)),
@@ -932,13 +944,23 @@ class DataEvolutionFormatsTest(unittest.TestCase):
 
         writer.abort()
 
+        # prepare_commit hands these files to the committer, as Java's
+        # drainIncrement does. The writer no longer owns their cleanup.
+        for file_meta in all_files:
+            self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.abort(commit_messages)
+        finally:
+            commit.close()
         for file_meta in all_files:
             self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),
                 f"Expected abort to delete {file_meta.file_name}",
             )
 
-    def test_vector_close_failure_after_prepare_raises(self):
+    @pytest.mark.python_write
+    def test_vector_close_failure_preserves_prepared_files(self):
         from unittest.mock import patch
 
         pa_schema = pa.schema([
@@ -974,6 +996,13 @@ class DataEvolutionFormatsTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Close error"):
                 writer.close()
 
+        for file_meta in all_files:
+            self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.abort(commit_messages)
+        finally:
+            commit.close()
         for file_meta in all_files:
             self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),

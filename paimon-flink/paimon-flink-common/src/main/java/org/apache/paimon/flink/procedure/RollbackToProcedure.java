@@ -66,8 +66,13 @@ public class RollbackToProcedure extends ProcedureBase {
         Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
         Preconditions.checkNotNull(latestSnapshot, "Latest snapshot is null, can not rollback.");
 
+        boolean hasTag = !StringUtils.isNullOrWhitespaceOnly(tagName);
+        boolean hasSnapshot = snapshotId != null;
+        Preconditions.checkArgument(
+                hasTag != hasSnapshot, "Must specify exactly one of tag and snapshot_id.");
+
         long rollbackSnapshotId;
-        if (!StringUtils.isNullOrWhitespaceOnly(tagName)) {
+        if (hasTag) {
             table.rollbackTo(tagName);
             rollbackSnapshotId = store.newTagManager().getOrThrow(tagName).trimToSnapshot().id();
         } else {

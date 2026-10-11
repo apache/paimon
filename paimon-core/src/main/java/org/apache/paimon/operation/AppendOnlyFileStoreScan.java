@@ -98,15 +98,18 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     @Override
     public Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifestFiles, boolean useSequential) {
-        Iterator<ManifestEntry> result = super.readManifestEntries(manifestFiles, useSequential);
         if (limit == null
                 || limit <= 0
                 || deletionVectorsEnabled
                 || dataEvolutionEnabled
                 || inputFilter != null) {
-            return result;
+            return super.readManifestEntries(manifestFiles, useSequential);
         }
 
+        // A LIMIT scan may stop before consuming all manifest entries. Submit reads in bounded
+        // batches instead of scheduling every manifest before the first entry is consumed.
+        // Keep the normal merge path so later DELETE entries still invalidate earlier ADDs.
+        Iterator<ManifestEntry> result = super.readManifestEntries(manifestFiles, true);
         List<ManifestEntry> filtered = new ArrayList<>();
         long accumulatedRowCount = 0;
         while (result.hasNext()) {

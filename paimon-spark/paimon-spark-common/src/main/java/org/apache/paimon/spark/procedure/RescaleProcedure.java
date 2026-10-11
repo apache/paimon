@@ -125,7 +125,7 @@ public class RescaleProcedure extends BaseProcedure {
                     // So we use strict mode to make sure nothing is lost.
                     Map<String, String> dynamicOptions = new HashMap<>();
                     dynamicOptions.put(
-                            CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
+                            CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
                             String.valueOf(snapshot.id()));
                     fileStoreTable = fileStoreTable.copy(dynamicOptions);
 

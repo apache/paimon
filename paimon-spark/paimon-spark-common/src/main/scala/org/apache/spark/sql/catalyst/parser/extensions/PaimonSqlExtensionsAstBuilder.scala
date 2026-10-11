@@ -34,6 +34,8 @@ import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.command.{CreateTableLikeCommand => SparkCreateTableLikeCommand}
 
+import java.util.Locale
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -239,7 +241,7 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
 
     opts.foreach {
       opt =>
-        val key = opt.key.getText.toUpperCase
+        val key = opt.key.getText.toUpperCase(Locale.ROOT)
         if (!seen.add(key)) {
           throw new IllegalArgumentException(s"Duplicate FILE_FORMAT option: $key")
         }

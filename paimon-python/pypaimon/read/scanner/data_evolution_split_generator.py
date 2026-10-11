@@ -41,8 +41,11 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         row_ranges: Optional[List] = None,
         score_getter=None,
         group_stats_filter=None,
+        snapshot_id: Optional[int] = None,
     ):
-        super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
+        super().__init__(
+            table, target_split_size, open_file_cost, deletion_files_map,
+            snapshot_id)
         self.row_ranges = row_ranges
         self.score_getter = score_getter
         self.group_stats_filter = group_stats_filter
@@ -131,13 +134,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             pack = packed_files[i] if i < len(packed_files) else []
             raw_convertible = all(len(sub_pack) == 1 for sub_pack in pack)
 
-            for data_file in file_group:
-                data_file.set_file_path(
-                    self.table.table_path,
-                    file_entries[0].partition,
-                    file_entries[0].bucket,
-                    self.default_part_value
-                )
+            self._set_data_file_paths(
+                file_group, file_entries[0].partition, file_entries[0].bucket)
 
             if file_group:
                 # Get deletion files for this split
@@ -154,7 +152,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
                     raw_convertible=raw_convertible,
-                    data_deletion_files=data_deletion_files
+                    data_deletion_files=data_deletion_files,
+                    snapshot_id=self.snapshot_id,
                 )
                 splits.append(split)
         return splits

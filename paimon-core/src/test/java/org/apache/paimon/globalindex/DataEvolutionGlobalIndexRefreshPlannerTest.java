@@ -155,13 +155,13 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
     }
 
     @Test
-    void testUsesColumnSequenceNumbersForCompactedFullFile() {
+    void testUsesWriteColsSequencesForCompactedFullFile() {
         IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
 
         assertThat(
                         plan(
                                 Collections.singletonList(
-                                        dataWithColumnSequences(
+                                        dataWithWriteColsSequences(
                                                 "unrelated-compact",
                                                 0,
                                                 100,
@@ -172,7 +172,7 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
         assertThat(
                         plan(
                                 Collections.singletonList(
-                                        dataWithColumnSequences(
+                                        dataWithWriteColsSequences(
                                                 "index-compact",
                                                 0,
                                                 100,
@@ -187,13 +187,13 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
     }
 
     @Test
-    void testColumnSequenceNumbersFollowWriteColsOrder() {
+    void testWriteColsSequencesFollowWriteColsOrder() {
         IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
 
         assertThat(
                         plan(
                                 Collections.singletonList(
-                                        dataWithColumnSequences(
+                                        dataWithWriteColsSequences(
                                                 "reordered-compact",
                                                 0,
                                                 100,
@@ -206,13 +206,13 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
     }
 
     @Test
-    void testColumnSequenceNumbersIgnoreRowTrackingFields() {
+    void testWriteColsSequencesIgnoreRowTrackingFields() {
         IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
 
         assertThat(
                         plan(
                                 Collections.singletonList(
-                                        dataWithColumnSequences(
+                                        dataWithWriteColsSequences(
                                                 "row-tracking-compact",
                                                 0,
                                                 100,
@@ -241,13 +241,13 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
     }
 
     @Test
-    void testMalformedColumnSequenceNumbersFallBackToFileSequence() {
+    void testMalformedWriteColsSequencesFallBackToFileSequence() {
         IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
 
         assertThat(
                         plan(
                                 Collections.singletonList(
-                                        dataWithColumnSequences(
+                                        dataWithWriteColsSequences(
                                                 "malformed-compact",
                                                 0,
                                                 100,
@@ -599,17 +599,17 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
         return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);
     }
 
-    private ManifestEntry dataWithColumnSequences(
+    private ManifestEntry dataWithWriteColsSequences(
             String fileName,
             long firstRowId,
             long rowCount,
             long maxSequenceNumber,
-            long[] columnSequences,
+            long[] writeColsSequences,
             String... writeCols) {
         DataFileMeta file =
                 data(fileName, firstRowId, rowCount, maxSequenceNumber, 1, writeCols)
                         .file()
-                        .withColumnMaxSequenceNumbers(columnSequences);
+                        .withWriteColsSequences(writeColsSequences);
         return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);
     }
 }

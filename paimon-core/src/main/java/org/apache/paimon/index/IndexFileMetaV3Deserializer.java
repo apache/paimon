@@ -35,6 +35,8 @@ import java.util.List;
 
 import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvMetas;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
+import static org.apache.paimon.utils.SerializationUtils.presizedCapacity;
+import static org.apache.paimon.utils.SerializationUtils.readCount;
 
 /** Deserializer for version 3 {@link IndexFileMeta}. */
 public class IndexFileMetaV3Deserializer implements Serializable {
@@ -72,8 +74,8 @@ public class IndexFileMetaV3Deserializer implements Serializable {
     }
 
     public final List<IndexFileMeta> deserializeList(DataInputView source) throws IOException {
-        int size = source.readInt();
-        List<IndexFileMeta> records = new ArrayList<>(size);
+        int size = readCount(source, getClass().getSimpleName());
+        List<IndexFileMeta> records = new ArrayList<>(presizedCapacity(size));
         for (int i = 0; i < size; i++) {
             records.add(deserialize(source));
         }

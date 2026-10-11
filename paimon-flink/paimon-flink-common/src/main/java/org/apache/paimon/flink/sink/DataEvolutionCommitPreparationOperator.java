@@ -23,6 +23,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPrepa
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
@@ -39,15 +40,18 @@ public class DataEvolutionCommitPreparationOperator
 
     private final FileStoreTable table;
     private final Snapshot snapshot;
+    private final boolean materializeDvRowIdCheck;
     private final List<Committable> committables;
 
     private DataEvolutionCommitPreparationOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
-            Snapshot snapshot) {
+            Snapshot snapshot,
+            boolean materializeDvRowIdCheck) {
         super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.snapshot = snapshot;
+        this.materializeDvRowIdCheck = materializeDvRowIdCheck;
         this.committables = new ArrayList<>();
     }
 
@@ -73,7 +77,18 @@ public class DataEvolutionCommitPreparationOperator
                 new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages)) {
             toCommit.add(new Committable(toCommit.get(0).checkpointId(), message));
         }
-        return toCommit;
+        if (!materializeDvRowIdCheck) {
+            return toCommit;
+        }
+        List<Committable> checked = new ArrayList<>(toCommit.size());
+        for (Committable committable : toCommit) {
+            checked.add(
+                    new Committable(
+                            committable.checkpointId(),
+                            ((CommitMessageImpl) committable.commitMessage())
+                                    .withCheckFromSnapshot(snapshot.id())));
+        }
+        return checked;
     }
 
     /** {@link StreamOperatorFactory} of {@link DataEvolutionCommitPreparationOperator}. */
@@ -81,18 +96,26 @@ public class DataEvolutionCommitPreparationOperator
 
         private final FileStoreTable table;
         private final Snapshot snapshot;
+        private final boolean materializeDvRowIdCheck;
 
         public Factory(FileStoreTable table, Snapshot snapshot) {
+            this(table, snapshot, false);
+        }
+
+        public Factory(FileStoreTable table, Snapshot snapshot, boolean materializeDvRowIdCheck) {
             super(Options.fromMap(table.options()));
             this.table = table;
             this.snapshot = snapshot;
+            this.materializeDvRowIdCheck = materializeDvRowIdCheck;
         }
 
         @Override
         @SuppressWarnings("unchecked")
         public <T extends StreamOperator<Committable>> T createStreamOperator(
                 StreamOperatorParameters<Committable> parameters) {
-            return (T) new DataEvolutionCommitPreparationOperator(parameters, table, snapshot);
+            return (T)
+                    new DataEvolutionCommitPreparationOperator(
+                            parameters, table, snapshot, materializeDvRowIdCheck);
         }
 
         @Override

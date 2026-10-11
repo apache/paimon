@@ -70,6 +70,10 @@ public class PredicateBuilder {
         this.fieldNames = rowType.getFieldNames();
     }
 
+    public RowType rowType() {
+        return rowType;
+    }
+
     public int indexOf(String field) {
         return fieldNames.indexOf(field);
     }
@@ -217,6 +221,14 @@ public class PredicateBuilder {
         return leaf(optimized.getKey(), transform, optimized.getValue());
     }
 
+    public Predicate notLike(int idx, Object patternLiteral) {
+        return leaf(NotLike.INSTANCE, idx, patternLiteral);
+    }
+
+    public Predicate notLike(Transform transform, Object patternLiteral) {
+        return leaf(NotLike.INSTANCE, transform, patternLiteral);
+    }
+
     private Predicate leaf(LeafFunction function, int idx, Object literal) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));
@@ -263,7 +275,9 @@ public class PredicateBuilder {
     public Predicate in(Transform transform, List<Object> literals) {
         // In the IN predicate, 20 literals are critical for performance.
         // If there are more than 20 literals, the performance will decrease.
-        if (literals.size() > 20) {
+        // An empty list has no equals to OR together, so it must also take this branch - mirroring
+        // in(int, List) - rather than fall into or(emptyList()), which throws.
+        if (literals.size() > 20 || literals.isEmpty()) {
             return LeafPredicate.of(transform, In.INSTANCE, literals);
         }
 
@@ -276,6 +290,10 @@ public class PredicateBuilder {
 
     public Predicate notIn(int idx, List<Object> literals) {
         return in(idx, literals).negate().get();
+    }
+
+    public Predicate notIn(Transform transform, List<Object> literals) {
+        return in(transform, literals).negate().get();
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {

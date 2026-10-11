@@ -325,4 +325,277 @@ class FullTextSearchTest extends PaimonSparkTestBase {
       assert(searchResult.length == 10)
     }
   }
+
+  // ========== Row filter tests ==========
+
+  private def createRankedTable(extraProps: String = ""): Unit = {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, category STRING, content STRING)
+                 |TBLPROPERTIES (
+                 |  'bucket' = '-1',
+                 |  'global-index.row-count-per-shard' = '10000',
+                 |  'row-tracking.enabled' = 'true',
+                 |  'data-evolution.enabled' = 'true'$extraProps)
+                 |""".stripMargin)
+    // Rows 0-2 match both terms of "paimon lake" (score 1.0); rows 3-5 only "paimon" (0.5).
+    spark.sql("""
+                |INSERT INTO T VALUES
+                |  (0, 'a', 'paimon lake alpha'),
+                |  (1, 'a', 'paimon lake beta'),
+                |  (2, 'b', 'paimon lake gamma'),
+                |  (3, 'b', 'paimon delta'),
+                |  (4, 'c', 'paimon epsilon'),
+                |  (5, 'c', 'paimon zeta')
+                |""".stripMargin)
+    spark
+      .sql(
+        s"CALL sys.create_global_index(table => 'test.T', index_column => 'content', index_type => '$indexType')")
+      .collect()
+  }
+
+  private val rankedQuery = """{"match":{"column":"content","terms":"paimon lake"}}"""
+
+  test("full-text search - WHERE filter is applied before top-k") {
+    withTable("T") {
+      createRankedTable()
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'btree')")
+        .collect()
+
+      val unfiltered = spark
+        .sql(s"SELECT id FROM full_text_search('T', 'content', '$rankedQuery', 2)")
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(unfiltered.subsetOf(Set(0, 1, 2)))
+
+      val filtered = spark
+        .sql(s"""
+                |SELECT id, __paimon_search_score
+                |FROM full_text_search('T', 'content', '$rankedQuery', 2)
+                |WHERE id >= 3
+                |""".stripMargin)
+        .collect()
+      assert(filtered.length == 2)
+      assert(filtered.map(_.getInt(0)).toSet.subsetOf(Set(3, 4, 5)))
+      assert(filtered.forall(_.getFloat(1) == 0.5f))
+
+      // Equivalent to ranking the filtered subset without the index.
+      val expected = spark
+        .sql("SELECT id FROM T WHERE id >= 3 AND content LIKE '%paimon%' ORDER BY id LIMIT 3")
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(filtered.map(_.getInt(0)).toSet.subsetOf(expected))
+    }
+  }
+
+  test("full-text search - WHERE filter on string column with bitmap index") {
+    withTable("T") {
+      createRankedTable()
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'category', index_type => 'bitmap')")
+        .collect()
+
+      val result = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 10)
+                |WHERE category IN ('b', 'c')
+                |ORDER BY id
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSeq
+      assert(result == Seq(2, 3, 4, 5))
+
+      val none = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 10)
+                |WHERE category = 'z'
+                |""".stripMargin)
+        .collect()
+      assert(none.isEmpty)
+    }
+  }
+
+  test("full-text search - fast mode excludes rows whose filter column has no index") {
+    withTable("T") {
+      createRankedTable()
+
+      val result = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 10)
+                |WHERE id >= 3
+                |""".stripMargin)
+        .collect()
+      assert(result.isEmpty)
+    }
+  }
+
+  test("full-text search - full mode scans rows whose filter column has no index") {
+    withTable("T") {
+      createRankedTable(",\n  'scalar-index.search-mode' = 'full'")
+
+      val result = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 2)
+                |WHERE id >= 3
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(result.size == 2)
+      assert(result.subsetOf(Set(3, 4, 5)))
+    }
+  }
+
+  test("full-text search - WHERE filter combined with partition filter") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, content STRING, pt INT)
+                  |PARTITIONED BY (pt)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (0, 'paimon lake', 1),
+                  |  (1, 'paimon lake', 1),
+                  |  (2, 'paimon lake', 2),
+                  |  (3, 'paimon lake', 2)
+                  |""".stripMargin)
+      spark
+        .sql(
+          s"CALL sys.create_global_index(table => 'test.T', index_column => 'content', index_type => '$indexType')")
+        .collect()
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'btree')")
+        .collect()
+
+      val result = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 10)
+                |WHERE pt = 2 AND id >= 3
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSeq
+      assert(result == Seq(3))
+    }
+  }
+
+  test("full-text search - WHERE filter with deletion vectors") {
+    withTable("T") {
+      createRankedTable(",\n  'deletion-vectors.enabled' = 'true'")
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'btree')")
+        .collect()
+      spark.sql("DELETE FROM T WHERE id = 3")
+
+      val result = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 10)
+                |WHERE id >= 3
+                |ORDER BY id
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSeq
+      assert(result == Seq(4, 5))
+    }
+  }
+
+  test("full-text search - predicate that cannot be pushed down is applied after the search") {
+    withTable("T") {
+      createRankedTable()
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'id', index_type => 'btree')")
+        .collect()
+
+      // `id % 2 = 1` is not a pushable predicate, so Spark evaluates it after the top-k: the
+      // result is a subset of the unfiltered top-k, never rows outside it, and may be short.
+      val unfiltered = spark
+        .sql(s"SELECT id FROM full_text_search('T', 'content', '$rankedQuery', 3)")
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      val filtered = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 3)
+                |WHERE id % 2 = 1
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(filtered.subsetOf(unfiltered))
+      assert(filtered.forall(_ % 2 == 1))
+
+      // Mixed: the pushable half narrows the candidates before top-k, the rest post-filters.
+      val mixed = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 3)
+                |WHERE id >= 3 AND id % 2 = 1
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSet
+      assert(mixed.subsetOf(Set(3, 5)))
+    }
+  }
+
+  test("full-text search - candidate-only index answers are excluded unless refine-from-data") {
+    withTable("T") {
+      createRankedTable()
+      // A BTree answers LIKE '%zeta%' with every non-null row; that superset must not be ranked.
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'content', index_type => 'btree')")
+        .collect()
+
+      val excluded = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 1)
+                |WHERE content LIKE '%zeta%'
+                |""".stripMargin)
+        .collect()
+      assert(excluded.isEmpty)
+
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('global-index.filter.refine-from-data' = 'true')")
+      val refined = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 1)
+                |WHERE content LIKE '%zeta%'
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSeq
+      assert(refined == Seq(5))
+
+      // Exact operators on the same index work either way.
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES ('global-index.filter.refine-from-data' = 'false')")
+      val exact = spark
+        .sql(s"""
+                |SELECT id
+                |FROM full_text_search('T', 'content', '$rankedQuery', 1)
+                |WHERE content = 'paimon zeta'
+                |""".stripMargin)
+        .collect()
+        .map(_.getInt(0))
+        .toSeq
+      assert(exact == Seq(5))
+    }
+  }
 }

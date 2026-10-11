@@ -20,6 +20,7 @@
 import tempfile
 import unittest
 from contextlib import ExitStack
+from dataclasses import replace
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -32,7 +33,7 @@ from pypaimon.read.native_plan import (
     native_version_at_least,
     native_runtime_available,
 )
-from pypaimon.read.sliced_split import SlicedSplit
+from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
@@ -56,16 +57,23 @@ class _DistributionFixture:
             primary_keys=primary_keys), False)
         return self.catalog.get_table('default.' + name)
 
-    def _write(self, table, rows, schema=None):
+    def _write(self, table, rows, schema=None, level=None):
         builder = table.new_batch_write_builder()
         writer, commit = builder.new_write(), builder.new_commit()
         try:
             writer.write_arrow(pa.Table.from_pylist(
                 rows, schema=self.schema if schema is None else schema))
-            commit.commit(writer.prepare_commit())
+            messages = writer.prepare_commit()
+            if level is not None:
+                # Unique-key L1 files model materialized Java compaction output.
+                for message in messages:
+                    message.new_files = [replace(file, level=level)
+                                         for file in message.new_files]
+            commit.commit(messages)
         finally:
             writer.close()
             commit.close()
+        return messages
 
     @staticmethod
     def _de_options(**extra):
@@ -91,6 +99,7 @@ class _DistributionFixture:
               limit=None, predicate=None, projection=None):
         builder = table.copy({
             'scan.native-plan.enabled': str(native).lower(),
+            'read.native.enabled': str(native).lower(),
         }).new_read_builder()
         if limit is not None:
             builder.with_limit(limit)
@@ -105,11 +114,29 @@ class _DistributionFixture:
             scan.with_slice(*slice_)
         if row_ranges is not None:
             scan.with_row_ranges(row_ranges)
-        guard = patch.object(scan.file_scanner, 'scan', side_effect=AssertionError(
-            'distributed native plan fell back to Python')) if native else ExitStack()
-        with guard:
+        with ExitStack() as stack:
+            if native:
+                stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError(
+                    'distributed native plan fell back to Python')))
+                if table.is_primary_key_table and not table.options.global_index_enabled():
+                    stack.enter_context(patch.object(
+                        scan.file_scanner, '_apply_push_down_limit', side_effect=AssertionError(
+                            'PK shard LIMIT was applied in Python')))
             plan = scan.plan()
-        return plan, builder.new_read().to_arrow(plan.splits(), parallelism=1).to_pylist()
+        if native:
+            self.assertTrue(all(
+                getattr(split, '_native_split', None) is not None
+                for split in plan.splits()))
+            read_guard = patch(
+                'pypaimon.read.table_read.TableRead._create_split_read',
+                side_effect=AssertionError(
+                    'distributed native read fell back to Python'))
+        else:
+            read_guard = ExitStack()
+        with read_guard:
+            rows = builder.new_read().to_arrow(
+                plan.splits(), parallelism=1).to_pylist()
+        return plan, rows
 
     def _assert_parity(self, table, expected, snapshot_id, ordered=True, **options):
         plans = []
@@ -183,6 +210,44 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
             with self.subTest(start=start, end=end):
                 self._assert_parity(table, rows[start:end], 3, slice_=(start, end))
 
+    def test_row_tracked_append_uses_global_ranges_for_native_read(self):
+        table = self._create('append_row_tracking', {
+            'row-tracking.enabled': 'true',
+            'source.split.target-size': '1b',
+        })
+        rows = [{'k': k, 'v': str(k)} for k in range(9)]
+        for start in range(0, 9, 3):
+            self._write(table, rows[start:start + 3])
+
+        native = self._assert_parity(table, rows[2:7], 3, slice_=(2, 7))
+        selected_ranges = [
+            (range_.from_, range_.to)
+            for split in native.splits()
+            for range_ in getattr(split, 'row_ranges', lambda: [])()
+        ]
+        # The middle file is selected in full and stays a plain DataSplit;
+        # only partial boundary files need explicit global ranges.
+        self.assertEqual(selected_ranges, [(2, 2), (6, 6)])
+        for index, expected in enumerate((rows[:3], rows[3:5], rows[5:7], rows[7:])):
+            self._assert_parity(table, expected, 3, shard=(index, 4))
+
+    def test_append_positions_follow_partition_pruned_file_order(self):
+        schema = self.schema.append(pa.field('p', pa.string()))
+        table = self._create(
+            'append_partition_filter', {'source.split.target-size': '1b'},
+            schema, ['p'])
+        low = [{'k': k, 'v': str(k), 'p': 'low'} for k in range(3)]
+        high = [{'k': k, 'v': str(k), 'p': 'high'} for k in range(100, 103)]
+        self._write(table, low, schema)
+        self._write(table, high, schema)
+        predicate = (table.new_read_builder().new_predicate_builder()
+                     .equal('p', 'high'))
+
+        self._assert_parity(
+            table, high[1:], 2, slice_=(1, 3), predicate=predicate)
+        self._assert_parity(
+            table, high[1:2], 2, slice_=(1, 3), predicate=predicate, limit=1)
+
     def test_append_limit_is_applied_after_shard_or_slice(self):
         table = self._create('append_limit', {'source.split.target-size': '1b'})
         rows = [{'k': k, 'v': str(k)} for k in range(12)]
@@ -227,6 +292,67 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                 self.assertIn(limited[0], expected)
         self.assertCountEqual(covered, list(latest.values()))
         self.assertEqual(len({row['k'] for row in covered}), len(covered))
+
+    def test_raw_primary_key_shards_distribute_files_within_one_bucket(self):
+        for engine, dv in (('first-row', False), ('deduplicate', True)):
+            with self.subTest(engine=engine, dv=dv):
+                table = self._create('raw_pk_' + engine, {
+                    'bucket': '1', 'merge-engine': engine,
+                    'deletion-vectors.enabled': str(dv).lower(),
+                    'source.split.target-size': '1b',
+                }, primary_keys=['k'])
+                rows = [{'k': k, 'v': str(k)} for k in range(12)]
+                files = []
+                for row in rows:
+                    files.append(self._write(table, [row], level=1)[0].new_files[0])
+                expected_rows, snapshot_id = rows, 12
+                if dv:
+                    vectors = {}
+                    for key in (3, 7):
+                        vector = BitmapDeletionVector()
+                        vector.delete(0)
+                        vectors[files[key].file_name] = vector
+                    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+                        GenericRow([], []), 0, vectors)
+                    commit = table.new_batch_write_builder().new_commit()
+                    try:
+                        commit.commit([CommitMessage(
+                            partition=(), bucket=0, new_files=[], index_adds=[entry])])
+                    finally:
+                        commit.close()
+                    expected_rows = [row for row in rows if row['k'] not in (3, 7)]
+                    snapshot_id = 13
+                _, expected = self._read(table, False)
+                self.assertCountEqual(expected, expected_rows)
+                covered = []
+                owned_files = set()
+                for shard in range(5):
+                    normal, expected = self._read(table, False, shard=(shard, 5))
+                    plan = self._assert_parity(
+                        table, expected, snapshot_id, ordered=False, shard=(shard, 5))
+                    for candidate in (normal, plan):
+                        self.assertTrue(all(split.bucket == 0 for split in candidate.splits()))
+                        self.assertTrue(all(
+                            java_file_name_shard(file.file_name, 5) == shard
+                            for split in candidate.splits() for file in split.files))
+                    files = {file.file_name for split in plan.splits() for file in split.files}
+                    self.assertFalse(owned_files & files)
+                    owned_files.update(files)
+                    covered.extend(expected)
+                    if expected:
+                        _, limited = self._read(table, True, shard=(shard, 5), limit=1)
+                        self.assertEqual(len(limited), 1)
+                        self.assertIn(limited[0], expected)
+                self.assertCountEqual(covered, expected_rows)
+                self.assertEqual(len(owned_files), 12)
+                # Snapshot selection must happen before shard planning.
+                old = table.copy({'scan.snapshot-id': '3'})
+                old_rows = []
+                for shard in range(5):
+                    _, expected = self._read(old, False, shard=(shard, 5))
+                    self._assert_parity(old, expected, 3, ordered=False, shard=(shard, 5))
+                    old_rows.extend(expected)
+                self.assertCountEqual(old_rows, rows[:3])
 
     @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_slice'),
                          'pypaimon_rust row-position selection API required')
@@ -353,9 +479,6 @@ class SlicedDeletionVectorLimitTest(_DistributionFixture, unittest.TestCase):
             plan, _ = self._read(table, False, slice_=(2, 9))
             sliced = plan.splits()[0]
             self.assertIsNone(sliced.merged_row_count())
-            exact = SlicedSplit(sliced.data_split(), sliced.shard_file_idx_map(),
-                                exact_merged_row_count=int(expected_key == 2))
-            self.assertEqual(exact.merged_row_count(), int(expected_key == 2))
             _, actual = self._read(table, False, slice_=(2, 9), limit=1)
             self.assertEqual(actual, [rows[expected_key]])
 

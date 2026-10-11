@@ -199,7 +199,7 @@ public class OptionsUtils {
             return (Boolean) o;
         }
 
-        switch (o.toString().toUpperCase()) {
+        switch (o.toString().toUpperCase(Locale.ROOT)) {
             case "TRUE":
                 return true;
             case "FALSE":

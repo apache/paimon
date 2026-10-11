@@ -48,7 +48,7 @@ public class AppendTableRead extends AbstractDataTableRead {
     @Nullable private RowType readType = null;
     private Predicate predicate = null;
     protected TopN topN = null;
-    protected Integer limit = null;
+    protected Long limit = null;
     @Nullable private ReadBatchSizer readBatchSizer;
 
     public AppendTableRead(
@@ -104,7 +104,7 @@ public class AppendTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public InnerTableRead withLimit(int limit) {
+    public InnerTableRead withLimit(long limit) {
         initialized().forEach(r -> r.withLimit(limit));
         this.limit = limit;
         return this;

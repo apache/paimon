@@ -24,6 +24,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeFamily;
 
+import java.util.List;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory for the exact partitioned FM contains index. */
@@ -37,7 +39,12 @@ public class FMGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField dataField, Options options) {
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() != 1) {
+            throw new UnsupportedOperationException(
+                    "Index type '" + identifier() + "' requires exactly one index field.");
+        }
+        DataField dataField = indexFields.get(0);
         checkArgument(
                 dataField.type().is(DataTypeFamily.CHARACTER_STRING),
                 "FM index requires a character string column, but field '%s' is %s.",

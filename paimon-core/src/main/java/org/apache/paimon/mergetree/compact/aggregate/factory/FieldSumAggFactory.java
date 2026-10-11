@@ -19,9 +19,12 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
+
+import java.util.Collections;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -30,13 +33,18 @@ public class FieldSumAggFactory implements FieldAggregatorFactory {
 
     public static final String NAME = "sum";
 
+    @VisibleForTesting
+    public FieldSumAgg create(DataType fieldType) {
+        return create(fieldType, CoreOptions.fromMap(Collections.emptyMap()), null);
+    }
+
     @Override
     public FieldSumAgg create(DataType fieldType, CoreOptions options, String field) {
         checkArgument(
                 fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.NUMERIC),
                 "Data type for sum column must be 'NumericType' but was '%s'.",
                 fieldType);
-        return new FieldSumAgg(identifier(), fieldType);
+        return new FieldSumAgg(identifier(), fieldType, options.fieldSumAggFailOnOverflow(field));
     }
 
     @Override

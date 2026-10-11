@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.lookup.LookupStrategy;
@@ -28,6 +29,7 @@ import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -59,6 +61,58 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     private static final RecordEqualiser EQUALISER =
             (row1, row2) -> row1.getInt(0) == row2.getInt(0);
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSequenceGroupDeleteProducesDeleteChangelog(boolean lookupOldRow) {
+        RowType valueType =
+                RowType.of(
+                        DataTypes.INT().notNull(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        Options options = new Options();
+        options.set("fields.f1.sequence-group", "f2");
+        options.set("fields.f3.sequence-group", "f4");
+        options.set("partial-update.remove-record-on-sequence-group", "f1");
+        KeyValue oldRow =
+                new KeyValue()
+                        .replace(row(1), 1, INSERT, GenericRow.of(1, 1, 10, 1, 20))
+                        .setLevel(2);
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                PartialUpdateMergeFunction.factory(
+                                        options, valueType, Collections.singletonList("f0")),
+                                null,
+                                null,
+                                null),
+                        key -> lookupOldRow ? oldRow : null,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        null);
+        function.reset();
+        if (!lookupOldRow) {
+            function.add(oldRow);
+        }
+        function.add(
+                new KeyValue()
+                        .replace(row(1), 2, DELETE, GenericRow.of(1, 2, 10, null, null))
+                        .setLevel(0));
+        function.add(
+                new KeyValue()
+                        .replace(row(1), 2, DELETE, GenericRow.of(1, null, null, 2, 20))
+                        .setLevel(0));
+
+        ChangelogResult result = function.getResult();
+        assertThat(result.result().valueKind()).isEqualTo(DELETE);
+        assertThat(result.result().value().getInt(1)).isEqualTo(2);
+        assertThat(result.changelogs()).hasSize(1);
+        assertThat(result.changelogs().get(0).valueKind()).isEqualTo(DELETE);
+        assertThat(result.changelogs().get(0).value()).isEqualTo(oldRow.value());
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -286,8 +340,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                     row -> row.isNullAt(0) ? null : row.getInt(0)
                                                 },
                                                 new FieldAggregator[] {
-                                                    new FieldSumAggFactory()
-                                                            .create(DataTypes.INT(), null, null)
+                                                    new FieldSumAggFactory().create(DataTypes.INT())
                                                 },
                                                 false,
                                                 null),

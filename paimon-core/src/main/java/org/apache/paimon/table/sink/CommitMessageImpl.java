@@ -45,6 +45,7 @@ public class CommitMessageImpl implements CommitMessage {
     private transient BinaryRow partition;
     private transient int bucket;
     private transient @Nullable Integer totalBuckets;
+    private transient @Nullable Long checkFromSnapshot;
     private transient DataIncrement dataIncrement;
     private transient CompactIncrement compactIncrement;
 
@@ -54,11 +55,22 @@ public class CommitMessageImpl implements CommitMessage {
             @Nullable Integer totalBuckets,
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement) {
+        this(partition, bucket, totalBuckets, dataIncrement, compactIncrement, null);
+    }
+
+    public CommitMessageImpl(
+            BinaryRow partition,
+            int bucket,
+            @Nullable Integer totalBuckets,
+            DataIncrement dataIncrement,
+            CompactIncrement compactIncrement,
+            @Nullable Long checkFromSnapshot) {
         this.partition = partition;
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
         this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
+        this.checkFromSnapshot = checkFromSnapshot;
     }
 
     @Override
@@ -74,6 +86,16 @@ public class CommitMessageImpl implements CommitMessage {
     @Override
     public @Nullable Integer totalBuckets() {
         return totalBuckets;
+    }
+
+    @Override
+    public @Nullable Long checkFromSnapshot() {
+        return checkFromSnapshot;
+    }
+
+    public CommitMessageImpl withCheckFromSnapshot(long snapshotId) {
+        return new CommitMessageImpl(
+                partition, bucket, totalBuckets, dataIncrement, compactIncrement, snapshotId);
     }
 
     public DataIncrement newFilesIncrement() {
@@ -103,6 +125,7 @@ public class CommitMessageImpl implements CommitMessage {
         this.partition = message.partition;
         this.bucket = message.bucket;
         this.totalBuckets = message.totalBuckets;
+        this.checkFromSnapshot = message.checkFromSnapshot;
         this.dataIncrement = message.dataIncrement;
         this.compactIncrement = message.compactIncrement;
     }
@@ -120,13 +143,20 @@ public class CommitMessageImpl implements CommitMessage {
         return bucket == that.bucket
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(totalBuckets, that.totalBuckets)
+                && Objects.equals(checkFromSnapshot, that.checkFromSnapshot)
                 && Objects.equals(dataIncrement, that.dataIncrement)
                 && Objects.equals(compactIncrement, that.compactIncrement);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, totalBuckets, dataIncrement, compactIncrement);
+        return Objects.hash(
+                partition,
+                bucket,
+                totalBuckets,
+                checkFromSnapshot,
+                dataIncrement,
+                compactIncrement);
     }
 
     @Override
@@ -136,8 +166,14 @@ public class CommitMessageImpl implements CommitMessage {
                         + "partition = %s, "
                         + "bucket = %d, "
                         + "totalBuckets = %s, "
+                        + "checkFromSnapshot = %s, "
                         + "newFilesIncrement = %s, "
                         + "compactIncrement = %s}",
-                partition, bucket, totalBuckets, dataIncrement, compactIncrement);
+                partition,
+                bucket,
+                totalBuckets,
+                checkFromSnapshot,
+                dataIncrement,
+                compactIncrement);
     }
 }

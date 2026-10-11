@@ -168,7 +168,7 @@ public class DefaultGlobalIndexBuilder implements Serializable {
     private List<ResultEntry> writePaimonRows(
             CloseableIterator<InternalRow> rows, LongCounter rowCounter) throws IOException {
         GlobalIndexWriter indexWriter =
-                createIndexWriter(table, indexType, indexField, extraFields, options);
+                createIndexWriter(table, indexType, indexedFields(), options);
         boolean multiColumn = !extraFields.isEmpty();
 
         try {

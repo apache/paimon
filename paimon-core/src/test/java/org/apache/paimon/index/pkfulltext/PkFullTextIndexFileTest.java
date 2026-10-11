@@ -40,6 +40,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -274,6 +275,7 @@ class PkFullTextIndexFileTest {
                 GlobalIndexFileReader fileReader,
                 List<GlobalIndexIOMeta> files,
                 long totalRowCount,
+                List<Range> rowRanges,
                 ExecutorService executor) {
             throw new UnsupportedOperationException();
         }

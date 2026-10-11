@@ -628,10 +628,8 @@ public class SnapshotManager implements Serializable {
         if (optionalMaxSnapshotId.isPresent()) {
             upperId = optionalMaxSnapshotId.get();
             if (upperId < lowerBoundSnapshotId) {
-                throw new RuntimeException(
-                        String.format(
-                                "snapshot upper id:%s should not greater than earliestSnapshotId:%s",
-                                upperId, lowerBoundSnapshotId));
+                // no snapshot id in [earliest, latest] falls in the range
+                return Collections.emptyIterator();
             }
             upperBoundSnapshotId = upperId < upperBoundSnapshotId ? upperId : upperBoundSnapshotId;
         }
@@ -639,10 +637,8 @@ public class SnapshotManager implements Serializable {
         if (optionalMinSnapshotId.isPresent()) {
             lowerId = optionalMinSnapshotId.get();
             if (lowerId > upperBoundSnapshotId) {
-                throw new RuntimeException(
-                        String.format(
-                                "snapshot upper id:%s should not greater than latestSnapshotId:%s",
-                                lowerId, upperBoundSnapshotId));
+                // no snapshot id in [earliest, latest] falls in the range
+                return Collections.emptyIterator();
             }
             lowerBoundSnapshotId = lowerId > lowerBoundSnapshotId ? lowerId : lowerBoundSnapshotId;
         }

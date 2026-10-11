@@ -16,7 +16,7 @@
 # under the License.
 
 from typing import Dict, Optional
-from urllib.parse import unquote
+from urllib.parse import quote_plus, unquote_plus
 
 from pypaimon.common.options import Options
 
@@ -24,14 +24,14 @@ from pypaimon.common.options import Options
 class RESTUtil:
     @staticmethod
     def encode_string(value: str) -> str:
-        import urllib.parse
-
-        return urllib.parse.quote(value)
+        # Java URLEncoder uses form encoding, including '+' for spaces and
+        # escaping '/' so one resource name stays one path segment.
+        return quote_plus(value, safe="*").replace("~", "%7E")
 
     @staticmethod
     def decode_string(encoded: str) -> str:
         """Decode URL-encoded string"""
-        return unquote(encoded)
+        return unquote_plus(encoded)
 
     @staticmethod
     def extract_prefix_map(

@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import unittest
 
 import pyarrow as pa
@@ -91,6 +92,9 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
 
         self.assertEqual(table.current_branch(), "b1")
         self.assertEqual(table.schema_manager.branch, "b1")
+        self.assertEqual(
+            json.loads(table.catalog_environment.rest_table_response)['name'],
+            identifier.get_object_name() + '$branch_b1')
 
     def test_write_blob_to_data_evolution_branch(self):
         schema = pa.schema([

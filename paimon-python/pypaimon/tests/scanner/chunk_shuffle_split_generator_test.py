@@ -23,6 +23,7 @@ workers together cover the data exactly once.
 """
 
 import os
+import random
 import shutil
 import tempfile
 import unittest
@@ -49,10 +50,13 @@ def _mock_table(table_path='/tmp/_chunk_shuffle_test_path'):
     table = Mock()
     table.table_path = table_path
     table.options = Mock()
+    table.options.row_tracking_enabled.return_value = False
     return table
 
 
-def _mock_entry(partition_values, bucket, file_name, row_count, file_size=1024):
+def _mock_entry(
+        partition_values, bucket, file_name, row_count, file_size=1024,
+        first_row_id=None):
     entry = Mock()
     entry.partition = Mock()
     entry.partition.values = partition_values
@@ -61,12 +65,15 @@ def _mock_entry(partition_values, bucket, file_name, row_count, file_size=1024):
     entry.file.file_name = file_name
     entry.file.file_size = file_size
     entry.file.row_count = row_count
+    entry.file.first_row_id = first_row_id
     # Swallow set_file_path so we don't need to mock partition path encoding.
     entry.file.set_file_path = Mock()
     return entry
 
 
-def _make_generator(seed, chunk_size, table=None, deletion_files_map=None):
+def _make_generator(
+        seed, chunk_size, table=None, deletion_files_map=None,
+        snapshot_id=None):
     if table is None:
         table = _mock_table()
     return AppendChunkShuffleSplitGenerator(
@@ -76,6 +83,7 @@ def _make_generator(seed, chunk_size, table=None, deletion_files_map=None):
         deletion_files_map=deletion_files_map,
         seed=seed,
         chunk_size=chunk_size,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -158,6 +166,75 @@ def _bitmap_deletion_vector(*positions):
     return deletion_vector
 
 
+class ChunkShuffleOrderCompatibilityTest(unittest.TestCase):
+
+    def _check_order(self, factory, entries, ordered_signatures):
+        first_dv = DeletionFile('dv.index', 0, 20, cardinality=1)
+        second_dv = DeletionFile('dv.index', 20, 20, cardinality=None)
+        deletion_files = {((None,), 0): {'a.parquet': first_dv, 'b.parquet': second_dv}}
+        vectors = {
+            first_dv: _bitmap_deletion_vector(1),
+            second_dv: _bitmap_deletion_vector(0, 2),
+        }
+        for seed in (0, 7, 42):
+            expected = list(ordered_signatures)
+            random.Random(seed).shuffle(expected)
+            # Include unsharded reads and empty workers (four chunks, six workers).
+            for workers in (1, 3, 6):
+                combined = []
+                for worker in range(workers):
+                    with self.subTest(seed=seed, workers=workers, worker=worker):
+                        gen = factory(seed=seed, chunk_size=3, deletion_files_map=deletion_files)
+                        if workers > 1:
+                            gen.with_shard(worker, workers)
+                        with patch(
+                            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+                            side_effect=lambda _, dv: vectors[dv],
+                        ) as read:
+                            # Manifest input order must not affect the shuffle.
+                            splits = gen.create_splits(list(reversed(entries)))
+                        self.assertEqual(read.call_count, 2)
+                        signatures = [_split_signature(split) for split in splits]
+                        size, remainder = divmod(len(expected), workers)
+                        start = worker * size + min(worker, remainder)
+                        end = start + size + (worker < remainder)
+                        self.assertEqual(signatures, expected[start:end])
+                        combined.extend(signatures)
+                self.assertEqual(combined, expected)
+
+    def test_append_order_across_partitions_files_and_deletions(self):
+        entries = [
+            _mock_entry([None], 0, 'a.parquet', 5),
+            _mock_entry([None], 0, 'b.parquet', 4),
+            _mock_entry(['p'], 2, 'c.parquet', 5),
+        ]
+        # Non-null partitions sort first. The second null-partition chunk
+        # spans files: b's file-local offsets 1 and 3 follow a's five rows.
+        expected = [
+            (('p',), 2, ('c.parquet',), ((0, 2),)),
+            (('p',), 2, ('c.parquet',), ((3, 4),)),
+            ((None,), 0, ('a.parquet',), ((0, 0), (2, 3))),
+            ((None,), 0, ('a.parquet', 'b.parquet'), ((4, 4), (6, 6), (8, 8))),
+        ]
+        self._check_order(_make_generator, entries, expected)
+
+    def test_data_evolution_order_preserves_blob_siblings_and_row_id_gaps(self):
+        entries = [
+            _mock_de_entry([None], 0, 'a.parquet', 1000, 5),
+            _mock_de_entry([None], 0, 'a.blob', 1000, 5),
+            _mock_de_entry([None], 0, 'b.parquet', 2000, 4),
+            _mock_de_entry(['p'], 2, 'c.parquet', 3000, 5),
+        ]
+        expected = [
+            (('p',), 2, ('c.parquet',), ((3000, 3002),)),
+            (('p',), 2, ('c.parquet',), ((3003, 3004),)),
+            ((None,), 0, ('a.blob', 'a.parquet'), ((1000, 1000), (1002, 1003))),
+            ((None,), 0, ('a.blob', 'a.parquet', 'b.parquet'),
+             ((1004, 1004), (2001, 2001), (2003, 2003))),
+        ]
+        self._check_order(_make_de_generator, entries, expected)
+
+
 class LiveRowRangeSlicerTest(unittest.TestCase):
 
     def test_slices_by_live_rows_and_absorbs_deletion_runs(self):
@@ -167,34 +244,32 @@ class LiveRowRangeSlicerTest(unittest.TestCase):
         second = slicer.take(3)
 
         self.assertEqual(
-            (
-                first.start_inclusive,
-                first.end_exclusive,
-                first.live_row_count,
-            ),
-            (0, 6, 3),
+            (first.row_ranges, first.live_row_count),
+            ([Range(1, 2), Range(5, 5)], 3),
         )
         self.assertEqual(
-            (
-                second.start_inclusive,
-                second.end_exclusive,
-                second.live_row_count,
-            ),
-            (6, 10, 3),
+            (second.row_ranges, second.live_row_count),
+            ([Range(6, 8)], 3),
         )
-        self.assertEqual(first.to_closed_row_id_range(100), Range(100, 105))
+        self.assertEqual(
+            first.to_closed_row_id_ranges(100),
+            [Range(101, 102), Range(105, 105)],
+        )
         self.assertIsNone(slicer.take(3))
+
+        alternating = _LiveRowRangeSlicer(8, iter([1, 3, 5, 7]))
+        self.assertEqual(
+            alternating.take(3).row_ranges,
+            [Range(0, 0), Range(2, 2), Range(4, 4)],
+        )
+        self.assertEqual(alternating.take(3).row_ranges, [Range(6, 6)])
 
     def test_returns_smaller_tail_and_skips_fully_deleted_source(self):
         tail_slicer = _LiveRowRangeSlicer(6, iter([1, 4]))
         tail = tail_slicer.take(10)
         self.assertEqual(
-            (
-                tail.start_inclusive,
-                tail.end_exclusive,
-                tail.live_row_count,
-            ),
-            (0, 6, 4),
+            (tail.row_ranges, tail.live_row_count),
+            ([Range(0, 0), Range(2, 3), Range(5, 5)], 4),
         )
         self.assertIsNone(tail_slicer.take(1))
 
@@ -224,25 +299,31 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         ]
         gen = _make_generator(seed=1, chunk_size=100)
         splits = gen.create_splits(entries)
-        # 3 chunks, each holding exactly one whole file → all DataSplit, no SlicedSplit
+        # Chunk output always uses IndexedSplit so row ranges carry the
+        # coordinate contract through stable split serialization.
         self.assertEqual(len(splits), 3)
         for s in splits:
-            self.assertIsInstance(s, DataSplit)
+            self.assertIsInstance(s, IndexedSplit)
+            self.assertEqual(s.row_ranges(), [Range(0, 99)])
             self.assertEqual(s.row_count, 100)
 
     def test_chunk_truncates_inside_file(self):
         # one file of 250 rows, chunk_size 100 → 3 chunks: 100, 100, 50
         entries = [_mock_entry([], 0, 'f1', 250)]
-        gen = _make_generator(seed=1, chunk_size=100)
+        gen = _make_generator(seed=1, chunk_size=100, snapshot_id=7)
         splits = gen.create_splits(entries)
         self.assertEqual(len(splits), 3)
-        # All three chunks slice the same file → all SlicedSplit
+        # All three chunks carry split-local physical positions.
         for s in splits:
-            self.assertIsInstance(s, SlicedSplit)
-        # union of (start, end) intervals must cover [0, 250)
-        intervals = sorted(s.shard_file_idx_map()['f1'] for s in splits)
-        self.assertEqual(intervals, [(0, 100), (100, 200), (200, 250)])
-        total = sum(end - start for start, end in intervals)
+            self.assertIsInstance(s, IndexedSplit)
+            self.assertEqual(s.snapshot_id, 7)
+        intervals = sorted(
+            (row_range.from_, row_range.to)
+            for split in splits
+            for row_range in split.row_ranges()
+        )
+        self.assertEqual(intervals, [(0, 99), (100, 199), (200, 249)])
+        total = sum(end - start + 1 for start, end in intervals)
         self.assertEqual(total, 250)
 
     def test_chunk_spans_multiple_files(self):
@@ -259,6 +340,28 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         total_rows = sum(_split_rows(s) for s in splits)
         self.assertEqual(total_rows, 90)
 
+    def test_row_tracking_chunks_use_global_row_ids(self):
+        table = _mock_table()
+        table.options.row_tracking_enabled.return_value = True
+        entries = [
+            _mock_entry([], 0, 'f1', 2, first_row_id=100),
+            _mock_entry([], 0, 'f2', 2, first_row_id=200),
+        ]
+        splits = _make_generator(
+            seed=1, chunk_size=3, table=table).create_splits(entries)
+
+        ranges = sorted(
+            (row_range.from_, row_range.to)
+            for split in splits
+            for row_range in split.row_ranges()
+        )
+        self.assertEqual(ranges, [(100, 101), (200, 200), (201, 201)])
+
+        entries[0].file.first_row_id = None
+        with self.assertRaisesRegex(ValueError, 'missing first_row_id'):
+            _make_generator(
+                seed=1, chunk_size=3, table=table).create_splits(entries)
+
     def test_chunk_size_larger_than_total(self):
         entries = [
             _mock_entry([], 0, 'f1', 30),
@@ -267,8 +370,8 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         gen = _make_generator(seed=1, chunk_size=1000)
         splits = gen.create_splits(entries)
         self.assertEqual(len(splits), 1)
-        # No truncation — full files inside one chunk → DataSplit not SlicedSplit
-        self.assertIsInstance(splits[0], DataSplit)
+        self.assertIsInstance(splits[0], IndexedSplit)
+        self.assertEqual(splits[0].row_ranges(), [Range(0, 59)])
         self.assertEqual(_split_rows(splits[0]), 60)
 
     def test_deletion_vector_slices_by_live_rows_and_is_attached(self):
@@ -289,8 +392,12 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             splits = gen.create_splits([entry])
 
         self.assertEqual(
-            sorted(s.shard_file_idx_map()['f1'] for s in splits),
-            [(0, 6), (6, 10)],
+            sorted(
+                (row_range.from_, row_range.to)
+                for split in splits
+                for row_range in split.row_ranges()
+            ),
+            [(1, 2), (5, 5), (6, 8)],
         )
         self.assertEqual(
             sorted(s.merged_row_count() for s in splits),
@@ -319,9 +426,9 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             splits = gen.create_splits([entry])
 
         self.assertEqual(len(splits), 1)
-        self.assertIsInstance(splits[0], SlicedSplit)
-        self.assertEqual(splits[0].shard_file_idx_map(), {})
-        self.assertEqual(splits[0].row_count, 10)
+        self.assertIsInstance(splits[0], IndexedSplit)
+        self.assertEqual(splits[0].row_ranges(), [Range(1, 2), Range(5, 8)])
+        self.assertEqual(splits[0].row_count, 6)
         self.assertEqual(splits[0].merged_row_count(), 6)
         read.assert_called_once_with(gen.table.file_io, deletion_file)
 
@@ -367,10 +474,14 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             splits = gen.create_splits(entries)
 
         self.assertEqual(len(splits), 1)
-        self.assertIsInstance(splits[0], DataSplit)
+        self.assertIsInstance(splits[0], IndexedSplit)
         self.assertEqual(
             [file.file_name for file in splits[0].files],
             ['f1', 'f2'],
+        )
+        self.assertEqual(
+            splits[0].row_ranges(),
+            [Range(0, 0), Range(2, 2), Range(4, 4), Range(6, 8)],
         )
         self.assertEqual(
             splits[0].data_deletion_files,
@@ -849,7 +960,10 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
             for split in splits
             for row_range in split.row_ranges()
         )
-        self.assertEqual(ranges, [(100, 104), (105, 109)])
+        self.assertEqual(
+            ranges,
+            [(100, 100), (103, 104), (105, 106), (108, 108)],
+        )
         self.assertEqual(
             sorted(split.merged_row_count() for split in splits),
             [3, 3],
@@ -915,7 +1029,8 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
                 (row_range.from_, row_range.to)
                 for row_range in splits[0].row_ranges()
             ],
-            [(100, 104), (200, 205)],
+            [(100, 100), (102, 102), (104, 104),
+             (201, 201), (203, 204)],
         )
         self.assertEqual(
             [file.file_name for file in splits[0].files],

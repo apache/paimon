@@ -157,7 +157,7 @@ public class JavaPyE2ETest {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
-                                embeddingField,
+                                Collections.singletonList(embeddingField),
                                 indexOptions);
 
         for (int i = 0; i < vectors.length; i++) {
@@ -267,7 +267,7 @@ public class JavaPyE2ETest {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
-                                embeddingField,
+                                Collections.singletonList(embeddingField),
                                 indexOptions);
 
         for (int i = 0; i < indexedVectors.length; i++) {

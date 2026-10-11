@@ -28,11 +28,17 @@ public class GlobalIndexIOMeta {
 
     private final Path filePath;
     private final long fileSize;
+    private final long rowCount;
     private final byte[] metadata;
 
     public GlobalIndexIOMeta(Path filePath, long fileSize, byte[] metadata) {
+        this(filePath, fileSize, -1, metadata);
+    }
+
+    public GlobalIndexIOMeta(Path filePath, long fileSize, long rowCount, byte[] metadata) {
         this.filePath = filePath;
         this.fileSize = fileSize;
+        this.rowCount = rowCount;
         this.metadata = metadata;
     }
 
@@ -42,6 +48,11 @@ public class GlobalIndexIOMeta {
 
     public long fileSize() {
         return fileSize;
+    }
+
+    /** Number of indexed rows, or -1 if it is unknown. */
+    public long rowCount() {
+        return rowCount;
     }
 
     public byte[] metadata() {
@@ -59,12 +70,13 @@ public class GlobalIndexIOMeta {
         GlobalIndexIOMeta that = (GlobalIndexIOMeta) o;
         return Objects.equals(filePath, that.filePath)
                 && fileSize == that.fileSize
+                && rowCount == that.rowCount
                 && Arrays.equals(metadata, that.metadata);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(filePath, fileSize);
+        int result = Objects.hash(filePath, fileSize, rowCount);
         result = 31 * result + Arrays.hashCode(metadata);
         return result;
     }

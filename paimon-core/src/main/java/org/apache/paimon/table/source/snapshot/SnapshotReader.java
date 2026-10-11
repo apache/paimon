@@ -132,7 +132,7 @@ public interface SnapshotReader {
 
     SnapshotReader withReadType(RowType readType);
 
-    SnapshotReader withLimit(int limit);
+    SnapshotReader withLimit(long limit);
 
     /** Whether the pushed filter still contains non-partition predicates. */
     boolean hasNonPartitionFilter();
@@ -166,6 +166,10 @@ public interface SnapshotReader {
          */
         @Nullable
         Long snapshotId();
+
+        /** Snapshot used to plan the splits, if available. */
+        @Nullable
+        Snapshot snapshot();
 
         /** Result splits. */
         List<Split> splits();

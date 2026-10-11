@@ -141,6 +141,8 @@ public class DLFAuthProvider implements AuthProvider {
                 return new DLFDefaultSigner(region);
             case DLFOpenApiSigner.IDENTIFIER:
                 return new DLFOpenApiSigner();
+            case DLFOpenApiV4Signer.IDENTIFIER:
+                return new DLFOpenApiV4Signer(region);
             default:
                 throw new IllegalArgumentException(
                         "Unknown DLF signing algorithm: "
@@ -148,7 +150,9 @@ public class DLFAuthProvider implements AuthProvider {
                                 + ". Supported: "
                                 + DLFDefaultSigner.IDENTIFIER
                                 + ", "
-                                + DLFOpenApiSigner.IDENTIFIER);
+                                + DLFOpenApiSigner.IDENTIFIER
+                                + ", "
+                                + DLFOpenApiV4Signer.IDENTIFIER);
         }
     }
 

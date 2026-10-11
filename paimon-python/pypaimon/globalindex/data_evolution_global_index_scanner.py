@@ -282,7 +282,8 @@ class _IndexMetaFileGroup:
 class _PaddingGlobalIndexReader(GlobalIndexReader):
     def __init__(self, wrapped, padding):
         self._wrapped = wrapped
-        self._padding = padding
+        # Padding rows have not been tested by this index.
+        self._padding = GlobalIndexResult.create(padding.results(), is_exact=False)
 
     def _pad(self, future):
         return _map_future(
@@ -344,6 +345,8 @@ class _PaddingGlobalIndexReader(GlobalIndexReader):
 def _resolve_snapshot(table, snapshot):
     if snapshot is not None:
         return snapshot
+    if hasattr(table, "_read_snapshot"):
+        return table._read_snapshot
     snapshot_manager = table.snapshot_manager()
     if snapshot_manager is None:
         return None
@@ -368,9 +371,12 @@ def _resolve_snapshot(table, snapshot):
 
 
 def is_supported_scalar_index(index_file):
+    meta = index_file.global_index_meta
     return (
-        index_file.global_index_meta is not None
+        meta is not None
         and index_file.index_type in _SUPPORTED_SCALAR_INDEX_TYPES
+        # Composite BTree keys cannot use scalar readers or their coverage.
+        and not (index_file.index_type == 'btree' and meta.extra_field_ids)
     )
 
 

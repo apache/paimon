@@ -185,6 +185,13 @@ public class OffsetGlobalIndexReader implements ContainsRefiningGlobalIndexReade
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return wrapped.visitRange(fieldRef, from, to, fromInclusive, toInclusive)
+                .thenApply(this::applyOffset);
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
         return wrapped.visitBetween(fieldRef, from, to).thenApply(this::applyOffset);

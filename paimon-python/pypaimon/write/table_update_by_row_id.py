@@ -17,7 +17,6 @@
 
 import bisect
 import uuid
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
@@ -26,11 +25,7 @@ import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.data_evolution_split_generator import (
-    DataEvolutionSplitGenerator,
-)
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import (
@@ -43,10 +38,11 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.row_utils import (
+    inline_blob_value,
     require_columns,
     row_to_named_values,
     value_for_arrow,
@@ -61,19 +57,17 @@ _ARROW_MAJOR = int(pa.__version__.split('.')[0])
 _DEFAULT_PARQUET_BLOCK_SIZE = 128 * 1024 * 1024
 
 
-@dataclass(frozen=True)
-class _FilesInfo:
-    """Snapshot view of target data files keyed by first_row_id.
-
-    Built once per merge by the driver and broadcast to workers so each task
-    avoids re-scanning the manifest.
-    """
-    snapshot_id: int
-    first_row_ids: List[int]
-    first_row_id_index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = (
-        field(default_factory=dict)
-    )
-    valid_row_id_ranges: List[Range] = field(default_factory=list)
+def _supports_parquet_row_id_update(table):
+    """Shared format constraints for ordinary row-ID updates."""
+    options = table.options
+    return (not table.is_primary_key_table
+            and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
+            == CoreOptions.FILE_FORMAT_PARQUET
+            and not options.variant_shredding_schema()
+            and not options.data_evolution_row_sidecar_enabled(False)
+            and not options.with_vector_format()
+            and options.changelog_producer() == ChangelogProducer.NONE
+            and not any(is_blob_file_field(f) for f in table.fields))
 
 
 class _RowIdUpdateFileWriter:
@@ -83,18 +77,9 @@ class _RowIdUpdateFileWriter:
 
     @staticmethod
     def supports_table(table):
-        options = table.options
-        return (not table.is_primary_key_table
-                and options.file_format(CoreOptions.FILE_FORMAT_PARQUET)
-                == CoreOptions.FILE_FORMAT_PARQUET
-                and not (options.variant_shredding_enabled()
-                         and options.variant_shredding_schema())
-                and not options.data_evolution_row_sidecar_enabled(False)
-                and not options.with_vector_format()
-                and options.changelog_producer() == ChangelogProducer.NONE
-                and not any(options.map_storage_layout(f.name) == 'shared-shredding'
-                            for f in table.fields)
-                and not any(is_blob_file_field(f) for f in table.fields))
+        return (_supports_parquet_row_id_update(table)
+                and not any(table.options.map_storage_layout(f.name) == 'shared-shredding'
+                            for f in table.fields))
 
     def __init__(self, table, partition, column_names):
         if not self.supports_table(table):
@@ -172,7 +157,8 @@ class _RowIdUpdateFileWriter:
                     file_writer = SingleFileWriter(
                         writer.file_io, file_path, batch.schema, writer.file_format,
                         writer.compression, writer.zstd_level,
-                        fields, writer._get_column_stats)
+                        fields, writer._get_column_stats,
+                        parquet_options=writer.parquet_writer_options)
                 file_writer.write(batch, row_group_size=batch.num_rows)
                 del batch
             if file_writer is None:
@@ -222,7 +208,7 @@ class TableUpdateByRowId:
 
     def __init__(
             self, table, commit_user: str, commit_identifier: int,
-            _precomputed_files_info: Optional[_FilesInfo] = None,
+            _precomputed_files_info: Optional[RowIdFileIndex] = None,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -239,101 +225,24 @@ class TableUpdateByRowId:
         self.commit_messages: List[CommitMessage] = []
         self._updated_first_row_ids_by_column: Dict[str, Set[int]] = {}
 
-    def _snapshot_files_info(self) -> _FilesInfo:
+    def _snapshot_files_info(self) -> RowIdFileIndex:
         """Return the already loaded snapshot file index for broadcast."""
-        return _FilesInfo(
+        return RowIdFileIndex(
             snapshot_id=self.snapshot_id,
             first_row_ids=self.first_row_ids,
             first_row_id_index=self._first_row_id_index,
             valid_row_id_ranges=self.valid_row_id_ranges,
         )
 
-    def _load_existing_files_info(self) -> _FilesInfo:
+    def _load_existing_files_info(self) -> RowIdFileIndex:
         """Scan the latest snapshot once and index files by ``first_row_id``.
 
-        Returns a :class:`_FilesInfo` whose ``first_row_id_index`` maps each
+        Returns a :class:`RowIdFileIndex` whose ``first_row_id_index`` maps each
         ``first_row_id`` to the owning split and the list of files with that
         id (a single id may belong to multiple files when data evolution has
         split a logical row range).
         """
-        scan = self.table.new_read_builder().new_scan()
-        plan = scan.plan_for_write()
-        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
-        return self._files_info_from_splits(snapshot_id, plan.splits())
-
-    @classmethod
-    def _files_info_from_entries(
-            cls,
-            table,
-            snapshot_id: int,
-            entries: List[ManifestEntry],
-    ) -> _FilesInfo:
-        """Build a file index from an already resolved snapshot entry set."""
-        splits = DataEvolutionSplitGenerator(
-            table,
-            table.options.source_split_target_size(),
-            table.options.source_split_open_file_cost(),
-        ).create_splits(entries)
-        return cls._files_info_from_splits(snapshot_id, splits)
-
-    @classmethod
-    def _files_info_from_splits(
-            cls, snapshot_id: int, splits: List[DataSplit]) -> _FilesInfo:
-        index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
-        row_id_ranges: List[Range] = []
-        for split in splits:
-            files_with_row_id = [
-                file for file in split.files if file.first_row_id is not None
-            ]
-            data_files = [
-                file for file in files_with_row_id
-                if not DataFileMeta.is_blob_file(file.file_name)
-            ]
-            for file in split.files:
-                if (
-                        file.first_row_id is None
-                        or DataFileMeta.is_blob_file(file.file_name)
-                ):
-                    continue
-                row_id_ranges.append(file.row_id_range())
-            for file in data_files:
-                target_files = [
-                    target_file
-                    for target_file in files_with_row_id
-                    if cls._overlaps(
-                        file.row_id_range(), target_file.row_id_range()
-                    )
-                ]
-
-                entry = index.get(file.first_row_id)
-                if entry is None:
-                    index[file.first_row_id] = (split, target_files)
-                else:
-                    existing_files = entry[1]
-                    existing_names = {
-                        existing.file_name for existing in existing_files
-                    }
-                    existing_files.extend(
-                        target_file
-                        for target_file in target_files
-                        if target_file.file_name not in existing_names
-                    )
-
-        if row_id_ranges:
-            merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
-        else:
-            merged = []
-
-        return _FilesInfo(
-            snapshot_id=snapshot_id,
-            first_row_ids=sorted(index.keys()),
-            first_row_id_index=index,
-            valid_row_id_ranges=merged,
-        )
-
-    @staticmethod
-    def _overlaps(left: Range, right: Range) -> bool:
-        return left.from_ <= right.to and right.from_ <= left.to
+        return RowIdFileIndex.from_table(self.table)
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """
@@ -428,6 +337,8 @@ class TableUpdateByRowId:
         ]
         fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
         blob_object_columns: Dict[str, List[Any]] = {}
+        descriptor_fields = self.table.options.blob_descriptor_fields()
+        view_fields = self.table.options.blob_view_fields()
 
         for col_name in column_names:
             if self._is_blob_column(col_name):
@@ -442,7 +353,9 @@ class TableUpdateByRowId:
             arrays.append(
                 pa.array(
                     [
-                        value_for_arrow(values_by_name[col_name], table_field)
+                        value_for_arrow(inline_blob_value(
+                            values_by_name[col_name],
+                            col_name in descriptor_fields, col_name in view_fields), table_field)
                         for _, values_by_name in row_entries
                     ],
                     type=arrow_field.type,
@@ -451,6 +364,9 @@ class TableUpdateByRowId:
             fields.append(arrow_field)
 
         update_data = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+        return self._write_row_columns(update_data, column_names, blob_object_columns)
+
+    def _write_row_columns(self, update_data, column_names, blob_object_columns):
         data_with_first_row_id = self._calculate_first_row_id(update_data)
         self._write_by_first_row_id(
             data_with_first_row_id, column_names, blob_object_columns)
@@ -568,8 +484,11 @@ class TableUpdateByRowId:
         # added after the original file was written, reading only those
         # missing columns can otherwise produce a zero-row table instead of
         # one null value per original row.
+        read_table = self.table
+        if wanted.intersection(self.table.options.blob_descriptor_fields() | self.table.options.blob_view_fields()):
+            read_table = self.table.copy({'blob-as-descriptor': 'true', 'blob-view.resolve.enabled': 'false'})
         table_read = TableRead(
-            self.table,
+            read_table,
             predicate=None,
             read_type=read_fields + [SpecialFields.ROW_ID],
         )
@@ -946,6 +865,8 @@ class TableUpdateByRowId:
         return pa.array(pylist, type=target_type)
 
     def _is_blob_column(self, column_name: str) -> bool:
+        if column_name in (self.table.options.blob_descriptor_fields() | self.table.options.blob_view_fields()):
+            return False
         for table_field in self.table.fields:
             if table_field.name == column_name:
                 return is_blob_file_field(table_field)
@@ -1027,6 +948,7 @@ class TableUpdateByRowId:
                 for value in values:
                     blob_writer.write_blob(value, arrow_type)
                 new_files.extend(blob_writer.prepare_commit())
+                blob_writer._release_prepared_files()
 
             if new_files:
                 self._assign_update_file_metadata(
@@ -1049,6 +971,8 @@ class TableUpdateByRowId:
             else:
                 if file_store_write is not None:
                     file_store_write.abort()
+                # Never delete files from CommitMessage on failure.
+                # A commit can succeed even when its response raises an exception.
                 for blob_writer in blob_writers:
                     blob_writer.abort()
 

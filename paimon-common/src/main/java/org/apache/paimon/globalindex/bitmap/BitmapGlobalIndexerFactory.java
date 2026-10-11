@@ -18,10 +18,16 @@
 
 package org.apache.paimon.globalindex.bitmap;
 
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedFileMetaSelector;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
+
+import java.util.List;
 
 /** The {@link GlobalIndexerFactory} for bitmap index. */
 public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -34,7 +40,19 @@ public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField dataField, Options options) {
+    public List<GlobalIndexIOMeta> selectFiles(
+            List<DataField> indexFields, Predicate predicate, List<GlobalIndexIOMeta> files) {
+        return SortedFileMetaSelector.selectFiles(
+                predicate, files, KeySerializer.create(indexFields.get(0).type()));
+    }
+
+    @Override
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() != 1) {
+            throw new UnsupportedOperationException(
+                    "Index type '" + identifier() + "' requires exactly one index field.");
+        }
+        DataField dataField = indexFields.get(0);
         return new BitmapGlobalIndexer(dataField, options);
     }
 }

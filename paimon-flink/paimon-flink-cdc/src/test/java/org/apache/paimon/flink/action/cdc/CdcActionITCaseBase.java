@@ -471,6 +471,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
         private Map<String, String> catalogConfig = Collections.emptyMap();
         private Map<String, String> tableConfig = Collections.emptyMap();
+        private final List<String> tableConfigByTable = new ArrayList<>();
         @Nullable private Boolean ignoreIncompatible;
         @Nullable private Boolean mergeShards;
         @Nullable private String tablePrefix;
@@ -497,6 +498,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
         public SyncDatabaseActionBuilder<T> withTableConfig(Map<String, String> tableConfig) {
             this.tableConfig = tableConfig;
+            return this;
+        }
+
+        public SyncDatabaseActionBuilder<T> withTableConfigByTable(String... configs) {
+            this.tableConfigByTable.addAll(Arrays.asList(configs));
             return this;
         }
 
@@ -582,6 +588,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             args.addAll(mapToArgs(getConfKey(clazz), sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
             args.addAll(mapToArgs("--table-conf", tableConfig));
+            args.addAll(listToMultiArgs("--table-conf-by-table", tableConfigByTable));
 
             args.addAll(nullableToArgs("--ignore-incompatible", ignoreIncompatible));
             args.addAll(nullableToArgs("--merge-shards", mergeShards));

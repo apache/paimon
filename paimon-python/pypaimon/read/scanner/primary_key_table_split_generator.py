@@ -22,6 +22,7 @@ from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.interval_partition import IntervalPartition
+from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import Split
 
@@ -36,9 +37,12 @@ class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
             table,
             target_split_size: int,
             open_file_cost: int,
-            deletion_files_map=None
+            deletion_files_map=None,
+            snapshot_id=None,
     ):
-        super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
+        super().__init__(
+            table, target_split_size, open_file_cost, deletion_files_map,
+            snapshot_id)
         self.deletion_vectors_enabled = table.options.deletion_vectors_enabled()
         self.merge_engine = table.options.merge_engine()
 
@@ -46,7 +50,7 @@ class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
         """Primary key tables do not support slice-based sharding."""
         raise NotImplementedError(
             "Primary key tables do not support with_slice(). "
-            "Use with_shard() for bucket-based parallel processing instead."
+            "Use with_shard() for parallel processing instead."
         )
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
@@ -116,11 +120,14 @@ class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
         return splits
 
     def _filter_by_shard(self, file_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+        """Match Java SnapshotReaderImpl and MergeTreeSplitGenerator.
+
+        Raw-convertible engines distribute file names; other engines keep every
+        version of a key in its bucket. Select entries before packing splits.
         """
-        Filter file entries by bucket-based sharding.
-        """
-        filtered_entries = []
-        for entry in file_entries:
-            if entry.bucket % self.number_of_para_subtasks == self.idx_of_this_subtask:
-                filtered_entries.append(entry)
-        return filtered_entries
+        by_file_name = (self.deletion_vectors_enabled
+                        or self.merge_engine == MergeEngine.FIRST_ROW)
+        return [entry for entry in file_entries if (
+            java_file_name_shard(entry.file.file_name, self.number_of_para_subtasks)
+            if by_file_name else entry.bucket % self.number_of_para_subtasks
+        ) == self.idx_of_this_subtask]

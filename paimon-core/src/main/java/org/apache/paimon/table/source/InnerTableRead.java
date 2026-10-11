@@ -56,7 +56,7 @@ public interface InnerTableRead extends TableRead {
         return this;
     }
 
-    default InnerTableRead withLimit(int limit) {
+    default InnerTableRead withLimit(long limit) {
         return this;
     }
 

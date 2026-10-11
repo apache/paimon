@@ -217,8 +217,8 @@ public class ChainSplit implements Split {
 
         BinaryRow logicalPartition = SerializationUtils.deserializeBinaryRow(in);
 
-        int n = in.readInt();
-        List<DataFileMeta> dataFiles = new ArrayList<>(n);
+        int n = SerializationUtils.readCount(in, "ChainSplit");
+        List<DataFileMeta> dataFiles = new ArrayList<>(SerializationUtils.presizedCapacity(n));
         ObjectSerializer<DataFileMeta> dataFileSer =
                 version <= 2
                         ? new DataFileMetaWriteColsLegacySerializer()

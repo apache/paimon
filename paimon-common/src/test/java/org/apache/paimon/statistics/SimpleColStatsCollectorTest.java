@@ -175,6 +175,25 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
+    public void testTruncateMaxSkipsSurrogateCodePoints() {
+        String prefix = "0123456789abcde";
+        BinaryString value = BinaryString.fromString(prefix + "\uD7FFzz");
+        BinaryString laterValue = BinaryString.fromString(prefix + "A");
+        BinaryString expectedMax = BinaryString.fromString(prefix + "\uE000");
+
+        TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(16);
+        collector.collect(value, (Serializer) BinaryStringSerializer.INSTANCE);
+        collector.collect(laterValue, (Serializer) BinaryStringSerializer.INSTANCE);
+        SimpleColStats stats = collector.result();
+        assertThat(stats.max()).isEqualTo(expectedMax);
+        assertThat(((BinaryString) stats.max()).compareTo(value)).isGreaterThan(0);
+
+        SimpleColStats converted = collector.convert(new SimpleColStats(laterValue, value, 0L));
+        assertThat(converted.max()).isEqualTo(expectedMax);
+        assertThat(((BinaryString) converted.max()).compareTo(value)).isGreaterThan(0);
+    }
+
+    @Test
     public void testTruncateCopied() {
         TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(16);
         BinaryString str = BinaryString.fromString("str");

@@ -42,6 +42,23 @@ import java.util.stream.Collectors;
  */
 public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<GlobalIndexIOMeta>>> {
 
+    /** Select files conservatively before distributing a query to data splits. */
+    public static List<GlobalIndexIOMeta> selectFiles(
+            org.apache.paimon.predicate.Predicate predicate,
+            List<GlobalIndexIOMeta> files,
+            KeySerializer keySerializer) {
+        if (files.stream().anyMatch(file -> file.metadata() == null)) {
+            return files;
+        }
+        try {
+            return predicate
+                    .visit(new SortedFileIndexPlanner(files, keySerializer, Long.MAX_VALUE))
+                    .orElse(files);
+        } catch (UnsupportedOperationException e) {
+            return files;
+        }
+    }
+
     private final List<Pair<GlobalIndexIOMeta, SortedIndexFileMeta>> files;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;

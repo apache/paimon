@@ -30,7 +30,9 @@ from pypaimon.multimodal.query import (
     TextQuery,
     VectorQuery,
 )
-from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_type
+from pypaimon.schema.data_types import (
+    PyarrowFieldParser, is_array_blob_type, is_blob_file_type, is_map_blob_type,
+)
 from pypaimon.table.data_evolution_merge_into import (
     WhenMatched,
     WhenNotMatched,
@@ -100,6 +102,12 @@ class MultimodalTable:
         self.raw_table = raw_table
         self.table = raw_table
 
+    def copy(self, options: dict) -> 'MultimodalTable':
+        """Return a table view with dynamic Paimon options."""
+        raw_table = self.raw_table.copy(options)
+        return MultimodalTable(
+            self.catalog, raw_table.identifier.get_full_name(), raw_table)
+
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         write_builder = self.raw_table.new_batch_write_builder()
@@ -130,6 +138,54 @@ class MultimodalTable:
         return self.add_videos(
             [(video, frames, first_frame)], video_column=video_column
         )
+
+    def add_images_as_video(
+            self,
+            images,
+            frames,
+            *,
+            fps,
+            codec,
+            pixel_format,
+            gop_size,
+            codec_options=None,
+            video_column=None):
+        """Encode ordered images as one MP4 and append its logical frame rows.
+
+        Images may be encoded image bytes or Pillow images. ``frames`` supplies
+        every table column except ``video_column`` and must contain one row per
+        image. Encoding finishes before the Paimon write starts.
+        """
+        import os
+        import tempfile
+
+        from pypaimon.multimodal.video import _encode_images_to_video
+
+        column = self._resolve_video_frame_column(video_column)
+        target_schema = _target_schema(self.raw_table)
+        non_video_schema = pa.schema([
+            field for field in target_schema if field.name != column
+        ])
+        frame_table = _to_arrow_table(frames, non_video_schema)
+        with tempfile.TemporaryDirectory(prefix="pypaimon_video_") as directory:
+            video_path = os.path.join(directory, "video.mp4")
+            image_count = _encode_images_to_video(
+                images,
+                video_path,
+                fps=fps,
+                codec=codec,
+                pixel_format=pixel_format,
+                gop_size=gop_size,
+                codec_options=codec_options,
+            )
+            if image_count != frame_table.num_rows:
+                raise ValueError(
+                    "Image count %d does not match frame row count %d."
+                    % (image_count, frame_table.num_rows)
+                )
+            return self.add_video(
+                video_path, frame_table, video_column=column
+            )
 
     def add_videos(self, videos, *, video_column=None):
         """Append several encoded videos with one writer and one commit.
@@ -296,7 +352,8 @@ class MultimodalTable:
         """
         column = self._resolve_video_frame_column(video_column)
         target_schema = _target_schema(self.raw_table)
-        payload, first_frame = _video_payload(video, first_frame)
+        payload, keyframe_index, first_frame = _video_payload(
+            video, first_frame)
 
         row_ids = (
             self.scan()
@@ -311,7 +368,7 @@ class MultimodalTable:
             return self
 
         descriptors = _video_frame_descriptors(
-            payload, len(row_ids), first_frame)
+            payload, keyframe_index, len(row_ids), first_frame)
         update_data = pa.Table.from_arrays(
             [
                 pa.array(row_ids, type=pa.int64()),
@@ -355,6 +412,10 @@ class MultimodalTable:
             fn,
             file_io=self.raw_table.file_io,
             all_blob_columns=_blob_columns(self.raw_table),
+            map_blob_columns=[field.name for field in self.raw_table.fields
+                              if is_map_blob_type(field.type)],
+            array_blob_columns=[field.name for field in self.raw_table.fields
+                                if is_array_blob_type(field.type)],
             **kwargs,
         )
 
@@ -479,9 +540,11 @@ class MultimodalTable:
             pre_filter=pre_filter,
         )
 
-    def create_index(self, column, index_type, options=None):
+    def create_index(self, column, index_type, options=None, *, execution="local",
+                     concurrency=None, ray_remote_args=None):
         return self.raw_table.create_global_index(
-            column, index_type=_normalize_index_type(index_type), options=options)
+            column, index_type=_normalize_index_type(index_type), options=options,
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
 
     def _merge(
             self,
@@ -569,19 +632,35 @@ class _MergeBuilder:
 def _blob_columns(table):
     return tuple(
         field.name for field in table.fields
-        if is_blob_type(field.type)
+        if is_blob_file_type(field.type)
     )
 
 
 def _to_arrow_table(data, target_schema=None):
     if target_schema is not None:
         data = _serialize_blob_values(data, target_schema)
+        if isinstance(data, list):
+            # Untyped from_pylist only discovers columns present in the first row.
+            data = {
+                field.name: [row.get(field.name) for row in data]
+                for field in target_schema
+            }
+        if isinstance(data, dict):
+            data = dict(data)
+            for field in target_schema:
+                if field.name in data and pa.types.is_map(field.type):
+                    # Inferred STRUCT/LIST arrays cannot be cast back to MAP.
+                    data[field.name] = pa.array(data[field.name], type=field.type)
     if isinstance(data, pa.Table):
         table = data
     elif isinstance(data, pa.RecordBatch):
         table = pa.Table.from_batches([data])
     elif isinstance(data, list):
-        table = pa.Table.from_pylist(data)
+        # Inference from the first row alone drops fields in later source rows.
+        names = dict.fromkeys(name for row in data for name in row)
+        table = pa.Table.from_pydict({
+            name: [row.get(name) for row in data] for name in names
+        })
     elif isinstance(data, dict):
         table = pa.Table.from_pydict(data)
     elif hasattr(data, "__dataframe__") or data.__class__.__module__.startswith("pandas"):
@@ -743,35 +822,41 @@ def _video_payload(video, first_frame):
             "video must be a path, Blob, or BlobDescriptor, got %r."
             % type(video)
         )
+    keyframe_index = None
     if isinstance(payload, VideoFrameDescriptor):
+        keyframe_index = payload.keyframe_index_descriptor
         payload = payload.payload_descriptor
 
-    return payload, first_frame
+    return payload, keyframe_index, first_frame
 
 
-def _video_frame_descriptors(payload, count, first_frame):
+def _video_frame_descriptors(payload, keyframe_index, count, first_frame):
     from pypaimon.table.row.blob import VideoFrameDescriptor
 
+    index_offset = -1 if keyframe_index is None else keyframe_index.offset
+    index_length = 0 if keyframe_index is None else keyframe_index.length
     return [
         VideoFrameDescriptor(
             payload.uri,
             payload.offset,
             payload.length,
             first_frame + index,
+            index_offset,
+            index_length,
         ).serialize()
         for index in range(count)
     ]
 
 
 def _video_frame_table(video, frames, video_column, first_frame, target_schema):
-    payload, first_frame = _video_payload(video, first_frame)
+    payload, keyframe_index, first_frame = _video_payload(video, first_frame)
 
     non_video_schema = pa.schema([
         field for field in target_schema if field.name != video_column
     ])
     frame_table = _to_arrow_table(frames, non_video_schema)
     descriptor_values = _video_frame_descriptors(
-        payload, frame_table.num_rows, first_frame)
+        payload, keyframe_index, frame_table.num_rows, first_frame)
     arrays = []
     for field in target_schema:
         if field.name == video_column:

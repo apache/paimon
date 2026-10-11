@@ -22,10 +22,12 @@ from pypaimon.schema.table_schema import TableSchema
 
 class TableMetadata:
 
-    def __init__(self, schema: TableSchema, is_external: bool, uuid: Optional[str] = None):
+    def __init__(self, schema: TableSchema, is_external: bool, uuid: Optional[str] = None,
+                 rest_table_response: Optional[str] = None):
         self._schema = schema
         self._is_external = is_external
         self._uuid = uuid
+        self.rest_table_response = rest_table_response
 
     @property
     def schema(self) -> TableSchema:

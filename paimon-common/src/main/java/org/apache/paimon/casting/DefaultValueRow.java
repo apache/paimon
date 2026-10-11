@@ -27,10 +27,13 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.NestedProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -223,6 +226,16 @@ public class DefaultValueRow implements InternalRow {
 
     @Nullable
     public static DefaultValueRow create(RowType rowType) {
+        return create(rowType, rowType);
+    }
+
+    /**
+     * Creates the default value row of {@code rowType}, which may keep only some sub-fields of a
+     * ROW field of {@code fullRowType}. The default of such a field is converted with the full ROW
+     * type and then projected to the kept sub-fields.
+     */
+    @Nullable
+    public static DefaultValueRow create(RowType rowType, RowType fullRowType) {
         List<DataField> fields = rowType.getFields();
         GenericRow row = new GenericRow(fields.size());
         boolean containsDefaultValue = false;
@@ -234,8 +247,7 @@ public class DefaultValueRow implements InternalRow {
             }
 
             containsDefaultValue = true;
-            Object defaultValue = convertDefaultValue(dataField.type(), defaultValueStr);
-            row.setField(i, defaultValue);
+            row.setField(i, defaultValueOf(dataField, fullRowType, defaultValueStr));
         }
 
         if (!containsDefaultValue) {
@@ -243,5 +255,22 @@ public class DefaultValueRow implements InternalRow {
         }
 
         return DefaultValueRow.from(row);
+    }
+
+    private static Object defaultValueOf(
+            DataField field, RowType fullRowType, String defaultValueStr) {
+        DataType type = field.type();
+        if (type instanceof RowType && fullRowType.containsField(field.id())) {
+            DataType fullType = fullRowType.getField(field.id()).type();
+            if (fullType instanceof RowType && !fullType.equals(type)) {
+                InternalRow fullDefault =
+                        (InternalRow) convertDefaultValue(fullType, defaultValueStr);
+                NestedProjectedRow projected =
+                        NestedProjectedRow.create((RowType) fullType, (RowType) type);
+                return new InternalRowSerializer((RowType) type)
+                        .copy(projected.replaceRow(fullDefault));
+            }
+        }
+        return convertDefaultValue(type, defaultValueStr);
     }
 }

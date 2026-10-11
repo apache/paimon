@@ -143,15 +143,18 @@ class TestTimeTravelSchemaEvolution:
         assert 'vector-field' not in historical.table_schema.options
         assert self._read(historical) == [{'id': 1}]
 
-    def test_legacy_descriptor_option_keeps_historical_blob_layout(self):
+    def test_descriptor_fallback_keeps_historical_inline_layout(self):
         legacy_key = 'blob.stored-descriptor-fields'
         original = self._create([
             DataField(0, 'id', AtomicType('INT')),
             DataField(1, 'payload', AtomicType('BLOB')),
         ], {legacy_key: 'payload'})
-        payload = b'legacy-blob-payload'
-        messages = self._write(original, {'id': 1, 'payload': payload})
-        assert any(f.file_name.endswith('.blob') for msg in messages for f in msg.new_files)
+        source = self.root / 'blob-source'
+        payload = b'blob-payload'
+        source.write_bytes(payload)
+        messages = self._write(original, {'id': 1, 'payload': BlobDescriptor(
+            source.as_uri(), 0, len(payload)).serialize()})
+        assert all(f.file_name.endswith('.parquet') for msg in messages for f in msg.new_files)
         self.catalog.alter_table('test.t', [
             SchemaChange.drop_column('payload'),
             SchemaChange.add_column('reference', AtomicType('BYTES'), '__BLOB_DESCRIPTOR_FIELD'),
@@ -160,10 +163,9 @@ class TestTimeTravelSchemaEvolution:
 
         historical = current.copy({'scan.snapshot-id': '1'})
 
-        # Restore the original key, without turning it into an inline-descriptor layout switch.
         assert historical.table_schema.options[legacy_key] == 'payload'
         assert 'blob-descriptor-field' not in historical.table_schema.options
-        assert not historical.options.blob_descriptor_fields()
+        assert historical.options.blob_descriptor_fields() == {'payload'}
         assert self._read(historical) == [{'id': 1, 'payload': payload}]
 
     def test_explicit_field_overrides_survive_repeated_copies(self):
@@ -185,3 +187,17 @@ class TestTimeTravelSchemaEvolution:
 
         historical = current.copy({'scan.snapshot-id': '1'})
         assert historical._applied_dynamic_options == {'scan.snapshot-id': '1'}
+
+    def test_descriptor_fallback_override_keeps_canonical_group(self):
+        original = self._create([
+            DataField(0, 'id', AtomicType('INT')), DataField(1, 'payload', AtomicType('BLOB')),
+        ], {'blob.stored-descriptor-fields': 'payload'})
+        self._write(original, {'id': 1, 'payload': None})
+        self.catalog.alter_table('test.t', [SchemaChange.add_column(
+            'reference', AtomicType('BYTES'), '__BLOB_DESCRIPTOR_FIELD')])
+        current = self.catalog.get_table('test.t')
+        historical = current.copy({'blob.stored-descriptor-fields': None}).copy({'scan.snapshot-id': '1'})
+        repeated = historical.copy({'read.batch-size': '1'})
+        for table in (historical, repeated):
+            assert table.table_schema.options['blob-descriptor-field'] == 'payload,reference'
+            assert 'blob.stored-descriptor-fields' not in table.table_schema.options

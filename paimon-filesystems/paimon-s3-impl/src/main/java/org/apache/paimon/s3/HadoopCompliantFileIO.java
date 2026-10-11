@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -31,6 +32,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.io.IOUtils;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -43,7 +45,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
 
-    protected transient volatile Map<String, FileSystem> fsMap;
+    protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
@@ -137,16 +139,16 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             }
         }
 
-        Map<String, FileSystem> map = fsMap;
+        Map<Pair<String, String>, FileSystem> map = fsMap;
 
-        String authority = path.toUri().getAuthority();
-        if (authority == null) {
-            authority = "DEFAULT";
-        }
-        FileSystem fs = map.get(authority);
+        URI uri = path.toUri();
+        String scheme = uri.getScheme();
+        String authority = uri.getAuthority();
+        Pair<String, String> key = Pair.of(scheme, authority);
+        FileSystem fs = map.get(key);
         if (fs == null) {
             fs = createFileSystem(path);
-            map.put(authority, fs);
+            map.put(key, fs);
         }
         return fs;
     }

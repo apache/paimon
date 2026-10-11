@@ -25,15 +25,22 @@ import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DeletionVector}. */
 public class DeletionVectorTest {
@@ -178,6 +185,58 @@ public class DeletionVectorTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRejectCorruptedChecksum(boolean bitmap64) {
+        byte[] serialized = serializeDeletionVector(bitmap64);
+        serialized[serialized.length - 1] ^= 1;
+
+        assertThatThrownBy(
+                        () ->
+                                readDeletionVector(
+                                        serialized, serializedLength(serialized, bitmap64)))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Invalid deletion vector checksum");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRejectCorruptedPayload(boolean bitmap64) {
+        byte[] serialized = serializeDeletionVector(bitmap64);
+        serialized[
+                        Bitmap64DeletionVector.LENGTH_SIZE_BYTES
+                                + Bitmap64DeletionVector.MAGIC_NUMBER_SIZE_BYTES] ^=
+                1;
+
+        assertThatThrownBy(
+                        () ->
+                                readDeletionVector(
+                                        serialized, serializedLength(serialized, bitmap64)))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Invalid deletion vector checksum");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRejectTruncatedChecksum(boolean bitmap64) {
+        byte[] serialized = serializeDeletionVector(bitmap64);
+        long length = serializedLength(serialized, bitmap64);
+        byte[] truncated = Arrays.copyOf(serialized, serialized.length - 1);
+
+        assertThatThrownBy(() -> readDeletionVector(truncated, length))
+                .isInstanceOf(IOException.class);
+    }
+
+    @Test
+    public void testRejectInvalidBitmapLength() {
+        byte[] serialized = serializeDeletionVector(false);
+        ByteBuffer.wrap(serialized).putInt(BitmapDeletionVector.MAGIC_NUMBER_SIZE_BYTES - 1);
+
+        assertThatThrownBy(() -> readDeletionVector(serialized, null))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Invalid deletion vector bitmap length");
+    }
+
     @Test
     public void testBitmapDeletionVectorTo64() {
         HashSet<Integer> toDelete = new HashSet<>();
@@ -212,6 +271,24 @@ public class DeletionVectorTest {
             assertThat(deletionVector.isDeleted(i)).isFalse();
             assertThat(bitmap64DeletionVector.isDeleted(i)).isFalse();
         }
+    }
+
+    private static byte[] serializeDeletionVector(boolean bitmap64) {
+        DeletionVector deletionVector =
+                bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
+        deletionVector.delete(1);
+        deletionVector.delete(10);
+        return DeletionVector.serializeToBytes(deletionVector);
+    }
+
+    private static long serializedLength(byte[] serialized, boolean bitmap64) {
+        return bitmap64 ? serialized.length : ByteBuffer.wrap(serialized).getInt();
+    }
+
+    private static DeletionVector readDeletionVector(byte[] serialized, @Nullable Long length)
+            throws IOException {
+        return DeletionVector.read(
+                new DataInputStream(new ByteArrayInputStream(serialized)), length);
     }
 
     private static class TestingFileRecordIterator implements FileRecordIterator<InternalRow> {

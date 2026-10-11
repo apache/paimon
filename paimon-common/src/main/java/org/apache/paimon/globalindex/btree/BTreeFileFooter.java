@@ -32,7 +32,16 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BTreeFileFooter {
 
     public static final int MAGIC_NUMBER = 0x50425449;
-    public static final int CURRENT_VERSION = 1;
+    public static final int VERSION_1 = 1;
+    public static final int VERSION_2 = 2;
+
+    // Keep writing version 1 until all readers in the ecosystem support version 2.
+    public static final int DEFAULT_WRITE_VERSION = VERSION_1;
+    public static final int MAX_SUPPORTED_VERSION = VERSION_2;
+
+    /** The default version written by constructors which do not specify a version. */
+    public static final int CURRENT_VERSION = DEFAULT_WRITE_VERSION;
+
     public static final int ENCODED_LENGTH = 52;
 
     private final int version;
@@ -44,7 +53,7 @@ public class BTreeFileFooter {
             @Nullable BloomFilterHandle bloomFilterHandle,
             BlockHandle indexBlockHandle,
             BlockHandle nullBitmapHandle) {
-        this(CURRENT_VERSION, bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
+        this(DEFAULT_WRITE_VERSION, bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
     }
 
     public BTreeFileFooter(

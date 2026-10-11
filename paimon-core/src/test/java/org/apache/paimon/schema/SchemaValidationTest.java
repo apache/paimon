@@ -1920,6 +1920,69 @@ class SchemaValidationTest {
                         "Geometry and geography columns cannot be clustering columns: [nested].");
     }
 
+    @Test
+    public void testVariantTypeValidation() {
+        // a top-level variant and one nested inside a struct
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "v", DataTypes.VARIANT()),
+                        new DataField(
+                                2,
+                                "nested",
+                                DataTypes.ROW(DataTypes.FIELD(3, "inner", DataTypes.VARIANT()))));
+
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                new HashMap<>())));
+
+        // the main format used to be caught by the format's own type converter, with a bare
+        // "Unsupported type: VARIANT" that named neither the column nor the option
+        Map<String, String> orcOptions = new HashMap<>();
+        orcOptions.put(CoreOptions.FILE_FORMAT.key(), "orc");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields, emptyList(), emptyList(), orcOptions)))
+                .hasMessageContaining(
+                        "Variant columns [v, nested] require 'file.format'='parquet', but was 'orc'");
+
+        // these two used to pass DDL and fail on the first row written with that format
+        Map<String, String> perLevelOptions = new HashMap<>();
+        perLevelOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                singletonList("id"),
+                                                perLevelOptions)))
+                .hasMessageContaining(
+                        "Variant columns [v, nested] require parquet at every level, but 'file.format.per.level' contains '0:orc'");
+
+        Map<String, String> changelogOptions = new HashMap<>();
+        changelogOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+        changelogOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                singletonList("id"),
+                                                changelogOptions)))
+                .hasMessageContaining(
+                        "Variant columns [v, nested] require 'changelog-file.format' to be parquet, but was 'avro'");
+    }
+
     private TableSchema geospatialSchema(
             List<DataField> fields,
             List<String> partitionKeys,

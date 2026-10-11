@@ -36,6 +36,7 @@ import java.io.IOException;
 
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
 import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Bloom filter for file index.
@@ -86,6 +87,12 @@ public class BloomFilterFileIndex implements FileIndexer {
         private final FastHash hashFunction;
 
         public Writer(DataType type, int items, double fpp) {
+            checkArgument(
+                    fpp > 0 && fpp < 1,
+                    "Bloom filter '" + FPP + "' must be in range (0, 1), but was %s.",
+                    fpp);
+            checkArgument(
+                    items > 0, "Bloom filter '" + ITEMS + "' must be positive, but was %s.", items);
             this.filter = new BloomFilter64(items, fpp);
             this.hashFunction = FastHash.getHashFunction(type);
         }

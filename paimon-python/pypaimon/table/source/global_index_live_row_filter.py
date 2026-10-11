@@ -19,19 +19,20 @@
 
 from typing import Optional
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
-def live_rows(table, partition_filter=None, snapshot=None) -> Optional[RoaringBitmap64]:
+def live_rows(table, partition_filter=None, snapshot=None, row_ranges=None) -> Optional[RoaringBitmap64]:
     """Return live global row ids at ``snapshot`` for deletion-vector tables.
 
     ``None`` means no live-row filter is needed. This keeps tables without
     deletion vectors on the old zero-overhead path.
+    ``row_ranges`` restricts both file planning and the returned live-row bitmap.
     """
     options = getattr(table, "options", None)
     deletion_vectors_enabled = getattr(options, "deletion_vectors_enabled", None)
@@ -45,16 +46,20 @@ def live_rows(table, partition_filter=None, snapshot=None) -> Optional[RoaringBi
     if partition_filter is not None:
         read_builder = read_builder.with_partition_filter(partition_filter)
 
-    data_splits = [
-        (split.split if isinstance(split, QueryAuthSplit) else split)
-        for split in read_builder.new_scan().plan().splits()
-    ]
-    data_splits = [s for s in data_splits if isinstance(s, DataSplit)]
+    scan = read_builder.new_scan()
+    if row_ranges is not None:
+        scan = scan.with_row_ranges(row_ranges)
+    data_splits = []
+    for split in scan.plan().splits():
+        while isinstance(split, (QueryAuthSplit, IndexedSplit)):
+            split = split.split if isinstance(split, QueryAuthSplit) else split.data_split()
+        if isinstance(split, DataSplit):
+            data_splits.append(split)
 
     rows = RoaringBitmap64()
     # Phase 1: union every file's row-id range.
     for split in data_splits:
-        _add_row_ranges(rows, split)
+        _add_row_ranges(rows, split, row_ranges)
     # Phase 2: subtract each DV. Ranges are all unioned first (no re-add), and
     # peak memory stays at one DV at a time.
     for split in data_splits:
@@ -67,17 +72,7 @@ def table_at_snapshot(table, snapshot):
     if snapshot is None:
         return table
 
-    pin_options = {
-        CoreOptions.SCAN_MODE.key(): "from-snapshot",
-        CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
-    }
-    for option in (CoreOptions.SCAN_TAG_NAME,
-                   CoreOptions.SCAN_WATERMARK,
-                   CoreOptions.SCAN_TIMESTAMP,
-                   CoreOptions.SCAN_TIMESTAMP_MILLIS):
-        if option.key() in table.table_schema.options:
-            pin_options[option.key()] = None
-    return table.copy_without_time_travel(pin_options)
+    return table._copy_with_snapshot(snapshot)
 
 
 def for_range(live_row_ids: Optional[RoaringBitmap64],
@@ -92,11 +87,13 @@ def for_range(live_row_ids: Optional[RoaringBitmap64],
     return None if include.cardinality() == row_range.count() else include
 
 
-def _add_row_ranges(rows: RoaringBitmap64, split: DataSplit) -> None:
+def _add_row_ranges(rows: RoaringBitmap64, split: DataSplit, row_ranges=None) -> None:
     for data_file in split.files:
         row_id_range = data_file.row_id_range()
         if row_id_range is not None:
-            rows.add_range(row_id_range.from_, row_id_range.to)
+            ranges = [row_id_range] if row_ranges is None else Range.and_([row_id_range], row_ranges)
+            for r in ranges:
+                rows.add_range(r.from_, r.to)
 
 
 def _subtract_deleted_rows(table, rows: RoaringBitmap64, split: DataSplit) -> None:

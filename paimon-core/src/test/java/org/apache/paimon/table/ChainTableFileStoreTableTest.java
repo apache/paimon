@@ -19,6 +19,9 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -26,7 +29,15 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.CastTransform;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -37,13 +48,18 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -53,16 +69,22 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Random;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -96,6 +118,428 @@ public class ChainTableFileStoreTableTest {
         String uuid = UUID.randomUUID().toString();
         commitUser = uuid;
         tableName = "chain_t_" + uuid.replace("-", "");
+    }
+
+    private static Stream<Arguments> filterPushdownParams() {
+        return Stream.of("parquet", "orc")
+                .flatMap(
+                        format ->
+                                Stream.of(false, true)
+                                        .flatMap(
+                                                dv ->
+                                                        Stream.of(false, true)
+                                                                .map(
+                                                                        keyRange ->
+                                                                                Arguments.of(
+                                                                                        format, dv,
+                                                                                        keyRange))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("filterPushdownParams")
+    public void testFilterPushdownAcrossChainMerge(
+            String format, boolean deletionVectors, boolean keyRangeSplit) throws Exception {
+        createChainTable(
+                options -> {
+                    options.set(CoreOptions.FILE_FORMAT, format);
+                    options.set(DELETION_VECTORS_ENABLED, deletionVectors);
+                    options.set(CoreOptions.CHAIN_TABLE_KEY_RANGE_SPLIT_ENABLED, keyRangeSplit);
+                    options.set(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, new MemorySize(1));
+                });
+        FileStoreTable table = loadTable();
+        FileStoreTable snapshot = table.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable delta = table.switchToBranch(DELTA_BRANCH);
+        // Separate files let branch-local stats discard individual versions independently.
+        writeWithCommit(snapshot, row(1L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(snapshot, row(2L, 1L, "new", "CN", "20250810", "20"));
+        if (!deletionVectors) {
+            writeWithCommit(snapshot, row(3L, 1L, "old", "CN", "20250810", "20"));
+        }
+        writeWithCommit(snapshot, row(4L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(snapshot, row(5L, 1L, null, "CN", "20250810", "20"));
+        writeWithCommit(snapshot, row(6L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(snapshot, row(1L, 1L, "other-group", "US", "20250810", "20"));
+        writeWithCommit(delta, row(1L, 2L, "new", "CN", "20250810", "21"));
+        writeWithCommit(delta, row(2L, 2L, "old", "CN", "20250810", "21"));
+        if (!deletionVectors) {
+            writeWithCommit(delta, row(RowKind.DELETE, 3L, 2L, "new", "CN", "20250810", "21"));
+        }
+        writeWithCommit(delta, row(4L, 2L, null, "CN", "20250810", "21"));
+        writeWithCommit(delta, row(5L, 2L, "old", "CN", "20250810", "21"));
+        writeWithCommit(delta, row(6L, 2L, "new", "CN", "20250810", "21"));
+        writeWithCommit(delta, row(7L, 1L, "old", "CN", "20250810", "21"));
+        writeWithCommit(delta, row(6L, 3L, "latest", "CN", "20250810", "22"));
+        writeWithCommit(delta, row(1L, 2L, "other-group-new", "US", "20250810", "22"));
+        table = loadTable();
+        Map<String, String> partition =
+                ImmutableMap.of("region", "CN", "dt", "20250810", "hour", "22");
+        List<GenericRow> baseline = getResult(table, partition);
+        assertThat(baseline)
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "new", "CN", "20250810", "22"),
+                        row(2L, 2L, "old", "CN", "20250810", "22"),
+                        row(4L, 2L, null, "CN", "20250810", "22"),
+                        row(5L, 2L, "old", "CN", "20250810", "22"),
+                        row(6L, 3L, "latest", "CN", "20250810", "22"),
+                        row(7L, 1L, "old", "CN", "20250810", "22"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate old = builder.equal(2, BinaryString.fromString("old"));
+        Predicate newer = builder.equal(2, BinaryString.fromString("new"));
+        for (Predicate filter :
+                Arrays.asList(
+                        old,
+                        newer,
+                        builder.isNull(2),
+                        builder.isNotNull(2),
+                        old.negate().get(),
+                        builder.greaterThan(1, 1L),
+                        builder.equal(0, 1L),
+                        builder.equal(
+                                new CastTransform(
+                                        new FieldRef(0, "k", DataTypes.BIGINT()),
+                                        DataTypes.STRING()),
+                                BinaryString.fromString("1")),
+                        PredicateBuilder.and(builder.equal(0, 1L), old),
+                        PredicateBuilder.or(builder.equal(0, 1L), old),
+                        PredicateBuilder.or(builder.equal(0, 1L), builder.equal(0, 6L)),
+                        PredicateBuilder.or(
+                                PredicateBuilder.and(builder.equal(0, 1L), old),
+                                PredicateBuilder.and(builder.equal(0, 6L), newer)),
+                        builder.equal(2, BinaryString.fromString("absent")),
+                        PredicateBuilder.alwaysTrue(),
+                        PredicateBuilder.alwaysFalse())) {
+            assertFilterMatchesMergedRows(table, partition, filter, baseline);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testPartialUpdateFilterPushdownAcrossChainMerge(String format) throws Exception {
+        createPartialUpdateChainTable(
+                options -> {
+                    options.set(CoreOptions.FILE_FORMAT, format);
+                    options.set(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE, true);
+                });
+        FileStoreTable table = loadTable();
+        FileStoreTable snapshot = table.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable delta = table.switchToBranch(DELTA_BRANCH);
+        writeWithCommit(snapshot, row(1L, 1L, "a", null, "20250810"));
+        writeWithCommit(snapshot, row(2L, 1L, "a", "old", "20250810"));
+        writeWithCommit(delta, row(1L, 2L, null, "b", "20250811"));
+        writeWithCommit(delta, row(RowKind.DELETE, 2L, 2L, null, null, "20250811"));
+        table = loadTable();
+        Map<String, String> partition = ImmutableMap.of("dt", "20250811");
+        List<GenericRow> baseline = getResult(table, partition);
+        assertThat(baseline).containsExactly(row(1L, 2L, "a", "b", "20250811"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate a = builder.equal(2, BinaryString.fromString("a"));
+        Predicate b = builder.equal(3, BinaryString.fromString("b"));
+        for (Predicate filter :
+                Arrays.asList(
+                        a,
+                        b,
+                        PredicateBuilder.and(a, b),
+                        PredicateBuilder.or(a, b),
+                        builder.isNull(3),
+                        builder.equal(0, 2L),
+                        PredicateBuilder.and(builder.equal(0, 1L), a))) {
+            assertFilterMatchesMergedRows(table, partition, filter, baseline);
+        }
+    }
+
+    @Test
+    public void testChainFilterPreservesKeyAndCompleteSnapshotPruning() throws Exception {
+        createChainTable(options -> options.set(BUCKET, 2));
+        FileStoreTable table = loadTable();
+        FileStoreTable snapshot = table.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable delta = table.switchToBranch(DELTA_BRANCH);
+        for (long key = 1; key <= 4; key++) {
+            writeWithCommit(snapshot, row(key, 1L, "old", "CN", "20250810", "20"));
+            writeWithCommit(delta, row(key, 2L, "new", "CN", "20250810", "21"));
+        }
+        table = loadTable();
+        Map<String, String> partition =
+                ImmutableMap.of("region", "CN", "dt", "20250810", "hour", "21");
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate key = builder.equal(0, 1L);
+        Predicate old = builder.equal(2, BinaryString.fromString("old"));
+        long allBytes = plannedFileBytes(table, partition, PredicateBuilder.alwaysTrue());
+        long keyBytes = plannedFileBytes(table, partition, key);
+        assertThat(keyBytes).isPositive().isLessThan(allBytes);
+        assertThat(plannedFileBytes(table, partition, PredicateBuilder.and(key, old)))
+                .isEqualTo(keyBytes);
+        Predicate keyOr = PredicateBuilder.or(key, builder.equal(0, 2L));
+        Predicate mixedOr =
+                PredicateBuilder.or(
+                        PredicateBuilder.and(key, old),
+                        PredicateBuilder.and(builder.equal(0, 2L), builder.isNull(2)));
+        assertThat(plannedFileBytes(table, partition, mixedOr))
+                .isEqualTo(plannedFileBytes(table, partition, keyOr));
+        assertThat(plannedFileBytes(table, partition, mixedOr)).isLessThan(allBytes);
+        assertThat(plannedFileBytes(table, partition, PredicateBuilder.or(key, old)))
+                .isEqualTo(allBytes);
+        Map<String, String> complete =
+                ImmutableMap.of("region", "CN", "dt", "20250810", "hour", "20");
+        assertThat(plannedFileBytes(table, complete, old)).isPositive();
+        assertThat(
+                        plannedFileBytes(
+                                table,
+                                complete,
+                                builder.equal(2, BinaryString.fromString("absent"))))
+                .isZero();
+        assertThat(
+                        table.newReadBuilder()
+                                .withPartitionFilter(partition)
+                                .withFilter(PredicateBuilder.and(key, old))
+                                .withBucketFilter(bucket -> false)
+                                .newScan()
+                                .plan()
+                                .splits())
+                .isEmpty();
+        long bucketBytes = 0;
+        for (int bucket = 0; bucket < 2; bucket++) {
+            final int selectedBucket = bucket;
+            TableScan.Plan plan =
+                    table.newReadBuilder()
+                            .withPartitionFilter(partition)
+                            .withFilter(PredicateBuilder.alwaysTrue())
+                            .withBucketFilter(candidate -> candidate == selectedBucket)
+                            .newScan()
+                            .plan();
+            long bytes =
+                    plan.splits().stream()
+                            .flatMap(this::plannedDataFiles)
+                            .mapToLong(file -> file.fileSize())
+                            .sum();
+            assertThat(bytes).isPositive().isLessThan(allBytes);
+            bucketBytes += bytes;
+        }
+        assertThat(bucketBytes).isEqualTo(allBytes);
+    }
+
+    @Test
+    public void testChainKeyFilterAfterSchemaReorder() throws Exception {
+        createChainTable(options -> {});
+        writeWithCommit(
+                loadTable().switchToBranch(SNAPSHOT_BRANCH),
+                row(9L, 1L, "old", "CN", "20250810", "20"));
+        Path path = new Path(tempDir.toUri().toString(), tableName);
+        for (String branch : Arrays.asList(DEFAULT_MAIN_BRANCH, SNAPSHOT_BRANCH, DELTA_BRANCH)) {
+            new FileSystemSchemaManager(LocalFileIO.create(), path, branch)
+                    .commitChanges(SchemaChange.updateColumnPosition(SchemaChange.Move.last("k")));
+        }
+        FileStoreTable table = loadTable();
+        writeWithCommit(
+                table.switchToBranch(DELTA_BRANCH), row(2L, "new", "CN", "20250810", "21", 9L));
+        table = loadTable();
+        assertThat(table.rowType().getFieldIndex("k")).isEqualTo(5);
+        Map<String, String> partition =
+                ImmutableMap.of("region", "CN", "dt", "20250810", "hour", "21");
+        List<GenericRow> baseline = getResult(table, partition);
+        assertThat(baseline).containsExactly(row(2L, "new", "CN", "20250810", "21", 9L));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        assertFilterMatchesMergedRows(table, partition, builder.equal(5, 9L), baseline);
+        assertFilterMatchesMergedRows(
+                table,
+                partition,
+                PredicateBuilder.and(
+                        builder.equal(5, 9L), builder.equal(1, BinaryString.fromString("old"))),
+                baseline);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testFilterPushdownWithoutSnapshotAnchor(String format) throws Exception {
+        createChainTable(options -> options.set(CoreOptions.FILE_FORMAT, format));
+        FileStoreTable delta = loadTable().switchToBranch(DELTA_BRANCH);
+        writeWithCommit(delta, row(1L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(delta, row(2L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(delta, row(1L, 2L, "new", "CN", "20250810", "21"));
+        writeWithCommit(delta, row(RowKind.DELETE, 2L, 2L, "new", "CN", "20250810", "21"));
+        FileStoreTable table = loadTable();
+        Map<String, String> partition =
+                ImmutableMap.of("region", "CN", "dt", "20250810", "hour", "21");
+        List<GenericRow> baseline = getResult(table, partition);
+        assertThat(baseline).containsExactly(row(1L, 2L, "new", "CN", "20250810", "21"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        for (Predicate filter :
+                Arrays.asList(
+                        builder.equal(2, BinaryString.fromString("old")),
+                        builder.equal(2, BinaryString.fromString("new")),
+                        builder.equal(0, 2L),
+                        PredicateBuilder.and(builder.equal(0, 1L), builder.greaterThan(1, 1L)))) {
+            assertFilterMatchesMergedRows(table, partition, filter, baseline);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testFilterPushdownAgainstVersionHistory(String format) throws Exception {
+        createChainTable(options -> options.set(CoreOptions.FILE_FORMAT, format));
+        FileStoreTable table = loadTable();
+        Map<Long, GenericRow> latest = new HashMap<>();
+        for (long key = 0; key < 24; key++) {
+            String value = key % 4 == 0 ? null : "v" + key % 3;
+            writeWithCommit(
+                    table.switchToBranch(SNAPSHOT_BRANCH),
+                    row(key, 0L, value, "CN", "20250810", "20"));
+            latest.put(key, row(key, 0L, value, "CN", "20250810", "23"));
+        }
+        Random random = new Random(20260919L);
+        FileStoreTable delta = table.switchToBranch(DELTA_BRANCH);
+        for (int version = 1; version <= 3; version++) {
+            List<GenericRow> updates = new ArrayList<>();
+            for (long key = 0; key < 28; key++) {
+                if (random.nextInt(3) == 0) {
+                    continue;
+                }
+                boolean delete = random.nextInt(5) == 0;
+                String value = random.nextInt(4) == 0 ? null : "v" + random.nextInt(3);
+                updates.add(
+                        row(
+                                delete ? RowKind.DELETE : RowKind.INSERT,
+                                key,
+                                (long) version,
+                                value,
+                                "CN",
+                                "20250810",
+                                Integer.toString(20 + version)));
+                if (delete) {
+                    latest.remove(key);
+                } else {
+                    latest.put(key, row(key, (long) version, value, "CN", "20250810", "23"));
+                }
+            }
+            writeWithCommit(delta, updates.toArray(new GenericRow[0]));
+        }
+        table = loadTable();
+        Map<String, String> partition =
+                ImmutableMap.of("region", "CN", "dt", "20250810", "hour", "23");
+        List<GenericRow> expectedRows = new ArrayList<>(latest.values());
+        assertThat(getResult(table, partition)).containsExactlyInAnyOrderElementsOf(expectedRows);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        for (int i = 0; i < 24; i++) {
+            Predicate key = builder.greaterOrEqual(0, (long) random.nextInt(28));
+            Predicate value = builder.equal(2, BinaryString.fromString("v" + random.nextInt(3)));
+            Predicate predicate;
+            switch (i % 4) {
+                case 0:
+                    predicate = PredicateBuilder.and(key, value);
+                    break;
+                case 1:
+                    predicate = PredicateBuilder.or(key, value);
+                    break;
+                case 2:
+                    predicate =
+                            PredicateBuilder.or(
+                                    PredicateBuilder.and(key, builder.isNull(2)),
+                                    PredicateBuilder.and(builder.lessThan(0, 12L), value));
+                    break;
+                default:
+                    predicate = PredicateBuilder.and(key, value.negate().get());
+            }
+            assertFilterMatchesMergedRows(table, partition, predicate, expectedRows);
+        }
+    }
+
+    @Test
+    public void testFilterCombiningLogicalPartitionsAndValues() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable table = loadTable();
+        FileStoreTable snapshot = table.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable delta = table.switchToBranch(DELTA_BRANCH);
+        writeWithCommit(snapshot, row(1L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(snapshot, row(2L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(delta, row(1L, 2L, "new", "CN", "20250810", "21"));
+        writeWithCommit(delta, row(1L, 3L, "latest", "CN", "20250810", "22"));
+        table = loadTable();
+        List<GenericRow> baseline = getResult(table, null);
+        assertThat(baseline)
+                .containsExactlyInAnyOrder(
+                        row(1L, 1L, "old", "CN", "20250810", "20"),
+                        row(2L, 1L, "old", "CN", "20250810", "20"),
+                        row(1L, 2L, "new", "CN", "20250810", "21"),
+                        row(2L, 1L, "old", "CN", "20250810", "21"),
+                        row(1L, 3L, "latest", "CN", "20250810", "22"),
+                        row(2L, 1L, "old", "CN", "20250810", "22"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate filter =
+                PredicateBuilder.or(
+                        PredicateBuilder.and(
+                                builder.equal(5, BinaryString.fromString("22")),
+                                builder.equal(0, 1L)),
+                        PredicateBuilder.and(
+                                builder.equal(5, BinaryString.fromString("21")),
+                                builder.equal(2, BinaryString.fromString("old"))));
+        assertFilterMatchesMergedRows(table, null, filter, baseline);
+    }
+
+    @Test
+    public void testKeyFilterRespectsQueryAuthMask() throws Exception {
+        createChainTableWithQueryAuth();
+        Transform mask = new FieldTransform(new FieldRef(1, "seq", DataTypes.BIGINT()));
+        FileStoreTable table =
+                loadTable(
+                        queryAuthEnvironment(
+                                () ->
+                                        new TableQueryAuthResult(
+                                                null,
+                                                Collections.singletonMap(
+                                                        "k", JsonSerdeUtil.toFlatJson(mask)))));
+        List<GenericRow> baseline = getResult(table, QUERIED_PARTITION);
+        assertThat(baseline)
+                .containsExactlyInAnyOrder(
+                        row(2L, 2L, "1-1", "CN", "20250810", "21"),
+                        row(1L, 1L, "2", "CN", "20250810", "21"),
+                        row(1L, 1L, "4", "CN", "20250810", "21"));
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        assertFilterMatchesMergedRows(table, QUERIED_PARTITION, builder.equal(0, 1L), baseline);
+    }
+
+    private void assertFilterMatchesMergedRows(
+            FileStoreTable table,
+            Map<String, String> partition,
+            Predicate filter,
+            List<GenericRow> mergedRows)
+            throws Exception {
+        List<GenericRow> expected =
+                mergedRows.stream().filter(filter::test).collect(Collectors.toList());
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withPartitionFilter(partition).withFilter(filter);
+        List<GenericRow> actual = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(table.rowType());
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    record -> {
+                        // Keep the residual: extra rows are allowed by pushdown, missing versions
+                        // are not.
+                        if (filter.test(record)) {
+                            actual.add((GenericRow) serializer.copy(record));
+                        }
+                    });
+        }
+        assertThat(actual)
+                .as("Pushed predicate %s", filter)
+                .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private Stream<DataFileMeta> plannedDataFiles(Split split) {
+        if (split instanceof FallbackReadFileStoreTable.FallbackSplit) {
+            return plannedDataFiles(((FallbackReadFileStoreTable.FallbackSplit) split).wrapped());
+        }
+        return split instanceof ChainSplit
+                ? ((ChainSplit) split).dataFiles().stream()
+                : ((DataSplit) split).dataFiles().stream();
+    }
+
+    private long plannedFileBytes(
+            FileStoreTable table, Map<String, String> partition, Predicate filter) {
+        return table.newReadBuilder().withPartitionFilter(partition).withFilter(filter).newScan()
+                .plan().splits().stream()
+                .flatMap(this::plannedDataFiles)
+                .mapToLong(file -> file.fileSize())
+                .sum();
     }
 
     @Test
@@ -350,7 +794,303 @@ public class ChainTableFileStoreTableTest {
         assertThat(foundChainSplit).as("Should have found at least one ChainSplit").isTrue();
     }
 
+    @Test
+    public void testQueryAuthBatchPlanKeepsChainSplitsWrapped() throws Exception {
+        createChainTableWithQueryAuth();
+        TableQueryAuthResult authResult = maskValueAndFilterKey();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        List<Split> splits = planQueriedPartition(table.newScan());
+
+        assertChainSplitsCarryAuth(splits, authResult);
+    }
+
+    @Test
+    public void testQueryAuthScanWithSnapshotReaderFactoryKeepsChainSplitsWrapped()
+            throws Exception {
+        createChainTableWithQueryAuth();
+        TableQueryAuthResult authResult = maskValueAndFilterKey();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        List<Split> splits = planQueriedPartition(table.newScan(FileStoreTable::newSnapshotReader));
+
+        assertChainSplitsCarryAuth(splits, authResult);
+    }
+
+    @Test
+    public void testQueryAuthRulesAreAppliedWhenReadingChainSplits() throws Exception {
+        createChainTableWithQueryAuth();
+
+        // the same query without any rule: raw values, no row dropped
+        assertThat(getResult(loadTable(), QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                        row(2L, 1L, "2", "CN", "20250810", "21"),
+                        row(4L, 1L, "4", "CN", "20250810", "21"));
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+
+        // 'v' comes back as the region it is masked with, and k=4 is dropped by the row filter
+        assertThat(getResult(table, QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "CN", "CN", "20250810", "21"),
+                        row(2L, 1L, "CN", "CN", "20250810", "21"));
+    }
+
+    /**
+     * A chain partition key names the partition a row is reported under, not the branch partition
+     * it is stored in: k=2 sits in the snapshot branch under hour 20, and the chain merge hands it
+     * to the reader under the queried hour 21. A rule on 'hour' therefore cannot prune branch
+     * partitions, or the row it does admit disappears.
+     */
+    @Test
+    public void testQueryAuthChainPartitionRuleKeepsRowsOfAnEarlierBranchPartition()
+            throws Exception {
+        createChainTableWithQueryAuth();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::keepQueriedChainPartition));
+
+        assertThat(getResult(table, QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                        row(2L, 1L, "2", "CN", "20250810", "21"),
+                        row(4L, 1L, "4", "CN", "20250810", "21"));
+    }
+
+    /**
+     * The other direction: a partition the snapshot branch holds in full is read from it directly,
+     * branch partition and queried partition being the same row of values. A rule excluding that
+     * partition still has to prune it away, not hand the reader a split it filters down to nothing.
+     */
+    @Test
+    public void testQueryAuthPartitionRuleStillPrunesASnapshotBranchPartition() throws Exception {
+        createChainTableWithQueryAuth();
+        Map<String, String> snapshotPartition = ImmutableMap.of("dt", "20250810", "hour", "20");
+
+        assertThat(planPartition(loadTable().newScan(), snapshotPartition)).isNotEmpty();
+
+        // the rule admits hour 21 only, so nothing of the queried hour 20 is left to read
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::keepQueriedChainPartition));
+        assertThat(planPartition(table.newScan(), snapshotPartition)).isEmpty();
+        assertThat(getResult(table, snapshotPartition)).isEmpty();
+    }
+
+    /**
+     * Partition listing has no read to follow it, so an excluded partition would be reported — with
+     * its row and file counts — to a caller that cannot read a row of it.
+     */
+    @Test
+    public void testQueryAuthPartitionRulePrunesTheListedPartitions() throws Exception {
+        createChainTableWithQueryAuth();
+
+        assertThat(listedHours(loadTable())).containsExactlyInAnyOrder("20", "21");
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::keepQueriedChainPartition));
+        assertThat(listedHours(table)).containsExactly("21");
+    }
+
+    private List<String> listedHours(FileStoreTable table) {
+        return table.newScan().listPartitions().stream()
+                .map(partition -> partition.getString(2).toString())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * The authorization has not changed when the pushdown is turned off, so the cheap way out of
+     * reapplying it would leave the pruning the caller just asked to drop.
+     */
+    @Test
+    public void testQueryAuthPartitionPushdownIsDroppedAfterOneWasPushed() throws Exception {
+        createChainTableWithQueryAuth();
+        FileStoreTable snapshotBranch =
+                loadBranchTable(
+                        SNAPSHOT_BRANCH, queryAuthEnvironment(this::keepQueriedChainPartition));
+
+        // the rule admits hour 21 and this branch holds only hour 20, so the push prunes it away
+        DataTableScan scan = snapshotBranch.newScan();
+        assertThat(scan.listPartitions()).isEmpty();
+
+        assertThat(scan.withoutAuthPartitionPushdown().plan().splits()).isNotEmpty();
+    }
+
+    /** The branch as an ordinary table. switchToBranch would build another chain table. */
+    private FileStoreTable loadBranchTable(String branch, CatalogEnvironment catalogEnvironment) {
+        Path tablePath = new Path(tempDir.toUri().toString(), tableName);
+        LocalFileIO fileIO = LocalFileIO.create();
+        Optional<TableSchema> schemaOpt =
+                new FileSystemSchemaManager(fileIO, tablePath, branch).latest();
+        assertThat(schemaOpt.isPresent()).isTrue();
+        Options options = new Options(schemaOpt.get().options());
+        options.set(CHAIN_TABLE_ENABLED, false);
+        options.set(CoreOptions.BRANCH, branch);
+        return FileStoreTableFactory.create(
+                fileIO, tablePath, schemaOpt.get().copy(options.toMap()), catalogEnvironment);
+    }
+
+    /** Keeps only the rows reported under the chain partition hour = '21'. */
+    private TableQueryAuthResult keepQueriedChainPartition() {
+        RowType rowType = loadTable().schema().logicalRowType();
+        Predicate rowFilter = new PredicateBuilder(rowType).equal(5, BinaryString.fromString("21"));
+        return new TableQueryAuthResult(
+                Collections.singletonList(JsonSerdeUtil.toFlatJson(rowFilter)), null);
+    }
+
+    @Test
+    public void testQueryAuthWithoutRulesLeavesPlanAndReadUntouched() throws Exception {
+        createChainTableWithQueryAuth();
+        List<GenericRow> withoutQueryAuth = getResult(loadTable(), QUERIED_PARTITION);
+
+        // authorization answers with neither a row filter nor a column mask
+        FileStoreTable table =
+                loadTable(queryAuthEnvironment(() -> new TableQueryAuthResult(null, null)));
+        List<Split> splits = planQueriedPartition(table.newScan());
+
+        assertThat(splits).isNotEmpty();
+        assertThat(splits)
+                .allSatisfy(
+                        split ->
+                                assertThat(
+                                                ((FallbackReadFileStoreTable.FallbackSplit) split)
+                                                        .wrapped())
+                                        .isInstanceOf(ChainSplit.class));
+        assertThat(getResult(table, QUERIED_PARTITION))
+                .containsExactlyInAnyOrderElementsOf(withoutQueryAuth);
+    }
+
+    @Test
+    public void testQueryAuthStreamingStartingPlanKeepsChainSplitsWrapped() throws Exception {
+        createChainTableWithQueryAuth();
+        TableQueryAuthResult authResult = maskValueAndFilterKey();
+
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        List<Split> splits = table.newStreamScan().plan().splits();
+
+        assertThat(splits).isNotEmpty();
+        assertThat(splits)
+                .allSatisfy(
+                        split -> {
+                            assertThat(split).isInstanceOf(QueryAuthSplit.class);
+                            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+                            assertThat(authSplit.authResult()).isEqualTo(authResult);
+                            assertThat(authSplit.split()).isInstanceOf(ChainSplit.class);
+                        });
+
+        // phase 1 reads the latest snapshot partition plus the later delta partitions, so the
+        // same key shows up under both; what matters here is that both carry the rules
+        List<GenericRow> rows = readSplits(table, splits);
+        assertThat(rows).isNotEmpty();
+        assertThat(rows)
+                .allSatisfy(
+                        r -> {
+                            assertThat(r.getLong(0)).isLessThan(3L);
+                            assertThat(r.getString(2)).isEqualTo(r.getString(3));
+                        });
+    }
+
+    private static final Map<String, String> QUERIED_PARTITION =
+            ImmutableMap.of("dt", "20250810", "hour", "21");
+
+    private void createChainTableWithQueryAuth() throws Exception {
+        createChainTable(
+                options -> {
+                    options.set(CoreOptions.QUERY_AUTH_ENABLED, true);
+                    // a chain read that cannot handle its own split otherwise falls through to the
+                    // main branch with nothing but a log line, which would hide a routing mistake
+                    options.set(CoreOptions.SCAN_FALLBACK_BRANCH_READ_FAIL_FAST, true);
+                });
+        FileStoreTable chainTable = loadTable();
+        writeWithCommit(
+                chainTable.switchToBranch(SNAPSHOT_BRANCH),
+                row(1L, 1L, "1", "CN", "20250810", "20"),
+                row(2L, 1L, "2", "CN", "20250810", "20"));
+        writeWithCommit(
+                chainTable.switchToBranch(DELTA_BRANCH),
+                row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                row(4L, 1L, "4", "CN", "20250810", "21"));
+    }
+
+    /** Masks column 'v' with the value of column 'region' and keeps only the rows with k &lt; 3. */
+    private TableQueryAuthResult maskValueAndFilterKey() {
+        RowType rowType = loadTable().schema().logicalRowType();
+        Predicate rowFilter = new PredicateBuilder(rowType).lessThan(0, 3L);
+        Transform mask = new FieldTransform(new FieldRef(3, "region", DataTypes.STRING()));
+        return new TableQueryAuthResult(
+                Collections.singletonList(JsonSerdeUtil.toFlatJson(rowFilter)),
+                Collections.singletonMap("v", JsonSerdeUtil.toFlatJson(mask)));
+    }
+
+    /**
+     * A catalog environment whose authorization answers with {@code authResult}. The table, its
+     * branch scans and its reads are all real; only the catalog call fetching the rules is stubbed.
+     * {@link CatalogEnvironment#empty()} cannot express this: without a catalog loader it short
+     * circuits to "no rules", so no split is ever wrapped.
+     */
+    private CatalogEnvironment queryAuthEnvironment(Supplier<TableQueryAuthResult> authResult) {
+        Catalog catalog = Mockito.mock(Catalog.class);
+        try {
+            // a fresh instance per call, as RESTCatalog#authTableQuery builds one per scan
+            Mockito.when(catalog.authTableQuery(Mockito.any(), Mockito.any()))
+                    .thenAnswer(invocation -> authResult.get());
+            // the snapshot manager takes the same catalog; let it fall back to the file system
+            // instead of answering "no snapshot" for every branch
+            Mockito.when(catalog.loadSnapshot(Mockito.any(Identifier.class)))
+                    .thenThrow(new UnsupportedOperationException());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return new CatalogEnvironment(
+                Identifier.create("default", tableName),
+                null,
+                () -> catalog,
+                null,
+                null,
+                null,
+                false,
+                false);
+    }
+
+    private List<Split> planQueriedPartition(DataTableScan scan) {
+        return planPartition(scan, QUERIED_PARTITION);
+    }
+
+    private List<Split> planPartition(DataTableScan scan, Map<String, String> partition) {
+        return scan.withPartitionFilter(partition).plan().splits();
+    }
+
+    private void assertChainSplitsCarryAuth(List<Split> splits, TableQueryAuthResult authResult) {
+        assertThat(splits).isNotEmpty();
+        assertThat(splits)
+                .allSatisfy(
+                        split -> {
+                            assertThat(split)
+                                    .isInstanceOf(FallbackReadFileStoreTable.FallbackSplit.class);
+                            Split wrapped =
+                                    ((FallbackReadFileStoreTable.FallbackSplit) split).wrapped();
+                            assertThat(wrapped).isInstanceOf(QueryAuthSplit.class);
+                            QueryAuthSplit authSplit = (QueryAuthSplit) wrapped;
+                            assertThat(authSplit.authResult()).isEqualTo(authResult);
+                            assertThat(authSplit.split()).isInstanceOf(ChainSplit.class);
+                        });
+    }
+
+    private List<GenericRow> readSplits(FileStoreTable table, List<Split> splits) throws Exception {
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(table.schema().logicalRowType());
+        InnerTableRead read = table.newRead();
+        List<GenericRow> result = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                reader.forEachRemaining(row -> result.add((GenericRow) serializer.copy(row)));
+            }
+        }
+        return result;
+    }
+
     private FileStoreTable loadTable() {
+        return loadTable(CatalogEnvironment.empty());
+    }
+
+    private FileStoreTable loadTable(CatalogEnvironment catalogEnvironment) {
         Path tablePath = new Path(tempDir.toUri().toString(), tableName);
         LocalFileIO fileIO = LocalFileIO.create();
         Options options = new Options();
@@ -359,8 +1099,7 @@ public class ChainTableFileStoreTableTest {
         Optional<TableSchema> schemaOpt =
                 new FileSystemSchemaManager(fileIO, tablePath, branchName).latest();
         assertThat(schemaOpt.isPresent()).isTrue();
-        return FileStoreTableFactory.create(
-                fileIO, tablePath, schemaOpt.get(), CatalogEnvironment.empty());
+        return FileStoreTableFactory.create(fileIO, tablePath, schemaOpt.get(), catalogEnvironment);
     }
 
     private void createChainTable(Consumer<Options> optionCustomizer) throws Exception {

@@ -32,8 +32,10 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
@@ -417,7 +419,14 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                     return ChannelComputer.select(key.f1, numPartitions);
                 },
                 split -> {
-                    DataSplit dataSplit = (DataSplit) split;
+                    // Keys on the underlying split, routes the original. Either shape orders
+                    // by partition and bucket.
+                    Split inner = Splits.underlying(split);
+                    if (inner instanceof IncrementalSplit) {
+                        IncrementalSplit incrementalSplit = (IncrementalSplit) inner;
+                        return Tuple2.of(incrementalSplit.partition(), incrementalSplit.bucket());
+                    }
+                    DataSplit dataSplit = (DataSplit) inner;
                     return Tuple2.of(dataSplit.partition(), dataSplit.bucket());
                 });
     }

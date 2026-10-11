@@ -176,7 +176,7 @@ object BucketFunction {
 
 /**
  * For partitioned tables, this function returns the maximum value of the first level partition of
- * the partitioned table, sorted alphabetically. Note, empty partitions will be skipped. For
+ * the partitioned table, ordered by its logical type. Note, empty partitions will be skipped. For
  * example, a partition created by `alter table ... add partition ...`.
  */
 class MaxPtFunction extends UnboundFunction {

@@ -176,6 +176,78 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(set(df.columns), {'id', 'name'})
         self.assertEqual(len(df), 2)
 
+    def test_read_paimon_with_named_projection(self):
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = self._create_and_populate_table(
+            'test_read_named_proj', pa_schema,
+            {'id': [1, 2], 'name': ['a', 'b']},
+        )
+        projection = {'identifier': 'id', 'label': 'name'}
+        ds = read_paimon(identifier, self.catalog_options,
+                         projection=projection)
+        self.assertEqual(ds.schema().names, list(projection))
+        rows = sorted(ds.take_all(), key=lambda row: row['identifier'])
+        self.assertEqual(rows, [
+            {'identifier': 1, 'label': 'a'},
+            {'identifier': 2, 'label': 'b'},
+        ])
+
+        empty_schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog = CatalogFactory.create(self.catalog_options)
+        catalog.create_table('default.test_empty_named_proj',
+                             empty_schema, False)
+        empty = read_paimon('default.test_empty_named_proj',
+                            self.catalog_options, projection=projection)
+        self.assertEqual(empty.schema().names, list(projection))
+        self.assertEqual(empty.count(), 0)
+
+    def test_ray_named_variant_projection_uses_resolved_read_type(self):
+        from pypaimon.data.generic_variant import GenericVariant
+        from pypaimon.read.datasource.ray_datasource import RayDatasource
+        from pypaimon.read.datasource.split_provider import CatalogSplitProvider
+        from pypaimon.read.native_plan import (
+            native_method_available, native_split_bridge_available)
+        from pypaimon.ray import read_paimon
+
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        schema = pa.schema([('id', pa.int32()), ('payload', variant_type)])
+        identifier = self._create_and_populate_table(
+            'test_ray_named_variant_read_type', schema,
+            {'id': [1], 'payload': GenericVariant.to_arrow_array([
+                GenericVariant.from_python({'x': 1.25})])},
+            options={'read.native.enabled': 'true'},
+        )
+        expressions = {
+            'identifier': 'id',
+            'x': "try_variant_get(payload, '$.x', 'float')",
+        }
+        table = CatalogFactory.create(self.catalog_options).get_table(identifier)
+        batch_type = table.new_read_builder().with_projection(expressions).read_type()
+        stream_type = table.new_stream_read_builder().with_projection(
+            expressions).read_type()
+        provider = CatalogSplitProvider(
+            identifier, self.catalog_options, projection=expressions)
+        datasource = RayDatasource(provider)
+        self.assertEqual(batch_type, stream_type)
+        self.assertEqual(batch_type, provider.read_type())
+        self.assertEqual(
+            batch_type[1].type.fields[0].description,
+            '__VARIANT_METADATA$.x;false;UTC')
+        self.assertEqual(len(datasource.get_read_tasks(1)), 1)
+        self.assertEqual(datasource._schema.names, list(expressions))
+        self.assertEqual(datasource._schema.field('x').type, pa.float32())
+        if (native_split_bridge_available()
+                and native_method_available('ReadBuilder', 'with_read_type')):
+            rows = read_paimon(
+                identifier, self.catalog_options,
+                projection=expressions).take_all()
+            self.assertEqual(rows, [{'identifier': 1, 'x': 1.25}])
+
     def test_read_paimon_count_with_query_auth(self):
         from pypaimon.ray import read_paimon
 

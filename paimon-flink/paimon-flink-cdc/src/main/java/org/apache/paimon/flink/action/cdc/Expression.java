@@ -37,6 +37,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -191,11 +192,11 @@ public interface Expression extends Serializable {
                 Arrays.stream(ExpressionFunction.values())
                         .collect(
                                 Collectors.toMap(
-                                        value -> value.name().toLowerCase(),
+                                        value -> value.name().toLowerCase(Locale.ROOT),
                                         ExpressionFunction::getCreator));
 
         public static ExpressionCreator creator(String exprName) {
-            return EXPRESSION_FUNCTIONS.get(exprName.toLowerCase());
+            return EXPRESSION_FUNCTIONS.get(exprName.toLowerCase(Locale.ROOT));
         }
     }
 
@@ -253,7 +254,7 @@ public interface Expression extends Serializable {
             String exprName,
             String... args) {
 
-        ExpressionCreator function = ExpressionFunction.creator(exprName.toLowerCase());
+        ExpressionCreator function = ExpressionFunction.creator(exprName.toLowerCase(Locale.ROOT));
         if (function == null) {
             throw new UnsupportedOperationException(
                     String.format(

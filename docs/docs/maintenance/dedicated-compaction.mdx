@@ -221,8 +221,8 @@ CALL sys.compact_database(
 CALL sys.compact_database(
   including_databases => 'db1|db2', 
   mode => 'combined', 
-  including_tables => 'table_.*', 
-  excluding_tables => 'ignore', 
+  including_tables => '.*\.table_.*',
+  excluding_tables => '.*\.ignore',
   table_options => 'sink.parallelism=4'
 )
 ```
@@ -444,7 +444,7 @@ Example: compact historical partitions for tables in database
 ```sql
 -- history partition compact table
 CALL sys.compact_database(
-  includingDatabases => 'test_db', 
+  including_databases => 'test_db',
   mode => 'combined', 
   partition_idle_time => '1 d'
 );

@@ -37,6 +37,7 @@ import javax.annotation.Nullable;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -153,8 +154,8 @@ public class MySqlTypeUtils {
         if (leftBracketIndex != -1) {
             int rightBracketIndex = typeName.indexOf(RIGHT_BRACKETS);
             shortType =
-                    typeName.substring(0, leftBracketIndex).trim().toUpperCase()
-                            + typeName.substring(rightBracketIndex + 1).toUpperCase();
+                    typeName.substring(0, leftBracketIndex).trim().toUpperCase(Locale.ROOT)
+                            + typeName.substring(rightBracketIndex + 1).toUpperCase(Locale.ROOT);
 
             String insideBrackets =
                     typeName.substring(leftBracketIndex + 1, rightBracketIndex).trim();
@@ -167,7 +168,7 @@ public class MySqlTypeUtils {
                 length = Integer.parseInt(insideBrackets);
             }
         } else {
-            shortType = typeName.toUpperCase();
+            shortType = typeName.toUpperCase(Locale.ROOT);
             if (isDecimalType(shortType)) {
                 // when missing precision and scale of the decimal, we
                 // use the max precision and scale to avoid parse error
@@ -187,7 +188,7 @@ public class MySqlTypeUtils {
             return DataTypes.STRING();
         }
 
-        switch (type.toUpperCase()) {
+        switch (type.toUpperCase(Locale.ROOT)) {
             case BIT:
                 if (length == null || length == 1) {
                     return DataTypes.BOOLEAN();
@@ -335,7 +336,7 @@ public class MySqlTypeUtils {
     }
 
     public static boolean isGeoType(String type) {
-        switch (type.toUpperCase()) {
+        switch (type.toUpperCase(Locale.ROOT)) {
             case GEOMETRY:
             case POINT:
             case LINESTRING:

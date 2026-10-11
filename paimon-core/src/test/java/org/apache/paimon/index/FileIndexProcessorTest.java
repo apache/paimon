@@ -25,11 +25,14 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fileindex.FileIndexFormat;
+import org.apache.paimon.fileindex.FileIndexReader;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -46,6 +49,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -173,5 +177,144 @@ public class FileIndexProcessorTest {
         FileIndexProcessor processor = new FileIndexProcessor(branchTable);
         DataFileMeta processed = processor.process(entry.partition(), entry.bucket(), entry);
         assertThat(processed.extraFiles()).isNotEmpty();
+    }
+
+    @Test
+    public void testRebuildsIndexOnCorrectColumnAfterColumnDropAndAdd() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        // A bitmap index is exact: querying an absent value returns an empty result,
+        // so the regression assertion below is deterministic (a bloom filter's
+        // probabilistic false positives could let the wrong-column behavior pass).
+        options.put(CoreOptions.FILE_INDEX + ".bitmap.columns", "v");
+        // v is the third field, so it sits at index 2 in the file schema.
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"k", "a", "v"});
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog catalog = new FileSystemCatalog(fileIO, warehouse)) {
+            catalog.createDatabase("mydb", false);
+            catalog.createTable(
+                    identifier,
+                    new Schema(
+                            rowType.getFields(),
+                            Collections.emptyList(),
+                            Collections.singletonList("k"),
+                            options,
+                            ""),
+                    false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, 10, 100));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            // Drop the middle column and add another: v keeps file-schema index 2, but the
+            // current table schema now has a different column (w) at index 2.
+            table.schemaManager().commitChanges(SchemaChange.dropColumn("a"));
+            table.schemaManager().commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+            FileStoreTable evolved = (FileStoreTable) catalog.getTable(identifier);
+
+            List<ManifestEntry> entries = evolved.store().newScan().plan().files();
+            assertThat(entries).isNotEmpty();
+            ManifestEntry entry = entries.get(0);
+            assertThat(entry.file().schemaId()).isEqualTo(0L);
+
+            FileIndexProcessor processor = new FileIndexProcessor(evolved);
+            DataFileMeta processed = processor.process(entry.partition(), entry.bucket(), entry);
+            // The small single-row bitmap index is embedded in the manifest, not a side file.
+            byte[] embedded = processed.embeddedIndex();
+            assertThat(embedded).isNotEmpty();
+
+            // The bitmap index for v must still contain the written value 100. Before the fix
+            // the reader projected the current-schema column at index 2 (w, absent from this
+            // file), so the index was rebuilt over nulls and 100 would be absent.
+            FieldRef vRef = new FieldRef(0, "v", DataTypes.INT());
+            try (FileIndexFormat.Reader reader =
+                    FileIndexFormat.createReader(new ByteArraySeekableStream(embedded), rowType)) {
+                Set<FileIndexReader> vReaders = reader.readColumnIndex("v");
+                assertThat(vReaders).isNotEmpty();
+                for (FileIndexReader vReader : vReaders) {
+                    // Exact: 100 was indexed from v, 999 never was.
+                    assertThat(vReader.visitEqual(vRef, 100).remain()).isTrue();
+                    assertThat(vReader.visitEqual(vRef, 999).remain()).isFalse();
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testProcessAfterDroppingColumnBeforeIndexedColumn() throws Exception {
+        // The file is written at schema 0 [k, a, v] with a bloom filter on v. Dropping "a"
+        // shrinks the current schema to [k, v] while the file keeps v at file position 2; the
+        // rewrite must still build the index for v (a file-schema position past the current
+        // arity must not throw or index the wrong column).
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put(CoreOptions.FILE_INDEX + ".bloom-filter.columns", "v");
+        options.put(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "0 B");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()},
+                        new String[] {"k", "a", "v"});
+        Identifier identifier = Identifier.create("mydb", "t");
+        FileStoreTable table;
+        try (FileSystemCatalog catalog = new FileSystemCatalog(fileIO, warehouse)) {
+            catalog.createDatabase("mydb", false);
+            catalog.createTable(
+                    identifier,
+                    new Schema(
+                            rowType.getFields(),
+                            Collections.emptyList(),
+                            Collections.singletonList("k"),
+                            options,
+                            ""),
+                    false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+        }
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, BinaryString.fromString("x"), 10));
+            write.write(GenericRow.of(2, BinaryString.fromString("y"), 20));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        table.schemaManager().commitChanges(SchemaChange.dropColumn("a"));
+        table = table.copyWithLatestSchema();
+
+        List<ManifestEntry> entries = table.store().newScan().plan().files();
+        assertThat(entries).isNotEmpty();
+        ManifestEntry entry = entries.get(0);
+        assertThat(entry.file().schemaId()).isEqualTo(0L);
+
+        FileIndexProcessor processor = new FileIndexProcessor(table);
+        DataFileMeta processed = processor.process(entry.partition(), entry.bucket(), entry);
+
+        String indexFile =
+                processed.extraFiles().stream()
+                        .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError("no file index was written"));
+        Path indexPath =
+                new Path(
+                        table.store().pathFactory().bucketPath(entry.partition(), entry.bucket()),
+                        indexFile);
+        try (FileIndexFormat.Reader reader =
+                FileIndexFormat.createReader(fileIO.newInputStream(indexPath), rowType)) {
+            assertThat(reader.readAll().keySet()).containsExactly("v");
+        }
     }
 }

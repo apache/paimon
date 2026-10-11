@@ -26,7 +26,10 @@ import java.io.IOException;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link PluginFileIO}. */
@@ -53,6 +56,30 @@ class PluginFileIOTest {
         assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .isEqualTo("https://example");
         assertThat(fileIO.createdFor).isEqualTo(new Path(descriptor.uri()));
+        assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);
+    }
+
+    @Test
+    void testListFilesIterativeReachesPluginOverride() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        ClassLoader pluginClassLoader = new ClassLoader() {};
+        TestPluginFileIO fileIO = new TestPluginFileIO(delegate, pluginClassLoader);
+        Path tableRoot = new Path("oss://bucket/table");
+        @SuppressWarnings("unchecked")
+        RemoteIterator<FileStatus> marker = mock(RemoteIterator.class);
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        when(delegate.listFilesIterative(tableRoot, true))
+                .thenAnswer(
+                        ignored -> {
+                            assertThat(Thread.currentThread().getContextClassLoader())
+                                    .isSameAs(pluginClassLoader);
+                            return marker;
+                        });
+
+        assertThat(fileIO.listFilesIterative(tableRoot, true)).isSameAs(marker);
+        verify(delegate).listFilesIterative(tableRoot, true);
+        // the interface default would construct its own iterator backed by listStatus
+        verify(delegate, never()).listStatus(any());
         assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);
     }
 

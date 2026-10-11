@@ -60,9 +60,7 @@ private[spark] class SparkPostponeStagedCommitter(
   private val fixedWriteCommitUser = coreOptions.createCommitUser()
   private val fixedWriteTable = {
     val options = new java.util.HashMap[String, String]()
-    options.put(
-      CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
-      baseSnapshotId.getOrElse(0L).toString)
+    options.put(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(), baseSnapshotId.getOrElse(0L).toString)
     // Every overwrite in this coordinator supplies its exact BinaryRow partitions. Disable the
     // table-level dynamic rewrite so an empty rewritten partition is still removed, and implement
     // INSERT OVERWRITE dynamic-partition semantics explicitly in commitCurrentBatch.

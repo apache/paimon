@@ -142,6 +142,55 @@ class JavaPyReadWriteTest(unittest.TestCase):
         writer.close()
         commit.close()
 
+    @parameterized.expand([
+        (type_name, order, grouping)
+        for type_name in ('float', 'double')
+        for order in ('ascending', 'descending')
+        for grouping in ('batch', 'commits')
+    ])
+    def test_py_write_floating_sequence(self, type_name, order, grouping):
+        table_name = 'default.floating_sequence_{}_{}_{}'.format(type_name, order, grouping)
+        self.catalog.drop_table(table_name, True)
+        arrow_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('seq', pa.float32() if type_name == 'float' else pa.float64()),
+            ('val', pa.string()),
+        ])
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            arrow_schema, primary_keys=['id'], options={
+                'bucket': '1', 'file.format': 'parquet',
+                'sequence.field': 'seq', 'sequence.field.sort-order': order,
+                'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+            }), False)
+        table = self.catalog.get_table(table_name)
+        # Java verifies both the winning payload and the stored sequence value.
+        # The two versions are either folded together or merged by Java on read.
+        versions = [
+            [(1, 1.0, 'finite'), (2, float('nan'), 'nan'),
+             (3, 0.0, 'positive-zero'), (4, -0.0, 'negative-zero'),
+             (5, None, 'null'), (6, float('nan'), 'nan'),
+             (7, float('inf'), 'infinity'), (8, float('nan'), 'nan-first'),
+             (9, float('-inf'), 'negative-infinity'), (10, None, 'null-first')],
+            [(1, float('nan'), 'nan'), (2, 1.0, 'finite'),
+             (3, -0.0, 'negative-zero'), (4, 0.0, 'positive-zero'),
+             (5, float('nan'), 'nan'), (6, None, 'null'),
+             (7, float('nan'), 'nan'), (8, -float('nan'), 'nan-last'),
+             (9, 1.0, 'finite'), (10, None, 'null-last')],
+        ]
+        groups = [versions[0] + versions[1]] if grouping == 'batch' else versions
+        for rows in groups:
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pydict({
+                    field.name: [row[i] for row in rows]
+                    for i, field in enumerate(arrow_schema)
+                }, schema=arrow_schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_append_table(self, file_format):
         pa_schema = pa.schema([

@@ -20,7 +20,9 @@ package org.apache.paimon.utils;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,9 +35,19 @@ public class BinPackingTest {
         List<List<Integer>> pack =
                 BinPacking.packForFixedBinNumber(
                         Arrays.asList(1, 5, 1, 2, 3, 6, 2), Integer::longValue, 3);
-        assertThat(pack)
-                .containsExactlyInAnyOrder(
-                        Arrays.asList(1, 3), Arrays.asList(2, 5), Arrays.asList(1, 2, 6));
+        assertThat(pack.stream().mapToInt(bin -> bin.stream().mapToInt(i -> i).sum()))
+                .containsExactlyInAnyOrder(6, 7, 7);
+    }
+
+    @Test
+    public void testPackForFixedBinNumberAssignsLargestItemsFirst() {
+        List<Integer> items = new ArrayList<>(Collections.nCopies(100, 1));
+        items.add(100);
+
+        List<List<Integer>> pack = BinPacking.packForFixedBinNumber(items, Integer::longValue, 2);
+
+        assertThat(pack.stream().mapToInt(bin -> bin.stream().mapToInt(i -> i).sum()))
+                .containsExactlyInAnyOrder(100, 100);
     }
 
     @Test

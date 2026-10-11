@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -71,7 +72,7 @@ public interface ActionFactory extends Factory {
 
     static Optional<Action> createAction(String[] args) {
         // to be compatible with old usage
-        String action = args[0].toLowerCase().replaceAll("-", "_");
+        String action = args[0].toLowerCase(Locale.ROOT).replaceAll("-", "_");
         String[] actionArgs = Arrays.copyOfRange(args, 1, args.length);
         ActionFactory actionFactory;
         try {

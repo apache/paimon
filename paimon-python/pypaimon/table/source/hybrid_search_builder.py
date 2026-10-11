@@ -19,11 +19,13 @@
 
 import heapq
 import math
+from copy import copy
 from abc import ABC, abstractmethod
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import (
@@ -172,7 +174,7 @@ class HybridSearchBuilder(ABC):
 
     @abstractmethod
     def with_filter(self, predicate) -> 'HybridSearchBuilder':
-        """Scalar predicate used to pre-filter vector routes."""
+        """Scalar predicate used to pre-filter every route before Top-K."""
         pass
 
     @abstractmethod
@@ -276,6 +278,14 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         self._filter = None
         self._partition_filter = None
 
+    def execute_local(self) -> ScoredGlobalIndexResult:
+        from pypaimon.table.source.native_hybrid_search import try_native_hybrid_search
+
+        result = try_native_hybrid_search(self)
+        if result is not None:
+            return result
+        return super().execute_local()
+
     def with_limit(self, limit: int) -> 'HybridSearchBuilder':
         self._limit = limit
         return self
@@ -311,17 +321,21 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         return self
 
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
+        reject_search_under_query_auth(self._table)
         self._validate_search()
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        execution = copy(self)
+        execution._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
         builders = []
         for route in self._routes:
             if route.is_vector():
                 builders.append(
                     HybridSearchRouteBuilder(
-                        route, self._new_vector_search_builder(route)))
+                        route, execution._new_vector_search_builder(route)))
             else:
                 builders.append(
                     HybridSearchRouteBuilder(
-                        route, self._new_full_text_search_builder(route)))
+                        route, execution._new_full_text_search_builder(route)))
         return builders
 
     def to_route_result(
@@ -357,13 +371,6 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
             raise ValueError("Routes cannot be empty")
         if self._limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self._limit)
-        if self._filter is not None:
-            for route in self._routes:
-                if route.is_full_text():
-                    raise ValueError(
-                        "Hybrid search with full-text routes does not support "
-                        "non-partition filters because full-text indexes cannot "
-                        "apply row-id pre-filters before top-k ranking.")
 
     def _new_vector_search_builder(self, route):
         builder = (
@@ -387,6 +394,8 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         )
         if self._partition_filter is not None:
             builder.with_partition_filter(self._partition_filter)
+        if self._filter is not None:
+            builder.with_filter(self._filter)
         return builder
 
     def _rrf(self, route_results):

@@ -23,6 +23,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.utils.range import Range
 
 
@@ -120,9 +121,17 @@ class SplitOrderTest(unittest.TestCase):
     class _Options:
         options = {}
 
+        def data_file_path_directory(self, default=None):
+            return default
+
     class _Table:
         table_path = '/table'
         options = None
+
+        def path_factory(self):
+            return FileStorePathFactory(
+                self.table_path, [], '__DEFAULT_PARTITION__', 'parquet',
+                'data-', 'changelog-', False, False, 'zstd')
 
     _Table.options = _Options()
 
@@ -161,9 +170,11 @@ class SplitOrderTest(unittest.TestCase):
             self._entry('c.parquet', 2),
         ]
         splits = DataEvolutionSplitGenerator(
-            self._Table(), target_split_size=1024, open_file_cost=0
+            self._Table(), target_split_size=1024, open_file_cost=0,
+            snapshot_id=7,
         ).create_splits(entries)
 
+        self.assertEqual(7, splits[0].snapshot_id)
         self.assertEqual(
             ['a.parquet', 'b.parquet', 'c.parquet'],
             [file.file_name for file in splits[0].files],

@@ -15,7 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import io
 import os
+import pickle
+import threading
 import types
 import unittest
 import uuid
@@ -27,7 +30,12 @@ from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import jindo_file_system_handler as jindo_module
-from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
+from pypaimon.filesystem import oss_user_agent
+from pypaimon.filesystem.jindo_file_system_handler import (
+    JindoFileSystemHandler,
+    JindoInputFile,
+    JINDO_AVAILABLE,
+)
 
 
 class _RecordingConfig:
@@ -38,7 +46,97 @@ class _RecordingConfig:
         self.values[key] = value
 
 
+class _RecordingInputStream:
+    def __init__(self, position=0):
+        self.position = position
+        self.seeks = []
+        self.reads = []
+        self.closed = False
+
+    def seek(self, position, whence=0):
+        self.seeks.append((position, whence))
+        self.position = position
+        return position
+
+    def tell(self):
+        return self.position
+
+    def read(self, size=None):
+        self.reads.append(size)
+        self.position += size or 0
+        return b"x" * (size or 0)
+
+    def close(self):
+        self.closed = True
+
+
+class JindoInputFileTest(unittest.TestCase):
+
+    def test_known_size_avoids_backend_seek_from_end(self):
+        stream = _RecordingInputStream()
+        input_file = JindoInputFile(stream, file_size=100)
+
+        self.assertEqual(95, input_file.seek(-5, os.SEEK_END))
+        self.assertEqual([(95, os.SEEK_SET)], stream.seeks)
+
+    def test_known_size_bounds_unlimited_read(self):
+        stream = _RecordingInputStream(position=40)
+        input_file = JindoInputFile(stream, file_size=100)
+
+        self.assertEqual(b"x" * 60, input_file.read())
+        self.assertEqual([60], stream.reads)
+
+
 class JindoConfigTest(unittest.TestCase):
+
+    def test_input_file_seek_returns_position(self):
+        class JindoStream:
+
+            def __init__(self):
+                self._stream = io.BytesIO(b"video")
+
+            def seek(self, offset, whence=io.SEEK_SET):
+                self._stream.seek(offset, whence)
+
+            def tell(self):
+                return self._stream.tell()
+
+        stream = JindoInputFile(JindoStream())
+        self.assertEqual(5, stream.seek(0, io.SEEK_END))
+
+    def test_pickle_reconnects_without_native_client_lock_or_cache(self):
+        options = Options({
+            "fs.oss.impl": "jindo", "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.accessKeyId": "test-ak", "fs.oss.accessKeySecret": "test-sk",
+            "fs.oss.securityToken": "test-token", "fs.jindocache.client.metrics.enable": True,
+        })
+        # A native client is not serializable even after the handler lock is
+        # removed. Give this stand-in its own lock to enforce reconstruction.
+        clients = [types.SimpleNamespace(lock=threading.Lock()) for _ in range(2)]
+        connect = mock.Mock(side_effect=clients)
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(connect=connect)), \
+             mock.patch.object(jindo_module, "jutil", types.SimpleNamespace(Config=_RecordingConfig)):
+            original = JindoFileSystemHandler("oss://bucket/", options)
+            original.register_file_size("object", 123)
+            # Exercise PyArrow's enclosing filesystem serialization as well.
+            encoded = pickle.dumps(PyFileSystem(original))
+            with original._known_file_sizes_lock:
+                restored = pickle.loads(encoded).handler
+            self.assertIs(original._jindo_fs, clients[0])
+            self.assertIs(restored._jindo_fs, clients[1])
+            self.assertEqual(restored.root_path, original.root_path)
+            self.assertEqual(restored.properties.to_map(), options.to_map())
+            self.assertIsNot(restored._known_file_sizes_lock, original._known_file_sizes_lock)
+            self.assertIsNone(restored._known_file_size("oss://bucket/object"))
+            restored.register_file_size("object", 456)
+            self.assertEqual(restored._known_file_size("oss://bucket/object"), 456)
+            self.assertEqual(original._known_file_size("oss://bucket/object"), 123)
+        self.assertEqual(connect.call_count, 2)
+        for call in connect.call_args_list:
+            self.assertEqual(call[0][:2], ("oss://bucket/", "root"))
+            self.assertEqual(call[0][2].values["fs.oss.securityToken"], "test-token")
+            self.assertEqual(call[0][2].values["fs.jindocache.client.metrics.enable"], "true")
 
     def test_forwards_native_options_to_connect(self):
         created_config = _RecordingConfig()
@@ -96,7 +194,10 @@ class JindoConfigTest(unittest.TestCase):
         self.assertEqual(config.values["logger.dir"], "/tmp/jindo-log")
         self.assertEqual(config.values["logger.verbose"], "3")
         self.assertEqual(config.values["logger.console.log.enable"], "false")
-        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.features"], oss_user_agent.identity())
+        self.assertNotIn("fs.oss.user.agent.module", config.values)
+        self.assertNotIn("fs.oss.user.agent.extended", config.values)
         self.assertNotIn(OssOptions.OSS_IMPL.key(), config.values)
         self.assertNotIn("fs.oss.unset.option", config.values)
         self.assertNotIn("metastore", config.values)
@@ -126,6 +227,55 @@ class JindoConfigTest(unittest.TestCase):
         self.assertEqual(config.values["logger.verbose"], "3")
         self.assertNotIn("fs.oss.provider.endpoint", config.values)
         self.assertNotIn("fs.oss.provider.format", config.values)
+
+    def test_user_agent_keeps_user_values_and_appends_access_tracking(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({
+            "fs.oss.user.agent.module": "MyModule/1.0",
+            "fs.oss.user.agent.features": "Flink",
+            "fs.oss.user.agent.extended": "user/ext",
+            "dlf.access-tracking.extended-info": "acs/xxx k/v",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             mock.patch.object(oss_user_agent, "identity", return_value="pypaimon/2.2.dev0"):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.module"], "MyModule/1.0")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.features"], "pypaimon/2.2.dev0 Flink")
+        self.assertEqual(
+            config.values["fs.oss.user.agent.extended"], "user/ext acs/xxx k/v")
+        self.assertNotIn("dlf.access-tracking.extended-info", config.values)
+
+    def test_user_agent_from_common_keys(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({
+            "user-agent.module": "MyApp/1.0",
+            "user-agent.features": "Flink",
+            "user-agent.extended": "vvr",
+            "dlf.access-tracking.extended-info": "uid/123",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             mock.patch.object(oss_user_agent, "identity", return_value="pypaimon/2.2.dev0"):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.module"], "MyApp/1.0")
+        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon/2.2.dev0 Flink")
+        self.assertEqual(config.values["fs.oss.user.agent.extended"], "vvr uid/123")
+
+    def test_user_agent_extended_from_access_tracking_only(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+        options = Options({"dlf.access-tracking.extended-info": "acs/xxx"})
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            config = jindo_module.build_jindo_config(options)
+
+        self.assertEqual(config.values["fs.oss.user.agent.extended"], "acs/xxx")
 
     def test_forwards_native_options_to_jindo_oss_filesystem(self):
         created_config = _RecordingConfig()

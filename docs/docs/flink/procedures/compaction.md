@@ -48,6 +48,8 @@ To compact a table. Arguments:
 
 - `compact_strategy` (optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.
 
+- `buckets` (optional): fixed-bucket IDs, comma-separated IDs, or inclusive ranges, for example `'0-3,7'`. Omit to include all buckets. Valid only for fixed-bucket tables without sort compaction.
+
 **Syntax**
 
 ```sql
@@ -60,7 +62,8 @@ CALL [catalog.]sys.compact(
     options => 'options',
     `where` => 'where',
     partition_idle_time => 'partition_idle_time',
-    compact_strategy => 'compact_strategy');
+    compact_strategy => 'compact_strategy',
+    buckets => 'buckets');
 
 -- Use indexed argument
 CALL [catalog.]sys.compact('table');
@@ -127,9 +130,9 @@ To compact databases. Arguments:
 
 - `mode`: compact mode. "divided" (default): start a sink for each table, detecting the new table requires restarting the job; "combined": start a single combined sink for all tables, the new table will be automatically detected.
 
-- `includingTables`: to specify tables. You can use regular expression.
+- `includingTables`: to specify tables. The format is `databaseName.tableName`, and the whole name must match. You can use regular expression, for example `.*\.table_.*`.
 
-- `excludingTables`: to specify tables that are not compacted. You can use regular expression.
+- `excludingTables`: to specify tables that are not compacted. The usage is same as `includingTables`.
 
 - `tableOptions`: additional dynamic options of the table.
 
@@ -195,8 +198,8 @@ CALL [catalog.]sys.compact_database(
 CALL sys.compact_database(
     including_databases => 'db1|db2',
     mode => 'combined',
-    including_tables => 'table_.*',
-    excluding_tables => 'ignore',
+    including_tables => '.*\.table_.*',
+    excluding_tables => '.*\.ignore',
     table_options => 'sink.parallelism=4',
     compact_strategy => 'full');
 ```

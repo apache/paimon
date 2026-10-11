@@ -692,6 +692,10 @@ public class RESTCatalog implements Catalog {
                 } else if (StringUtils.equals(
                         e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
                     throw new ColumnNotExistException(identifier, e.resourceName());
+                } else {
+                    // rethrow other typed 404s, for example a DATABASE dropped
+                    // concurrently; swallowing would report success for a failed ALTER
+                    throw e;
                 }
             }
         } catch (AlreadyExistsException e) {

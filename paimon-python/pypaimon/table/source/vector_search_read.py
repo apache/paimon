@@ -17,9 +17,15 @@
 
 """Vector search read to read index files."""
 
+import logging
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, wait
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from threading import Lock
 
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -87,6 +93,7 @@ class AbstractVectorSearchReadImpl:
         self._partition_filter = partition_filter
         self._options = dict(options or {})
         self._index_metric = None
+        self._scalar_pre_filter = None
 
     def _search_metric(self, index_type=None):
         if self._index_metric is not None:
@@ -94,7 +101,7 @@ class AbstractVectorSearchReadImpl:
         return _raw_search_metric(
             self._table, self._vector_column, self._options, index_type)
 
-    def _record_index_metric(self, reader, index_type):
+    def _record_index_metric(self, reader, index_type, metric_lock=None):
         """Keep one persisted metric for indexed scores, raw search and refinement."""
         metric_getter = getattr(reader, "vector_metric", None)
         if metric_getter is None:
@@ -106,11 +113,44 @@ class AbstractVectorSearchReadImpl:
             raise ValueError(
                 "Query vector metric '%s' does not match index metric '%s' for column '%s'."
                 % (requested, metric, self._vector_column.name))
+        if metric_lock is None:
+            self._set_index_metric(metric)
+        else:
+            with metric_lock:
+                self._set_index_metric(metric)
+
+    def _set_index_metric(self, metric):
         if self._index_metric is not None and self._index_metric != metric:
             raise ValueError(
                 "Cannot merge vector indexes with different metrics '%s' and '%s' for column '%s'."
                 % (self._index_metric, metric, self._vector_column.name))
         self._index_metric = metric
+
+    def _prepare_search_splits(self, splits, snapshot):
+        """Route unevaluable scalar filters through raw scoring, as in Java."""
+        index_splits, raw_splits = _split_search_splits(splits)
+        self._scalar_pre_filter = None
+        if self._filter is None or not index_splits:
+            return index_splits, raw_splits
+        result = self._scalar_index_result(index_splits, snapshot)
+        if result is not None:
+            self._scalar_pre_filter = self._refine_scalar_result(index_splits, result, snapshot)
+            return index_splits, raw_splits
+
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+        index_type = _vector_index_type(index_splits)
+        # Preserve the persisted metric even when these ANN segments are
+        # replaced by exact raw reads. Closing the wrapper closes its reader.
+        for split in index_splits:
+            if split.vector_index_files:
+                _, offset_reader = self._open_offset_reader(
+                    split.vector_index_files, split.row_range_start, split.row_range_end)
+                offset_reader.close()
+        raw_splits.append(RawVectorSearchSplit(
+            [Range(split.row_range_start, split.row_range_end) for split in index_splits],
+            [index_file for split in index_splits for index_file in split.scalar_index_files],
+            index_type))
+        return [], raw_splits
 
     def _pre_filters(self, splits, snapshot=None):
         # type: (list) -> List[RoaringBitmap64]
@@ -120,7 +160,13 @@ class AbstractVectorSearchReadImpl:
 
         live_rows = global_index_live_row_filter.live_rows(
             self._table, self._partition_filter, snapshot)
-        matched_rows = self._scalar_matched_rows(splits, snapshot)
+        matched_rows = self._scalar_pre_filter
+        if matched_rows is None:
+            matched_rows = self._scalar_matched_rows(splits, snapshot)
+        return self._combine_pre_filters(splits, live_rows, matched_rows)
+
+    @staticmethod
+    def _combine_pre_filters(splits, live_rows, matched_rows):
         if live_rows is None and matched_rows is None:
             return []
 
@@ -146,6 +192,10 @@ class AbstractVectorSearchReadImpl:
         if self._filter is None:
             return None
 
+        return self._refine_scalar_result(splits, self._scalar_index_result(splits, snapshot), snapshot)
+
+    def _scalar_index_result(self, splits, snapshot=None):
+        """Evaluate scalar indexes without data reads; None means no usable result."""
         # Collect scalar index files across splits, deduplicated by file name.
         seen = set()
         scalar_files = []
@@ -157,7 +207,7 @@ class AbstractVectorSearchReadImpl:
                 scalar_files.append(index_file)
 
         if not scalar_files:
-            return RoaringBitmap64()
+            return None
 
         from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
         scanner = DataEvolutionGlobalIndexScanner.create(
@@ -167,14 +217,36 @@ class AbstractVectorSearchReadImpl:
             snapshot=snapshot,
         )
         if scanner is None:
-            return RoaringBitmap64()
+            return None
         try:
-            result = scanner.scan(self._filter)
-            if result is None:
-                return RoaringBitmap64()
-            return result.results()
+            return scanner.scan(self._filter)
         finally:
             scanner.close()
+
+    def _refine_scalar_result(self, splits, result, snapshot=None):
+        from pypaimon.table.source.global_index_row_filter import is_exact
+
+        if is_exact(self._filter, result):
+            return result.results()
+        if not self._table.options.global_index_filter_refine_from_data():
+            logging.getLogger(__name__).warning(
+                "Scalar index candidates are excluded because the row filter %s cannot be "
+                "evaluated exactly. Set global-index.filter.refine-from-data=true to verify "
+                "candidates against the data; otherwise vector search may return fewer rows.",
+                self._filter)
+            return RoaringBitmap64()
+
+        candidates = RoaringBitmap64()
+        for split in splits:
+            candidates.add_range(split.row_range_start, split.row_range_end)
+        if result is not None:
+            candidates = RoaringBitmap64.and_(candidates, result.results())
+        return self._matching_candidate_rows(candidates, snapshot)
+
+    def _matching_candidate_rows(self, candidates, snapshot):
+        from pypaimon.table.source.global_index_row_filter import matching_rows
+
+        return matching_rows(self._table, self._filter, candidates, self._partition_filter, snapshot)
 
     def _pre_filter(self, splits, snapshot=None):
         # Backwards-compatible helper used by older tests/callers.
@@ -221,10 +293,15 @@ class AbstractVectorSearchReadImpl:
             if evaluation is None:
                 return None
             include_ranges = evaluation.result.results().to_range_list()
+            # Use the same effective mode as the scan so this optimization
+            # cannot remove raw ranges admitted by a query option override.
+            effective_options = dict(_table_options_map(self._table))
+            effective_options.update(self._options)
+            effective_core = CoreOptions(Options(effective_options))
             include_ranges.extend(
                 scanner.unindexed_ranges(
                     self._filter,
-                    search_mode=self._table.options.scalar_index_search_mode(),
+                    search_mode=effective_core.scalar_index_search_mode(),
                     contributing_field_ids=(
                         evaluation.contributing_field_ids),
                 ))
@@ -235,7 +312,8 @@ class AbstractVectorSearchReadImpl:
         finally:
             scanner.close()
 
-    def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end):
+    def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end,
+                            metric_lock=None):
         """Open a vector index reader for the split, wrapped with the row-id offset.
 
         The caller must close the returned reader once its future completes.
@@ -261,14 +339,14 @@ class AbstractVectorSearchReadImpl:
             self._table.table_schema.options,
         )
         try:
-            self._record_index_metric(reader, vector_index_files[0].index_type)
+            self._record_index_metric(reader, vector_index_files[0].index_type, metric_lock)
             return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-        except Exception:
+        except BaseException:
             reader.close()
             raise
 
     def _eval(self, row_range_start, row_range_end, vector_index_files,
-              query_vector, search_limit, include_row_ids):
+              query_vector, search_limit, include_row_ids, metric_lock=None):
         from pypaimon.globalindex.global_index_reader import _completed_future
 
         if not vector_index_files:
@@ -284,7 +362,7 @@ class AbstractVectorSearchReadImpl:
             vector_search = vector_search.with_include_row_ids(include_row_ids)
 
         reader, offset_reader = self._open_offset_reader(
-            vector_index_files, row_range_start, row_range_end)
+            vector_index_files, row_range_start, row_range_end, metric_lock)
         try:
             future = offset_reader.visit_vector_search(vector_search)
         except BaseException:
@@ -304,11 +382,16 @@ class AbstractVectorSearchReadImpl:
         if table is None or table.num_rows == 0:
             return DictBasedScoredIndexResult({})
 
+        return self._score_raw_batches(
+            table.to_batches(max_chunksize=_score_block_size(query_vector)),
+            query_vector, self._search_metric(index_type), score_candidates)
+
+    def _score_raw_batches(self, batches, query_vector, metric, score_candidates=None, reject_nan=False):
+        """Score bounded Arrow batches, shared by local and distributed reads."""
+        import math
+
         top_k_heap = []
-        metric = self._search_metric(index_type)
-        block_size = _score_block_size(query_vector)
-        for start in range(0, table.num_rows, block_size):
-            block = table.slice(start, block_size)
+        for block in batches:
             row_ids = block.column(SpecialFields.ROW_ID.name).to_pylist()
             vectors = block.column(self._vector_column.name)
             if score_candidates is not None:
@@ -322,6 +405,8 @@ class AbstractVectorSearchReadImpl:
                 row_ids, _iter_arrow_scores(vectors, query_vector, metric)
             ):
                 if score is not None:
+                    if reject_nan and math.isnan(score):
+                        raise ValueError("Ray vector search cannot rank NaN scores.")
                     _offer_score(top_k_heap, self._limit, row_id, score)
         return _scored_result(top_k_heap)
 
@@ -426,7 +511,7 @@ class AbstractVectorSearchReadImpl:
         return projection
 
     def _eval_batch(self, row_range_start, row_range_end, vector_index_files,
-                    query_vectors, search_limit, include_row_ids):
+                    query_vectors, search_limit, include_row_ids, metric_lock=None):
         from pypaimon.globalindex.global_index_reader import _completed_future
 
         if not vector_index_files:
@@ -442,7 +527,7 @@ class AbstractVectorSearchReadImpl:
             batch_vector_search = batch_vector_search.with_include_row_ids(include_row_ids)
 
         reader, offset_reader = self._open_offset_reader(
-            vector_index_files, row_range_start, row_range_end)
+            vector_index_files, row_range_start, row_range_end, metric_lock)
         try:
             future = offset_reader.visit_batch_vector_search(batch_vector_search)
         except BaseException:
@@ -450,6 +535,54 @@ class AbstractVectorSearchReadImpl:
             raise
         future.add_done_callback(lambda _: reader.close())
         return future
+
+    def _search_index_splits(self, splits, query, search_limit, snapshot, batch=False):
+        pre_filters = self._pre_filters(splits, snapshot)
+        # Native readers finish their search before returning a completed Future.
+        # Schedule the entire open/search/close operation, not just Future.result().
+        option = CoreOptions.GLOBAL_INDEX_THREAD_NUM
+        key = option.key()
+        value = _table_options_map(self._table).get(key, option.default_value())
+        try:
+            parallelism = int(str(value))
+        except (ValueError, TypeError):
+            parallelism = 0
+        if parallelism < 1:
+            raise ValueError("'%s' must be a positive integer, got: %s" % (key, value))
+
+        metric_lock = Lock()
+        evaluate = self._eval_batch if batch else self._eval
+
+        def search(i):
+            split = splits[i]
+            return evaluate(
+                split.row_range_start, split.row_range_end, split.vector_index_files,
+                query, search_limit, None if not pre_filters else pre_filters[i],
+                metric_lock,
+            ).result()
+
+        workers = min(parallelism, len(splits))
+        if workers <= 1:
+            for i in range(len(splits)):
+                yield search(i)
+            return
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            pending = deque()
+            try:
+                for i in range(workers):
+                    pending.append(executor.submit(search, i))
+                remaining = iter(range(workers, len(splits)))
+                while pending:
+                    # Consume in plan order to retain duplicate-row precedence.
+                    # Bound completed results as well as running searches.
+                    yield pending.popleft().result()
+                    i = next(remaining, None)
+                    if i is not None:
+                        pending.append(executor.submit(search, i))
+            finally:
+                for future in pending:
+                    future.cancel()
+                # Executor shutdown waits for started readers to close on failure.
 
     def _indexed_search_limit(self, index_type):
         refine_factor = self._configured_refine_factor(index_type)
@@ -575,7 +708,7 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
 
     def _read(self, splits, snapshot):
         self._index_metric = None
-        index_splits, raw_splits = _split_search_splits(splits)
+        index_splits, raw_splits = self._prepare_search_splits(splits, snapshot)
         if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
 
@@ -596,28 +729,12 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
     def _read_indexed(self, splits, query_vector, snapshot):
         index_type = _vector_index_type(splits)
         search_limit = self._indexed_search_limit(index_type)
-        pre_filters = self._pre_filters(splits, snapshot)
-        futures = [
-            self._eval(
-                split.row_range_start, split.row_range_end,
-                split.vector_index_files,
-                query_vector,
-                search_limit,
-                None if not pre_filters else pre_filters[i]
-            )
-            for i, split in enumerate(splits)
-        ]
-
-        wait(futures)
-
         merged_scores = {}
-        for future in futures:
-            split_result = future.result()
-            if split_result is not None:
-                score_getter = split_result.score_getter()
-                for row_id in split_result.results():
-                    if row_id not in merged_scores:
-                        merged_scores[row_id] = score_getter(row_id)
+        with closing(self._search_index_splits(
+                splits, query_vector, search_limit, snapshot)) as results:
+            for split_result in results:
+                _merge_index_scores(merged_scores, split_result)
+                del split_result
 
         indexed = DictBasedScoredIndexResult(merged_scores).top_k(search_limit)
         return self._maybe_rerank_indexed_result(
@@ -639,7 +756,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
     def _read_batch(self, splits, snapshot):
         self._index_metric = None
         n = len(self._query_vectors)
-        index_splits, raw_splits = _split_search_splits(splits)
+        index_splits, raw_splits = self._prepare_search_splits(splits, snapshot)
         if not index_splits and not raw_splits:
             return [GlobalIndexResult.create_empty() for _ in range(n)]
 
@@ -647,31 +764,14 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         # passing that split's pre-filter. Each future returns n per-query results.
         index_type = _vector_index_type(index_splits)
         search_limit = self._indexed_search_limit(index_type)
-        pre_filters = self._pre_filters(index_splits, snapshot)
-        futures = [
-            self._eval_batch(
-                split.row_range_start, split.row_range_end,
-                split.vector_index_files, self._query_vectors,
-                search_limit,
-                None if not pre_filters else pre_filters[i],
-            )
-            for i, split in enumerate(index_splits)
-        ]
-
-        wait(futures)
-
         # Merge each query vector's indexed results across index splits.
         merged_scores = [{} for _ in range(n)]
-        for future in futures:
-            split_results = future.result()
-            for i in range(n):
-                split_result = split_results[i]
-                if split_result is None:
-                    continue
-                score_getter = split_result.score_getter()
-                for row_id in split_result.results():
-                    if row_id not in merged_scores[i]:
-                        merged_scores[i][row_id] = score_getter(row_id)
+        with closing(self._search_index_splits(
+                index_splits, self._query_vectors, search_limit, snapshot, batch=True)) as results:
+            for split_results in results:
+                for i in range(n):
+                    _merge_index_scores(merged_scores[i], split_results[i])
+                del split_results
 
         indexed_results = [
             DictBasedScoredIndexResult(merged_scores[i]).top_k(search_limit)
@@ -721,23 +821,35 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
     def _score_raw_splits(self, table_read, splits, metric):
         from pypaimon.read.table_read import _ClosableArrowBatchReader
 
-        heaps = [[] for _ in self._query_vectors]
         reader, batches = table_read._new_arrow_batch_reader(splits)
         # Close the underlying iterator as well if scoring fails mid-batch.
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-            for batch in batch_reader:
-                row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
-                vectors = batch.column(self._vector_column.name)
-                for start, query_index, scores in _iter_arrow_batch_scores(
-                    vectors, self._query_vectors, metric
-                ):
-                    heap = heaps[query_index]
-                    block_row_ids = row_ids[start:start + len(scores)]
-                    for row_id, score in zip(block_row_ids, scores):
-                        if score is not None:
-                            _offer_score(heap, self._limit, row_id, score)
-                del batch, row_ids, vectors
+            return self._score_raw_batch_queries(batch_reader, metric)
+
+    def _score_raw_batch_queries(self, batches, metric):
+        heaps = [[] for _ in self._query_vectors]
+        for batch in batches:
+            row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
+            vectors = batch.column(self._vector_column.name)
+            for start, query_index, scores in _iter_arrow_batch_scores(
+                vectors, self._query_vectors, metric
+            ):
+                heap = heaps[query_index]
+                block_row_ids = row_ids[start:start + len(scores)]
+                for row_id, score in zip(block_row_ids, scores):
+                    if score is not None:
+                        _offer_score(heap, self._limit, row_id, score)
+            del batch, row_ids, vectors
         return [_scored_result(heap) for heap in heaps]
+
+
+def _merge_index_scores(merged_scores, result):
+    if result is None:
+        return
+    score_getter = result.score_getter()
+    for row_id in result.results():
+        if row_id not in merged_scores:
+            merged_scores[row_id] = score_getter(row_id)
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):
@@ -987,7 +1099,14 @@ def _iter_arrow_batch_scores(vectors, queries, metric):
 
     for start in range(0, len(vectors), block_size):
         block = vectors.slice(start, block_size)
-        matrix = _arrow_score_matrix(block, dimension) if fast_queries else None
+        positions = None
+        score_vectors = block
+        if fast_queries and block.null_count:
+            # Compact only this block; null rows must not disable vectorized
+            # scoring for the remaining rows or change their result positions.
+            positions = [i for i, valid in enumerate(block.is_valid().to_pylist()) if valid]
+            score_vectors = block.take(np.asarray(positions, dtype=np.int64))
+        matrix = _arrow_score_matrix(score_vectors, dimension) if fast_queries else None
         if matrix is not None and not np.isfinite(matrix).all():
             matrix = None
         if matrix is None:
@@ -1003,6 +1122,11 @@ def _iter_arrow_batch_scores(vectors, queries, metric):
             working = matrix if query_index == last_query else matrix.copy()
             scores = _compute_scores(query, working, metric)
             assert scores is not None
+            if positions is not None:
+                restored = [None] * len(block)
+                for position, score in zip(positions, scores):
+                    restored[position] = score
+                scores = restored
             yield start, query_index, scores
 
 

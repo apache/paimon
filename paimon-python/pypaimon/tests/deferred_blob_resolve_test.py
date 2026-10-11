@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
@@ -54,8 +55,7 @@ class _BlobCountingFileIO:
         return getattr(self._inner, name)
 
 
-class _RejectScoreOneAuthResult:
-    column_masking = None
+class _RejectScoreOneAuthResult(TableQueryAuthResult):
     filter = [json.dumps({
         "kind": "LEAF",
         "transform": {
@@ -66,8 +66,11 @@ class _RejectScoreOneAuthResult:
         "literals": [1],
     })]
 
+    def __init__(self):
+        super().__init__(filter=_RejectScoreOneAuthResult.filter, column_masking=None)
+
     @staticmethod
-    def get_extra_fields_for_filter(read_fields, table_fields):
+    def get_extra_fields(read_fields, table_fields):
         return []
 
     @staticmethod
@@ -75,12 +78,11 @@ class _RejectScoreOneAuthResult:
         return lambda batch: pc.not_equal(batch.column("score"), 1)
 
 
-class _PayloadAuthResult:
-    column_masking = None
+class _PayloadAuthResult(TableQueryAuthResult):
 
     def __init__(self, expected_payload):
         self._expected_payload = expected_payload
-        self.filter = [json.dumps({
+        super().__init__(filter=[json.dumps({
             "kind": "LEAF",
             "transform": {
                 "name": "FIELD_REF",
@@ -92,10 +94,10 @@ class _PayloadAuthResult:
             },
             "function": "EQUAL",
             "literals": [],
-        })]
+        })], column_masking=None)
 
     @staticmethod
-    def get_extra_fields_for_filter(read_fields, table_fields):
+    def get_extra_fields(read_fields, table_fields):
         return []
 
     def extract_row_filter(self):
@@ -103,6 +105,7 @@ class _PayloadAuthResult:
             batch.column("payload"), self._expected_payload)
 
 
+@pytest.mark.python_read
 class DeferredBlobResolveTest(unittest.TestCase):
 
     @classmethod
@@ -282,7 +285,10 @@ class DeferredBlobResolveTest(unittest.TestCase):
         read_builder = table.new_read_builder().with_projection(
             ["sample_id", "payload", "score"]
         ).with_limit(2)
-        splits = read_builder.new_scan().plan().splits()
+        # The reader's remaining-limit behavior needs both partitions, even
+        # when a planner could satisfy the limit with a single partition.
+        splits = sorted(table.new_read_builder().new_scan().plan().splits(),
+                        key=lambda split: split.partition.values)
 
         rows = list(read_builder.new_read().to_iterator(splits))
 
@@ -305,7 +311,10 @@ class DeferredBlobResolveTest(unittest.TestCase):
         auth_result = _RejectScoreOneAuthResult()
         splits = [
             QueryAuthSplit(split, auth_result)
-            for split in read_builder.new_scan().plan().splits()
+            # Attach authorization after planning; do not push the reader's
+            # limit into this unauthenticated scan. Order partitions explicitly.
+            for split in sorted(table.new_read_builder().new_scan().plan().splits(),
+                                key=lambda split: split.partition.values)
         ]
 
         scores = [

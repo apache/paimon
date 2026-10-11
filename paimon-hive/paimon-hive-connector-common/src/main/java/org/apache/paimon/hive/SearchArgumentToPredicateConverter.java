@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataType;
@@ -33,8 +34,10 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -62,11 +65,15 @@ public class SearchArgumentToPredicateConverter {
         this.root = searchArgument.getExpression();
         this.leaves = searchArgument.getLeaves();
         this.hiveColumnNames =
-                columnNames.stream().map(String::toLowerCase).collect(Collectors.toList());
+                columnNames.stream()
+                        .map(s -> s.toLowerCase(Locale.ROOT))
+                        .collect(Collectors.toList());
         this.columnTypes = columnTypes;
         if (readColumnNames != null) {
             readColumnNames =
-                    readColumnNames.stream().map(String::toLowerCase).collect(Collectors.toSet());
+                    readColumnNames.stream()
+                            .map(s -> s.toLowerCase(Locale.ROOT))
+                            .collect(Collectors.toSet());
         }
         this.readColumnNames = readColumnNames;
 
@@ -177,6 +184,33 @@ public class SearchArgumentToPredicateConverter {
         if (o instanceof HiveDecimalWritable) {
             o = ((HiveDecimalWritable) o).getHiveDecimal().bigDecimalValue();
         }
-        return convertJavaObject(literalType, o);
+        Object literal = convertJavaObject(literalType, o);
+        // Hive does not cast literals to the column type. A literal that cannot be represented
+        // exactly in the column type (e.g. 1000 for DECIMAL(5, 2), 1.005 for DECIMAL(5, 2) or 200
+        // for TINYINT) would be altered here and prune data files wrongly, so leave this
+        // conjunct to Hive's residual filter instead.
+        if (o != null && !isExact(literalType, o, literal)) {
+            throw new UnsupportedOperationException(
+                    "Literal "
+                            + o
+                            + " cannot be represented exactly in column type "
+                            + literalType
+                            + ".");
+        }
+        return literal;
+    }
+
+    private static boolean isExact(DataType literalType, Object original, Object literal) {
+        switch (literalType.getTypeRoot()) {
+            case DECIMAL:
+                return literal != null
+                        && ((Decimal) literal).toBigDecimal().compareTo((BigDecimal) original) == 0;
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+                return ((Number) literal).longValue() == ((Number) original).longValue();
+            default:
+                return true;
+        }
     }
 }

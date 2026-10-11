@@ -61,6 +61,44 @@ For example:
 SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
+### Scan Layout and Storage Partition Joins
+
+By default, Paimon plans batch read tasks using its regular split packing. It does not report
+bucket distribution or scan ordering to Spark, so scan parallelism is not limited by the number
+of selected buckets. Spark still adds the exchanges and sorts required by the query.
+
+To let Spark use a fixed-bucket table's layout for storage partition joins or grouped aggregates,
+enable both options before planning the query:
+
+```sql
+SET spark.paimon.scan.preserve-data-grouping=true;
+SET spark.sql.sources.v2.bucketing.enabled=true;
+
+SELECT * FROM t1 JOIN t2 ON t1.bucket_key = t2.bucket_key;
+```
+
+`scan.preserve-data-grouping` defaults to `false`. It can also be set as a table property or as a
+DataFrame read option. Session and read options follow the precedence described in
+[Configuration](./configuration). The effective choice is fixed when a scan is created;
+changing a session option later affects newly created scans.
+
+In grouped mode, Paimon preserves complete splits and can provide multiple read units for the
+same bucket. Spark may group those units into one task per bucket. When a supported join uses
+`spark.sql.sources.v2.bucketing.partiallyClusteredDistribution.enabled=true`, Spark can use
+multiple tasks for a bucket. This is a join optimization; enabling grouped mode can still reduce
+the parallelism of a plain scan or TopN query.
+
+Grouped mode requires Spark 3.3 or later and a supported fixed-bucket layout. If Spark V2
+bucketing is disabled, or the scan cannot report a supported bucket layout, Paimon uses regular
+split packing. Grouping does not guarantee that every join can avoid a shuffle.
+
+**Migration:** Enabling Spark V2 bucketing alone, including its default of `true` in Spark 4.1,
+no longer opts Paimon into grouped scans. Workloads that depend on bucket distribution to avoid
+shuffles must also enable `scan.preserve-data-grouping`. The former Paimon adaptive rule that
+disabled bucket scans after physical planning has been removed;
+`spark.sql.sources.bucketing.autoBucketedScan.enabled` no longer changes a Paimon scan's layout.
+AQE and non-AQE queries use the same scan policy.
+
 ### Batch Time Travel
 
 Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.

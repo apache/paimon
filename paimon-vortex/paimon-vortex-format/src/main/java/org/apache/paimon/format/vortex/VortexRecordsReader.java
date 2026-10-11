@@ -91,17 +91,22 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
                             ImmutableScanOptions.builder().ordered(true);
 
                     java.util.List<String> columns = physicalReadRowType.getFieldNames();
-                    scanBuilder.projection(
-                            Expression.select(columns.toArray(new String[0]), Expression.root()));
+                    // The scan clones the projection it is given, so both the root and the select
+                    // built here are ours to release once dataSource.scan has returned.
+                    try (Expression root = Expression.root();
+                            Expression projection =
+                                    Expression.select(columns.toArray(new String[0]), root)) {
+                        scanBuilder.projection(projection);
 
-                    if (rowIndices != null) {
-                        scanBuilder.selectionIndices(rowIndices);
-                        scanBuilder.selectionMode(ScanOptions.SelectionMode.INCLUDE);
+                        if (rowIndices != null) {
+                            scanBuilder.selectionIndices(rowIndices);
+                            scanBuilder.selectionMode(ScanOptions.SelectionMode.INCLUDE);
+                        }
+                        if (predicate != null) {
+                            scanBuilder.filter(predicate);
+                        }
+                        this.scan = dataSource.scan(scanBuilder.build());
                     }
-                    if (predicate != null) {
-                        scanBuilder.filter(predicate);
-                    }
-                    this.scan = dataSource.scan(scanBuilder.build());
                 } catch (Exception e) {
                     dataSource.close();
                     throw e;

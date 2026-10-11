@@ -326,7 +326,7 @@ public class DeleteActionDataEvolutionITCase extends ActionITCaseBase {
         first.run();
 
         assertThatThrownBy(stale::run)
-                .hasStackTraceContaining(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key());
+                .hasStackTraceContaining(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key());
         testBatchRead(
                 "SELECT id, name, dt FROM T ORDER BY id",
                 Arrays.asList(

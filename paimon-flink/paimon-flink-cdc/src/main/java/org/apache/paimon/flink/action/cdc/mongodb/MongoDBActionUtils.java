@@ -33,6 +33,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -118,7 +119,7 @@ public class MongoDBActionUtils {
                 .collectionList(tableList);
 
         String startupMode = mongodbConfig.get(SourceOptions.SCAN_STARTUP_MODE);
-        switch (startupMode.toLowerCase()) {
+        switch (startupMode.toLowerCase(Locale.ROOT)) {
             case INITIAL_MODE:
                 sourceBuilder.startupOptions(StartupOptions.initial());
                 break;

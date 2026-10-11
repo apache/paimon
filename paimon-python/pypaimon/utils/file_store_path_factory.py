@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import math
 import struct
 from datetime import date, timezone
 from decimal import Decimal
@@ -22,6 +23,7 @@ from typing import List, Optional, Tuple
 
 from pypaimon.casting.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.utils.path import resolve_path, to_file_io_path
 from pypaimon.schema.data_types import DataType
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import _is_ltz_type, _normalize_ltz, _parse_type_precision_scale
@@ -31,7 +33,29 @@ def _is_null_or_whitespace_only(value) -> bool:
     if value is None:
         return True
     s = str(value)
-    return len(s) == 0 or s.isspace()
+    # Character.isWhitespace, as used by Java StringUtils. Python isspace also
+    # folds NBSP, NEL and other characters Java keeps in a partition name.
+    return all(char in '\t\n\v\f\r\x1c\x1d\x1e\x1f \u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006'
+               '\u2008\u2009\u200a\u2028\u2029\u205f\u3000' for char in s)
+
+
+def _decode_java_utf8(value: bytes) -> str:
+    """BinaryString.toString replaces a malformed surrogate as one sequence."""
+    value = bytes(value)
+    parts = []
+    while value:
+        try:
+            parts.append(value.decode('utf-8'))
+            break
+        except UnicodeDecodeError as error:
+            parts.append(value[:error.start].decode('utf-8'))
+            value = value[error.start:]
+            length = error.end - error.start
+            if len(value) >= 2 and value[0] == 0xed and 0xa0 <= value[1] <= 0xbf:
+                length = 3 if len(value) >= 3 and value[2] & 0xc0 == 0x80 else 2
+            parts.append('\ufffd')
+            value = value[length:]
+    return ''.join(parts)
 
 
 def _escape_partition_component(value: str) -> str:
@@ -42,12 +66,32 @@ def _escape_partition_component(value: str) -> str:
                    for char in value)
 
 
+def canonical_data_file_path(table, partition, bucket, file_name):
+    """Locate a file in Java's escaped partition directory."""
+    bucket_path = table.path_factory().bucket_path(
+        tuple(partition), bucket, canonical_partition=True)
+    path = f"{bucket_path.rstrip('/')}/{file_name}"
+    root = resolve_path(table.path_factory().data_file_path(), '.').rstrip('/')
+    if (root.startswith('file:') and path.startswith(root + '/')
+            and '%' in path[len(root) + 1:]):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        # File I/O wrappers eventually decode %2F in file URIs. Rust stores
+        # the literal escaped component, so use its physical local path.
+        return str(LocalFileIO()._to_file(root) / path[len(root) + 1:])
+    return path
+
+
 def _floating_partition_string(value, single_precision: bool) -> str:
-    # Use a shortest round-tripping form for the initial lookup. Older JVMs
-    # can use different digits; the read fallback matches their stored values.
+    # Java's JDK 19+ contract selects a shortest round-tripping form with at
+    # least two significant digits before applying its notation thresholds.
     encoding = '>f' if single_precision else '>d'
     bits = struct.pack(encoding, value)
     value = struct.unpack(encoding, bits)[0]
+    if math.isnan(value):
+        return 'NaN'
+    if math.isinf(value):
+        return '-Infinity' if value < 0 else 'Infinity'
     for precision in range(2, 10 if single_precision else 18):
         text = format(value, '.{}g'.format(precision))
         try:
@@ -57,8 +101,6 @@ def _floating_partition_string(value, single_precision: bool) -> str:
         if rounded != bits:
             continue
         decimal = Decimal(text)
-        if not decimal.is_finite():
-            return str(value)
         if decimal.is_zero() or Decimal('0.001') <= abs(decimal) < Decimal('1e7'):
             text = format(decimal, 'f')
             if '.' in text:
@@ -117,6 +159,8 @@ class FileStorePathFactory:
         self.changelog_file_prefix = changelog_file_prefix
         self.file_suffix_include_compression = file_suffix_include_compression
         self.file_compression = file_compression
+        if data_file_path_directory == '':
+            raise ValueError('data-file.path-directory must not be empty')
         self.data_file_path_directory = data_file_path_directory
         self.external_paths = external_paths or []
         self.external_path_strategy = external_path_strategy
@@ -143,9 +187,8 @@ class FileStorePathFactory:
         return f"{self._root}/{self.STATISTICS_PATH}"
 
     def data_file_path(self) -> str:
-        if self.data_file_path_directory:
-            return f"{self._root}/{self.data_file_path_directory}"
-        return self._root
+        path = resolve_path(self._root, self.data_file_path_directory)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def relative_bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         if canonical_partition and partition:
@@ -157,6 +200,8 @@ class FileStorePathFactory:
         for i, value in enumerate(partition):
             data_type = self.partition_types[i] if self.partition_types is not None else None
             type_name = str(data_type).split('(', 1)[0].split()[0]
+            if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+                value = _decode_java_utf8(value)
             if value is not None and _is_ltz_type(str(data_type).upper()):
                 # Legacy Timestamp.toString() uses UTC fields. Java's non-legacy
                 # cast uses TimeZone.getDefault(); neither includes an offset.
@@ -181,6 +226,8 @@ class FileStorePathFactory:
             elif self.legacy_partition_name and type_name.startswith('TIME'):
                 text = str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000
                            + value.microsecond // 1000)
+            elif type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+                text = value
             elif data_type is not None and not _is_unsupported(data_type):
                 text = cast_value_to_string(value, data_type)
             else:
@@ -212,22 +259,27 @@ class FileStorePathFactory:
                 relative_parts = partition_parts + relative_parts
 
         # Add data file path directory if specified
+        relative = "/".join(relative_parts)
+        # Legacy Python timestamp partitions contain literal colons. Prefix a
+        # relative path so URI resolution cannot mistake the first field for a scheme.
+        if ':' in relative.split('/', 1)[0]:
+            relative = './' + relative
         if self.data_file_path_directory:
-            relative_parts = [self.data_file_path_directory] + relative_parts
-
-        return "/".join(relative_parts)
+            return resolve_path(self.data_file_path_directory, relative)
+        return relative
 
     def bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         relative_path = self.relative_bucket_path(partition, bucket, canonical_partition)
-        return f"{self._root}/{relative_path}"
+        path = resolve_path(self._root, relative_path)
+        return to_file_io_path(path) if self.data_file_path_directory is not None else path
 
     def create_external_path_provider(
-        self, partition: Tuple, bucket: int
+        self, partition: Tuple, bucket: int, canonical_partition: bool = False
     ) -> Optional[ExternalPathProvider]:
         if not self.external_paths:
             return None
 
-        relative_bucket_path = self.relative_bucket_path(partition, bucket)
+        relative_bucket_path = self.relative_bucket_path(partition, bucket, canonical_partition)
         return ExternalPathProvider.create(
             self.external_path_strategy,
             self.external_paths,
@@ -245,80 +297,23 @@ class FileStorePathFactory:
     def new_bucket_index_path(self, partition: Tuple, bucket: int, file_name: str) -> Tuple[str, bool]:
         """Return a new bucket index's path and whether to persist its external location."""
         if self.index_file_in_data_file_dir:
-            external = self.create_external_path_provider(partition, bucket)
+            external = self.create_external_path_provider(partition, bucket, canonical_partition=True)
             if external is not None:
                 return external.get_next_external_data_path(file_name), True
-            # Python data directories historically use str(value) without
-            # escaping. Record the actual location when Java renders it
-            # differently, so its readers can find the DV beside those files.
-            return (f"{self.bucket_path(partition, bucket)}/{file_name}",
-                    self._partition_path_requires_explicit_location(partition))
+            path = f"{self.bucket_path(partition, bucket, canonical_partition=True)}/{file_name}"
+            # Java IndexInDataFileDirPathFactory marks a path external only
+            # when a configured ExternalPathProvider selected it.
+            return to_file_io_path(path), False
         factory = self.global_index_path_factory()
         return factory.to_path(file_name), factory.is_external_path()
 
-    def _partition_path_requires_explicit_location(self, partition: Tuple) -> bool:
-        # FLOAT/DOUBLE spellings also vary between JVM versions, so persist
-        # their actual Python location even if one Java spelling matches it.
-        return (any(isinstance(value, float) for value in partition)
-                or self.relative_bucket_path(partition, 0) != self.relative_bucket_path(partition, 0, True))
-
-    def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
-        """Resolve an existing bucket index, including the legacy Python DV layout."""
+    def bucket_index_path(self, partition: Tuple, bucket: int, index_file) -> str:
+        """Resolve a bucket index using Java partition paths and explicit locations."""
         if index_file.external_path:
-            return index_file.external_path
-        legacy_path = f"{self.index_path()}/{index_file.file_name}"
+            return to_file_io_path(index_file.external_path)
         if not self.index_file_in_data_file_dir:
-            return legacy_path
-        path = f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}"
-        # Older Python DV writers ignored the option. Prefer the Java location
-        # when present, and use the old directory only for an existing DV file.
-        if file_io is not None and index_file.index_type == 'DELETION_VECTORS' and not file_io.exists(path):
-            python_path = f"{self.bucket_path(partition, bucket)}/{index_file.file_name}"
-            alternate = self._find_floating_bucket_index(partition, bucket, index_file.file_name, file_io, python_path)
-            if alternate is not None:
-                return alternate
-            if python_path != path and file_io.exists(python_path):
-                return python_path
-            if file_io.exists(legacy_path):
-                return legacy_path
-        return path
-
-    def _find_floating_bucket_index(self, partition, bucket, file_name, file_io, python_path):
-        floating = [str(data_type).split()[0] in ('FLOAT', 'REAL', 'DOUBLE')
-                    for data_type in self.partition_types or []]
-        if not any(is_float and value is not None for is_float, value in zip(floating, partition)):
-            return None
-        # Float/Double.toString changed across JDK releases. Only if the usual
-        # path is missing, inspect floating partition components and compare
-        # their exact encoded values (including the sign of zero).
-        paths = [self.data_file_path()]
-        for i, text in enumerate(self._canonical_partition(partition)):
-            prefix = _escape_partition_component(self.partition_keys[i]) + '='
-            if not floating[i] or partition[i] is None:
-                paths = [path + '/' + prefix + _escape_partition_component(text) for path in paths]
-                continue
-            encoding = '>d' if str(self.partition_types[i]).split()[0] == 'DOUBLE' else '>f'
-            expected = struct.pack(encoding, partition[i])
-            matched = []
-            for path in paths:
-                if not file_io.exists(path):
-                    continue
-                for status in file_io.list_status(path):
-                    name = status.base_name
-                    if not name.startswith(prefix):
-                        continue
-                    try:
-                        if struct.pack(encoding, float(name[len(prefix):])) == expected:
-                            matched.append(path + '/' + name)
-                    except (ValueError, OverflowError):
-                        continue
-            paths = sorted(matched)
-        bucket_name = 'postpone' if bucket == BucketMode.POSTPONE_BUCKET.value else str(bucket)
-        for path in paths:
-            candidate = '{}/{}{}/{}'.format(path, self.BUCKET_PATH_PREFIX, bucket_name, file_name)
-            if candidate != python_path and file_io.exists(candidate):
-                return candidate
-        return None
+            return f"{self.index_path()}/{index_file.file_name}"
+        return to_file_io_path(f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}")
 
 
 class IndexPathFactory:
@@ -335,7 +330,7 @@ class IndexPathFactory:
         self._file_count = 0
 
     def index_path(self) -> str:
-        """Return the table index path used as a read fallback."""
+        """Return the default table index directory."""
         return self._index_path
 
     def global_index_root_path(self) -> str:

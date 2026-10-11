@@ -413,6 +413,59 @@ def cmd_table_snapshot(args):
         sys.exit(1)
 
 
+def cmd_table_rollback(args):
+    """
+    Execute the 'table rollback' command.
+
+    Rolls a table back to an earlier snapshot, tag, or timestamp using the
+    table's existing rollback API. Exactly one of --snapshot / --tag /
+    --timestamp must be provided.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    config = load_catalog_config(args.config)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    database_name, table_name = parts
+    try:
+        table = catalog.get_table(f"{database_name}.{table_name}")
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not isinstance(table, FileStoreTable):
+        print(f"Error: Table '{table_identifier}' is not a FileStoreTable. "
+              f"Rollback operation is not supported for this table type.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        if args.snapshot is not None:
+            table.rollback_to(args.snapshot)
+            target_desc = f"snapshot {args.snapshot}"
+        elif args.tag is not None:
+            table.rollback_to(args.tag)
+            target_desc = f"tag '{args.tag}'"
+        else:
+            table.rollback_to_timestamp(args.timestamp)
+            target_desc = f"timestamp {args.timestamp}"
+    except Exception as e:
+        print(f"Error: Failed to roll back table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Rolled back table '{table_identifier}' to {target_desc}.")
+
+
 def cmd_table_create(args):
     """
     Execute the 'table create' command.
@@ -976,7 +1029,30 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     snapshot_parser.set_defaults(func=cmd_table_snapshot)
-    
+
+    # table rollback command
+    rollback_parser = table_subparsers.add_parser(
+        'rollback',
+        help='Roll back a table to an earlier snapshot, tag, or timestamp')
+    rollback_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    rollback_target = rollback_parser.add_mutually_exclusive_group(required=True)
+    rollback_target.add_argument(
+        '--snapshot', type=int, default=None,
+        help='Snapshot ID to roll back to'
+    )
+    rollback_target.add_argument(
+        '--tag', type=str, default=None,
+        help='Tag name to roll back to'
+    )
+    rollback_target.add_argument(
+        '--timestamp', type=int, default=None,
+        help='Epoch milliseconds; roll back to the latest snapshot at or before it'
+    )
+    rollback_parser.set_defaults(func=cmd_table_rollback)
+
     # table create command
     create_parser = table_subparsers.add_parser('create', help='Create a new table')
     create_parser.add_argument(

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.catalyst.plans.logical
 
+import java.util.Locale
+
 sealed trait OnErrorMode
 
 object OnErrorMode {
@@ -57,7 +59,7 @@ case class CopyFileFormat(formatType: FileFormatType, options: Map[String, Strin
         options.foreach {
           case (k, v) =>
             k match {
-              case "MULTI_LINE" => mapped("multiLine") = v.toLowerCase
+              case "MULTI_LINE" => mapped("multiLine") = v.toLowerCase(Locale.ROOT)
               case "COMPRESSION" => mapped("compression") = v
               case _ =>
             }
@@ -84,7 +86,7 @@ case class CopyFileFormat(formatType: FileFormatType, options: Map[String, Strin
           case (k, v) =>
             k match {
               case "FIELD_DELIMITER" => mapped("sep") = v
-              case "HEADER" => mapped("header") = v.toLowerCase
+              case "HEADER" => mapped("header") = v.toLowerCase(Locale.ROOT)
               case "QUOTE" => mapped("quote") = v
               case "ESCAPE" => mapped("escape") = v
               case "COMPRESSION" => mapped("compression") = v
@@ -226,7 +228,7 @@ object CopyFileFormat {
   val LIST_SEPARATOR: String = "\u001f"
 
   def parseFormatType(typeStr: String): FileFormatType = {
-    typeStr.toUpperCase match {
+    typeStr.toUpperCase(Locale.ROOT) match {
       case "CSV" => FileFormatType.CSV
       case "JSON" => FileFormatType.JSON
       case "PARQUET" => FileFormatType.PARQUET

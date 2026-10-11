@@ -24,6 +24,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 import java.util.logging.Logger;
 
 /**
@@ -34,10 +37,10 @@ public class JNIUtils {
 
     private static final Logger LOG = Logger.getLogger(JNIUtils.class.getName());
 
-    private static boolean inited = false;
+    private static final Set<String> INITIALIZED_LIBRARIES = new HashSet<>();
 
     private static String osName() {
-        String osName = System.getProperty("os.name").toLowerCase().replace(' ', '_');
+        String osName = System.getProperty("os.name").toLowerCase(Locale.ROOT).replace(' ', '_');
         if (osName.startsWith("win")) {
             return "win";
         } else {
@@ -83,7 +86,7 @@ public class JNIUtils {
     }
 
     public static synchronized void load(String jniName) {
-        if (!inited) {
+        if (!INITIALIZED_LIBRARIES.contains(jniName)) {
             String jniFileName = resourceName(jniName);
             InputStream jniFileInput = JNIUtils.class.getResourceAsStream(jniFileName);
             if (jniFileInput == null) {
@@ -110,7 +113,7 @@ public class JNIUtils {
                             }
 
                             loadLibraryFile(tempFile.getAbsolutePath());
-                            inited = true;
+                            INITIALIZED_LIBRARIES.add(jniName);
                             return;
                         }
 

@@ -24,6 +24,9 @@ pip install pyjindosdk
 
 Once installed, PyPaimon will automatically use PyJindoSDK as the default file I/O implementation for accessing OSS. No additional configuration is required.
 
+With multiprocessing, use `spawn` or initialize PyPaimon inside each worker;
+JindoSDK state created before `fork` cannot be reused.
+
 ### Fallback to Legacy Implementation
 
 Since JindoSDK is a native implementation, pre-built Python packages may not be available for all OS or platform versions. If you need to fall back to the legacy PyArrow-based implementation for any reason, there are two ways to do so:

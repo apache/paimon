@@ -21,7 +21,8 @@ import unittest
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.split_serializer import (
-    _decode_modified_utf8, _decode_str_array, deserialize_split_v1)
+    _decode_modified_utf8, _decode_str_array, _encode_modified_utf8,
+    deserialize_split_v1, serialize_split_v1)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 # Hand-built BinaryArray<string> == ["id", "longcolumn12"]: hits both the inline
@@ -201,6 +202,8 @@ class SplitSerializerTest(unittest.TestCase):
                 self.assertEqual(file.value_stats_cols, ['field1', 'field2', 'field3'])
                 self.assertEqual(file.first_row_id, 12)
                 self.assertEqual(file.write_cols, ['a', 'b', 'c', 'f'])
+                self.assertEqual(
+                    file.write_cols_sequences, [15, 100, 150, 200])
                 self.assertEqual(len(split.data_deletion_files), 1)
                 dv = split.data_deletion_files[0]
                 self.assertEqual(
@@ -209,6 +212,90 @@ class SplitSerializerTest(unittest.TestCase):
                 if indexed:
                     self.assertEqual([(r.from_, r.to) for r in split.row_ranges()], [(13, 14)])
                     self.assertEqual(split.scores(), [0.75])
+
+    def test_v9_roundtrip_is_byte_compatible_with_java(self):
+        fields = [DataField(0, 's', AtomicType('STRING'))]
+        frame = _GOLDEN_DATA_SPLIT_V1[:16] + _GOLDEN_DATA_SPLIT_V9
+
+        split = deserialize_split_v1(frame, fields, fields)
+
+        self.assertEqual(serialize_split_v1(split), frame)
+
+    def test_v8_is_upgraded_to_v9_without_losing_reader_metadata(self):
+        fields = self._partition_fields()
+        split = deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, fields)
+
+        upgraded = deserialize_split_v1(serialize_split_v1(split), fields)
+
+        self.assertEqual(upgraded.snapshot_id, split.snapshot_id)
+        self.assertEqual(upgraded.bucket_path, split.bucket_path)
+        self.assertEqual(upgraded.total_buckets, split.total_buckets)
+        self.assertEqual(
+            [file.file_path for file in upgraded.files],
+            [file.file_path for file in split.files])
+        self.assertEqual(
+            [file.max_sequence_number for file in upgraded.files], [100, 200])
+        self.assertEqual(
+            upgraded.files[0].key_stats.null_counts,
+            split.files[0].key_stats.null_counts)
+
+    def test_indexed_roundtrip_preserves_or_strips_scores_explicitly(self):
+        fields = self._partition_fields()
+        split = deserialize_split_v1(_GOLDEN_INDEXED_SPLIT_V1, fields)
+
+        with_scores = deserialize_split_v1(
+            serialize_split_v1(split), fields)
+        without_scores = deserialize_split_v1(
+            serialize_split_v1(split, include_scores=False), fields)
+
+        self.assertEqual(with_scores.scores(), [0.5, 0.25, 0.125])
+        self.assertIsNone(without_scores.scores())
+        self.assertEqual(
+            [(r.from_, r.to) for r in without_scores.row_ranges()],
+            [(1, 4), (11, 13)])
+
+    def test_disjoint_file_paths_use_per_file_external_paths(self):
+        fields = self._partition_fields()
+        split = deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, fields)
+        split.bucket_path = None
+        split.files[0].file_path = 's3://bucket-a/data/file-a'
+        split.files[1].file_path = 's3://bucket-b/data/file-b'
+
+        restored = deserialize_split_v1(serialize_split_v1(split), fields)
+
+        self.assertEqual(restored.bucket_path, '')
+        self.assertEqual(
+            [file.external_path for file in restored.files],
+            ['s3://bucket-a/data/file-a', 's3://bucket-b/data/file-b'])
+        self.assertEqual(
+            [file.file_path for file in restored.files],
+            ['s3://bucket-a/data/file-a', 's3://bucket-b/data/file-b'])
+
+    def test_modified_utf8_roundtrip_nul_bmp_and_supplementary(self):
+        value = 'a\x00\u07ff\u0800\U0001f600'
+        self.assertEqual(
+            _decode_modified_utf8(_encode_modified_utf8(value)), value)
+
+    def test_modified_utf8_roundtrip_unpaired_surrogates(self):
+        value = '\ud800x\udc00'
+        self.assertEqual(
+            _decode_modified_utf8(_encode_modified_utf8(value)), value)
+
+    def test_modified_utf8_rejects_oversized_value(self):
+        with self.assertRaisesRegex(ValueError, 'too long'):
+            _encode_modified_utf8('\u0800' * 21846)
+
+    def test_serializer_rejects_mismatched_deletion_files(self):
+        split = deserialize_split_v1(
+            _GOLDEN_DATA_SPLIT_V1, self._partition_fields())
+        split.data_deletion_files = [None]
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            serialize_split_v1(split)
+
+    def test_deserializer_rejects_trailing_bytes(self):
+        with self.assertRaisesRegex(ValueError, 'trailing bytes'):
+            deserialize_split_v1(
+                _GOLDEN_DATA_SPLIT_V1 + b'junk', self._partition_fields())
 
     def test_unsupported_data_split_version_raises(self):
         for version in (7, 10):

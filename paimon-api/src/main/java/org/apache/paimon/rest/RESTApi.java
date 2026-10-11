@@ -129,6 +129,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -174,6 +175,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class RESTApi {
 
     public static final String HEADER_PREFIX = "header.";
+    private static final String USER_AGENT_HEADER = "User-Agent";
     /**
      * Optional header carrying the URL-encoded {@link Identifier} JSON of the table which initiated
      * a dependency read.
@@ -240,13 +242,26 @@ public class RESTApi {
                                             ResourcePaths.config(),
                                             queryParams,
                                             ConfigResponse.class,
-                                            new RESTAuthFunction(baseHeaders, authProvider))
+                                            new RESTAuthFunction(
+                                                    withUserAgent(baseHeaders, options),
+                                                    authProvider))
                                     .merge(options.toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
-        this.restAuthFunction = new RESTAuthFunction(baseHeaders, authProvider);
+        this.restAuthFunction =
+                new RESTAuthFunction(withUserAgent(baseHeaders, options), authProvider);
         this.options = options;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
+    }
+
+    /** Adds Paimon's unified User-Agent unless {@code header.User-Agent} is set. */
+    private static Map<String, String> withUserAgent(Map<String, String> headers, Options options) {
+        if (headers.keySet().stream().anyMatch(USER_AGENT_HEADER::equalsIgnoreCase)) {
+            return headers;
+        }
+        Map<String, String> result = new HashMap<>(headers);
+        result.put(USER_AGENT_HEADER, HttpClientUtils.userAgent(options));
+        return result;
     }
 
     /** Get the configured options which has been merged from REST Server. */

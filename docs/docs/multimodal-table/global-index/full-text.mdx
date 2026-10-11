@@ -206,6 +206,17 @@ FROM full_text_search(
     10
 )
 ORDER BY __paimon_search_score DESC, id;
+
+-- Filter rows before ranking: the top 10 is taken among rows with category = 'lake'.
+SELECT id, content, __paimon_search_score
+FROM full_text_search(
+    'my_table',
+    'content',
+    '{"match":{"query":"paimon lake format"}}',
+    10
+)
+WHERE category = 'lake' AND dt >= '2026-09-01'
+ORDER BY __paimon_search_score DESC, id;
 ```
 
 Spark exposes the score as the `__paimon_search_score` metadata column.
@@ -228,6 +239,19 @@ TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan()
 try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
     reader.forEachRemaining(row -> System.out.println(row));
 }
+```
+
+Add a row filter with `withFilter` to rank only matching rows:
+
+```java
+Predicate filter = new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("lake"));
+
+GlobalIndexResult result =
+        table.newFullTextSearchBuilder()
+                .withQuery("content", "{\"match\":{\"query\":\"paimon lake\"}}")
+                .withFilter(filter)
+                .withLimit(10)
+                .executeLocal();
 ```
 
 </TabItem>
@@ -258,6 +282,49 @@ By default, `full-text-index.search-mode=fast` searches indexed row ranges only.
 When `full-text-index.search-mode` is `full` or `detail`, Paimon also covers
 unindexed row ranges by reading raw rows and building a temporary native
 full-text index for the searched column.
+
+### Row Filters
+
+A full-text search can carry a row filter: a Spark `WHERE` clause on the
+`full_text_search` result, `withFilter` on the Java builder, or `withFilter` on
+a hybrid search. Partition predicates in the filter prune partitions; the
+remaining predicates are evaluated **before** top-k ranking, so the result is
+the top-k among matching rows rather than a filtered subset of the unfiltered
+top-k.
+
+Non-partition predicates are resolved into an exact set of matching rows
+**before** ranking, and that set is handed to the existing full-text index, so
+BM25 statistics are always those of the full corpus:
+
+- Rows whose filter columns are covered by a scalar global index (BTree,
+  Bitmap, Multivalue, FM) are decided by the index, the same way
+  [vector search pre-filters](./vector#vector-search) rows. When the index can
+  only produce candidates (a conjunct no index could evaluate, or `contains`,
+  ends-with and `LIKE` on a BTree index), those candidates are never ranked as
+  if they matched: with `global-index.filter.refine-from-data=true` they are
+  verified by reading their filter columns, otherwise (the default) they are
+  excluded and a warning is logged, so the result may hold fewer than `limit`
+  rows. The read runs on the caller and can cover every candidate row, which is
+  why it is opt-in; prefer an index that answers the predicate exactly, such as
+  Bitmap or FM for `contains`.
+- Rows whose filter columns are not covered by a scalar index follow
+  `scalar-index.search-mode`:
+
+| `scalar-index.search-mode` | Rows without an index on the filter columns |
+|---|---|
+| `fast` (default) | Excluded from the search; a warning is logged |
+| `full` / `detail` | Decided by reading their filter columns |
+
+Build a scalar index on the columns you filter by to avoid the data read.
+With `full-text-index.search-mode=fast`, only rows covered by the full-text
+index are considered in either case; rows outside the coverage are searched
+through a temporary index in `full` mode, where the filter is applied the same
+way. Predicates the engine cannot push down (for example, UDFs) are applied by
+the engine after the search, so such queries may return fewer than `limit`
+rows.
+
+Primary-key full-text indexes do not support row filters yet; see
+[Primary-Key Indexes](../../primary-key-table/global-index#limitations).
 
 ## Query DSL
 

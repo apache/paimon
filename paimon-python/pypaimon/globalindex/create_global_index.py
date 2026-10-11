@@ -17,6 +17,8 @@
 
 """Build global index files from Python."""
 
+import threading
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from functools import cmp_to_key
 from typing import Dict, List, Optional, Sequence, Union
 
@@ -26,6 +28,7 @@ import pyarrow.compute as pc
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.btree.btree_index_writer import (
     BTREE_IDENTIFIER,
     BTreeIndexWriter,
@@ -70,6 +73,10 @@ def create_global_index(
     partition_filter: Optional[Predicate] = None,
     partitions: Optional[Union[Dict[str, object], Sequence[Dict[str, object]]]] = None,
     options: Optional[Dict[str, object]] = None,
+    *,
+    execution="local",
+    concurrency=None,
+    ray_remote_args=None,
 ) -> int:
     """Build and commit global index files for a table.
 
@@ -84,7 +91,8 @@ def create_global_index(
         partitions=partitions,
         options=options,
     )
-    messages = builder.build()
+    messages = builder.build(
+        execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
     if not messages:
         return 0
 
@@ -101,7 +109,7 @@ _SORTED_INDEX_IDENTIFIERS = (BTREE_IDENTIFIER, BITMAP_IDENTIFIER)
 _GENERIC_INDEX_IDENTIFIERS = tuple(VINDEX_IDENTIFIERS) + (
     FULL_TEXT_IDENTIFIER,
 )
-_SORTED_INDEX_RECORDS_PER_RANGE_FLOATING = 1.2
+_SORTED_INDEX_RECORDS_PER_FILE_FLOATING = 1.2
 
 
 class GlobalIndexBuilder:
@@ -121,6 +129,7 @@ class GlobalIndexBuilder:
         self._index_type = index_type.lower().strip()
         self._partition_filter = partition_filter
         self._partitions = partitions
+        self._user_options = dict(options or {})
         self._options = _merged_options(table, options)
         self._core_options = CoreOptions(self._options)
 
@@ -155,9 +164,22 @@ class GlobalIndexBuilder:
         if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
             self._validate_generic_index_table()
 
-    def build(self) -> List[CommitMessage]:
+    def build(self, *, execution="local", concurrency=None, ray_remote_args=None) -> List[CommitMessage]:
+        if execution not in ("local", "ray"):
+            raise ValueError("execution must be 'local' or 'ray'.")
+        if execution == "local" and (concurrency is not None or ray_remote_args is not None):
+            raise ValueError("Ray options require execution='ray'.")
+        if execution == "ray":
+            from pypaimon.ray.vector_index_build import validate_build_options
+            concurrency, ray_remote_args = validate_build_options(
+                self, concurrency, ray_remote_args)
+        partition_filter = self._resolve_partition_filter()
+        if execution == "local":
+            from pypaimon.globalindex.native_index_build import build_native_global_index
+            messages = build_native_global_index(self, partition_filter)
+            if messages is not None:
+                return messages
         read_builder = self._table.new_read_builder()
-        partition_filter = self._resolve_partition_filter(read_builder)
         if partition_filter is not None:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
@@ -199,6 +221,11 @@ class GlobalIndexBuilder:
         if self._index_type in _SORTED_INDEX_IDENTIFIERS:
             return self._build_sorted_index(
                 splits, unindexed_ranges, index_field, table_read, index_path)
+        if execution == "ray":
+            from pypaimon.ray.vector_index_build import build_vector_index
+            return build_vector_index(
+                self, splits, unindexed_ranges, index_field, table_read,
+                index_path, concurrency, ray_remote_args)
         return self._build_generic_index(
             splits, unindexed_ranges, index_field, table_read, index_path)
 
@@ -216,10 +243,10 @@ class GlobalIndexBuilder:
         configured_records_per_range = (
             self._core_options.sorted_index_records_per_range())
         if configured_records_per_range <= 0:
-            raise ValueError("sorted-index.records-per-range must be positive.")
+            raise ValueError("sorted-index.records-per-file must be positive.")
         records_per_range = int(
             configured_records_per_range
-            * _SORTED_INDEX_RECORDS_PER_RANGE_FLOATING
+            * _SORTED_INDEX_RECORDS_PER_FILE_FLOATING
         )
 
         messages = []
@@ -273,6 +300,8 @@ class GlobalIndexBuilder:
                 index_path,
                 key_serializer,
                 block_size=self._core_options.btree_index_block_size(),
+                bloom_filter_enabled=(
+                    self._core_options.btree_index_bloom_filter_enabled()),
             )
         if self._index_type == BITMAP_IDENTIFIER:
             return BitmapIndexWriter(
@@ -288,72 +317,172 @@ class GlobalIndexBuilder:
     def _build_generic_index(
         self, splits, unindexed_ranges, index_field, table_read, index_path: str
     ) -> List[CommitMessage]:
-        from pypaimon.read.table_read import _ClosableArrowBatchReader
-
         rows_per_shard = self._core_options.global_index_row_count_per_shard()
         if rows_per_shard <= 0:
             raise ValueError(
                 "Option 'global-index.row-count-per-shard' must be greater than 0."
             )
 
-        messages = []
-        for index_split, index_range in _split_by_global_index_shard(
-            splits, rows_per_shard, unindexed_ranges
-        ):
-            writer = None
+        parallelism = self._core_options.global_index_build_parallelism()
+        if parallelism <= 0:
+            raise ValueError(
+                "Option 'global-index.build.parallelism' must be greater than 0."
+            )
+
+        shards = _split_by_global_index_shard(
+            splits, rows_per_shard, unindexed_ranges)
+        if not shards:
+            return []
+
+        if parallelism == 1 or len(shards) == 1:
+            messages = []
             try:
-                reader, batches = table_read._new_arrow_batch_reader([index_split])
-                # Close the Python iterator explicitly on failure as well as
-                # the Arrow reader, which may retain a suspended generator.
-                with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-                    for batch in batch_reader:
-                        if batch.num_rows == 0:
-                            continue
-                        if writer is None:
-                            writer = self._create_generic_index_writer(
-                                index_path, index_field)
-                        if self._index_type in VINDEX_IDENTIFIERS:
-                            if batch.column(SpecialFields.ROW_ID.name).null_count:
-                                raise ValueError(
-                                    "Cannot build global index because _ROW_ID is null.")
-                            for offset in range(0, batch.num_rows, ADD_BATCH_SIZE):
-                                _write_vector_batch(
-                                    writer, batch.slice(offset, ADD_BATCH_SIZE),
-                                    self._index_columns[0], index_range)
-                        else:
-                            for value, row_id in _extract_index_rows(
-                                batch,
-                                self._index_columns[0],
-                                SpecialFields.ROW_ID.name,
-                                index_range,
-                            ):
-                                writer.write(value, row_id - index_range.from_)
-                        del batch
+                for index_split, index_range in shards:
+                    message = self._build_generic_shard(
+                        index_split, index_range, index_field, table_read, index_path)
+                    if message is not None:
+                        messages.append(message)
+                return messages
+            except BaseException:
+                self._delete_uncommitted_indexes(messages)
+                raise
 
-                if writer is None:
-                    continue
+        # Workers record their own output so that rollback never depends on the
+        # future list being fully built. ThreadPoolExecutor.submit() enqueues the
+        # work item before it starts an extra worker, so a submission that raises
+        # (RuntimeError: can't start new thread) may still run its shard on an
+        # already running worker.
+        completed = []
+        completed_lock = threading.Lock()
 
-                index_adds = _to_index_manifest_entries(
-                    self._table,
-                    index_split.partition,
-                    index_range,
-                    index_field.id,
-                    self._index_type,
-                    writer.finish(),
+        def build_shard(index_split, index_range):
+            message = self._build_generic_shard(
+                index_split, index_range, index_field, table_read, index_path)
+            if message is not None:
+                with completed_lock:
+                    completed.append(message)
+            return message
+
+        futures = []
+        try:
+            with ThreadPoolExecutor(
+                max_workers=min(parallelism, len(shards)),
+                thread_name_prefix="paimon-global-index-build",
+            ) as executor:
+                try:
+                    for index_split, index_range in shards:
+                        futures.append(
+                            executor.submit(build_shard, index_split, index_range))
+                except BaseException:
+                    # Keep queued shards that have not started from building an
+                    # index file this build is about to delete.
+                    for future in futures:
+                        future.cancel()
+                    raise
+                done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+                failed = next(
+                    (future for future in futures
+                     if future in done and future.exception() is not None),
+                    None,
                 )
-            finally:
-                if writer is not None:
-                    writer.close()
-            if index_adds:
-                messages.append(
-                    CommitMessage(
-                        partition=tuple(index_split.partition.values),
-                        bucket=0,
-                        new_files=[],
-                        index_adds=index_adds,
-                    )
+                if failed is not None:
+                    for future in futures:
+                        future.cancel()
+                    failed.result()
+
+                # Futures are consumed in shard-plan order so index manifest
+                # messages are deterministic even when shards finish out of order.
+                results = [future.result() for future in futures]
+            return [message for message in results if message is not None]
+        except BaseException:
+            # Exiting the executor waits for in-flight shards to close their
+            # readers and writers, so ``completed`` is stable and fully visible
+            # here. Delete every index that was built because build() will not
+            # return commit messages after a failure.
+            self._delete_uncommitted_indexes(completed)
+            raise
+
+    def _build_generic_shard(
+        self, index_split, index_range, index_field, table_read, index_path: str, file_name=None
+    ) -> Optional[CommitMessage]:
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+
+        writer = None
+        try:
+            reader, batches = table_read._new_arrow_batch_reader([index_split])
+            # Close the Python iterator explicitly on failure as well as
+            # the Arrow reader, which may retain a suspended generator.
+            with _ClosableArrowBatchReader(reader, batches) as batch_reader:
+                for batch in batch_reader:
+                    if batch.num_rows == 0:
+                        continue
+                    if writer is None:
+                        writer = self._create_generic_index_writer(
+                            index_path, index_field)
+                        if file_name is not None:
+                            writer.file_name = file_name
+                    if self._index_type in VINDEX_IDENTIFIERS:
+                        if batch.column(SpecialFields.ROW_ID.name).null_count:
+                            raise ValueError(
+                                "Cannot build global index because _ROW_ID is null.")
+                        for offset in range(0, batch.num_rows, ADD_BATCH_SIZE):
+                            _write_vector_batch(
+                                writer, batch.slice(offset, ADD_BATCH_SIZE),
+                                self._index_columns[0], index_range)
+                    else:
+                        for value, row_id in _extract_index_rows(
+                            batch,
+                            self._index_columns[0],
+                            SpecialFields.ROW_ID.name,
+                            index_range,
+                        ):
+                            writer.write(value, row_id - index_range.from_)
+                    del batch
+
+            if writer is None:
+                return None
+
+            index_adds = _to_index_manifest_entries(
+                self._table,
+                index_split.partition,
+                index_range,
+                index_field.id,
+                self._index_type,
+                writer.finish(),
+            )
+            if not index_adds:
+                return None
+            return CommitMessage(
+                partition=tuple(index_split.partition.values),
+                bucket=0,
+                new_files=[],
+                index_adds=index_adds,
+            )
+        except BaseException:
+            if writer is not None:
+                self._delete_writer_output(writer, index_path)
+            raise
+        finally:
+            if writer is not None:
+                writer.close()
+
+    def _delete_writer_output(self, writer, index_path: str) -> None:
+        file_name = getattr(writer, "file_name", None)
+        if file_name:
+            self._table.file_io.delete_quietly(
+                "%s/%s" % (index_path.rstrip("/"), file_name))
+
+    def _delete_uncommitted_indexes(self, messages) -> None:
+        path_factory = self._table.path_factory().global_index_path_factory()
+        for message in messages:
+            for index_add in message.index_adds:
+                index_file = index_add.index_file
+                file_path = (
+                    index_file.external_path
+                    if index_file.external_path is not None
+                    else path_factory.to_path(index_file.file_name)
                 )
-        return messages
+                self._table.file_io.delete_quietly(file_path)
 
     def _create_generic_index_writer(self, index_path: str, index_field):
         if self._index_type in VINDEX_IDENTIFIERS:
@@ -362,8 +491,9 @@ class GlobalIndexBuilder:
                 index_path,
                 index_field.type,
                 self._index_type,
-                self._options.to_map(),
+                self._table.options.options.to_map(),
                 index_field.name,
+                self._user_options,
             )
         if self._index_type == FULL_TEXT_IDENTIFIER:
             return NativeFullTextIndexWriter(
@@ -382,15 +512,16 @@ class GlobalIndexBuilder:
                 "(bucket = -1), but table '%s' has bucket = %s."
                 % (self._table.identifier, bucket)
             )
-        if self._core_options.deletion_vectors_enabled():
+        if (self._core_options.deletion_vectors_enabled()
+                and not (self._index_type in VINDEX_IDENTIFIERS
+                         and self._table.options.data_evolution_enabled())):
             raise ValueError(
-                "Generic global index does not support tables with deletion "
-                "vectors enabled. Table '%s' has "
-                "'deletion-vectors.enabled' = true."
-                % self._table.identifier
+                "Global index build with deletion vectors requires a native "
+                "vector index on a data-evolution table. Table '%s', index type '%s'."
+                % (self._table.identifier, self._index_type)
             )
 
-    def _resolve_partition_filter(self, read_builder) -> Optional[Predicate]:
+    def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:
             return self._partition_filter
         if self._partitions is None:
@@ -400,7 +531,7 @@ class GlobalIndexBuilder:
         if isinstance(partitions, dict):
             partitions = [partitions]
 
-        predicate_builder = read_builder.new_predicate_builder()
+        predicate_builder = PredicateBuilder(self._table.partition_keys_fields)
         partition_predicates = []
         for partition in partitions:
             sub_predicates = []

@@ -29,7 +29,6 @@ import org.apache.paimon.plugin.PluginLoader;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SensitiveConfigUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
@@ -46,6 +45,7 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -71,17 +71,14 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
-    private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
     private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
-    private static final String DLF_ACCESS_TRACKING_EXTENDED_INFO =
-            "dlf.access-tracking.extended-info";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
-                    put(OSS_ACCESS_KEY_ID.toLowerCase(), OSS_ACCESS_KEY_ID);
-                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(), OSS_ACCESS_KEY_SECRET);
-                    put(OSS_SECURITY_TOKEN.toLowerCase(), OSS_SECURITY_TOKEN);
+                    put(OSS_ACCESS_KEY_ID.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_ID);
+                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_SECRET);
+                    put(OSS_SECURITY_TOKEN.toLowerCase(Locale.ROOT), OSS_SECURITY_TOKEN);
                 }
             };
 
@@ -118,8 +115,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
                     String value = context.options().get(key);
-                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase())) {
-                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase());
+                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase(Locale.ROOT))) {
+                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase(Locale.ROOT));
                     }
                     hadoopOptions.set(key, value);
 
@@ -153,17 +150,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             hadoopOptions.set(OSS_SHOW_DIR_TIMESTAMP, "false");
         }
 
-        String dlfAccessTrackingExtendedInfo =
-                context.options().get(DLF_ACCESS_TRACKING_EXTENDED_INFO);
-        if (!StringUtils.isNullOrWhitespaceOnly(dlfAccessTrackingExtendedInfo)) {
-            LOG.info("Adding DLF access tracking extended info: {}", dlfAccessTrackingExtendedInfo);
-            String existedUserAgentExtended = hadoopOptions.get(OSS_USER_AGENT_EXTENDED);
-            hadoopOptions.set(
-                    OSS_USER_AGENT_EXTENDED,
-                    StringUtils.isNullOrWhitespaceOnly(existedUserAgentExtended)
-                            ? dlfAccessTrackingExtendedInfo
-                            : existedUserAgentExtended + " " + dlfAccessTrackingExtendedInfo);
-        }
+        JindoUserAgent.apply(context.options(), hadoopOptions);
 
         // another config when enable cache
         hadoopOptionsWithCache = new Options(hadoopOptions.toMap());

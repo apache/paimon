@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import os
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, Iterator, List, Optional
@@ -23,6 +25,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_json_parser import extract_referenced_fields
 from pypaimon.data.map_shared_shredding import map_selected_keys_field
@@ -34,16 +37,30 @@ from pypaimon.read.reader.auth_masking_reader import (
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.split import Split
+from pypaimon.read.variant_read_type import has_variant_extractions
+from pypaimon.read.read_type import (adapter_output_paths, extract_array, output_schema, reader_adapter)
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import (
-    DataField, MapType, PyarrowFieldParser, is_map_blob_type)
+    DataField, MapType, PyarrowFieldParser, is_blob_file_field, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.utils.arrow_utils import zero_column_batch
 
 ROW_KIND_COLUMN = "_row_kind"
+logger = logging.getLogger(__name__)
 _RECORD_BATCH_READER_FROM_STREAM = getattr(
     pyarrow.ipc.RecordBatchReader, "from_stream", None)
+_NATIVE_READ_FILE_FORMATS = frozenset({
+    CoreOptions.FILE_FORMAT_PARQUET,
+    CoreOptions.FILE_FORMAT_ORC,
+    CoreOptions.FILE_FORMAT_AVRO,
+    CoreOptions.FILE_FORMAT_ROW,
+    CoreOptions.FILE_FORMAT_MOSAIC,
+})
+_NATIVE_READ_FILE_SUFFIXES = tuple(
+    '.%s' % file_format for file_format in _NATIVE_READ_FILE_FORMATS)
+_NATIVE_BLOB_FILE_SUFFIXES = ('.blob', '.video')
 
 
 class _ClosableArrowBatchReader:
@@ -113,12 +130,16 @@ class _RemainingRows:
             return self._remaining <= 0
 
 
+class _NativeReadSetupError(Exception):
+    """Native reader construction failed before a batch was exposed."""
+
+
 class TableRead:
     """Implementation of TableRead for native Python reading."""
 
-    # Cap on peak concurrent blob reads across the whole parallel read: split
-    # workers (P) each spin up blob_parallelism (B) blob threads, so peak
-    # connections ~= P*B. Shrink per-split B to keep the product bounded.
+    # Cap peak concurrent BLOB range reads across the whole parallel read:
+    # split workers (P) each allow blob_parallelism (B) in-flight reads, so
+    # peak connections ~= P*B. Shrink per-reader B to keep the product bounded.
     _MAX_TOTAL_BLOB_WORKERS = 64
 
     def __init__(
@@ -127,28 +148,45 @@ class TableRead:
         predicate: Optional[Predicate],
         read_type: List[DataField],
         include_row_kind: bool = False,
-        nested_name_paths: Optional[List[List[str]]] = None,
+        output_projection=None,
         limit: Optional[int] = None,
     ):
         from pypaimon.read.merge_engine_support import check_supported
         from pypaimon.table.file_store_table import FileStoreTable
 
-        # Validate merge-engine support before any split-level dispatch.
-        # Raw-convertible splits skip MergeFileSplitRead, so this guard
-        # has to live at the read-builder level — otherwise unsupported
-        # options (e.g. partial-update.remove-record-on-delete) get
-        # silently ignored on fresh single-snapshot tables.
-        check_supported(table)
+        # Invalid configurations still fail immediately. Rust supports merge
+        # options outside the Python subset; defer only that capability check
+        # until a read actually needs the Python implementation.
+        self._python_merge_validation_pending = False
+        try:
+            check_supported(table)
+        except NotImplementedError:
+            if not table.options.native_read_enabled():
+                raise
+            self._python_merge_validation_pending = True
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.read_type = read_type
+        self.output_projection = output_projection
+        self._adapter_read_type = (self._reader_adapter()[0]
+                                   if output_projection is not None else read_type)
         # Split readers may need predicate-only columns that are absent from
         # the requested output. Read the widened schema internally, then use
         # ``_output_column_names`` to project batches back to ``read_type``.
         self._predicate_extra_fields = self._predicate_fields_outside_read_type()
-        self._scan_read_type = self.read_type + self._predicate_extra_fields
-        self._output_column_names = [f.name for f in self.read_type]
+        self._scan_read_type = self._adapter_read_type + self._predicate_extra_fields
+        self._output_column_names = [f.name for f in self._adapter_read_type]
+        # Output positions in ``read_type``, not ``_scan_read_type``. Predicate
+        # extras are appended for the inner scan and projected away before
+        # ``_serialize_blob_view_row_tuple``; prepending them would make these
+        # indices rewrite the wrong columns.
+        blob_view_fields = self.table.options.blob_view_fields()
+        self._blob_view_output_indices = tuple(
+            i for i, field in enumerate(self._adapter_read_type)
+            if field.name in blob_view_fields
+        )
+        self._blob_as_descriptor = bool(self.table.options.blob_as_descriptor())
         self._deferred_blob_fields = (
             deferred_blob_field_names(
                 self.table,
@@ -159,12 +197,17 @@ class TableRead:
             if self.table.options.data_evolution_enabled() else set()
         )
         self.include_row_kind = include_row_kind
-        self.nested_name_paths = nested_name_paths
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
         self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
+        if self.output_projection is not None and self.output_projection.named:
+            raise RuntimeError(
+                "Projection expressions are not supported by to_iterator(); "
+                "use to_arrow() or to_arrow_batch_reader()")
+        self._check_python_merge_supported()
+        self._begin_auth_read(splits)
         limit = self.limit
 
         def _record_generator():
@@ -176,6 +219,16 @@ class TableRead:
                 reader = self.__create_reader_for_split(
                     split, limit=remaining)
                 try:
+                    if self.output_projection is not None or not self._adapter_read_type:
+                        from pypaimon.read.reader.outer_projection_record_reader import OuterProjectionRecordReader
+                        _, paths = self._reader_adapter()
+                        outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
+                        reader = OuterProjectionRecordReader(
+                            reader, [field.name for field in self._adapter_read_type],
+                            [path for _, path in outputs], file_io=getattr(reader, 'file_io', None),
+                            blob_field_indices=getattr(reader, 'blob_field_indices', None),
+                            descriptor_field_indices=getattr(reader, 'descriptor_field_indices', None),
+                            vector_field_indices=getattr(reader, 'vector_field_indices', None))
                     for batch in iter(reader.read_batch, None):
                         for row in iter(batch.next, None):
                             yield row
@@ -187,23 +240,47 @@ class TableRead:
 
         return _record_generator()
 
-    def to_arrow_batch_reader(self, splits: List[Split],
-                              blob_parallelism: Optional[int] = None) -> pyarrow.ipc.RecordBatchReader:
-        reader, _ = self._new_arrow_batch_reader(splits, blob_parallelism)
+    def to_arrow_batch_reader(
+            self,
+            splits: List[Split],
+            blob_parallelism: Optional[int] = None,
+            parallelism: Optional[int] = None) -> pyarrow.ipc.RecordBatchReader:
+        """Lazily read batches using bounded native split concurrency.
+
+        ``parallelism`` follows :meth:`to_arrow`: an explicit value overrides
+        ``read.parallelism``, otherwise the reader auto-scales to the available
+        splits and CPUs. Native workers buffer at most one batch each; batches
+        from different split groups are emitted as they become ready because
+        table reads do not guarantee row order. Python fallback reads remain
+        serial.
+        """
+        # PyArrow does not close a suspended Python batch iterator. Keep its
+        # cleanup even when LIMIT or BLOB pruning serializes native reads.
+        effective = self._resolve_parallelism(parallelism, len(splits))
+        reader, batch_iterator = self._new_arrow_batch_reader(
+            splits, blob_parallelism, parallelism)
+        if self._requires_batch_iterator_cleanup(splits, effective):
+            return _ClosableArrowBatchReader(reader, batch_iterator)
         return reader
 
     def _to_managed_arrow_batch_reader(
             self,
             splits: List[Split],
-            blob_parallelism: Optional[int] = None):
+            blob_parallelism: Optional[int] = None,
+            parallelism: Optional[int] = None):
         """Return a closeable batch reader supporting context management.
 
-        Newer PyArrow versions use ``RecordBatchReader.from_stream``. Older
-        versions fall back to ``_ClosableArrowBatchReader``, which closes both
-        the batch iterator and its underlying reader.
+        PyArrow readers do not close the Python iterator passed to
+        ``from_batches``. Retain it explicitly for a parallel read so native
+        split workers are stopped when a caller ends the read early.
         """
+        # Keep the explicit iterator cleanup chain even when LIMIT caps the
+        # native worker count inside _new_arrow_batch_reader to one.
+        effective = self._resolve_parallelism(parallelism, len(splits))
         reader, batch_iterator = self._new_arrow_batch_reader(
-            splits, blob_parallelism)
+            splits, blob_parallelism, parallelism)
+        if self._requires_batch_iterator_cleanup(splits, effective):
+            return _ClosableArrowBatchReader(reader, batch_iterator)
         if (_RECORD_BATCH_READER_FROM_STREAM is not None
                 and hasattr(reader, "close")):
             return _RECORD_BATCH_READER_FROM_STREAM(reader)
@@ -212,12 +289,29 @@ class TableRead:
     def _new_arrow_batch_reader(
             self,
             splits: List[Split],
-            blob_parallelism: Optional[int] = None):
-        effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+            blob_parallelism: Optional[int] = None,
+            parallelism: Optional[int] = None):
+        schema = self._output_arrow_schema()
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
-        batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
+        effective = self._effective_parallelism(parallelism, len(splits))
+        effective_bp = self._resolve_blob_parallelism(blob_parallelism)
+        if self._should_run_parallel(splits, effective):
+            effective_bp = self._cap_blob_parallelism(
+                min(effective, len(splits)), effective_bp)
+        native_batches = self._try_native_batches(
+            splits,
+            schema,
+            parallelism=effective,
+            blob_parallelism=effective_bp,
+            streaming=True,
+        )
+        if native_batches is not None:
+            batch_iterator = iter(native_batches)
+        else:
+            self._check_python_merge_supported()
+            batch_iterator = self._arrow_batch_generator(
+                splits, schema, effective_bp)
         reader_type = pyarrow.ipc.RecordBatchReader
         reader = reader_type.from_batches(schema, batch_iterator)
         return reader, batch_iterator
@@ -229,8 +323,18 @@ class TableRead:
         return pyarrow.schema([row_kind_field] + list(schema))
 
     @staticmethod
-    def _try_to_pad_batch_by_schema(batch: pyarrow.RecordBatch, target_schema):
-        if batch.schema.names == target_schema.names:
+    def _try_to_pad_batch_by_schema(
+            batch: pyarrow.RecordBatch,
+            target_schema,
+            allow_type_cast: bool = False):
+        """Align a batch with the requested schema.
+
+        Native batches stay strict so an outdated Rust BLOB representation
+        cannot be silently converted. Python query-auth masking is allowed
+        to cast internal dependency columns because masking intentionally may
+        change their logical type.
+        """
+        if batch.schema.equals(target_schema, check_metadata=True):
             return batch
 
         columns = []
@@ -239,6 +343,12 @@ class TableRead:
         for field in target_schema:
             if field.name in batch.schema.names:
                 col = batch.column(field.name)
+                if col.type != field.type:
+                    if not allow_type_cast:
+                        raise TypeError(
+                            "Batch field '%s' has type %s, expected %s" % (
+                                field.name, col.type, field.type))
+                    col = col.cast(field.type)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)
@@ -260,46 +370,475 @@ class TableRead:
                 back to the table option; when that is also unset the read
                 auto-scales to ``min(number of splits, CPU count)``. ``1``
                 keeps reads serial; ``>= 2`` caps the thread pool that reads
-                splits concurrently and assembles the final table in input
-                order. Must be ``>= 1``. Note that with ``>= 2`` (or auto)
+                byte-balanced contiguous split groups concurrently and
+                assembles the final table in input order. An unfiltered row
+                limit caps this further to avoid speculative work. Must be
+                ``>= 1``. Note that with ``>= 2`` (or auto)
                 and a ``limit`` set, the returned rows are an arbitrary
                 subset of the requested size, since which splits fill the row
-                quota first is non-deterministic. Data-evolution reads with
-                deferred BLOB resolution run serially when a limit may discard
-                rows, so payloads are not materialized from discarded splits.
-            blob_parallelism: number of threads for concurrent blob reads
-                within each batch. ``None`` or ``1`` (default) reads blobs
-                serially; ``>= 2`` uses a thread pool with ``pread`` for
-                concurrent ranged reads. GIL is released during I/O. On the
+                quota first is non-deterministic. Reads with BLOB payloads run
+                serially when a limit may discard rows, so discarded payloads
+                are not fetched by speculative split workers.
+            blob_parallelism: maximum concurrent blob range reads within each
+                split reader. ``None`` or ``1`` (default) reads blobs serially;
+                ``>= 2`` enables concurrent ranged reads. On the
                 parallel path, peak blob threads (``parallelism`` *
                 ``blob_parallelism``) are capped at
                 ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
                 shrunk to stay within it.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-        effective = self._resolve_parallelism(parallelism, len(splits))
-        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        effective = self._effective_parallelism(parallelism, len(splits))
+        schema = self._output_arrow_schema()
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
+        native_parallel = self._should_run_parallel(splits, effective)
+        native_bp = effective_bp
+        if native_parallel:
+            native_bp = self._cap_blob_parallelism(
+                min(effective, len(splits)), effective_bp)
+        native_batches = self._try_native_batches(
+            splits,
+            schema,
+            parallelism=effective,
+            blob_parallelism=native_bp,
+        )
+        if native_batches is not None:
+            return self._batches_to_arrow(native_batches, schema)
+
+        self._check_python_merge_supported()
         if self._should_run_parallel(splits, effective):
             return self._to_arrow_parallel(splits, schema, effective, effective_bp)
 
-        batch_reader = self.to_arrow_batch_reader(splits, blob_parallelism=effective_bp)
+        batch_iterator = self._arrow_batch_generator(
+            splits, schema, effective_bp)
+        batch_reader = pyarrow.ipc.RecordBatchReader.from_batches(
+            schema, batch_iterator)
 
         table_list = []
         for batch in iter(batch_reader.read_next_batch, None):
             if batch.num_rows == 0:
                 continue
-            table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
+            table_list.append(self._try_to_pad_batch_by_schema(
+                batch, schema, allow_type_cast=True))
 
-        if not table_list:
-            return pyarrow.Table.from_arrays([pyarrow.array([], type=field.type) for field in schema], schema=schema)
-        else:
-            return pyarrow.Table.from_batches(table_list)
+        return self._batches_to_arrow(
+            table_list, schema, allow_type_cast=True)
+
+    @staticmethod
+    def _batches_to_arrow(batches, schema, allow_type_cast: bool = False):
+        batches = [
+            TableRead._try_to_pad_batch_by_schema(
+                batch, schema, allow_type_cast=allow_type_cast)
+            for batch in batches
+            if batch.num_rows > 0
+        ]
+        if not batches:
+            return pyarrow.Table.from_arrays(
+                [pyarrow.array([], type=field.type) for field in schema],
+                schema=schema)
+        return pyarrow.Table.from_batches(batches)
+
+    @property
+    def nested_name_paths(self):
+        if self.output_projection is None:
+            return None
+        _, paths = self._reader_adapter()
+        return paths if any(len(path) > 1 for path in paths) else None
+
+    def _reader_adapter(self):
+        adapter = reader_adapter(self.read_type, self._table_read_fields())
+        if (self.predicate is None or self.output_projection is None
+                or self.output_projection.named):
+            return adapter
+        # Keep complete source columns for authorization and result extraction.
+        # Only a predicate on a flat list-projection leaf needs an additional
+        # local leaf view, even when its parent ROW is requested in full.
+        projected = reader_adapter(self.read_type, self._table_read_fields(), self.output_projection)
+        extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
+        return projected if predicate_field_names(self.predicate) & extra_names else adapter
+
+    def _output_arrow_schema(self):
+        return output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
+
+    @staticmethod
+    def _apply_output_projection_to_schema(schema, projection):
+        return output_schema(schema, projection)
+
+    def _native_fallback(
+        self,
+        reason: str,
+        error: Optional[Exception] = None,
+        log: bool = False,
+    ):
+        if has_variant_extractions(self.read_type):
+            raise RuntimeError(
+                "Variant extraction requires a compatible native reader: %s"
+                % reason) from error
+        if log:
+            logger.warning(
+                "Native read failed, falling back to the Python reader: %s",
+                reason)
+        return None
+
+    def _try_native_batches(
+            self,
+            splits: List[Split],
+            schema: pyarrow.Schema,
+            parallelism: Optional[int] = None,
+            blob_parallelism: Optional[int] = None,
+            streaming: bool = False):
+        """Return Rust-read batches, or ``None`` when this read must fall back."""
+        if not self.table.options.native_read_enabled():
+            return self._native_fallback("read.native.enabled is false")
+        if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
+            return self._native_fallback(
+                "the table file format is not supported")
+        if not splits:
+            return []
+        if not self._native_blob_view_supported():
+            return self._native_fallback(
+                "the table uses an unsupported BLOB view")
+        # Query authorization has additional filtering, masking and projection
+        # semantics which are already implemented by the Python reader.
+        if any(isinstance(split, QueryAuthSplit) for split in splits):
+            return self._native_fallback(
+                "query authorization requires the Python reader")
+        try:
+            from pypaimon.read.native_plan import (
+                _prepare_native_read, _raise_if_native_fork_safety_error,
+                native_read, native_split_from_python)
+        except Exception as e:
+            return self._native_fallback(str(e), e, log=True)
+        rust_splits = []
+        split_weights = []
+        for split in splits:
+            if not self._native_split_files_supported(split):
+                return self._native_fallback(
+                    "a split contains a file unsupported by the native reader")
+            rust_split = getattr(split, '_native_split', None)
+            if rust_split is None:
+                try:
+                    rust_split = native_split_from_python(split)
+                except Exception as e:
+                    return self._native_fallback(
+                        "native split conversion failed: %s" % e,
+                        e,
+                        log=True)
+            rust_splits.append(rust_split)
+            split_weights.append(self._native_split_weight(split))
+        if (parallelism is not None
+                and self._should_run_parallel(splits, parallelism)):
+            read_kwargs = self._native_read_kwargs(blob_parallelism)
+            try:
+                read_splits = _prepare_native_read(self.table, **read_kwargs)
+            except Exception as e:
+                _raise_if_native_fork_safety_error(e)
+                return self._native_fallback(str(e), e, log=True)
+            if streaming:
+                groups = self._native_split_groups(
+                    rust_splits, parallelism, split_weights)
+                readers = []
+                try:
+                    for group in groups:
+                        readers.append(read_splits(group))
+                except Exception as e:
+                    for reader in readers:
+                        close = getattr(reader, 'close', None)
+                        if close is not None:
+                            try:
+                                close()
+                            except Exception:
+                                logger.debug(
+                                    "Failed to close a native reader after "
+                                    "another reader failed to start",
+                                    exc_info=True,
+                                )
+                    _raise_if_native_fork_safety_error(e)
+                    return self._native_fallback(str(e), e, log=True)
+                batches = self._native_batches_parallel_streaming(readers)
+                return self._convert_native_batches(batches, schema)
+            try:
+                return self._native_batches_parallel(
+                    read_splits, rust_splits, schema, parallelism,
+                    split_weights)
+            except _NativeReadSetupError as e:
+                _raise_if_native_fork_safety_error(e)
+                return self._native_fallback(str(e), e, log=True)
+        try:
+            read_kwargs = self._native_read_kwargs(blob_parallelism)
+            batches = native_read(self.table, rust_splits, **read_kwargs)
+        except Exception as e:
+            _raise_if_native_fork_safety_error(e)
+            return self._native_fallback(str(e), e, log=True)
+        return self._convert_native_batches(batches, schema)
+
+    def _native_read_kwargs(self, blob_parallelism=None):
+        kwargs = {
+            'predicate': self.predicate,
+            'limit': self.limit,
+        }
+        if blob_parallelism is not None:
+            kwargs['blob_parallelism'] = blob_parallelism
+        kwargs['read_type'] = self.read_type
+        if self.include_row_kind:
+            kwargs['include_row_kind'] = True
+        return kwargs
+
+    @staticmethod
+    def _native_split_weight(split):
+        """Estimate native split work from its physical data-file bytes."""
+        try:
+            sizes = [data_file.file_size for data_file in split.files]
+        except (AttributeError, TypeError):
+            return 1
+        if any(not isinstance(size, int) for size in sizes):
+            return 1
+        return max(1, sum(max(0, size) for size in sizes))
+
+    @staticmethod
+    def _native_split_groups(rust_splits, effective, weights=None):
+        workers = min(effective, len(rust_splits))
+        if weights is None:
+            weights = [1] * len(rust_splits)
+        if len(weights) != len(rust_splits):
+            raise ValueError("split weights must match splits")
+        weights = [max(1, int(weight)) for weight in weights]
+
+        # Find the smallest possible maximum group weight for a contiguous
+        # partition. Keeping groups contiguous preserves split order when the
+        # non-streaming path flattens worker results.
+        low, high = max(weights), sum(weights)
+        while low < high:
+            capacity = (low + high) // 2
+            groups_needed = 1
+            current = 0
+            for weight in weights:
+                if current + weight > capacity:
+                    groups_needed += 1
+                    current = weight
+                else:
+                    current += weight
+            if groups_needed <= workers:
+                high = capacity
+            else:
+                low = capacity + 1
+
+        capacity = low
+        groups = []
+        offset = 0
+        for index in range(workers):
+            remaining_groups = workers - index
+            if remaining_groups == 1:
+                groups.append(rust_splits[offset:])
+                break
+            end = offset
+            group_weight = 0
+            max_end = len(rust_splits) - (remaining_groups - 1)
+            while end < max_end:
+                weight = weights[end]
+                if end > offset and group_weight + weight > capacity:
+                    break
+                group_weight += weight
+                end += 1
+            groups.append(rust_splits[offset:end])
+            offset = end
+        return groups
+
+    def _native_batches_parallel(
+            self, read_splits, rust_splits, schema, effective,
+            split_weights=None):
+        """Read contiguous split groups with independent Rust streams."""
+        groups = self._native_split_groups(
+            rust_splits, effective, split_weights)
+        workers = len(groups)
+
+        remaining_state = _RemainingRows(self.limit)
+        results = [None] * len(groups)
+        with ThreadPoolExecutor(
+                max_workers=workers,
+                thread_name_prefix="pypaimon-native-read") as executor:
+            futures = {
+                executor.submit(
+                    self._read_native_split_group,
+                    read_splits,
+                    group,
+                    schema,
+                    remaining_state,
+                ): index
+                for index, group in enumerate(groups)
+            }
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+
+        return [batch for group_batches in results for batch in group_batches]
+
+    def _native_batches_parallel_streaming(self, readers):
+        """Stream ready batches with one buffered batch per Rust reader."""
+        stop = threading.Event()
+        results = queue.Queue(maxsize=len(readers))
+        capacities = [threading.Semaphore(1) for _ in readers]
+        executor = ThreadPoolExecutor(
+            max_workers=len(readers),
+            thread_name_prefix="pypaimon-native-read",
+        )
+
+        def put(index, item):
+            while not stop.is_set():
+                try:
+                    results.put((index, item), timeout=0.1)
+                    return True
+                except queue.Full:
+                    pass
+            return False
+
+        def read_group(index, batches):
+            try:
+                iterator = iter(batches)
+                while not stop.is_set():
+                    if not capacities[index].acquire(timeout=0.1):
+                        continue
+                    if stop.is_set():
+                        capacities[index].release()
+                        return
+                    try:
+                        batch = next(iterator)
+                    except StopIteration:
+                        put(index, ('done', None))
+                        return
+                    if not put(index, ('batch', batch)):
+                        return
+            except Exception as error:
+                put(index, ('error', error))
+            finally:
+                close = getattr(batches, 'close', None)
+                if close is not None:
+                    close()
+
+        futures = [
+            executor.submit(read_group, index, reader)
+            for index, reader in enumerate(readers)
+        ]
+        try:
+            completed = 0
+            while completed < len(readers):
+                index, (kind, value) = results.get()
+                if kind == 'batch':
+                    try:
+                        yield value
+                    except BaseException:
+                        # Stop workers before releasing this reader's permit.
+                        # Otherwise an early close can let it enter another
+                        # blocking ``next`` before the outer finally runs.
+                        stop.set()
+                        raise
+                    finally:
+                        capacities[index].release()
+                elif kind == 'done':
+                    capacities[index].release()
+                    completed += 1
+                else:
+                    capacities[index].release()
+                    raise value
+        finally:
+            stop.set()
+            # A worker may be blocked inside its first native next(), before
+            # it has produced a batch or observed stop. Close every reader to
+            # interrupt that in-flight Rust operation before waiting for the
+            # executor. Native close is idempotent because workers also close
+            # their own readers in read_group's finally block.
+            for reader in readers:
+                close = getattr(reader, 'close', None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception:
+                        logger.debug(
+                            "Failed to close a native reader while stopping "
+                            "parallel read",
+                            exc_info=True,
+                        )
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=True)
+
+    def _read_native_split_group(
+            self, read_splits, rust_splits, schema, remaining_state):
+        if remaining_state.exhausted():
+            return []
+        try:
+            batches = read_splits(rust_splits)
+        except Exception as e:
+            raise _NativeReadSetupError(str(e)) from e
+        result = []
+        for batch in batches:
+            if batch.num_rows == 0:
+                continue
+            allowed = remaining_state.try_consume(batch.num_rows)
+            if allowed == 0:
+                break
+            if allowed < batch.num_rows:
+                batch = batch.slice(0, allowed)
+            batch = self._prepare_native_batch(batch, schema)
+            batch = self._project_batch_to_output(batch)
+            result.append(self._try_to_pad_batch_by_schema(batch, schema))
+            if remaining_state.exhausted():
+                break
+        return result
+
+    @staticmethod
+    def _native_split_files_supported(split):
+        for data_file in split.files:
+            file_name = data_file.file_name.lower()
+            if (not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
+                    and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIXES)):
+                return False
+        return True
+
+    def _convert_native_batches(self, batches, schema):
+        remaining = self.limit
+        try:
+            for batch in batches:
+                if batch.num_rows == 0:
+                    continue
+                batch = self._prepare_native_batch(batch, schema)
+                if remaining is not None and batch.num_rows > remaining:
+                    batch = batch.slice(0, remaining)
+                batch = self._project_batch_to_output(batch)
+                yield self._try_to_pad_batch_by_schema(batch, schema)
+                if remaining is not None:
+                    remaining -= batch.num_rows
+                    if remaining <= 0:
+                        break
+        finally:
+            close = getattr(batches, 'close', None)
+            if close is not None:
+                close()
+
+    def _prepare_native_batch(self, batch, schema):
+        if self.include_row_kind and 'rowkind' in batch.schema.names:
+            index = batch.schema.get_field_index('rowkind')
+            batch = batch.rename_columns([
+                ROW_KIND_COLUMN if position == index else name
+                for position, name in enumerate(batch.schema.names)
+            ])
+        if self.nested_name_paths:
+            batch = self._flatten_native_nested_batch(batch, schema)
+        return batch
+
+    def _flatten_native_nested_batch(self, batch, schema):
+        _, paths = self._reader_adapter()
+        arrays = [extract_array(batch, path) for path in paths]
+        fields = list(PyarrowFieldParser.from_paimon_schema(self._adapter_read_type))
+        if self.include_row_kind:
+            arrays.insert(0, batch.column(ROW_KIND_COLUMN))
+            fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
+        return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
+        self._begin_auth_read(splits)
         chunk_size = 65536
         # ``remaining`` tracks how many rows we are still allowed to emit
         # across all splits. ``None`` means unlimited.
@@ -317,6 +856,8 @@ class TableRead:
                             continue
                         if remaining is not None and batch.num_rows > remaining:
                             batch = batch.slice(0, remaining)
+                        batch = self._serialize_blob_views_as_descriptors(
+                            batch, reader)
                         batch = self._project_batch_to_output(batch)
                         if self.include_row_kind:
                             if "_row_kind" not in batch.schema.names:
@@ -337,7 +878,8 @@ class TableRead:
                         for row in iter(row_iterator.next, None):
                             if not isinstance(row, OffsetRow):
                                 raise TypeError(f"Expected OffsetRow, but got {type(row).__name__}")
-                            row_tuple_chunk.append(row.row_tuple[row.offset: row.offset + row.arity])
+                            row_tuple_chunk.append(
+                                self._serialize_blob_view_row_tuple(row, reader))
                             if self.include_row_kind:
                                 row_kind_chunk.append(row.get_row_kind().to_string())
 
@@ -348,7 +890,7 @@ class TableRead:
                                     break
 
                             if len(row_tuple_chunk) >= chunk_size:
-                                yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                                yield from self._convert_rows_to_output_batches(
                                     row_tuple_chunk, row_kind_chunk, schema
                                 )
                                 row_tuple_chunk = []
@@ -357,7 +899,7 @@ class TableRead:
                             break
 
                     if row_tuple_chunk:
-                        yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                        yield from self._convert_rows_to_output_batches(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
             finally:
@@ -384,6 +926,14 @@ class TableRead:
             raise ValueError(f"{source} must be >= 1, got {value}")
         return value
 
+    def _effective_parallelism(
+            self, runtime: Optional[int], num_splits: int) -> int:
+        """Resolve parallelism and bound speculative unfiltered LIMIT reads."""
+        effective = self._resolve_parallelism(runtime, num_splits)
+        if self.limit is None or (self.limit > 0 and self.predicate is not None):
+            return effective
+        return min(effective, max(1, self.limit))
+
     @staticmethod
     def _resolve_blob_parallelism(runtime: Optional[int]) -> int:
         if runtime is None:
@@ -400,9 +950,9 @@ class TableRead:
         return max(1, cls._MAX_TOTAL_BLOB_WORKERS // workers)
 
     def _should_run_parallel(
-        self,
-        splits: List[Split],
-        effective: int,
+            self,
+            splits: List[Split],
+            effective: int,
     ) -> bool:
         """Decide whether to take the parallel read path.
 
@@ -410,13 +960,40 @@ class TableRead:
         overhead, no behavior change). A single split is never
         parallelized since there is nothing to fan out across.
         """
-        deferred_limit_may_prune = (
-            self.limit is not None
-            and self._deferred_blob_fields
-            and not self._limit_covers_all_splits(splits)
-        )
+        deferred_limit_may_prune = self._deferred_blob_limit_may_prune(splits)
         return (effective >= 2 and len(splits) >= 2
                 and not deferred_limit_may_prune)
+
+    def _deferred_blob_limit_may_prune(self, splits: List[Split]) -> bool:
+        return (self.limit is not None
+                and (self._deferred_blob_fields
+                     or self._native_resolved_blob_fields())
+                and not self._limit_covers_all_splits(splits))
+
+    def _requires_batch_iterator_cleanup(self, splits: List[Split], effective: int) -> bool:
+        return (self._should_run_parallel(splits, effective)
+                or self._deferred_blob_limit_may_prune(splits))
+
+    def _native_blob_view_supported(self) -> bool:
+        from pypaimon.read.native_plan import _native_blob_view_supported
+        return _native_blob_view_supported(self.table, (field.name for field in self._scan_read_type))
+
+    def _native_resolved_blob_fields(self) -> set:
+        """BLOB fields Rust resolves before emitting a batch."""
+        options = self.table.options
+        if options.blob_as_descriptor():
+            return set()
+        if self.table.is_primary_key_table:
+            return {field.name for field in self._scan_read_type if is_blob_file_field(field)}
+        inline_fields = (
+            options.blob_descriptor_fields()
+            | options.blob_view_fields()
+        )
+        read_names = {
+            field.name
+            for field in getattr(self, '_scan_read_type', self._adapter_read_type)
+        }
+        return inline_fields & read_names
 
     def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
         """Return whether split metadata proves that LIMIT cannot drop rows."""
@@ -445,6 +1022,7 @@ class TableRead:
         by submission index, so the merged table preserves the order of the
         input ``splits`` list.
         """
+        self._begin_auth_read(splits)
         remaining_state = _RemainingRows(self.limit)
         results: List[Optional[List[pyarrow.RecordBatch]]] = [None] * len(splits)
         workers = min(effective, len(splits))
@@ -473,7 +1051,8 @@ class TableRead:
             for batch in split_batches:
                 if batch.num_rows == 0:
                     continue
-                table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
+                table_list.append(self._try_to_pad_batch_by_schema(
+                    batch, schema, allow_type_cast=True))
 
         if not table_list:
             return pyarrow.Table.from_arrays(
@@ -508,6 +1087,8 @@ class TableRead:
                         break
                     if allowed < batch.num_rows:
                         batch = batch.slice(0, allowed)
+                    batch = self._serialize_blob_views_as_descriptors(
+                        batch, reader)
                     batch = self._project_batch_to_output(batch)
                     if self.include_row_kind:
                         if "_row_kind" not in batch.schema.names:
@@ -531,21 +1112,38 @@ class TableRead:
                             stop = True
                             break
                         row_tuple_chunk.append(
-                            row.row_tuple[row.offset: row.offset + row.arity])
+                            self._serialize_blob_view_row_tuple(row, reader))
                         if self.include_row_kind:
                             row_kind_chunk.append(row.get_row_kind().to_string())
 
                         if len(row_tuple_chunk) >= chunk_size:
-                            out.extend(self._convert_rows_to_arrow_batches_with_row_kind(
+                            out.extend(self._convert_rows_to_output_batches(
                                 row_tuple_chunk, row_kind_chunk, schema))
                             row_tuple_chunk = []
                             row_kind_chunk = []
                 if row_tuple_chunk:
-                    out.extend(self._convert_rows_to_arrow_batches_with_row_kind(
+                    out.extend(self._convert_rows_to_output_batches(
                         row_tuple_chunk, row_kind_chunk, schema))
         finally:
             reader.close()
         return out
+
+    def _convert_rows_to_output_batches(
+        self,
+        row_tuples: List[tuple],
+        row_kinds: List[str],
+        schema: pyarrow.Schema,
+    ) -> Iterator[pyarrow.RecordBatch]:
+        if self.output_projection is None:
+            yield from self._convert_rows_to_arrow_batches_with_row_kind(
+                row_tuples, row_kinds, schema)
+            return
+        physical_schema = PyarrowFieldParser.from_paimon_schema(self._adapter_read_type)
+        if self.include_row_kind:
+            physical_schema = self._add_row_kind_to_schema(physical_schema)
+        for batch in self._convert_rows_to_arrow_batches_with_row_kind(
+                row_tuples, row_kinds, physical_schema):
+            yield self._project_batch_to_output(batch)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -589,6 +1187,9 @@ class TableRead:
         single ``RecordBatch`` cannot hold. When that happens we split the rows in
         half and recurse so every emitted batch keeps each column under the limit.
         """
+        if not schema:
+            yield zero_column_batch(row_count, schema.metadata)
+            return
         arrays = []
         for field in schema:
             arr = pyarrow.array(pydict[field.name], type=field.type)
@@ -674,7 +1275,7 @@ class TableRead:
         import ray
 
         if not splits:
-            schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+            schema = self._output_arrow_schema()
             if self.include_row_kind:
                 schema = self._add_row_kind_to_schema(schema)
             empty_table = pyarrow.Table.from_arrays(
@@ -696,7 +1297,7 @@ class TableRead:
                 read_type=self.read_type,
                 predicate=self.predicate,
                 limit=self.limit,
-                nested_name_paths=self.nested_name_paths,
+                output_projection=self.output_projection,
                 include_row_kind=self.include_row_kind,
             )
         )
@@ -742,9 +1343,10 @@ class TableRead:
                 format.
             batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
                 formats require streaming.
-            batch_size: Rows per batch; ``None`` preserves reader batches.
+            batch_size: Rows per batch; ``None`` preserves reader batches when
+                unshuffled, or emits shuffle blocks of at most buffer_size rows.
             to_tensor_fn: Optional RecordBatch converter for Torch batches.
-            shuffle: Whether to shuffle rows; supported only in row format.
+            shuffle: Whether to shuffle rows in a bounded buffer before output.
             auto_detect_rank: Whether streaming reads shard by DDP rank.
             sharding_rank: Explicit rank in the intended DDP process group.
             sharding_world_size: Explicit size of that process group.
@@ -768,6 +1370,10 @@ class TableRead:
         ):
             raise ValueError("batch_size must be a positive int or None")
         if batch_format == "row":
+            if self.output_projection is not None and self.output_projection.named:
+                raise RuntimeError(
+                    "Projection expressions are not supported by Torch row format; "
+                    "use streaming=True with batch_format='pyarrow' or 'torch'")
             if batch_size is not None:
                 raise ValueError(
                     "batch_size requires batch_format='pyarrow' or 'torch'"
@@ -778,10 +1384,6 @@ class TableRead:
             if not streaming:
                 raise ValueError(
                     "batch_format=%r requires streaming=True" % batch_format
-                )
-            if shuffle:
-                raise ValueError(
-                    "shuffle=True only supports batch_format='row'"
                 )
             if batch_format == "pyarrow" and to_tensor_fn is not None:
                 raise ValueError("to_tensor_fn requires batch_format='torch'")
@@ -798,8 +1400,13 @@ class TableRead:
 
             from pypaimon.read.datasource.torch_dataset import (
                 TorchBatchIterDataset,
+                TorchShuffledBatchIterDataset,
             )
-            return TorchBatchIterDataset(
+            dataset_type = TorchShuffledBatchIterDataset if shuffle else TorchBatchIterDataset
+            shuffle_options = (dict(seed=seed, buffer_size=buffer_size,
+                                    max_buffer_input_splits=max_buffer_input_splits)
+                               if shuffle else {})
+            return dataset_type(
                 self,
                 splits,
                 batch_format=batch_format,
@@ -808,6 +1415,7 @@ class TableRead:
                 auto_detect_rank=auto_detect_rank,
                 sharding_rank=sharding_rank,
                 sharding_world_size=sharding_world_size,
+                **shuffle_options,
             )
 
         if shuffle:
@@ -872,19 +1480,25 @@ class TableRead:
         effective_limit = (
             self.limit if limit is None else limit
         ) if push_down_limit else None
-        effective_read_type = read_type if read_type is not None else self.read_type
+        effective_read_type = read_type if read_type is not None else self._adapter_read_type
         scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
+        # the columns authorization widens the read with are plain top-level ones, so each
+        # gets a one-segment path; without them the outer extraction sees fewer paths than fields
+        nested_name_paths = self.nested_name_paths
+        if nested_name_paths and len(nested_name_paths) < len(effective_read_type):
+            nested_name_paths = list(nested_name_paths) + [
+                [f.name] for f in effective_read_type[len(nested_name_paths):]]
         if self.table.is_primary_key_table and (
                 getattr(split, 'is_streaming', False) or not split.raw_convertible):
             inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
-            if self.nested_name_paths and any(
-                    len(p) > 1 for p in self.nested_name_paths):
+            if nested_name_paths and any(
+                    len(p) > 1 for p in nested_name_paths):
                 # Inner: full ROW for the merge function. Outer: extract
                 # the requested sub-paths back to the user's flat schema.
                 inner_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge())
-                outer_extract_name_paths = self.nested_name_paths
+                    self._widen_to_top_level_for_merge(nested_name_paths))
+                outer_extract_name_paths = nested_name_paths
 
             # When the user's projection drops a ``sequence.field``, the merge
             # heap can't compare it. Inject the missing sequence field(s) into
@@ -925,15 +1539,15 @@ class TableRead:
                 limit=effective_limit,
             )
         elif self.table.options.data_evolution_enabled():
-            if self.nested_name_paths and any(
-                    len(p) > 1 for p in self.nested_name_paths):
+            if nested_name_paths and any(
+                    len(p) > 1 for p in nested_name_paths):
                 if not self._only_map_key_nested_paths():
                     raise NotImplementedError(
                         "ROW nested-field projection on data-evolution tables "
                         "is not yet supported")
                 scan_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge())
-                outer_extract_name_paths = self.nested_name_paths
+                    self._widen_to_top_level_for_merge(nested_name_paths))
+                outer_extract_name_paths = nested_name_paths
             else:
                 outer_extract_name_paths = None
             if (outer_extract_name_paths is None
@@ -948,10 +1562,10 @@ class TableRead:
                 row_tracking_enabled=True,
                 nested_name_paths=(
                     None if outer_extract_name_paths
-                    else self.nested_name_paths),
+                    else nested_name_paths),
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
-                    self.read_type if outer_extract_name_paths else None),
+                    self._adapter_read_type if outer_extract_name_paths else None),
                 limit=effective_limit,
                 post_merge_filter=post_merge_filter,
                 eager_blob_fields=eager_blob_fields,
@@ -960,16 +1574,16 @@ class TableRead:
         else:
             inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
-            if self.nested_name_paths and any(
-                    len(p) > 1 for p in self.nested_name_paths):
+            if nested_name_paths and any(
+                    len(p) > 1 for p in nested_name_paths):
                 # Mirror the merge path: read the full top-level columns so
                 # the per-file field-id normalization applies (a leaf path is
                 # only valid against the latest schema, not each file's own
                 # names/types), then extract the requested sub-paths back to
                 # the user's flat schema.
                 inner_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge())
-                outer_extract_name_paths = self.nested_name_paths
+                    self._widen_to_top_level_for_merge(nested_name_paths))
+                outer_extract_name_paths = nested_name_paths
             if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return RawFileSplitRead(
@@ -984,22 +1598,72 @@ class TableRead:
                 limit=effective_limit,
             )
 
+    def _serialize_blob_views_as_descriptors(self, batch: pyarrow.RecordBatch, reader) -> pyarrow.RecordBatch:
+        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+            return batch
+        lookup = getattr(reader, 'blob_view_lookup', None)
+        if lookup is None:
+            return batch
+        for index in self._blob_view_output_indices:
+            field_name = self._adapter_read_type[index].name
+            if field_name not in batch.schema.names:
+                continue
+            converted = [
+                lookup.serialize_view_field_value(value)
+                for value in batch.column(field_name).to_pylist()
+            ]
+            column_idx = batch.schema.names.index(field_name)
+            batch = batch.set_column(
+                column_idx,
+                pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
+                pyarrow.array(converted, type=pyarrow.large_binary()),
+            )
+        return batch
+
+    def _serialize_blob_view_row_tuple(self, row: OffsetRow, reader) -> tuple:
+        values = row.row_tuple[row.offset: row.offset + row.arity]
+        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+            return values
+        lookup = getattr(reader, 'blob_view_lookup', None)
+        if lookup is None:
+            return values
+        converted = list(values)
+        for index in self._blob_view_output_indices:
+            converted[index] = lookup.serialize_view_field_value(converted[index])
+        return tuple(converted)
+
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
+        if self.output_projection is not None:
+            _, paths = self._reader_adapter()
+            outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
+            arrays = [extract_array(batch, path) for _, path in outputs]
+            fields = list(self._output_arrow_schema())
+            if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
+                arrays.insert(0, batch.column(ROW_KIND_COLUMN))
+                fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
+            if not arrays:
+                return batch.select([])
+            return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
         if not self._needs_output_projection():
             return batch
-        if batch.schema.names == self._output_column_names:
+        output_names = list(self._output_column_names)
+        if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
+            output_names.insert(0, ROW_KIND_COLUMN)
+        if batch.schema.names == output_names:
             return batch
         name_to_pos = {name: i for i, name in enumerate(batch.schema.names)}
-        arrays = [batch.column(name_to_pos[name]) for name in self._output_column_names]
-        fields = [batch.schema.field(name_to_pos[name]) for name in self._output_column_names]
+        arrays = [batch.column(name_to_pos[name]) for name in output_names]
+        fields = [batch.schema.field(name_to_pos[name]) for name in output_names]
+        if not arrays:
+            return batch.select([])
         return pyarrow.RecordBatch.from_arrays(
             arrays, schema=pyarrow.schema(fields))
 
     def _needs_output_projection(self) -> bool:
-        return bool(self._predicate_extra_fields)
+        return bool(self._predicate_extra_fields or self.output_projection)
 
     def _output_extract_name_paths(self) -> List[List[str]]:
-        return [[f.name] for f in self.read_type]
+        return [[f.name] for f in self._adapter_read_type]
 
     def _with_predicate_extra_fields(self, fields: List[DataField]) -> List[DataField]:
         names = {f.name for f in fields}
@@ -1009,12 +1673,17 @@ class TableRead:
     def _predicate_fields_outside_read_type(self) -> List[DataField]:
         if self.predicate is None:
             return []
-        read_names = {f.name for f in self.read_type}
+        read_names = {f.name for f in self._adapter_read_type}
         predicate_fields = predicate_field_names(self.predicate)
         missing = predicate_fields - read_names
         if not missing:
             return []
-        return [f for f in self._table_read_fields() if f.name in missing]
+        table_fields = self._table_read_fields()
+        unknown = missing - {field.name for field in table_fields}
+        if unknown:
+            raise ValueError(
+                "Predicate fields %r are not in the table schema or the reader projection" % sorted(unknown))
+        return [f for f in table_fields if f.name in missing]
 
     def _table_read_fields(self) -> List[DataField]:
         from pypaimon.table.special_fields import SpecialFields
@@ -1023,15 +1692,16 @@ class TableRead:
             fields = SpecialFields.row_type_with_row_tracking(fields)
         return fields
 
-    def _widen_to_top_level_for_merge(self) -> List[DataField]:
-        """Unique top-level fields from ``self.nested_name_paths``, in path order."""
+    def _widen_to_top_level_for_merge(self, name_paths=None) -> List[DataField]:
+        """Unique top-level fields from ``name_paths``, in path order."""
+        paths = self.nested_name_paths if name_paths is None else name_paths
         table_fields_by_name = {f.name: f for f in self._table_read_fields()}
         paths_by_top = {}
-        for path in self.nested_name_paths or []:
+        for path in paths or []:
             paths_by_top.setdefault(path[0], []).append(path)
         seen = set()
         widened: List[DataField] = []
-        for path in self.nested_name_paths or []:
+        for path in paths or []:
             top_name = path[0]
             if top_name in seen:
                 continue
@@ -1086,8 +1756,17 @@ class TableRead:
             or "fields.default-aggregate-function" in options
         )
 
+    def _check_python_merge_supported(self):
+        if getattr(self, '_python_merge_validation_pending', False):
+            from pypaimon.read.merge_engine_support import check_supported
+            check_supported(self.table)
+            self._python_merge_validation_pending = False
+
     def __create_reader_for_split(self, split, blob_parallelism=1,
                                   limit: Optional[int] = None):
+        # Raw-convertible splits skip MergeFileSplitRead, so validate before
+        # dispatch, including when native setup failed or bindings are absent.
+        self._check_python_merge_supported()
         auth_result = None
         if isinstance(split, QueryAuthSplit):
             auth_result = split.auth_result
@@ -1111,9 +1790,18 @@ class TableRead:
             raise NotImplementedError(
                 "MAP-key projection with query authorization is not supported")
         table_fields = self.table.fields
-        read_fields = self.read_type
+        read_fields = self._adapter_read_type
+        from pypaimon.read.table_scan import latest_auth_fields, validate_auth_rules
+        # a split can carry rules without having been planned by a validating scan
+        snapshot = getattr(self, "_auth_schema", None)
+        if snapshot is None:
+            snapshot = self._auth_schema = latest_auth_fields(self.table)
+        latest_fields = validate_auth_rules(self.table, auth_result, snapshot)
+        # bind to the latest schema: a generated alias may since have become a real column
+        auth_result.validate_read_type(
+            latest_fields, read_fields, self.nested_name_paths, table_fields)
 
-        extra_fields = auth_result.get_extra_fields_for_filter(read_fields, table_fields)
+        extra_fields = auth_result.get_extra_fields(read_fields, table_fields)
         effective_read_type = read_fields
         if extra_fields:
             effective_read_type = read_fields + extra_fields
@@ -1151,6 +1839,15 @@ class TableRead:
         if not isinstance(reader, RecordBatchReader):
             schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
+            if getattr(reader, 'blob_field_indices', None) is None:
+                from pypaimon.read.reader.field_indices import (
+                    blob_field_indices, descriptor_field_indices_for_table,
+                    vector_field_indices)
+                reader.file_io = self.table.file_io
+                reader.blob_field_indices = blob_field_indices(effective_read_type)
+                reader.descriptor_field_indices = descriptor_field_indices_for_table(
+                    self.table, effective_read_type)
+                reader.vector_field_indices = vector_field_indices(effective_read_type)
             needs_convert_back = True
 
         if filter_fn and not embed_filter:
@@ -1169,6 +1866,21 @@ class TableRead:
             reader = BatchToRecordReaderAdapter(reader)
 
         return reader
+
+    def _begin_auth_read(self, splits):
+        """Refresh the schema the rules are validated against, once for this read.
+
+        Splits are read concurrently and temporal alignment gives each one its own rule object,
+        so a per-split refresh would ask the catalog once per worker; a per-reader one would let
+        a later read reuse a schema fetched for an earlier one.
+        """
+        from pypaimon.read.table_scan import latest_auth_fields
+
+        self._auth_schema = None
+        for split in splits:
+            if isinstance(split, QueryAuthSplit) and split.auth_result is not None:
+                self._auth_schema = latest_auth_fields(self.table)
+                return
 
     @staticmethod
     def _auth_filter_field_names(auth_result, read_fields) -> set:

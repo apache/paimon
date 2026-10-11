@@ -67,6 +67,16 @@ class TimeTravelUtil:
     """The util class of resolve snapshot from scan params for time travel."""
 
     @staticmethod
+    def resolve_snapshot(table):
+        """Resolve the table's read view, including an explicitly pinned empty view."""
+        if hasattr(table, "_read_snapshot"):
+            return table._read_snapshot
+        manager = table.snapshot_manager()
+        snapshot = TimeTravelUtil.try_travel_to_snapshot(
+            table.options.options, table.tag_manager(), manager)
+        return snapshot if snapshot is not None else manager.get_latest_snapshot()
+
+    @staticmethod
     def try_travel_to_snapshot(
             options: Options,
             tag_manager: TagManager,

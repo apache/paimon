@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -311,7 +312,7 @@ public class DataEvolutionVectorScan implements VectorScan {
         if (value == null) {
             value = table.options().get(key);
         }
-        return value == null ? null : value.toLowerCase().trim();
+        return value == null ? null : value.toLowerCase(Locale.ROOT).trim();
     }
 
     private static boolean containsField(GlobalIndexMeta meta, int fieldId) {

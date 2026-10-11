@@ -46,8 +46,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
@@ -101,15 +99,17 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
 
         String type = getAndCheck(FIELD_TYPE).asText();
 
-        for (JsonNode data : arrayData) {
+        for (int i = 0; i < arrayData.size(); i++) {
+            JsonNode data = arrayData.get(i);
             switch (type) {
                 case OP_UPDATE:
                     ArrayNode oldArrayData = getNodeAs(root, FIELD_OLD, ArrayNode.class);
                     checkNotNull(oldArrayData, FIELD_OLD, FIELD_TYPE, type);
 
-                    Map<JsonNode, JsonNode> matchedOldRecords =
-                            matchOldRecords(arrayData, oldArrayData);
-                    JsonNode old = matchedOldRecords.get(data);
+                    // Pair the i-th new row with the i-th old row by position. The previous
+                    // content-keyed lookup threw IllegalStateException on a batch that held two
+                    // equal row images (natural for a table without a primary key).
+                    JsonNode old = oldArrayData.get(i);
                     processRecord(mergeOldRecord(data, old), RowKind.DELETE, records);
                     processRecord(data, RowKind.INSERT, records);
                     break;
@@ -188,12 +188,6 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
     @Override
     protected String format() {
         return "canal-json";
-    }
-
-    private Map<JsonNode, JsonNode> matchOldRecords(ArrayNode newData, ArrayNode oldData) {
-        return IntStream.range(0, newData.size())
-                .boxed()
-                .collect(Collectors.toMap(newData::get, oldData::get));
     }
 
     private String transformValue(@Nullable String oldValue, String shortType, String mySqlType) {

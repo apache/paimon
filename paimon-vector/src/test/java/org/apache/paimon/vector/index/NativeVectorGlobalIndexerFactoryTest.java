@@ -26,6 +26,7 @@ import org.apache.paimon.types.VectorType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -100,12 +101,13 @@ public class NativeVectorGlobalIndexerFactoryTest {
 
     @Test
     public void testNewVectorIndexOptions() {
-        Options options = new Options();
-        options.setString("ivf-rq.rq.bits", "5");
-        options.setString("ivf-rq.max-bytes-per-vector", "96");
-        options.setString("diskann.build-preset", "balanced");
-        options.setString("diskann.pq.code-ratio", "0.0625");
-        options.setString("diskann.raw-vector-encoding", "f16");
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("ivf-rq.rq.bits", "5");
+        tableOptions.put("ivf-rq.max-bytes-per-vector", "96");
+        tableOptions.put("diskann.build-preset", "balanced");
+        tableOptions.put("diskann.pq.code-ratio", "0.0625");
+        tableOptions.put("diskann.raw-vector-encoding", "f16");
+        Options options = new Options(tableOptions);
 
         Map<String, String> rqOptions =
                 NativeVectorGlobalIndexerFactory.nativeOptions(
@@ -129,6 +131,114 @@ public class NativeVectorGlobalIndexerFactoryTest {
                 .containsEntry("diskann.build-preset", "balanced")
                 .containsEntry("pq.code-ratio", "0.0625")
                 .containsEntry("diskann.raw-vector-encoding", "f16");
+    }
+
+    @Test
+    public void test050BuildOptions() {
+        Options nativeNames = new Options();
+        nativeNames.setString("ivf.coarse-assignment", "auto");
+        nativeNames.setString("ivf.pq-encoding", "auto");
+        nativeNames.setString("ivf.train.max-points-per-centroid", "32");
+        nativeNames.setString("pq.train.max-points-per-centroid", "64");
+
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        nativeNames,
+                        IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
+        assertThat(nativeOptions)
+                .containsEntry("ivf.coarse-assignment", "auto")
+                .containsEntry("ivf.pq-encoding", "auto")
+                .containsEntry("ivf.train.max-points-per-centroid", "32")
+                .containsEntry("pq.train.max-points-per-centroid", "64");
+
+        Options prefixedNames = new Options();
+        prefixedNames.setString("ivf-pq.ivf.coarse-assignment", "exact");
+        prefixedNames.setString("fields.vec.ivf.pq-encoding", "canonical");
+        prefixedNames.setString("ivf-pq.ivf.train.max-points-per-centroid", "16");
+        prefixedNames.setString("fields.vec.pq.train.max-points-per-centroid", "48");
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.nativeOptions(
+                                new ArrayType(new FloatType()),
+                                prefixedNames,
+                                IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER,
+                                "vec"))
+                .containsEntry("ivf.coarse-assignment", "exact")
+                .containsEntry("ivf.pq-encoding", "canonical")
+                .containsEntry("ivf.train.max-points-per-centroid", "16")
+                .containsEntry("pq.train.max-points-per-centroid", "48");
+
+        Options diskAnn = new Options();
+        diskAnn.setString("diskann.pq.train.max-points-per-centroid", "24");
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.nativeOptions(
+                                new ArrayType(new FloatType()),
+                                diskAnn,
+                                DiskAnnVectorGlobalIndexerFactory.IDENTIFIER,
+                                "vec"))
+                .containsEntry("pq.train.max-points-per-centroid", "24");
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("fields.vec.ivf.pq-encoding", "auto");
+        Map<String, String> userOptions = new HashMap<>();
+        userOptions.put("ivf.pq-encoding", "canonical");
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.nativeOptions(
+                                new ArrayType(new FloatType()),
+                                new Options(
+                                        new HashMap<>(), new Options(tableOptions, userOptions)),
+                                IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER,
+                                "vec"))
+                .containsEntry("ivf.pq-encoding", "canonical");
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.nativeOptions(
+                                new ArrayType(new FloatType()),
+                                new Options(tableOptions),
+                                IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                "vec"))
+                .doesNotContainKey("ivf.pq-encoding");
+    }
+
+    @Test
+    public void testRejectsInapplicable050BuildOptions() {
+        Options mutableOptions = new Options();
+        mutableOptions.setString("ivf-flat.ivf.pq-encoding", "canonical");
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexerFactory.nativeOptions(
+                                        new ArrayType(new FloatType()),
+                                        mutableOptions,
+                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                        "vec"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ivf-flat.ivf.pq-encoding");
+
+        Map<String, String> flatUserOptions = new HashMap<>();
+        flatUserOptions.put("ivf-flat.ivf.pq-encoding", "canonical");
+        Options flatOptions = new Options(new HashMap<>(), flatUserOptions);
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexerFactory.nativeOptions(
+                                        new ArrayType(new FloatType()),
+                                        flatOptions,
+                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                        "vec"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ivf-flat.ivf.pq-encoding");
+
+        Map<String, String> diskAnnUserOptions = new HashMap<>();
+        diskAnnUserOptions.put("diskann.ivf.coarse-assignment", "exact");
+        Options diskAnnOptions = new Options(new HashMap<>(), diskAnnUserOptions);
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexerFactory.nativeOptions(
+                                        new ArrayType(new FloatType()),
+                                        diskAnnOptions,
+                                        DiskAnnVectorGlobalIndexerFactory.IDENTIFIER,
+                                        "vec"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("diskann.ivf.coarse-assignment");
     }
 
     @Test
@@ -290,6 +400,17 @@ public class NativeVectorGlobalIndexerFactoryTest {
                         NativeVectorGlobalIndexerFactory.trainSampleRatio(
                                 options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "other"))
                 .isEqualTo(0.25);
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("fields.vec.train.sample-ratio", "0.75");
+        Map<String, String> userOptions = new HashMap<>();
+        userOptions.put("ivf-flat.train.sample-ratio", "0.5");
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.trainSampleRatio(
+                                new Options(tableOptions, userOptions),
+                                IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                "vec"))
+                .isEqualTo(0.5);
     }
 
     @Test

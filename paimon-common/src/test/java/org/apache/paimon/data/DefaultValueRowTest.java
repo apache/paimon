@@ -25,6 +25,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.Test;
 
+import java.util.Collections;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -121,6 +123,27 @@ public class DefaultValueRowTest {
 
         assertThat(wrappedRow.getInt(0)).isEqualTo(200);
         assertThat(propertiesValue).isNull();
+    }
+
+    @Test
+    public void testDefaultValueRowProjectsRowDefaultToWriteType() {
+        RowType fullType =
+                RowType.of(
+                        new DataField(
+                                0,
+                                "nest",
+                                RowType.of(
+                                        new DataField(1, "a", DataTypes.INT()),
+                                        new DataField(2, "b", DataTypes.STRING())),
+                                null,
+                                "{42, z}"));
+        RowType writeType = fullType.projectByPaths(Collections.singletonList("nest.b"));
+
+        DefaultValueRow defaultValueRow = DefaultValueRow.create(writeType, fullType);
+
+        InternalRow nest = defaultValueRow.replaceRow(GenericRow.of((Object) null)).getRow(0, 1);
+        assertThat(nest.getFieldCount()).isEqualTo(1);
+        assertThat(nest.getString(0).toString()).isEqualTo("z");
     }
 
     @Test

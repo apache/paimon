@@ -143,7 +143,8 @@ class BranchManager:
         """
         if not branch or not branch.strip():
             return DEFAULT_MAIN_BRANCH
-        return branch.strip()
+        # Java preserves non-blank names; trimming would alias branch directories.
+        return branch
 
     @staticmethod
     def is_main_branch(branch: str) -> bool:
@@ -175,7 +176,7 @@ class BranchManager:
             )
         if not branch_name or not branch_name.strip():
             raise ValueError("Branch name is blank.")
-        if branch_name.strip().isdigit():
+        if branch_name.isdigit():
             raise ValueError(
                 f"Branch name cannot be pure numeric string but is '{branch_name}'."
             )

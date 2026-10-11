@@ -114,6 +114,28 @@ public class DataFilePathFactoryTest {
     }
 
     @Test
+    public void testTextFormatCarriesTheCompressionExtension() {
+        // A text file is always written through the configured codec, while the reader recovers
+        // that codec from the file name alone, so the name has to end with the codec extension.
+        // The compression is passed explicitly rather than taken from the option default so that
+        // the expected name does not silently change with it.
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/bucket-123"),
+                        CoreOptions.FILE_FORMAT_TEXT,
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        "zstd",
+                        null);
+
+        String name = pathFactory.newPath().getName();
+        assertThat(name).endsWith(".text.zst");
+        assertThat(DataFilePathFactory.formatIdentifier(name))
+                .isEqualTo(CoreOptions.FILE_FORMAT_TEXT);
+    }
+
+    @Test
     public void testEntropyInjectWithNoPartition() {
         EntropyInjectExternalPathProvider externalPathProvider =
                 createExternalPathProvider(new Path(tempDir.toString()), "bucket-123");

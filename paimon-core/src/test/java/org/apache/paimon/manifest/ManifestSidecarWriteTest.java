@@ -341,6 +341,7 @@ class ManifestSidecarWriteTest {
                         paths,
                         targetSize,
                         null,
+                        null,
                         new CoreOptions(options))
                 .create();
     }

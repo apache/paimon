@@ -35,6 +35,27 @@ from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
+def _normalize_naive_datetimes(value):
+    """Recursively attach UTC to naive datetimes, including ones nested inside
+    ROW (dict) and ARRAY/MAP (list/tuple) values.
+
+    fastavro converts a naive datetime using the host timezone, which corrupts
+    the stored instant on a non-UTC host; Paimon timestamps are UTC-based.
+    ``write_avro`` previously normalized only top-level column values, so a
+    naive datetime inside a struct or list was written shifted by the host
+    offset. Normalizing recursively keeps nested timestamps correct.
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, dict):
+        return {key: _normalize_naive_datetimes(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_normalize_naive_datetimes(val) for val in value)
+    return value
+
+
 def _file_uri_path(parsed, windows=None) -> str:
     """Decode a file URI path, preserving Windows drives and UNC hosts."""
     if windows is None:
@@ -358,9 +379,7 @@ class LocalFileIO(FileIO):
                 record = {}
                 for col in records_dict.keys():
                     value = records_dict[col][i]
-                    if isinstance(value, datetime) and value.tzinfo is None:
-                        value = value.replace(tzinfo=timezone.utc)
-                    record[col] = value
+                    record[col] = _normalize_naive_datetimes(value)
                 yield record
         
         records = record_generator()

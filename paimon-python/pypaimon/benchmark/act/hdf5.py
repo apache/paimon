@@ -137,6 +137,7 @@ def compute_normalization(episodes):
     train = [
         episode for episode in episodes
         if episode.split == "train" and episode.success
+        and getattr(episode, "quality_status", 0) == 0
     ]
     if not train:
         raise ValueError("No successful train episodes are available.")

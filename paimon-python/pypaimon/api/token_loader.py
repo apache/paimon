@@ -27,9 +27,10 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
 from pypaimon.api.client import ExponentialRetry
+from pypaimon.common import user_agent
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
-from pypaimon.common.json_util import JSON, json_field
+from pypaimon.common.json_util import JSON, json_field, json_ignore_field
 
 
 @dataclass
@@ -40,7 +41,7 @@ class DLFToken:
     access_key_secret: str = json_field('AccessKeySecret')
     security_token: Optional[str] = json_field('SecurityToken')
     expiration: Optional[str] = json_field('Expiration')
-    expiration_at_millis: Optional[int] = json_field('ExpirationAt', default=None)
+    expiration_at_millis: Optional[int] = json_ignore_field(default=None)
 
     @staticmethod
     def parse_expiration_to_millis(expiration: str) -> int:
@@ -136,6 +137,7 @@ class HTTPClient:
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
         self.session = requests.Session()
+        self.session.headers['User-Agent'] = user_agent.rest_user_agent()
 
         # Add retry adapter
         retry_interceptor = ExponentialRetry(max_retries=3)

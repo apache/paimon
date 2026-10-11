@@ -158,6 +158,22 @@ public class SchemaMergingUtils {
 
             return new RowType(base0.isNullable(), updatedFields);
         } else if (base instanceof MapType && update instanceof MapType) {
+            // The read layer cannot cast map keys (createMapCastExecutor requires equal key
+            // types), so widening a key here would make every pre-change file unreadable.
+            // Fail the schema change up front with a clear reason instead. Nullability is
+            // ignored, matching merge()'s contract and the read layer, so that a key that
+            // only changes nullability (Spark forces map keys to NOT NULL) still merges; only
+            // a genuine key type change is rejected.
+            if (!((MapType) base)
+                    .getKeyType()
+                    .equalsIgnoreNullable(((MapType) update).getKeyType())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Failed to merge map types with different key types: %s and %s. "
+                                        + "Map key type cannot be changed; cast the keys manually "
+                                        + "and recreate the column if needed.",
+                                base, update));
+            }
             return new MapType(
                     base0.isNullable(),
                     merge(

@@ -28,8 +28,6 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
 import java.util.Map;
 
@@ -44,10 +42,8 @@ public interface FileStoreCommit extends AutoCloseable {
 
     FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
-    FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
-
-    FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
-            @Nullable Long rowIdCheckFromSnapshot);
+    /** Use the materialize-DV row-id conflict strategy with snapshots from commit messages. */
+    FileStoreCommit materializeDvRowIdCheck();
 
     FileStoreCommit withOperation(Snapshot.Operation operation);
 

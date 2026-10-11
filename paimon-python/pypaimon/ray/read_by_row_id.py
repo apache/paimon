@@ -114,11 +114,7 @@ def read_by_row_id(
     if not table.options.row_tracking_enabled():
         raise ValueError(
             f"read_by_row_id requires 'row-tracking.enabled'='true' on '{target}'.")
-    if table.options.deletion_vectors_enabled():
-        # A DV-deleted row still lives in its file, so slicing would surface it.
-        raise ValueError(
-            f"read_by_row_id does not support deletion-vectors-enabled tables yet: "
-            f"'{target}'.")
+
     if dynamic_options:
         # Flipping these would bypass the checks above.
         bad = sorted({"data-evolution.enabled", "row-tracking.enabled",
@@ -169,30 +165,28 @@ def read_by_row_id(
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.common.options.options import Options
         base_schema = table.schema_manager.get_schema(base.schema_id)
+        if table.table_schema.id != base_schema.id:
+            raise ValueError(
+                "The time-travel schema changed while resolving the read snapshot; "
+                "retry read_by_row_id.")
         if not CoreOptions(Options(base_schema.options)).row_tracking_enabled():
             raise ValueError(
                 f"the resolved snapshot ({base.id}) predates row-tracking; read_by_row_id needs it.")
-    # No DV (rejected above) -> total_record_count is the live row count; 0 = empty.
-    if base is None or base.total_record_count == 0:
+    if base is None or (base.total_record_count == 0
+                        and not table.options.deletion_vectors_enabled()):
         # Force an action on the source only in this degenerate branch (like update_by_row_id).
         if rid_ds.limit(1).count() > 0:
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return _empty_result(table, read_cols)
-    # base captures the resolved snapshot; reduce any time-travel key to a plain snapshot-id
-    # so the planner's own snapshot-id pin does not read as a second, conflicting one.
-    from pypaimon.common.options.core_options import CoreOptions
-    present = [k for k in SCAN_KEYS if table.options.options.contains_key(k)]
-    if present:
-        overrides = {k: None for k in present}
-        overrides[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base.id)
-        table = table.copy(overrides)
+    # Carry the resolved metadata into planning and workers: a tag can retain its
+    # snapshot after the main snapshot file expires, or move before lazy execution.
+    table = table._copy_with_snapshot(base)
     try:
         result = distributed_read_by_row_id(
             rid_ds, table, projection,
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
-            base_snapshot_id=base.id,
             estimated_size_bytes=estimated_size_bytes,
             estimated_num_rows=estimated_num_rows,
             data_context=data_context,

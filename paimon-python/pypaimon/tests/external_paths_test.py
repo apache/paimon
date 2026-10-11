@@ -265,6 +265,14 @@ class WeightedExternalPathProviderTest(unittest.TestCase):
 class WeightsParsingTest(unittest.TestCase):
     """Test CoreOptions.data_file_external_paths_weights() parsing and validation."""
 
+    def test_weights_use_java_integer_range_and_trailing_comma_rules(self):
+        self.assertEqual(CoreOptions.from_dict({
+            'data-file.external-paths.weights': '1,2147483647,,'
+        }).data_file_external_paths_weights(), [1, 2147483647])
+        for value in ['2147483648', '1,9999999999', '', '1,,2']:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                CoreOptions.from_dict({'data-file.external-paths.weights': value}).data_file_external_paths_weights()
+
     def test_valid_weights(self):
         """Normal comma-separated positive integers."""
         from pypaimon.common.options.core_options import CoreOptions
@@ -579,7 +587,7 @@ class ExternalPathsIntegrationTest(unittest.TestCase):
             for file_meta in commit_msg.new_files:
                 # External path should be set
                 self.assertIsNotNone(file_meta.external_path)
-                self.assertTrue(file_meta.external_path.startswith("file://"))
+                self.assertTrue(file_meta.external_path.startswith("file:"))
                 self.assertIn(self.external_dir, file_meta.external_path)
 
         table_commit.commit(commit_messages)

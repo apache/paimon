@@ -25,6 +25,19 @@ import static org.apache.paimon.options.ConfigOptions.key;
 /** Options for spark connector. */
 public class SparkConnectorOptions {
 
+    public static final ConfigOption<Boolean> SCAN_PRESERVE_DATA_GROUPING =
+            key("scan.preserve-data-grouping")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether batch scans preserve bucket grouping for Spark to use the table's "
+                                    + "distribution and ordering. Requires Spark V2 bucketing to be enabled. "
+                                    + "If false, scans use regular split packing and report no bucket distribution "
+                                    + "or ordering. If true, Spark may group multiple read units into one task "
+                                    + "per bucket, or use them separately for a partially clustered join. "
+                                    + "Set as a table/read option or with spark.paimon.scan.preserve-data-grouping. "
+                                    + "The choice is fixed when the scan is created.");
+
     public static final ConfigOption<Boolean> REQUIRED_SPARK_CONFS_CHECK_ENABLED =
             key("requiredSparkConfsCheck.enabled")
                     .booleanType()

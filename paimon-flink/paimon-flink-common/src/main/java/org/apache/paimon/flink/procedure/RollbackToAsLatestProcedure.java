@@ -96,6 +96,7 @@ public class RollbackToAsLatestProcedure extends ProcedureBase {
         }
 
         String createdRollbackTag = null;
+        boolean canDeleteCreatedTag = true;
         String commitUser = "rollback-to-as-latest-" + UUID.randomUUID().toString();
         try {
             if (!hasTag) {
@@ -104,7 +105,12 @@ public class RollbackToAsLatestProcedure extends ProcedureBase {
             }
 
             try (TableCommitImpl commit = fileStoreTable.newCommit(commitUser)) {
+                // The core commit reads latest again, so another writer may change the rollback
+                // snapshot ID. An exception may also come after a successful commit (for example,
+                // from a callback). Keep the protection tag unless the commit returns false.
+                canDeleteCreatedTag = false;
                 boolean success = commit.rollbackToAsLatest(targetTag);
+                canDeleteCreatedTag = !success;
                 Preconditions.checkState(
                         success,
                         "Failed to roll back to snapshot %s as latest.",
@@ -112,8 +118,13 @@ public class RollbackToAsLatestProcedure extends ProcedureBase {
             }
         } catch (Exception e) {
             try {
-                deleteCreatedRollbackTagIfNotCommitted(
-                        store, tagManager, createdRollbackTag, latestSnapshot.id() + 1, commitUser);
+                if (createdRollbackTag != null && canDeleteCreatedTag) {
+                    tagManager.deleteTag(
+                            createdRollbackTag,
+                            store.newTagDeletion(),
+                            store.snapshotManager(),
+                            Collections.emptyList());
+                }
             } catch (Exception cleanupException) {
                 e.addSuppressed(cleanupException);
             }
@@ -139,31 +150,6 @@ public class RollbackToAsLatestProcedure extends ProcedureBase {
                         + UUID.randomUUID().toString();
         tagManager.createTag(targetSnapshot, tagName, null, Collections.emptyList(), false);
         return tagName;
-    }
-
-    private void deleteCreatedRollbackTagIfNotCommitted(
-            FileStore<?> store,
-            TagManager tagManager,
-            String createdRollbackTag,
-            long rollbackSnapshotId,
-            String commitUser) {
-        if (createdRollbackTag == null
-                || rollbackSnapshotCommitted(
-                        store.snapshotManager(), rollbackSnapshotId, commitUser)) {
-            return;
-        }
-
-        tagManager.deleteTag(
-                createdRollbackTag,
-                store.newTagDeletion(),
-                store.snapshotManager(),
-                Collections.emptyList());
-    }
-
-    private boolean rollbackSnapshotCommitted(
-            SnapshotManager snapshotManager, long rollbackSnapshotId, String commitUser) {
-        return snapshotManager.snapshotExists(rollbackSnapshotId)
-                && commitUser.equals(snapshotManager.snapshot(rollbackSnapshotId).commitUser());
     }
 
     private Snapshot findSnapshot(FileStore<?> store, TagManager tagManager, long snapshotId) {

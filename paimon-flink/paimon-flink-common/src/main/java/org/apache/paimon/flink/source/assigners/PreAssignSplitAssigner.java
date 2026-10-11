@@ -18,16 +18,16 @@
 
 package org.apache.paimon.flink.source.assigners;
 
-import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.source.DynamicPartitionFilteringInfo;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.connector.source.DynamicFilteringData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -45,12 +45,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Pre-calculate which splits each task should process according to the weight or given
  * DynamicFilteringData, and then distribute the splits fairly.
  */
 public class PreAssignSplitAssigner implements SplitAssigner {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PreAssignSplitAssigner.class);
 
     /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitBatchSize;
@@ -92,13 +95,13 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             int splitBatchSize,
             int parallelism,
             Collection<FileStoreSourceSplit> splits,
-            Projection partitionRowProjection,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             DynamicFilteringData dynamicFilteringData) {
         this(
                 splitBatchSize,
                 parallelism,
                 splits,
-                partitionRowProjection,
+                dynamicPartitionFilteringInfo,
                 dynamicFilteringData,
                 split -> split.split().rowCount());
     }
@@ -107,14 +110,17 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             int splitBatchSize,
             int parallelism,
             Collection<FileStoreSourceSplit> splits,
-            Projection partitionRowProjection,
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
             DynamicFilteringData dynamicFilteringData,
             SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
         this(
                 splitBatchSize,
                 parallelism,
                 splits.stream()
-                        .filter(s -> filter(partitionRowProjection, dynamicFilteringData, s))
+                        .filter(
+                                s ->
+                                        dynamicPartitionFilteringInfo.mayMatch(
+                                                dynamicFilteringData, s.split()))
                         .collect(Collectors.toList()),
                 weightFunc);
     }
@@ -138,6 +144,10 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             Collection<FileStoreSourceSplit> splits,
             SerializableFunction<FileStoreSourceSplit, Long> weightFunc,
             @Nullable SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
+        checkArgument(
+                splitBatchSize > 0,
+                "%s must be positive.",
+                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE.key());
         this.splitBatchSize = splitBatchSize;
         this.parallelism = parallelism;
         this.splits = splits;
@@ -145,7 +155,40 @@ public class PreAssignSplitAssigner implements SplitAssigner {
         this.groupFunc = groupFunc;
         this.pendingSplitAssignment =
                 createBatchFairSplitAssignment(splits, parallelism, this.weightFunc, groupFunc);
+        logSplitAssignmentSummary(
+                this.pendingSplitAssignment, parallelism, splits.size(), this.weightFunc);
         this.numberOfPendingSplits = new AtomicInteger(splits.size());
+    }
+
+    private static void logSplitAssignmentSummary(
+            Map<Integer, LinkedList<FileStoreSourceSplit>> assignment,
+            int parallelism,
+            int totalSplits,
+            SerializableFunction<FileStoreSourceSplit, Long> weightFunc) {
+        if (!LOG.isInfoEnabled()) {
+            return;
+        }
+
+        long totalWeight = 0L;
+        List<Integer> splitCounts = new ArrayList<>(parallelism);
+        List<Long> assignedWeights = new ArrayList<>(parallelism);
+        for (int i = 0; i < parallelism; i++) {
+            Collection<FileStoreSourceSplit> assignedSplits =
+                    assignment.getOrDefault(i, new LinkedList<>());
+            long assignedWeight = assignedSplits.stream().mapToLong(weightFunc::apply).sum();
+            splitCounts.add(assignedSplits.size());
+            assignedWeights.add(assignedWeight);
+            totalWeight += assignedWeight;
+        }
+
+        LOG.info(
+                "Created FAIR split assignment summary: parallelism={}, totalSplits={}, "
+                        + "totalWeight={}, splitCountsPerSubtask={}, assignedWeightsPerSubtask={}",
+                parallelism,
+                totalSplits,
+                totalWeight,
+                splitCounts,
+                assignedWeights);
     }
 
     @Override
@@ -279,23 +322,14 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     }
 
     public SplitAssigner ofDynamicPartitionPruning(
-            Projection partitionRowProjection, DynamicFilteringData dynamicFilteringData) {
+            DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
+            DynamicFilteringData dynamicFilteringData) {
         return new PreAssignSplitAssigner(
                 splitBatchSize,
                 parallelism,
                 splits,
-                partitionRowProjection,
+                dynamicPartitionFilteringInfo,
                 dynamicFilteringData,
                 weightFunc);
-    }
-
-    private static boolean filter(
-            Projection partitionRowProjection,
-            DynamicFilteringData dynamicFilteringData,
-            FileStoreSourceSplit sourceSplit) {
-        DataSplit dataSplit = (DataSplit) sourceSplit.split();
-        BinaryRow partition = dataSplit.partition();
-        FlinkRowData projected = new FlinkRowData(partitionRowProjection.apply(partition));
-        return dynamicFilteringData.contains(projected);
     }
 }

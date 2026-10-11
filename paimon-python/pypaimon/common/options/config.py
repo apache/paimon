@@ -46,6 +46,9 @@ class OssOptions:
 
 
 class S3Options:
+    CHECKSUM_COMPATIBILITY_AUTO_CONFIGURE = (
+        ConfigOptions.key("fs.s3.checksum-compatibility.auto-configure").boolean_type().default_value(True)
+        .with_description("Apply a process-wide optional-checksum default for PyArrow OSS/custom S3 clients."))
     S3_ACCESS_KEY_ID = ConfigOptions.key("fs.s3.accessKeyId").string_type().no_default_value().with_description(
         "S3 access key ID")
     S3_ACCESS_KEY_SECRET = ConfigOptions.key("fs.s3.accessKeySecret").string_type().no_default_value().with_description(
@@ -54,9 +57,6 @@ class S3Options:
         "S3 security token")
     S3_ENDPOINT = ConfigOptions.key("fs.s3.endpoint").string_type().no_default_value().with_description("S3 endpoint")
     S3_REGION = ConfigOptions.key("fs.s3.region").string_type().no_default_value().with_description("S3 region")
-    S3_DELETE_BATCH_ENABLED = ConfigOptions.key(
-        "fs.s3.delete.batch-enabled").boolean_type().default_value(False).with_description(
-            "Use native S3 batch deletion for custom endpoints")
 
 
 class GcsOptions:
@@ -90,6 +90,13 @@ class PVFSOptions:
 
 
 class CatalogOptions:
+    CACHE_BLOB_INDEX_MAX_SIZE = (
+        ConfigOptions.key("cache.blob-index.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(64))
+        .with_description("Maximum estimated Python BLOB index cache size per catalog.")
+    )
+
     URI = ConfigOptions.key("uri").string_type().no_default_value().with_description("Catalog URI")
     METASTORE = ConfigOptions.key("metastore").string_type().default_value("filesystem").with_description(
         "Metastore type")
@@ -129,11 +136,22 @@ class CatalogOptions:
     DLF_SIGNING_ALGORITHM = ConfigOptions.key(
         "dlf.signing-algorithm").string_type().default_value("default").with_description(
         "DLF signing algorithm. Options: 'default' (for VPC endpoint), "
-        "'openapi' (for DlfNext/2026-01-18). "
+        "'openapi-v4' (ACS4-HMAC-SHA256, for DlfNext/2026-01-18), "
+        "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
         "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
-        "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+        "header.User-Agent").string_type().no_default_value().with_description(
+        "The User-Agent of REST catalog requests, replacing Paimon's unified one")
+    USER_AGENT_MODULE = ConfigOptions.key(
+        "user-agent.module").string_type().no_default_value().with_description(
+        "The module of Paimon's unified User-Agent, 'pypaimon/<version>' by default")
+    USER_AGENT_FEATURES = ConfigOptions.key(
+        "user-agent.features").string_type().no_default_value().with_description(
+        "Space-separated features of Paimon's unified User-Agent")
+    USER_AGENT_EXTENDED = ConfigOptions.key(
+        "user-agent.extended").string_type().no_default_value().with_description(
+        "Free text appended to Paimon's unified User-Agent")
     SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
         "Sync all table properties to the catalog metastore")
     RESOLVING_FILE_IO_ENABLED = (
@@ -147,6 +165,26 @@ class CatalogOptions:
         )
     )
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class FileIOOptions:
+    READ_COALESCE_MAX_GAP = (
+        ConfigOptions.key("file-io.read-coalesce.max-gap")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(1))
+        .with_description(
+            "Maximum gap between same-file ranges merged into one read."
+        )
+    )
+    READ_COALESCE_MAX_BLOCK = (
+        ConfigOptions.key("file-io.read-coalesce.max-block")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(8))
+        .with_description(
+            "Maximum span for coalescing same-file ranges, except when an "
+            "individual range is larger. Individual ranges are not split."
+        )
+    )
 
 
 class HdfsOptions:

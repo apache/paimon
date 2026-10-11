@@ -75,6 +75,7 @@ class OverwriteChangesProvider:
         self.full_scan_count += 1
         return (FileScanner(self.table, lambda: ([], None),
                             partition_predicate=self.partition_filter)
+                .with_all_buckets()
                 .read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
 
     def _update_cache(self, latest_snapshot: Snapshot) -> bool:
@@ -110,7 +111,8 @@ class OverwriteChangesProvider:
         # snapshots are applied instead of being discarded by FileScanner.
         entries = []
         for manifest_file in delta_manifests:
-            for entry in manifest_file_manager.read(manifest_file.file_name):
+            for entry in manifest_file_manager.read(
+                    manifest_file.file_name, file_size=manifest_file.file_size):
                 if (self.partition_filter is not None
                         and not self.partition_filter.test(entry.partition)):
                     continue

@@ -46,6 +46,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.TreeMap;
@@ -946,7 +947,8 @@ public class LocalKvDb implements Closeable {
 
     private File newSstFile() {
         long sequence = fileSequence.getAndIncrement();
-        return new File(dataDirectory, String.format("sst-%s-%06d.db", uuid, sequence));
+        return new File(
+                dataDirectory, String.format(Locale.ROOT, "sst-%s-%06d.db", uuid, sequence));
     }
 
     private void ensureOpen() {

@@ -439,6 +439,18 @@ public final class ManifestAvroReader implements AutoCloseable {
             return toRows(projectedType, null, null, true);
         }
 
+        /**
+         * Lazily decompresses this block, applies manifest filters before decoding file metadata,
+         * and returns an iterator over one reusable row.
+         */
+        public RowIterator toRows(
+                RowType projectedType,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter)
+                throws IOException {
+            return toRows(projectedType, partitionFilter, bucketFilter, true);
+        }
+
         private RowIterator toRows(
                 RowType projectedType,
                 @Nullable PartitionPredicate partitionFilter,

@@ -38,8 +38,14 @@ class ShardBatchReader(RecordBatchReader):
         if isinstance(self.reader.format_reader, FormatBlobReader):
             # For blob reader, pass begin_idx and end_idx parameters
             return self.reader.read_arrow_batch(start_idx=self.start_pos, end_idx=self.end_pos)
-        else:
-            # For non-blob reader (DataFileBatchReader), use standard read_arrow_batch
+
+        # For non-blob reader (DataFileBatchReader), use standard read_arrow_batch.
+        # Loop rather than recurse over skipped batches: a slice/shard whose range
+        # sits deep in a file (default parquet batch_size is 1024 rows) skips one
+        # batch per step, so recursing here overflows the stack (RecursionError)
+        # once the skipped count exceeds the interpreter limit. Mirrors the
+        # while-loop skip pattern in ConcatBatchReader / ApplyDeletionVectorReader.
+        while True:
             batch = self.reader.read_arrow_batch()
 
             if batch is None:
@@ -56,8 +62,7 @@ class ShardBatchReader(RecordBatchReader):
                 return batch.slice(self.start_pos - batch_begin, self.end_pos - self.start_pos)
             elif batch_begin < self.end_pos < self.current_pos:  # batch ends after the desired range
                 return batch.slice(0, self.end_pos - batch_begin)
-            else:  # batch is outside the desired range
-                return self.read_arrow_batch()
+            # else: batch is outside the desired range -> read the next one (loop)
 
     def close(self):
         self.reader.close()

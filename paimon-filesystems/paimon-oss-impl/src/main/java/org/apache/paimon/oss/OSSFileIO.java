@@ -58,6 +58,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -90,6 +91,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
      * from the host it signs, which the server rejects with SignatureDoesNotMatch.
      */
     private static final String OSS_CNAME_ENABLED = "fs.oss.cname.enabled";
+
+    /** Set to false to use the OSS SDK default retry instead of {@link OSSRetryStrategy}. */
+    private static final String OSS_ENHANCED_RETRY_ENABLED = "fs.oss.enhanced-retry.enabled";
+
     // Paimon OSS SSE keys, mapping 1:1 to the OSS headers; they take precedence over hadoop's
     // server-side-encryption-algorithm.
     /** SSE method -> x-oss-server-side-encryption (AES256 / KMS / SM4). */
@@ -115,9 +120,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
-                    put(OSS_ACCESS_KEY_ID.toLowerCase(), OSS_ACCESS_KEY_ID);
-                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(), OSS_ACCESS_KEY_SECRET);
-                    put(OSS_SECURITY_TOKEN.toLowerCase(), OSS_SECURITY_TOKEN);
+                    put(OSS_ACCESS_KEY_ID.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_ID);
+                    put(OSS_ACCESS_KEY_SECRET.toLowerCase(Locale.ROOT), OSS_ACCESS_KEY_SECRET);
+                    put(OSS_SECURITY_TOKEN.toLowerCase(Locale.ROOT), OSS_SECURITY_TOKEN);
                 }
             };
 
@@ -147,8 +152,8 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
                     String value = context.options().get(key);
-                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase())) {
-                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase());
+                    if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase(Locale.ROOT))) {
+                        key = CASE_SENSITIVE_KEYS.get(key.toLowerCase(Locale.ROOT));
                     }
                     hadoopOptions.set(key, value);
 
@@ -158,6 +163,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                             SensitiveConfigUtils.redactValue(key, hadoopOptions.get(key)));
                 }
             }
+        }
+        // A user-set hadoop-aliyun prefix wins over Paimon's unified User-Agent.
+        if (!hadoopOptions.containsKey(OSSUserAgent.PREFIX)) {
+            hadoopOptions.set(OSSUserAgent.PREFIX, OSSUserAgent.prefix(context.options()));
         }
     }
 
@@ -210,6 +219,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                         fs.initialize(fsUri, hadoopConf);
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
+                    }
+
+                    if (hadoopOptions.getBoolean(OSS_ENHANCED_RETRY_ENABLED, true)) {
+                        setRetryStrategy(fs);
                     }
 
                     if (hadoopOptions.getBoolean(OSS_SECOND_LEVEL_DOMAIN_ENABLED, false)) {
@@ -302,6 +315,15 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         } catch (Exception e) {
             LOG.error("Failed to enable second level domain.", e);
             throw new RuntimeException("Failed to enable second level domain.", e);
+        }
+    }
+
+    /** Retry every request of this file system, so writes and deletes ride out OSS throttling. */
+    private static void setRetryStrategy(AliyunOSSFileSystem fs) {
+        try {
+            getOssClient(fs).getClientConfiguration().setRetryStrategy(new OSSRetryStrategy());
+        } catch (Exception e) {
+            LOG.warn("Failed to set the OSS retry strategy, keeping the SDK default.", e);
         }
     }
 

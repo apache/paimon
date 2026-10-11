@@ -26,8 +26,9 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
-import org.elasticsearch.eslib.api.model.FieldIndexConfig;
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -42,19 +43,43 @@ import java.util.concurrent.ExecutorService;
 public class ESIndexGlobalIndexer implements VectorGlobalIndexer {
 
     private final List<DataField> fields;
-    private final ESIndexOptions indexOptions;
+    private final Options options;
+    @Nullable private final ESIndexOptions indexOptions;
     private final String configuredVectorMetric;
     private volatile String readerVectorMetric;
 
     public ESIndexGlobalIndexer(List<DataField> fields, Options options) {
         this.fields = Collections.unmodifiableList(new ArrayList<>(fields));
-        this.indexOptions = new ESIndexOptions(this.fields, options);
-        this.configuredVectorMetric = primaryVectorMetric(this.fields, this.indexOptions);
+        this.options = options;
+        this.indexOptions = tryParseIndexOptions(this.fields, options);
+        this.configuredVectorMetric =
+                this.fields.isEmpty()
+                        ? null
+                        : ESIndexOptions.configuredVectorMetric(this.fields.get(0), options);
+    }
+
+    /**
+     * Readers use the field configuration persisted in the index metadata, so the current options
+     * only have to describe a build when a writer is created. For example, the dimension of an
+     * ARRAY&lt;FLOAT&gt; column is usually passed to the build procedure only and is absent from
+     * the table options that the read path passes here.
+     */
+    @Nullable
+    private static ESIndexOptions tryParseIndexOptions(List<DataField> fields, Options options) {
+        try {
+            return new ESIndexOptions(fields, options);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
-        return new ESIndexGlobalIndexWriter(fileWriter, fields, indexOptions);
+        // Re-parse so that options which cannot describe a build fail here with the original
+        // message instead of being silently ignored.
+        ESIndexOptions writerOptions =
+                indexOptions != null ? indexOptions : new ESIndexOptions(fields, options);
+        return new ESIndexGlobalIndexWriter(fileWriter, fields, writerOptions);
     }
 
     @Override
@@ -62,6 +87,7 @@ public class ESIndexGlobalIndexer implements VectorGlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
+            List<Range> rowRanges,
             ExecutorService executor) {
         ESIndexGlobalIndexReader reader =
                 new ESIndexGlobalIndexReader(fileReader, files, fields, indexOptions, executor);
@@ -98,15 +124,5 @@ public class ESIndexGlobalIndexer implements VectorGlobalIndexer {
                             + metric
                             + ".");
         }
-    }
-
-    private static String primaryVectorMetric(List<DataField> fields, ESIndexOptions indexOptions) {
-        if (fields.isEmpty()) {
-            return null;
-        }
-        FieldIndexConfig config = indexOptions.getConfig(fields.get(0).name());
-        return config != null && config.indexType() == FieldIndexConfig.IndexType.VECTOR
-                ? ESIndexOptions.toPaimonVectorMetric(config.metric())
-                : null;
     }
 }

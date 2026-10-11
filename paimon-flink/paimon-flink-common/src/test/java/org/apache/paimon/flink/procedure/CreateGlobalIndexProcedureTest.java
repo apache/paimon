@@ -42,11 +42,11 @@ public class CreateGlobalIndexProcedureTest {
         Options userOptions =
                 CreateGlobalIndexProcedure.createUserOptions(
                         tableOptions,
-                        SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE.key()
+                        SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE.key()
                                 + "=200;procedure-only=procedure-value");
 
         assertThat(userOptions.get(BTreeIndexOptions.BTREE_INDEX_COMPRESSION)).isEqualTo("zstd");
-        assertThat(userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE))
+        assertThat(userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_FILE))
                 .isEqualTo(200L);
         assertThat(userOptions.get("unrelated-table-option")).isEqualTo("table-value");
         assertThat(userOptions.get("procedure-only")).isEqualTo("procedure-value");

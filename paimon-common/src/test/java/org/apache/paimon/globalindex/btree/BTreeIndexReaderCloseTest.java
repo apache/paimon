@@ -43,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -82,7 +83,9 @@ public class BTreeIndexReaderCloseTest {
                 };
 
         BTreeGlobalIndexer indexer =
-                new BTreeGlobalIndexer(new DataField(1, "testField", dataType), new Options());
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        new Options());
         GlobalIndexSingleColumnWriter writer = indexer.createWriter(fileWriter);
         for (int i = 0; i < RECORD_NUM; i++) {
             writer.write(i, (long) i);
@@ -104,7 +107,8 @@ public class BTreeIndexReaderCloseTest {
                         keySerializer,
                         tracking(closed),
                         meta,
-                        new CacheManager(MemorySize.VALUE_8_MB, 0));
+                        new CacheManager(MemorySize.VALUE_8_MB, 0),
+                        null);
         assertThat(closed).hasValue(0);
 
         reader.close();
@@ -126,7 +130,8 @@ public class BTreeIndexReaderCloseTest {
                                         keySerializer,
                                         tracking(closed),
                                         meta,
-                                        new CacheManager(MemorySize.VALUE_8_MB, 0)))
+                                        new CacheManager(MemorySize.VALUE_8_MB, 0),
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("bad magic number");
 
@@ -142,7 +147,7 @@ public class BTreeIndexReaderCloseTest {
         FailingCacheManager cacheManager = new FailingCacheManager();
         AtomicInteger closed = new AtomicInteger();
         BTreeIndexReader reader =
-                new BTreeIndexReader(keySerializer, tracking(closed), meta, cacheManager);
+                new BTreeIndexReader(keySerializer, tracking(closed), meta, cacheManager, null);
 
         cacheManager.failing = true;
         assertThatThrownBy(reader::close)

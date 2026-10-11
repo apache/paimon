@@ -18,6 +18,8 @@
 
 package org.apache.paimon.tests;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnJre;
 import org.slf4j.Logger;
@@ -27,6 +29,8 @@ import org.testcontainers.containers.ContainerState;
 
 import java.util.Arrays;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.condition.JRE.JAVA_11;
@@ -36,8 +40,14 @@ import static org.junit.jupiter.api.condition.JRE.JAVA_11;
 public class SparkE2eTest extends E2eReaderTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkE2eTest.class);
-    private static final String COARSE_GRAINED_SCHEDULER_SHUTDOWN_ERROR =
-            "ERROR Utils: Uncaught exception in thread dispatcher-CoarseGrainedScheduler";
+
+    /**
+     * Start of a Spark ERROR log line in the default log4j2 pattern ({@code %d{yy/MM/dd HH:mm:ss}
+     * %p %c{1}: %m%n%ex}), which spark-sql writes to stdout. Anchoring on the timestamp prefix
+     * avoids matching an "ERROR" word inside a result row.
+     */
+    private static final Pattern SPARK_ERROR_LOG_LINE =
+            Pattern.compile("(?m)^\\d{2}/\\d{2}/\\d{2} \\d{2}:\\d{2}:\\d{2} ERROR ");
 
     public SparkE2eTest() {
         super(false, false, true);
@@ -77,8 +87,7 @@ public class SparkE2eTest extends E2eReaderTestBase {
                         LOG.info(execResult.getStderr());
                         throw new AssertionError("Failed when running spark sql.");
                     }
-                    String stdout =
-                            stripCoarseGrainedSchedulerShutdownError(execResult.getStdout());
+                    String stdout = stripTrailingSparkErrorLogs(execResult.getStdout());
                     return Arrays.stream(stdout.split("\n"))
                                     .filter(s -> !s.contains("WARN"))
                                     .collect(Collectors.joining("\n"))
@@ -86,14 +95,17 @@ public class SparkE2eTest extends E2eReaderTestBase {
                 });
     }
 
-    private static String stripCoarseGrainedSchedulerShutdownError(String stdout) {
-        int errorIndex = stdout.indexOf(COARSE_GRAINED_SCHEDULER_SHUTDOWN_ERROR);
-        if (errorIndex < 0) {
-            return stdout;
-        }
-
-        int errorLineStart = stdout.lastIndexOf('\n', errorIndex);
-        return errorLineStart < 0 ? "" : stdout.substring(0, errorLineStart);
+    /**
+     * Drops everything from the first Spark ERROR log line onwards. When spark-sql exits, the
+     * driver shutdown races with RPC dispatch and may log after the query result, with exit code 0,
+     * e.g. {@code ERROR Utils: Uncaught exception in thread dispatcher-CoarseGrainedScheduler} or
+     * {@code ERROR TransportRequestHandler: Error while invoking RpcHandler#receive() for one-way
+     * message.} followed by a stack trace.
+     */
+    @VisibleForTesting
+    static String stripTrailingSparkErrorLogs(String stdout) {
+        Matcher matcher = SPARK_ERROR_LOG_LINE.matcher(stdout);
+        return matcher.find() ? stdout.substring(0, matcher.start()) : stdout;
     }
 
     private ContainerState getSpark() {

@@ -51,7 +51,15 @@ public final class Expression implements AutoCloseable {
 
     public static Expression column(String name) {
         long rootPtr = NativeExpression.root();
-        return new Expression(NativeExpression.getItem(name, rootPtr));
+        try {
+            return new Expression(NativeExpression.getItem(name, rootPtr));
+        } finally {
+            // Vortex builders do not take ownership of their inputs -- see the module doc of
+            // vortex-jni/src/expression.rs at 0.73.0 -- so releasing this intermediate is our
+            // responsibility, and getItem has already cloned it into the expression we return.
+            // It is never wrapped in an Expression, so without this no caller can reach it.
+            NativeExpression.free(rootPtr);
+        }
     }
 
     public static Expression select(String[] columns, Expression parent) {

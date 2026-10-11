@@ -149,7 +149,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             partitionKeys,
                             primaryKeys,
                             Collections.emptyList(),
-                            tableConfig,
+                            tableConfig(tableInfo.identifiers().get(0).getObjectName()),
                             tableInfo.schema(),
                             metadataConverters,
                             caseSensitive,
@@ -161,7 +161,11 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
-                    table = alterTableOptions(identifier, table);
+                    table =
+                            alterTableOptions(
+                                    identifier,
+                                    table,
+                                    tableConfig(tableInfo.identifiers().get(0).getObjectName()));
                     tables.add(table);
                     monitoredTables.addAll(tableInfo.identifiers());
                 } else {

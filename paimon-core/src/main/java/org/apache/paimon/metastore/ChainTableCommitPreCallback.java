@@ -29,7 +29,6 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
-import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
@@ -45,8 +44,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -55,7 +58,8 @@ import java.util.stream.Collectors;
  * <p>This callback performs a pre-check before dropping partitions on the snapshot branch of a
  * chain table. It verifies that a snapshot partition being dropped is either followed by no delta
  * partitions in the chain interval or has a previous snapshot partition that can serve as its
- * predecessor.
+ * predecessor. The check considers the post-commit state, so partitions dropped by the same commit
+ * do not count as predecessors or successors.
  *
  * <p>The callback is only executed when all of following conditions are met:
  *
@@ -99,8 +103,6 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
         if (!isPureDeleteCommit(deltaFiles, indexFiles)) {
             return;
         }
-        List<BinaryRow> changedPartitions =
-                ManifestEntryChanges.changedPartitions(deltaFiles, indexFiles);
         FileStoreTable candidateTable = ChainTableUtils.resolveChainPrimaryTable(table);
         FileStoreTable deltaTable =
                 candidateTable.switchToBranch(coreOptions.scanFallbackDeltaBranch());
@@ -123,13 +125,30 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
         RecordComparator chainComparator =
                 CodeGenUtils.newRecordComparator(projector.chainPartitionType().getFieldTypes());
 
+        // The pure-delete commit may drop several partitions of a group at once (batch
+        // overwrite / rollback). Validation must consider the post-commit state: a partition
+        // dropped by this very commit can no longer serve as predecessor or successor, or a
+        // delta partition would silently lose its baseline rows once the commit lands. A
+        // partition counts as dropped only if the commit deletes ALL of its base files; a
+        // rollback deletes per-file and may leave a partition partially alive, and such a
+        // partition still serves as a baseline after the commit.
+        Set<BinaryRow> droppedPartitions = fullyDroppedPartitions(baseFiles, deltaFiles);
         List<BinaryRow> snapshotPartitions =
                 table.newSnapshotReader().partitionEntries().stream()
                         .map(PartitionEntry::partition)
+                        .filter(partition -> !droppedPartitions.contains(partition))
                         .collect(Collectors.toList());
         SnapshotReader deltaSnapshotReader = deltaTable.newSnapshotReader();
         PredicateBuilder builder = new PredicateBuilder(partitionType);
-        for (BinaryRow partition : changedPartitions) {
+        // Delta partitions that the triggering chain-table OVERWRITE just rewrote hold fresh,
+        // complete data and do not depend on a snapshot baseline, so dropping their baseline is
+        // intended rather than an orphan. A standalone drop or a rollback leaves this empty, so a
+        // genuinely stranded follower is still rejected below.
+        Set<BinaryRow> freshlyWrittenDeltaPartitions =
+                ChainTableOverwriteScope.freshlyWrittenDeltaPartitions();
+        // only fully dropped partitions can break the chain; a partially deleted partition
+        // survives the commit and keeps anchoring its delta followers
+        for (BinaryRow partition : droppedPartitions) {
             BinaryRow partitionGroup = projector.extractGroupPartition(partition);
             BinaryRow partitionChain = projector.extractChainPartition(partition);
 
@@ -166,6 +185,9 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
                                                     nextSnapshotPartition,
                                                     chainComparator,
                                                     projector))
+                            .filter(
+                                    deltaPartition ->
+                                            !freshlyWrittenDeltaPartitions.contains(deltaPartition))
                             .collect(Collectors.toList());
             boolean canDrop =
                     deltaFollowingPartitions.isEmpty() || preSnapshotPartition.isPresent();
@@ -179,6 +201,37 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
                 throw new RuntimeException("Snapshot partition cannot be dropped.");
             }
         }
+    }
+
+    private Set<BinaryRow> fullyDroppedPartitions(
+            List<SimpleFileEntry> baseFiles, List<ManifestEntry> deltaFiles) {
+        Map<BinaryRow, Set<String>> deletedFilesByPartition = new HashMap<>();
+        for (ManifestEntry entry : deltaFiles) {
+            if (entry.kind() == FileKind.DELETE) {
+                deletedFilesByPartition
+                        .computeIfAbsent(entry.partition(), k -> new HashSet<>())
+                        .add(entry.bucket() + "/" + entry.file().fileName());
+            }
+        }
+        Set<BinaryRow> droppedPartitions = new HashSet<>();
+        for (Map.Entry<BinaryRow, Set<String>> deleted : deletedFilesByPartition.entrySet()) {
+            BinaryRow partition = deleted.getKey();
+            Set<String> deletedFiles = deleted.getValue();
+            List<String> partitionBaseFiles =
+                    baseFiles.stream()
+                            .filter(base -> base.partition().equals(partition))
+                            .map(base -> base.bucket() + "/" + base.fileName())
+                            .collect(Collectors.toList());
+            // A partition with no base files was never a baseline, so it cannot break the
+            // chain; treat it as dropped only when the commit deletes every one of its base
+            // files. Guarding the empty case keeps a caller that passes an incomplete base
+            // file list (e.g. a path that scans only changed partitions) from misclassifying
+            // a partially deleted survivor as fully dropped.
+            if (!partitionBaseFiles.isEmpty() && deletedFiles.containsAll(partitionBaseFiles)) {
+                droppedPartitions.add(partition);
+            }
+        }
+        return droppedPartitions;
     }
 
     private boolean isPureDeleteCommit(

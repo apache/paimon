@@ -2745,6 +2745,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                                         null),
                                 Long.MAX_VALUE,
                                 null,
+                                null,
                                 new CoreOptions(new Options()))
                         .create();
 
@@ -3205,6 +3206,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                                 false,
                                 null),
                         Long.MAX_VALUE,
+                        null,
                         null,
                         new CoreOptions(new Options()))
                 .create();

@@ -36,6 +36,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -1127,6 +1128,98 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testNullablePredicateThreeValuedLogic() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("id INT", "v INT", "flag BOOLEAN"),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList());
+
+        insertInto(
+                table,
+                "(1, CAST(NULL AS INT), CAST(NULL AS BOOLEAN))",
+                "(2, 1, TRUE)",
+                "(3, 2, FALSE)",
+                "(4, 3, CAST(NULL AS BOOLEAN))",
+                "(5, 4, TRUE)");
+
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v BETWEEN 1 AND 3"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 3), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT BETWEEN 1 AND 3"),
+                Collections.singletonList(changelogRow("+I", 5)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v IN (1, 3)"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, 3)"),
+                Arrays.asList(changelogRow("+I", 3), changelogRow("+I", 5)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v IN (1, NULL, 3)"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, NULL, 3)"), Collections.emptyList());
+        testBatchRead(
+                buildQuery(table, "id", "WHERE flag IS TRUE"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 5)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE flag IS NOT TRUE"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 3), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE NOT (flag IS TRUE)"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 3), changelogRow("+I", 4)));
+    }
+
+    @Test
+    public void testNotBetweenWithNullBoundsThreeValuedLogic() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("id INT", "v INT"),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList());
+
+        insertInto(table, "(1, 12)", "(2, 16)", "(3, 8)", "(4, CAST(NULL AS INT))");
+
+        // 12 NOT BETWEEN 15 AND NULL = 12 < 15 OR 12 > NULL = TRUE
+        // 16 NOT BETWEEN 15 AND NULL = UNKNOWN (dropped by WHERE)
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT BETWEEN 15 AND NULL"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 3)));
+
+        // 12 NOT BETWEEN NULL AND 10 = 12 < NULL OR 12 > 10 = TRUE
+        // 8 NOT BETWEEN NULL AND 10 = UNKNOWN
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT BETWEEN NULL AND 10"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 2)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"file-index.bsi.columns", "file-index.range-bitmap.columns"})
+    public void testNotInNullWithFileIndex(String indexOption) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(indexOption, "v");
+        options.put("file-index.in-manifest-threshold", "1B");
+        String table =
+                createTable(
+                        Arrays.asList("id INT", "v INT"),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList(),
+                        options);
+
+        insertInto(table, "(1, CAST(NULL AS INT))", "(2, 1)", "(3, 2)", "(4, 3)", "(5, 4)");
+
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, NULL, 3)"), Collections.emptyList());
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, 3)"),
+                Arrays.asList(changelogRow("+I", 3), changelogRow("+I", 5)));
+    }
+
+    @Test
     public void testUnsupportedPredicate() throws Exception {
         String table =
                 createTable(
@@ -1188,19 +1281,21 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         assertThat(sourceParallelism(buildSimpleQuery(table))).isEqualTo(bExeEnv.getParallelism());
 
         // with hint
-        assertThat(
-                        sourceParallelism(
-                                buildQueryWithTableOptions(
-                                        table,
-                                        "*",
-                                        "",
-                                        new HashMap<String, String>() {
-                                            {
-                                                put(INFER_SCAN_PARALLELISM.key(), "false");
-                                                put(SCAN_PARALLELISM.key(), "66");
-                                            }
-                                        })))
-                .isEqualTo(66);
+        String queryWithHint =
+                buildQueryWithTableOptions(
+                        table,
+                        "*",
+                        "",
+                        new HashMap<String, String>() {
+                            {
+                                put(INFER_SCAN_PARALLELISM.key(), "false");
+                                put(SCAN_PARALLELISM.key(), "66");
+                            }
+                        });
+        DataStream<Row> result =
+                ((StreamTableEnvironment) bEnv).toChangelogStream(bEnv.sqlQuery(queryWithHint));
+        assertThat(result.getParallelism()).isEqualTo(bExeEnv.getParallelism());
+        assertThat(sourceParallelism(result)).isEqualTo(66);
     }
 
     @Test
@@ -1283,7 +1378,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                                         put(SCAN_PARALLELISM.key(), "-2");
                                                     }
                                                 })))
-                .hasMessageContaining("The parallelism of an operator must be at least 1");
+                .hasMessageContaining("Invalid configured parallelism -2");
 
         // 2 splits, the parallelism is splits num: 2
         insertInto(table, "('Euro', 119)");
@@ -1329,7 +1424,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         3L,
                                         Collections.singletonMap(
                                                 INFER_SCAN_PARALLELISM.key(), "true"))))
-                .isEqualTo(1);
+                .isEqualTo(2);
 
         // 2 splits, infer parallelism is disabled, the parallelism is scan.parallelism
         assertThat(
@@ -1879,13 +1974,22 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     private int sourceParallelism(String sql) {
         DataStream<Row> stream =
                 ((StreamTableEnvironment) bEnv).toChangelogStream(bEnv.sqlQuery(sql));
-        return stream.getParallelism();
+        return sourceParallelism(stream);
     }
 
     private int sourceParallelismStreaming(String sql) {
         DataStream<Row> stream =
                 ((StreamTableEnvironment) sEnv).toChangelogStream(sEnv.sqlQuery(sql));
-        return stream.getParallelism();
+        return sourceParallelism(stream);
+    }
+
+    private int sourceParallelism(DataStream<Row> stream) {
+        return stream.getTransformation().getTransitivePredecessors().stream()
+                .filter(SourceTransformation.class::isInstance)
+                .map(SourceTransformation.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Source transformation not found"))
+                .getParallelism();
     }
 
     private void testSinkParallelism(

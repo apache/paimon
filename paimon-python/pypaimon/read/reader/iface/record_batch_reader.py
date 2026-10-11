@@ -19,6 +19,7 @@ from abc import abstractmethod
 from typing import Iterator, Optional, TypeVar
 
 import polars
+import pyarrow as pa
 from pyarrow import RecordBatch, Table
 
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
@@ -29,6 +30,53 @@ from pypaimon.table.row.offset_row import OffsetRow
 T = TypeVar('T')
 
 
+def _polars_arrow_array(array):
+    """Represent MAP as LIST<ROW<key, value>> without losing its null mask."""
+    data_type = array.type
+    if pa.types.is_struct(data_type):
+        children = [_polars_arrow_array(array.field(i)) for i in range(data_type.num_fields)]
+        fields = [field.with_type(child.type) for field, child in zip(data_type, children)]
+        if pa.struct(fields) == data_type:
+            return array
+        return pa.StructArray.from_arrays(children, fields=fields, mask=array.is_null())
+    if (pa.types.is_map(data_type) or pa.types.is_list(data_type)
+            or pa.types.is_large_list(data_type) or pa.types.is_fixed_size_list(data_type)):
+        if pa.types.is_map(data_type):
+            keys, items = _polars_arrow_array(array.keys), _polars_arrow_array(array.items)
+            fields = [data_type.key_field.with_type(keys.type), data_type.item_field.with_type(items.type)]
+            child = pa.StructArray.from_arrays([keys, items], fields=fields)
+            value = pa.field('entries', child.type, nullable=False)
+        else:
+            child = _polars_arrow_array(array.values)
+            value = data_type.value_field.with_type(child.type)
+        if pa.types.is_large_list(data_type):
+            target = pa.large_list(value)
+        elif pa.types.is_fixed_size_list(data_type):
+            target = pa.list_(value, data_type.list_size)
+        else:
+            target = pa.list_(value)
+        if target == data_type:
+            return array
+        if pa.types.is_fixed_size_list(data_type):
+            child = child.slice(array.offset * data_type.list_size, len(array) * data_type.list_size)
+            return pa.Array.from_buffers(target, len(array), [array.is_valid().buffers()[1]],
+                                         null_count=array.null_count, children=[child])
+        return pa.Array.from_buffers(target, len(array), array.buffers()[:data_type.num_buffers],
+                                     null_count=array.null_count, offset=array.offset, children=[child])
+    return array
+
+
+def _polars_arrow_table(batch):
+    arrays = [_polars_arrow_array(column) for column in batch.columns]
+    schema = pa.schema([field.with_type(array.type) for field, array in zip(batch.schema, arrays)],
+                       metadata=batch.schema.metadata)
+    # Polars' direct MAP conversion turns null maps into empty lists. Arrow's
+    # equivalent list representation preserves the parent bitmap, including
+    # MAPs nested inside ROWs or arrays. Reuse buffers without relying on MAP
+    # casts, which older supported Arrow releases do not provide.
+    return Table.from_batches([batch]) if schema == batch.schema else Table.from_arrays(arrays, schema=schema)
+
+
 class RecordBatchReader(RecordReader):
     """
     The reader that reads the pyarrow batches of records.
@@ -36,11 +84,16 @@ class RecordBatchReader(RecordReader):
 
     file_io = None
     blob_field_indices = None
+    descriptor_field_indices = None
+    blob_view_lookup = None
     vector_field_indices = None
 
     def _adopt_metadata(self, reader: "RecordBatchReader") -> None:
         self.file_io = reader.file_io
         self.blob_field_indices = reader.blob_field_indices
+        self.descriptor_field_indices = getattr(
+            reader, 'descriptor_field_indices', None)
+        self.blob_view_lookup = getattr(reader, 'blob_view_lookup', None)
         self.vector_field_indices = reader.vector_field_indices
 
     @abstractmethod
@@ -59,7 +112,7 @@ class RecordBatchReader(RecordReader):
         if arrow_batch is None:
             return None
         # Older Polars versions accept Arrow Table but not RecordBatch.
-        return polars.from_arrow(Table.from_batches([arrow_batch]))
+        return polars.from_arrow(_polars_arrow_table(arrow_batch))
 
     def tuple_iterator(self) -> Optional[Iterator[tuple]]:
         df = self.read_next_df()
@@ -73,7 +126,8 @@ class RecordBatchReader(RecordReader):
             return None
         return InternalRowWrapperIterator(
             self._iter_df_rows(df), df.width, self.file_io,
-            self.blob_field_indices, self.vector_field_indices)
+            self.blob_field_indices, self.vector_field_indices,
+            self.descriptor_field_indices, self.blob_view_lookup)
 
     @staticmethod
     def _iter_df_rows(df) -> Iterator[tuple]:
@@ -87,12 +141,16 @@ class RecordBatchReader(RecordReader):
 class InternalRowWrapperIterator(RecordIterator[InternalRow]):
     def __init__(self, iterator: Iterator[tuple], width: int,
                  file_io=None, blob_field_indices=None,
-                 vector_field_indices=None):
+                 vector_field_indices=None,
+                 descriptor_field_indices=None,
+                 blob_view_lookup=None):
         self._iterator = iterator
         self._reused_row = OffsetRow(None, 0, width,
                                      file_io=file_io,
                                      blob_field_indices=blob_field_indices,
-                                     vector_field_indices=vector_field_indices)
+                                     vector_field_indices=vector_field_indices,
+                                     descriptor_field_indices=descriptor_field_indices,
+                                     blob_view_lookup=blob_view_lookup)
 
     def next(self) -> Optional[InternalRow]:
         row_tuple = next(self._iterator, None)
@@ -114,6 +172,7 @@ class RowPositionReader(RecordBatchReader):
         batch = self._data_reader.read_arrow_batch()
         if batch is None:
             return None
+        self._refresh_blob_view_lookup(self._data_reader)
         self.batch_pos += batch.num_rows
         return batch
 

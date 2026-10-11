@@ -136,6 +136,19 @@ public interface ReadBuilder extends Serializable {
     ReadBuilder withLimit(int limit);
 
     /**
+     * The row number pushed down.
+     *
+     * <p>The default implementation preserves compatibility with implementations which only support
+     * integer limits. A limit outside the integer range is left unpushed instead of being narrowed.
+     */
+    default ReadBuilder withLimit(long limit) {
+        if (limit < Integer.MIN_VALUE || limit > Integer.MAX_VALUE) {
+            return this;
+        }
+        return withLimit(Math.toIntExact(limit));
+    }
+
+    /**
      * Push TopN filter. Will filter the data as much as possible, but it is not guaranteed that it
      * is a complete filter.
      */

@@ -27,6 +27,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -80,6 +81,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final LinkedHashMap<String, DataFileMeta> compactBefore;
     private final LinkedHashSet<DataFileMeta> compactAfter;
     private final LinkedHashSet<DataFileMeta> compactChangelog;
+    private final List<IndexFileMeta> newIndexFiles;
+    private final List<IndexFileMeta> deletedIndexFiles;
+    private final List<IndexFileMeta> compactNewIndexFiles;
+    private final List<IndexFileMeta> compactDeletedIndexFiles;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
 
@@ -123,16 +128,27 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
         this.compactChangelog = new LinkedHashSet<>();
+        this.newIndexFiles = new ArrayList<>();
+        this.deletedIndexFiles = new ArrayList<>();
+        this.compactNewIndexFiles = new ArrayList<>();
+        this.compactDeletedIndexFiles = new ArrayList<>();
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
             deletedFiles.addAll(increment.newFilesIncrement().deletedFiles());
             newFilesChangelog.addAll(increment.newFilesIncrement().changelogFiles());
+            // index file changes must survive the restore replay too: a payload accepted
+            // during checkpoint would otherwise never reach the manifest, and replaced
+            // payloads would stay as zombie entries
+            newIndexFiles.addAll(increment.newFilesIncrement().newIndexFiles());
+            deletedIndexFiles.addAll(increment.newFilesIncrement().deletedIndexFiles());
             increment
                     .compactIncrement()
                     .compactBefore()
                     .forEach(f -> compactBefore.put(f.fileName(), f));
             compactAfter.addAll(increment.compactIncrement().compactAfter());
             compactChangelog.addAll(increment.compactIncrement().changelogFiles());
+            compactNewIndexFiles.addAll(increment.compactIncrement().newIndexFiles());
+            compactDeletedIndexFiles.addAll(increment.compactIncrement().deletedIndexFiles());
             updateCompactDeletionFile(increment.compactDeletionFile());
         }
     }
@@ -285,20 +301,28 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 new DataIncrement(
                         new ArrayList<>(newFiles),
                         new ArrayList<>(deletedFiles),
-                        new ArrayList<>(newFilesChangelog));
+                        new ArrayList<>(newFilesChangelog),
+                        new ArrayList<>(newIndexFiles),
+                        new ArrayList<>(deletedIndexFiles));
         CompactIncrement compactIncrement =
                 new CompactIncrement(
                         new ArrayList<>(compactBefore.values()),
                         new ArrayList<>(compactAfter),
-                        new ArrayList<>(compactChangelog));
+                        new ArrayList<>(compactChangelog),
+                        new ArrayList<>(compactNewIndexFiles),
+                        new ArrayList<>(compactDeletedIndexFiles));
         CompactDeletionFile drainDeletionFile = compactDeletionFile;
 
         newFiles.clear();
         deletedFiles.clear();
         newFilesChangelog.clear();
+        newIndexFiles.clear();
+        deletedIndexFiles.clear();
         compactBefore.clear();
         compactAfter.clear();
         compactChangelog.clear();
+        compactNewIndexFiles.clear();
+        compactDeletedIndexFiles.clear();
         compactDeletionFile = null;
 
         return new CommitIncrement(dataIncrement, compactIncrement, drainDeletionFile);

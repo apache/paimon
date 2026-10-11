@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -31,6 +32,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
@@ -66,6 +68,8 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -585,6 +589,105 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(result.results()).containsExactlyInAnyOrder(2L, 3L);
+    }
+
+    @Test
+    public void testVectorSearchFilterIndexCannotEvaluate() throws Exception {
+        catalog.createTable(
+                identifier("vector_search_unsupported_scalar_predicate"),
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column("id", DataTypes.INT())
+                                        .column("tags", new ArrayType(DataTypes.STRING()))
+                                        .column(
+                                                VECTOR_FIELD_NAME,
+                                                new ArrayType(DataTypes.FLOAT())))
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_unsupported_scalar_predicate"));
+
+        // row 0 has NULL tags and is the closest to the query: dropping the index
+        // pre-filter alone would pollute the top-K with it, and keeping the old empty
+        // bitmap would drop every row — only routing the search through the exact
+        // final-read filter returns the closest *matching* rows
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectorsWithTags(table, vectors, 0);
+        buildAndCommitIndex(table, vectors);
+        buildAndCommitMultiValueIndex(table, vectors.length);
+
+        // IS NOT NULL on the multivalue-indexed array column is a function the reader
+        // cannot evaluate; the scalar pre-filter must step aside and let the exact
+        // final-read filter decide instead of answering "no rows match"
+        Predicate filter =
+                new PredicateBuilder(table.rowType())
+                        .isNotNull(table.rowType().getFieldIndex("tags"));
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(filter)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(1L, 2L);
+        assertThat(readIds(table, result)).containsExactly(1, 2);
+    }
+
+    private void writeVectorsWithTags(FileStoreTable table, float[][] vectors, int nullTagsRow)
+            throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < vectors.length; i++) {
+                GenericArray tags =
+                        i == nullTagsRow
+                                ? null
+                                : new GenericArray(
+                                        new BinaryString[] {BinaryString.fromString("t" + i)});
+                write.write(GenericRow.of(i, tags, new GenericArray(vectors[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private void buildAndCommitMultiValueIndex(FileStoreTable table, int rowCount)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField tagsField = table.rowType().getField("tags");
+
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                MultiValueGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(tagsField),
+                                options);
+        for (int row = 0; row < rowCount; row++) {
+            writer.write(BinaryString.fromString("t" + row), row);
+        }
+        List<ResultEntry> entries = writer.finish(rowCount);
+
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, rowCount - 1),
+                        tagsField.id(),
+                        MultiValueGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
     }
 
     @Test
@@ -1333,12 +1436,13 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(searchBuilder.executeLocal().results().isEmpty()).isTrue();
     }
 
-    @Test
-    public void testVectorPrimaryMultiFieldIndexServesScalarExtraField() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    public void testMultiFieldIndexDoesNotProvideSingleFieldCoverage(String mode) throws Exception {
         catalog.createTable(
                 identifier("vector_primary_scalar_extra_field_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), mode)
                         .build(),
                 false);
         FileStoreTable table = getTable(identifier("vector_primary_scalar_extra_field_table"));
@@ -1361,11 +1465,16 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .newVectorScan()
                         .scan();
 
-        // A vector-primary multi-field index can serve both the vector search and a scalar
-        // predicate on an extra field. It must therefore be attached as both vector and scalar
-        // index input, and full search mode must not create a raw fallback for the covered range.
+        // The reader can serve both roles, but a multi-field definition does not supply
+        // single-field coverage. Full/detail mode must retain a data fallback for these rows.
         assertThat(indexVectorSearchSplits(plan.splits())).hasSize(1);
-        assertThat(rawVectorSearchSplits(plan.splits())).isEmpty();
+        if ("fast".equals(mode)) {
+            assertThat(rawVectorSearchSplits(plan.splits())).isEmpty();
+        } else {
+            assertThat(rawVectorSearchSplits(plan.splits())).hasSize(1);
+            assertThat(rawVectorSearchSplits(plan.splits()).get(0).rowRanges())
+                    .containsExactly(new Range(0, 1));
+        }
 
         IndexVectorSearchSplit split = indexVectorSearchSplits(plan.splits()).get(0);
         assertThat(split.vectorIndexFiles()).hasSize(2);
@@ -1405,10 +1514,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
         DataField idField = table.rowType().getField("id");
         buildAndCommitVectorIndexWithFields(
                 table, vectors, new Range(0, 3), Arrays.asList(vectorField, idField));
-        // The dedicated scalar index covers only the head. The vector index's scalar extra field
-        // must still serve the tail; otherwise DataEvolutionGlobalIndexScanner's primary-field
-        // preference drops
-        // rows [2, 3] even though coverage planning treats them as indexed.
+        // The dedicated scalar index covers only the head. The multi-field index's scalar extra
+        // field does not extend that coverage, so the tail remains eligible for a data fallback.
         buildAndCommitBTreeIndex(table, new int[] {0, 1}, new Range(0, 1));
 
         Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 2);
@@ -1805,7 +1912,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
@@ -1848,7 +1955,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = 0; i < mid; i++) {
             writer1.write(vectors[i], i);
@@ -1871,7 +1978,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = mid; i < vectors.length; i++) {
             writer2.write(vectors[i], i - mid);
@@ -2027,8 +2134,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                             GlobalIndexBuilderUtils.createIndexWriter(
                                     table,
                                     TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                    vectorField,
-                                    indexFields.subList(1, indexFields.size()),
+                                    indexFields,
                                     options);
             for (int i = 0; i < vectors.length; i++) {
                 writer.write(
@@ -2043,7 +2149,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                             GlobalIndexBuilderUtils.createIndexWriter(
                                     table,
                                     TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                    vectorField,
+                                    Collections.singletonList(vectorField),
                                     options);
             for (int i = 0; i < vectors.length; i++) {
                 writer.write(vectors[i], i);
@@ -2083,7 +2189,10 @@ public class VectorSearchBuilderTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(idField),
+                                options);
         for (int id : ids) {
             long relativeRowId = id - rowRange.from;
             writer.write(id, relativeRowId);
@@ -2124,7 +2233,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);

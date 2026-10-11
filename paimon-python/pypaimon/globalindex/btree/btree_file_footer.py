@@ -46,7 +46,8 @@ class BTreeFileFooter:
     """
     
     MAGIC_NUMBER = 0x50425449
-    CURRENT_VERSION = 1
+    VERSION_1 = 1
+    CURRENT_VERSION = VERSION_1
     ENCODED_LENGTH = 52
 
     def __init__(

@@ -42,44 +42,44 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
         return gen.next()
                 .meta
                 .copy(Arrays.asList("extra1", "extra2"))
-                .withColumnMaxSequenceNumbers(new long[] {3L, 42L});
+                .withWriteColsSequences(new long[] {3L, 42L});
     }
 
     @Test
-    void testCopyOperationsPreserveColumnSequences() {
+    void testCopyOperationsPreserveWriteColsSequences() {
         DataFileMeta file = object();
-        assertColumnSequences(file.upgrade(file.level() + 1));
-        assertColumnSequences(file.rename("renamed.parquet"));
-        assertColumnSequences(file.copyWithoutStats());
-        assertColumnSequences(file.assignSequenceNumber(1L, 2L));
-        assertColumnSequences(file.assignFirstRowId(1L));
-        assertColumnSequences(file.newFirstRowId(null));
-        assertColumnSequences(file.copy(Collections.emptyList()));
-        assertColumnSequences(file.newExternalPath("external/renamed.parquet"));
-        assertColumnSequences(file.copy(new byte[] {1}));
+        assertWriteColsSequences(file.upgrade(file.level() + 1));
+        assertWriteColsSequences(file.rename("renamed.parquet"));
+        assertWriteColsSequences(file.copyWithoutStats());
+        assertWriteColsSequences(file.assignSequenceNumber(1L, 2L));
+        assertWriteColsSequences(file.assignFirstRowId(1L));
+        assertWriteColsSequences(file.newFirstRowId(null));
+        assertWriteColsSequences(file.copy(Collections.emptyList()));
+        assertWriteColsSequences(file.newExternalPath("external/renamed.parquet"));
+        assertWriteColsSequences(file.copy(new byte[] {1}));
     }
 
     @Test
-    void testLegacySerializerDropsColumnSequences() {
+    void testLegacySerializerDropsWriteColsSequences() {
         DataFileMetaWriteColsLegacySerializer legacy = new DataFileMetaWriteColsLegacySerializer();
         DataFileMeta file = legacy.fromRow(legacy.toRow(object()));
-        assertThat(file.columnMaxSequenceNumbers()).isNull();
+        assertThat(file.writeColsSequences()).isNull();
     }
 
     @Test
-    void testColumnSequencesAreDefensivelyCopied() {
+    void testWriteColsSequencesAreDefensivelyCopied() {
         long[] sequences = {3L, 42L};
-        DataFileMeta file = gen.next().meta.withColumnMaxSequenceNumbers(sequences);
+        DataFileMeta file = gen.next().meta.withWriteColsSequences(sequences);
 
         sequences[0] = 100L;
-        assertColumnSequences(file);
+        assertWriteColsSequences(file);
 
-        long[] returned = file.columnMaxSequenceNumbers();
+        long[] returned = file.writeColsSequences();
         returned[1] = 100L;
-        assertColumnSequences(file);
+        assertWriteColsSequences(file);
     }
 
-    private void assertColumnSequences(DataFileMeta file) {
-        assertThat(file.columnMaxSequenceNumbers()).containsExactly(3L, 42L);
+    private void assertWriteColsSequences(DataFileMeta file) {
+        assertThat(file.writeColsSequences()).containsExactly(3L, 42L);
     }
 }

@@ -668,6 +668,63 @@ public class BlobFileFormatTest {
     }
 
     @Test
+    public void testMapDescriptorReadsCoalesceMetadata() throws IOException {
+        for (int entryCount : new int[] {32, 4097}) {
+            TrackingLocalFileIO trackingIO = new TrackingLocalFileIO();
+            RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB()));
+            Map<Object, Object> entries = new LinkedHashMap<>();
+            entries.put(null, null);
+            for (int i = 0; i < entryCount; i++) {
+                entries.put(i, new BlobData(i == 0 ? new byte[0] : new byte[] {1, 2, 3}));
+            }
+            Path mapFile = new Path(parent, UUID.randomUUID().toString());
+            BlobFileFormat format =
+                    new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+            try (PositionOutputStream out = trackingIO.newOutputStream(mapFile, false)) {
+                FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+                writer.addElement(GenericRow.of(new GenericMap(entries)));
+                writer.close();
+            }
+
+            FormatReaderContext context =
+                    new FormatReaderContext(
+                            trackingIO, mapFile, trackingIO.getFileSize(mapFile), null, null);
+            List<InternalRow> rows = new ArrayList<>();
+            try (FileRecordReader<InternalRow> reader =
+                    format.createReaderFactory(null, rowType, null).createReader(context)) {
+                reader.forEachRemaining(rows::add);
+            }
+            GenericMap result = (GenericMap) rows.get(0).getMap(0);
+            assertThat(result.size()).isEqualTo(entryCount + 1);
+            assertThat(result.get(null)).isNull();
+            long valueStart = 4 + 9 + (long) entryCount * Integer.BYTES;
+            long valueEnd = valueStart + (entryCount - 1L) * 3;
+            for (int i = 0; i < entryCount; i++) {
+                Blob blob = (Blob) result.get(i);
+                assertThat(blob).isInstanceOf(BlobRef.class);
+                assertThat(blob.toDescriptor().offset())
+                        .isEqualTo(valueStart + Math.max(0, i - 1L) * 3);
+                assertThat(blob.toDescriptor().length()).isEqualTo(i == 0 ? 0 : 3);
+            }
+            List<long[]> ranges = trackingIO.lastInputStream.readRanges;
+            if (entryCount == 32) {
+                // File footer/index plus map header, lengths, combined indexes and keys.
+                assertThat(ranges).hasSize(6);
+            } else {
+                // Metadata larger than the buffer is read in bounded chunks, not per key.
+                assertThat(ranges.size()).isLessThan(20);
+            }
+            for (long[] range : ranges) {
+                assertThat(range[0] >= valueEnd || range[0] + range[1] <= valueStart)
+                        .as(
+                                "metadata range [%s, %s) must not read values",
+                                range[0], range[0] + range[1])
+                        .isTrue();
+            }
+        }
+    }
+
+    @Test
     public void testMapBlobSupportedKeyTypes() throws IOException {
         DataType[] keyTypes =
                 new DataType[] {
@@ -1185,6 +1242,7 @@ public class BlobFileFormatTest {
         private int closeCount;
         private int readCount;
         private int seekCount;
+        private final List<long[]> readRanges = new ArrayList<>();
 
         private TrackingSeekableInputStream(SeekableInputStream delegate) {
             this.delegate = delegate;
@@ -1212,8 +1270,10 @@ public class BlobFileFormatTest {
 
         @Override
         public int read(byte[] bytes, int offset, int length) throws IOException {
+            long position = delegate.getPos();
             int read = delegate.read(bytes, offset, length);
             if (read > 0) {
+                readRanges.add(new long[] {position, read});
                 readCount += read;
             }
             return read;

@@ -22,6 +22,7 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
 
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.regex.Matcher;
 
 import static org.apache.paimon.statistics.TruncateSimpleColStatsCollector.TRUNCATE_PATTERN;
@@ -62,7 +63,7 @@ public interface SimpleColStatsCollector {
     }
 
     static Factory from(String option) {
-        String upper = option.toUpperCase();
+        String upper = option.toUpperCase(Locale.ROOT);
         switch (upper) {
             case "NONE":
                 return NoneSimpleColStatsCollector::new;

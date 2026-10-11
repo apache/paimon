@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pyarrow as pa
 from pypaimon.catalog.catalog import Catalog as InnerCatalog
 from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
@@ -85,7 +84,7 @@ class PaimonCatalog(Catalog):
     ) -> Table:
         import pypaimon
 
-        pa_schema = _cast_large_types(schema.to_pyarrow_schema())
+        pa_schema = schema.to_pyarrow_schema()
         partition_keys = [pf.field.name for pf in (partition_fields or [])]
         primary_keys = list((properties or {}).get("primary_keys", []))
         options = {k: str(v) for k, v in (properties or {}).items() if k != "primary_keys"} if properties else {}
@@ -303,24 +302,3 @@ def _to_paimon_table_ident(ident: Identifier) -> str | None:
             return f"{parts[0]}.{parts[1]}"
         return None
     return ident
-
-
-def _cast_large_types(arrow_schema: pa.Schema) -> pa.Schema:
-    """Convert PyArrow schema to be compatible with pypaimon.
-
-    pypaimon doesn't support large_string, so we convert it to regular string.
-    large_binary is kept as-is because pypaimon 1.4+ maps it to the BLOB type.
-    """
-    new_fields = []
-    need_conversion = False
-
-    for field in arrow_schema:
-        field_type = field.type
-        if pa.types.is_large_string(field_type):
-            field_type = pa.string()
-            need_conversion = True
-        new_fields.append(pa.field(field.name, field_type, nullable=field.nullable, metadata=field.metadata))
-
-    if need_conversion:
-        return pa.schema(new_fields, metadata=arrow_schema.metadata)
-    return arrow_schema

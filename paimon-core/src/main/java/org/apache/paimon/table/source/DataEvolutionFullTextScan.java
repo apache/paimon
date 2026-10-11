@@ -28,6 +28,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataField;
@@ -49,6 +50,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link FullTextScan}. */
@@ -56,6 +58,7 @@ public class DataEvolutionFullTextScan implements FullTextScan {
 
     private final FileStoreTable table;
     @Nullable private final PartitionPredicate partitionFilter;
+    @Nullable private final Predicate filter;
     private final List<DataField> textColumns;
     @Nullable private final Snapshot pinnedSnapshot;
 
@@ -78,8 +81,18 @@ public class DataEvolutionFullTextScan implements FullTextScan {
             @Nullable PartitionPredicate partitionFilter,
             List<DataField> textColumns,
             @Nullable Snapshot pinnedSnapshot) {
+        this(table, partitionFilter, null, textColumns, pinnedSnapshot);
+    }
+
+    public DataEvolutionFullTextScan(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            List<DataField> textColumns,
+            @Nullable Snapshot pinnedSnapshot) {
         this.table = table;
         this.partitionFilter = partitionFilter;
+        this.filter = filter;
         this.textColumns = textColumns;
         this.pinnedSnapshot = pinnedSnapshot;
     }
@@ -98,6 +111,7 @@ public class DataEvolutionFullTextScan implements FullTextScan {
             idToColumn.put(textColumn.id(), textColumn.name());
         }
 
+        Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
         @Nullable
         Snapshot snapshot =
                 pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
@@ -111,36 +125,56 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                     if (globalIndex == null) {
                         return false;
                     }
-                    return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()
-                            && supportsFullTextSearch(entry.indexFile().indexType());
+                    return isFullTextIndexFile(entry.indexFile(), textColumnIds)
+                            || containsAnyField(globalIndex, filterFieldIds);
                 };
 
         List<IndexFileMeta> allIndexFiles =
                 indexFileHandler.scan(snapshot, indexFileFilter).stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
+        List<IndexFileMeta> fullTextIndexFiles = new ArrayList<>();
+        List<IndexFileMeta> scalarIndexFiles = new ArrayList<>();
+        for (IndexFileMeta indexFile : allIndexFiles) {
+            boolean fullText = isFullTextIndexFile(indexFile, textColumnIds);
+            if (fullText) {
+                fullTextIndexFiles.add(indexFile);
+            }
+            // A dedicated full-text index cannot evaluate scalar predicates; a multi-field index
+            // (text carried next to scalar extra fields) can serve both roles.
+            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            if (containsAnyField(meta, filterFieldIds) && (!fullText || hasExtraFields(meta))) {
+                scalarIndexFiles.add(indexFile);
+            }
+        }
 
+        // Build splits: for each chosen full-text range, attach the scalar index files that can
+        // pre-filter its rows. Rows the full-text index does not cover go to the raw split; rows
+        // it covers but no scalar index does are resolved from the data at read time.
         List<FullTextSearchSplit> splits = new ArrayList<>();
         for (IndexRangeSelection selection :
-                chooseIndexRanges(allIndexFiles, textColumnIds, idToColumn)) {
+                chooseIndexRanges(fullTextIndexFiles, textColumnIds, idToColumn)) {
             splits.add(
                     new IndexFullTextSearchSplit(
                             selection.columnName,
                             selection.fileRange.from,
                             selection.fileRange.to,
                             selection.files,
-                            selection.searchRanges));
+                            selection.searchRanges,
+                            scalarIndexFiles(
+                                    scalarIndexFiles,
+                                    Collections.singletonList(selection.fileRange))));
         }
 
-        if (!allIndexFiles.isEmpty()) {
+        if (!fullTextIndexFiles.isEmpty()) {
             List<Range> rawRowRanges =
                     new DataEvolutionGlobalIndexCoverage(
                                     table,
                                     snapshot,
                                     partitionFilter,
-                                    allIndexFiles,
+                                    fullTextIndexFiles,
                                     table.coreOptions().fullTextIndexSearchMode())
-                            .unindexedRanges(textColumnIds);
+                            .unindexedRanges(textColumnIds, null);
             if (!rawRowRanges.isEmpty()) {
                 splits.add(new RawFullTextSearchSplit(rawRowRanges));
             }
@@ -406,6 +440,48 @@ public class DataEvolutionFullTextScan implements FullTextScan {
             this.files = files;
             this.searchRanges = searchRanges;
         }
+    }
+
+    private static boolean isFullTextIndexFile(
+            IndexFileMeta indexFile, Set<Integer> textColumnIds) {
+        GlobalIndexMeta globalIndex = checkNotNull(indexFile.globalIndexMeta());
+        return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()
+                && supportsFullTextSearch(indexFile.indexType());
+    }
+
+    private static boolean containsAnyField(GlobalIndexMeta meta, Set<Integer> fieldIds) {
+        if (fieldIds.contains(meta.indexFieldId())) {
+            return true;
+        }
+        int[] extraFieldIds = meta.extraFieldIds();
+        if (extraFieldIds != null) {
+            for (int extraFieldId : extraFieldIds) {
+                if (fieldIds.contains(extraFieldId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasExtraFields(GlobalIndexMeta meta) {
+        int[] extraFieldIds = meta.extraFieldIds();
+        return extraFieldIds != null && extraFieldIds.length > 0;
+    }
+
+    private static List<IndexFileMeta> scalarIndexFiles(
+            List<IndexFileMeta> scalarIndexFiles, List<Range> rowRanges) {
+        List<IndexFileMeta> result = new ArrayList<>();
+        for (IndexFileMeta indexFile : scalarIndexFiles) {
+            Range indexRange = checkNotNull(indexFile.globalIndexMeta()).rowRange();
+            for (Range rowRange : rowRanges) {
+                if (rowRange.hasIntersection(indexRange)) {
+                    result.add(indexFile);
+                    break;
+                }
+            }
+        }
+        return result;
     }
 
     private static boolean supportsFullTextSearch(String indexType) {

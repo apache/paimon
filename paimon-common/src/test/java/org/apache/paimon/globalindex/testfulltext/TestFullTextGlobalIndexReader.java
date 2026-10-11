@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Test full-text index reader that performs brute-force text matching. Loads all documents into
@@ -60,6 +61,9 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
     private long[] rowIds;
     private int count;
 
+    /** Limits requested from this reader, in call order; lets tests pin what the read asks for. */
+    public static final List<Integer> REQUESTED_LIMITS = new CopyOnWriteArrayList<>();
+
     public TestFullTextGlobalIndexReader(
             GlobalIndexFileReader fileReader, GlobalIndexIOMeta ioMeta) {
         this.fileReader = fileReader;
@@ -76,6 +80,7 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
         }
 
         int limit = fullTextSearch.limit();
+        REQUESTED_LIMITS.add(limit);
         int effectiveK = Math.min(limit, count);
         if (effectiveK <= 0) {
             return CompletableFuture.completedFuture(Optional.empty());

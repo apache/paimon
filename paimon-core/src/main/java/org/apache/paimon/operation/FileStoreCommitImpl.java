@@ -50,6 +50,7 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
+import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
@@ -169,6 +170,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
+    private boolean materializeDvRowIdCheck = false;
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
@@ -222,7 +224,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.strictModeChecker =
-                options.commitStrictModeLastSafeSnapshot()
+                options.commitLastSafeSnapshot()
+                        .filter(ignored -> options.commitStrictModeEnabled())
                         .map(
                                 id ->
                                         new StrictModeChecker(
@@ -262,16 +265,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
-        this.conflictDetection.setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot);
-        return this;
-    }
-
-    @Override
-    public FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
-            @Nullable Long rowIdCheckFromSnapshot) {
-        this.conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
-                rowIdCheckFromSnapshot);
+    public FileStoreCommit materializeDvRowIdCheck() {
+        materializeDvRowIdCheck = true;
         return this;
     }
 
@@ -294,14 +289,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
 
-        Optional<Long> optionalStrictSnapshot = options.commitStrictModeLastSafeSnapshot();
+        Optional<Long> lastSafeSnapshot = options.commitLastSafeSnapshot();
         Optional<Snapshot> latestSnapshot;
-        if (optionalStrictSnapshot.isPresent()) {
+        if (lastSafeSnapshot.isPresent()) {
             latestSnapshot =
                     snapshotManager.latestSnapshotOfUser(
                             commitUser,
                             snapshotManager.latestSnapshotId(),
-                            optionalStrictSnapshot.get() + 1);
+                            lastSafeSnapshot.get() + 1);
         } else {
             latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
         }
@@ -338,6 +333,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
+        configureRowIdCheckFromMessages(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
@@ -392,7 +388,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(changes, materializedBuckets),
+                                compactChangesProvider(
+                                        new CommitChanges(
+                                                changes.compactTableFiles,
+                                                changes.compactChangelog,
+                                                changes.compactIndexFiles),
+                                        materializedBuckets),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -504,6 +505,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int generatedSnapshot = 0;
         int attempts = 0;
 
+        configureRowIdCheckFromMessages(committable.fileCommittables());
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
         if (!changes.appendChangelog.isEmpty() || !changes.compactChangelog.isEmpty()) {
             StringBuilder warnMessage =
@@ -575,10 +577,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                CommitChangesProvider.provider(
-                                        changes.compactTableFiles,
-                                        emptyList(),
-                                        changes.compactIndexFiles),
+                                compactChangesProvider(
+                                        new CommitChanges(
+                                                changes.compactTableFiles,
+                                                emptyList(),
+                                                changes.compactIndexFiles),
+                                        Collections.emptySet()),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -763,6 +767,50 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
+    private void configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
+        Long checkFromSnapshot = null;
+        for (CommitMessage message : commitMessages) {
+            Long snapshotId = message.checkFromSnapshot();
+            if (snapshotId == null) {
+                continue;
+            }
+            checkArgument(snapshotId >= 0, "Invalid row-id check snapshot: %s", snapshotId);
+            checkArgument(
+                    checkFromSnapshot == null || checkFromSnapshot.equals(snapshotId),
+                    "Commit messages have different row-id check snapshots: %s and %s",
+                    checkFromSnapshot,
+                    snapshotId);
+            checkFromSnapshot = snapshotId;
+        }
+        if (checkFromSnapshot != null) {
+            for (CommitMessage message : commitMessages) {
+                if (message.checkFromSnapshot() != null) {
+                    continue;
+                }
+                checkArgument(
+                        !materializeDvRowIdCheck,
+                        "A materialize-DV commit message is missing its check-from snapshot.");
+                CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+                checkArgument(
+                        commitMessage.newFilesIncrement().newFiles().stream()
+                                        .noneMatch(file -> file.firstRowId() != null)
+                                && commitMessage.newFilesIncrement().deletedFiles().stream()
+                                        .noneMatch(file -> file.firstRowId() != null),
+                        "A row-id commit message is missing its check-from snapshot.");
+            }
+        }
+        if (materializeDvRowIdCheck) {
+            checkArgument(
+                    checkFromSnapshot != null || commitMessages.isEmpty(),
+                    "A materialize-DV commit is missing its check-from snapshot.");
+            conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
+                    checkFromSnapshot);
+        } else {
+            // A committer can be reused; an untagged commit must not inherit a previous baseline.
+            conflictDetection.setRowIdCheckFromSnapshot(checkFromSnapshot);
+        }
+    }
+
     private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
         if (!options.dataEvolutionEnabled() || !options.deletionVectorsEnabled()) {
             return Collections.emptySet();
@@ -787,15 +835,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @VisibleForTesting
     CommitChangesProvider compactChangesProvider(
-            ManifestEntryChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
+            CommitChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
         if (materializedBuckets.isEmpty()) {
+            Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
+            if (options.dataEvolutionEnabled()
+                    && !conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
+                    && lastSafeSnapshot != null
+                    && lastSafeSnapshot >= 0) {
+                return new ReassignCompactChangesProvider(
+                        fileIO, pathFactory, snapshotManager, lastSafeSnapshot, changes);
+            }
             return CommitChangesProvider.provider(
-                    changes.compactTableFiles, changes.compactChangelog, changes.compactIndexFiles);
+                    changes.tableFiles, changes.changelogFiles, changes.indexFiles);
         }
 
         return latestSnapshot -> {
             List<IndexManifestEntry> indexFiles =
-                    changes.compactIndexFiles.stream()
+                    changes.indexFiles.stream()
                             // Replace global-index deletions prepared against an older snapshot.
                             .filter(
                                     entry ->
@@ -821,8 +877,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
             }
 
-            return new CommitChanges(
-                    changes.compactTableFiles, changes.compactChangelog, indexFiles);
+            return new CommitChanges(changes.tableFiles, changes.changelogFiles, indexFiles);
         };
     }
 
@@ -840,13 +895,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            CommitChanges changes = changesProvider.provide(latestSnapshot);
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
-                            changes.tableFiles,
-                            changes.changelogFiles,
-                            changes.indexFiles,
+                            changesProvider,
                             identifier,
                             watermark,
                             properties,
@@ -976,10 +1028,34 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
             @Nullable String newStatsFileName) {
+        return tryCommitOnce(
+                retryResult,
+                CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
+                identifier,
+                watermark,
+                properties,
+                commitKind,
+                allowRollback,
+                latestSnapshot,
+                detectConflicts,
+                newStatsFileName);
+    }
+
+    private CommitResult tryCommitOnce(
+            @Nullable RetryCommitResult retryResult,
+            CommitChangesProvider changesProvider,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKind commitKind,
+            boolean allowRollback,
+            @Nullable Snapshot latestSnapshot,
+            boolean detectConflicts,
+            @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
 
-        // Check if the commit has been completed. At this point, there will be no more repeated
-        // commits and just return success
+        // Resolve an uncertain successful commit before preparing changes, which may refer
+        // to inputs removed by that successful commit.
         boolean hasOverwriteSinceLastAttempt = false;
         if (retryResult instanceof CommitFailRetryResult && latestSnapshot != null) {
             CommitFailRetryResult commitFailRetry = (CommitFailRetryResult) retryResult;
@@ -1003,6 +1079,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        CommitChanges changes = changesProvider.provide(latestSnapshot);
+        List<ManifestEntry> deltaFiles = changes.tableFiles;
+        List<ManifestEntry> changelogFiles = changes.changelogFiles;
+        List<IndexManifestEntry> indexFiles = changes.indexFiles;
+        Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
+
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         long firstRowIdStart = 0;
         if (latestSnapshot != null) {
@@ -1020,7 +1102,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<BinaryRow> changedPartitions = null;
         if (strictModeChecker != null) {
             changedPartitions = changedPartitions(deltaFiles, indexFiles);
-            strictModeChecker.check(newSnapshotId, commitKind, changedPartitions);
+            strictModeChecker.check(
+                    newSnapshotId, commitKind, changedPartitions, rebasedReassignments);
             strictModeChecker.update(newSnapshotId - 1);
         }
 
@@ -1044,7 +1127,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
-        if (checkConflicts) {
+        if (checkConflicts
+                && !conflictDetection.canSkipDataFileConflictDetection(
+                        latestSnapshot, deltaFiles, indexFiles, commitKind)) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             if (changedPartitions == null) {
@@ -1391,6 +1476,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId) {
+        return replaceManifestList(
+                latest,
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                indexManifest,
+                nextRowId,
+                latest.properties());
+    }
+
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1413,7 +1516,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.watermark(),
                         latest.statistics(),
                         // if empty properties, just set to null
-                        latest.properties(),
+                        properties == null || properties.isEmpty() ? null : properties,
                         nextRowId,
                         null);
 

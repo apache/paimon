@@ -253,7 +253,7 @@ public class PostponeUtilsTest {
         assertThat(options.getValue())
                 .containsEntry("bucket", "4")
                 .containsEntry("write-only", "false")
-                .containsEntry("commit.strict-mode.last-safe-snapshot", "5");
+                .containsEntry("commit.last-safe-snapshot", "5");
     }
 
     @Test

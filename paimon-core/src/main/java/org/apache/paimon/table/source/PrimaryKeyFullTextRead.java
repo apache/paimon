@@ -176,7 +176,9 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                             table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM));
             this.indexer =
                     GlobalIndexer.create(
-                            PkFullTextIndexFile.INDEX_TYPE, textField, definition.options());
+                            PkFullTextIndexFile.INDEX_TYPE,
+                            Collections.singletonList(textField),
+                            definition.options());
             this.archiveReader = meta -> fileIO.newInputStream(meta.filePath());
         }
 
@@ -211,6 +213,7 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                                         archiveReader,
                                         Collections.singletonList(ioMeta),
                                         totalRowCount,
+                                        null,
                                         executor);
                         return reader;
                     });

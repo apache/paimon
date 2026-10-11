@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
@@ -25,6 +26,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.AppendBatchTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -34,6 +36,8 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
@@ -208,6 +212,70 @@ public class DataEvolutionBatchScanTest {
         assertThat(indexedSplit.dataSplit()).isEqualTo(split);
         assertThat(indexedSplit.rowRanges())
                 .containsExactly(new Range(4200, 4450), new Range(4650, 4700));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWrapToIndexSplitsWithQueryAuth(boolean hasAuthResult) {
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(newAppendFile(0L, 10L, "file-0")))
+                        .build();
+        TableQueryAuthResult authResult =
+                hasAuthResult
+                        ? new TableQueryAuthResult(
+                                Collections.singletonList("filter-json"),
+                                Collections.singletonMap("f0", "mask-json"))
+                        : null;
+        QueryAuthSplit authSplit = new QueryAuthSplit(split, authResult);
+
+        List<Split> indexedSplits =
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                                Collections.singletonList(authSplit),
+                                RowRangeIndex.create(
+                                        Arrays.asList(new Range(1, 2), new Range(7, 12))),
+                                rowId -> rowId + 0.5f)
+                        .splits();
+
+        assertThat(indexedSplits).hasSize(1);
+        assertThat(indexedSplits.get(0)).isInstanceOf(QueryAuthSplit.class);
+        QueryAuthSplit indexedAuthSplit = (QueryAuthSplit) indexedSplits.get(0);
+        assertThat(indexedAuthSplit.authResult()).isSameAs(authResult);
+        assertThat(indexedAuthSplit.split()).isInstanceOf(IndexedSplit.class);
+        IndexedSplit indexedSplit = (IndexedSplit) indexedAuthSplit.split();
+        assertThat(indexedSplit.dataSplit()).isSameAs(split);
+        assertThat(indexedSplit.rowRanges()).containsExactly(new Range(1, 2), new Range(7, 9));
+        assertThat(indexedSplit.scores()).containsExactly(1.5f, 2.5f, 7.5f, 8.5f, 9.5f);
+        assertThat(authSplit.split()).isSameAs(split);
+    }
+
+    @Test
+    public void testWrapToIndexSplitsKeepsExistingIndexedSplits() {
+        IndexedSplit indexedSplit =
+                new IndexedSplit(
+                        mock(DataSplit.class),
+                        Collections.singletonList(new Range(1, 2)),
+                        new float[] {1.5f, 2.5f});
+        TableQueryAuthResult authResult = mock(TableQueryAuthResult.class);
+
+        List<Split> indexedSplits =
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                                Arrays.asList(
+                                        indexedSplit, new QueryAuthSplit(indexedSplit, authResult)),
+                                null,
+                                null)
+                        .splits();
+
+        assertThat(indexedSplits).hasSize(2);
+        assertThat(indexedSplits.get(0)).isSameAs(indexedSplit);
+        assertThat(indexedSplits.get(1)).isInstanceOf(QueryAuthSplit.class);
+        QueryAuthSplit indexedAuthSplit = (QueryAuthSplit) indexedSplits.get(1);
+        assertThat(indexedAuthSplit.authResult()).isSameAs(authResult);
+        assertThat(indexedAuthSplit.split()).isSameAs(indexedSplit);
     }
 
     private static RowType rowTypeWithRowId() {

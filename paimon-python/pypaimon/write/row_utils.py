@@ -21,7 +21,7 @@ from typing import Any, Dict, Iterable, List
 import pyarrow as pa
 
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser, is_blob_file_field
-from pypaimon.table.row.blob import Blob
+from pypaimon.table.row.blob import Blob, BlobView
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.vector import Vector
 
@@ -60,6 +60,21 @@ def require_columns(
             f"{context} requires row field(s) {missing}, "
             f"but row only contains {list(values_by_name.keys())}."
         )
+
+
+def inline_blob_value(value: Any, descriptor: bool, view: bool) -> Any:
+    """Serialize row objects to inline references without opening payloads."""
+    if descriptor and isinstance(value, Blob):
+        try:
+            return value.to_descriptor().serialize()
+        except Exception as error:
+            raise ValueError(
+                "blob-descriptor-field row values must be serialized "
+                "BlobDescriptor bytes or a Blob with a descriptor."
+            ) from error
+    if view and isinstance(value, BlobView):
+        return value.view_struct.serialize()
+    return value
 
 
 def value_for_arrow(value: Any, field: DataField) -> Any:

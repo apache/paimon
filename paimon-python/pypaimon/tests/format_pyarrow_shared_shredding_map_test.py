@@ -22,6 +22,7 @@ import shutil
 import struct
 import tempfile
 import unittest
+from typing import Dict, List, Optional
 from unittest import mock
 
 import pyarrow as pa
@@ -29,7 +30,11 @@ import pyarrow.fs as pafs
 import pyarrow.orc as orc
 import pyarrow.parquet as pq
 
-from pypaimon.data.map_shared_shredding import map_selected_keys_field
+from pypaimon.data import map_shared_shredding
+from pypaimon.data.map_shared_shredding import (
+    assemble_shared_shredding_selected_keys,
+    map_selected_keys_field,
+)
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.schema.data_types import (
     ArrayType,
@@ -73,6 +78,194 @@ def _metadata(compression):
 
 
 class SharedShreddingMapReaderTest(unittest.TestCase):
+    def test_selected_keys_preserve_sliced_mapping_and_overflow(self):
+        # Exercise both sides of the batch/candidate limits with the same
+        # sliced data, including null parents, moving keys and duplicate overflow.
+        # Keep explicit boundaries to catch accidental changes to the policy.
+        cases = [
+            (pa.string(), 6, 2, False),
+            (pa.string(), 1023, 8, False),
+            (pa.string(), 1024, 8, True),
+            (pa.string(), 1025, 8, True),
+            (pa.string(), 1024, 9, False),
+            (pa.struct([("v", pa.int64())]), 1024, 8, False),
+            (pa.int64(), 1024, 8, True),
+            (pa.float64(), 1024, 8, True),
+            (pa.bool_(), 1024, 8, True),
+            (pa.binary(), 1024, 8, True),
+        ]
+        for value_type, rows, width, vectorized in cases:
+            with self.subTest(value_type=value_type, rows=rows, width=width):
+
+                def value(number: int):
+                    if pa.types.is_string(value_type):
+                        return str(number)
+                    if pa.types.is_binary(value_type):
+                        return number.to_bytes(2, "little")
+                    if pa.types.is_integer(value_type):
+                        return number
+                    if pa.types.is_floating(value_type):
+                        return number / 8.0
+                    if pa.types.is_boolean(value_type):
+                        return bool(number % 2)
+                    return {"v": number}
+
+                mappings = [[0, 1], [], [-1, -1], [0, 1], [-1, -1], [1, 0]]
+                mappings = [m + [-1] * (width - 2) if m else [] for m in mappings]
+                repeats = (rows + 5) // 6
+                # Prefix is excluded by the slice but shifts both child offsets.
+                mapping = [[0, 1] + [-1] * (width - 2)] + mappings * repeats
+                first = [value(99)] + [
+                    value(1),
+                    None,
+                    None,
+                    None,
+                    None,
+                    value(15),
+                ] * repeats
+                second = [value(199)] + [
+                    value(11),
+                    None,
+                    None,
+                    None,
+                    None,
+                    value(5),
+                ] * repeats
+                overflow = [[(0, value(999))]] + [
+                    [],
+                    [],
+                    [(0, value(2)), (0, value(3)), (1, value(12))],
+                    [(0, value(4)), (1, value(14))],
+                    [],
+                    None,
+                ] * repeats
+                physical = pa.StructArray.from_arrays(
+                    [
+                        pa.array(mapping, type=pa.list_(pa.int32())),
+                        pa.array(first, type=value_type),
+                        pa.array(second, type=value_type),
+                    ]
+                    + [
+                        pa.nulls(len(mapping), type=value_type)
+                        for _ in range(width - 2)
+                    ]
+                    + [pa.array(overflow, type=pa.map_(pa.int32(), value_type))],
+                    names=["__field_mapping"]
+                    + ["__col_%d" % i for i in range(width)]
+                    + ["__overflow"],
+                    mask=pa.array(
+                        [False] + [False, True, False, False, False, False] * repeats
+                    ),
+                )
+                expected = [
+                    {"k": value(1), "other": value(11), "missing": None},
+                    None,
+                    {"k": value(2), "other": value(12), "missing": None},
+                    {"k": None, "other": None, "missing": None},
+                    {"k": None, "other": None, "missing": None},
+                    {"k": value(5), "other": value(15), "missing": None},
+                ] * repeats
+                with mock.patch.object(
+                    map_shared_shredding.pc,
+                    "list_value_length",
+                    wraps=map_shared_shredding.pc.list_value_length,
+                ) as vectorized_lengths:
+                    selected = assemble_shared_shredding_selected_keys(
+                        physical.slice(1, rows),
+                        ["k", "other", "missing"],
+                        value_type,
+                        (
+                            {0: "k", 1: "other"},
+                            {0: list(range(width)), 1: list(range(min(width, 8)))},
+                            {0, 1},
+                            width,
+                        ),
+                    )
+                    self.assertEqual(vectorized_lengths.call_count, int(vectorized))
+                expected_array = pa.array(expected[:rows], type=selected.type)
+                assert isinstance(expected_array, pa.StructArray)
+                self.assertTrue(selected.equals(expected_array))
+
+    def test_selected_keys_mapping_boundaries(self):
+        for rows in (1023, 1024):
+            for case in (
+                "tail_null", "null_id", "short_mapping", "unknown_key",
+                "missing_column", "fixed_size_list", "large_list",
+            ):
+                with self.subTest(rows=rows, case=case):
+                    mappings: List[List[Optional[int]]] = [[0, 1] for _ in range(rows + 1)]
+                    mask = [False] * (rows + 1)
+                    expected: List[Optional[Dict[str, Optional[str]]]] = [
+                        {"k": str(i)} for i in range(1, rows + 1)
+                    ]
+                    selected_keys = ["k"]
+                    mapping_type = pa.list_(pa.int32())
+                    if case == "tail_null":
+                        mappings[-1] = []
+                        mask[-1] = True
+                        expected[-1] = None
+                    elif case == "null_id":
+                        # A later null candidate must not erase an earlier match.
+                        mappings[7] = [0, None]
+                    elif case in ("short_mapping", "unknown_key"):
+                        mappings[7] = []
+                        if case == "unknown_key":
+                            selected_keys = ["missing"]
+                            expected = [{"missing": None}] * rows
+                    elif case == "missing_column":
+                        mappings[7] = [1, 0]
+                    elif case == "fixed_size_list":
+                        mapping_type = pa.list_(pa.int32(), 2)
+                    elif case == "large_list":
+                        mapping_type = pa.large_list(pa.int32())
+                    arrays = [
+                        pa.array(mappings, type=mapping_type),
+                        pa.array([str(i) for i in range(rows + 1)]),
+                    ]
+                    names = ["__field_mapping", "__col_0"]
+                    if case != "missing_column":
+                        arrays.append(pa.nulls(rows + 1, type=pa.string()))
+                        names.append("__col_1")
+                    physical = pa.StructArray.from_arrays(
+                        arrays, names=names, mask=pa.array(mask)
+                    ).slice(1)
+                    metadata = ({0: "k", 1: "other"}, {0: [0, 1]}, set(), 2)
+                    if case in ("short_mapping", "missing_column"):
+                        message = (
+                            "field mapping length must equal 2"
+                            if case == "short_mapping"
+                            else "Missing shared-shredding physical column 1"
+                        )
+                        with self.assertRaisesRegex(ValueError, message):
+                            assemble_shared_shredding_selected_keys(
+                                physical, selected_keys, pa.string(), metadata
+                            )
+                    else:
+                        selected = assemble_shared_shredding_selected_keys(
+                            physical, selected_keys, pa.string(), metadata
+                        )
+                        expected_array = pa.array(expected, type=selected.type)
+                        assert isinstance(expected_array, pa.StructArray)
+                        self.assertTrue(selected.equals(expected_array))
+
+    def test_selected_keys_reject_out_of_range_candidates(self):
+        for rows in (1023, 1024):
+            for physical_index in (-1, 1):
+                with self.subTest(rows=rows, physical_index=physical_index):
+                    # Keep adjacent rows in the backing array so an invalid
+                    # candidate can cross a row boundary without take failing.
+                    physical = pa.StructArray.from_arrays(
+                        [
+                            pa.array([[0]] * (rows + 2), type=pa.list_(pa.int32())),
+                            pa.array(["value"] * (rows + 2)),
+                        ],
+                        names=["__field_mapping", "__col_{}".format(physical_index)],
+                    ).slice(1, rows)
+                    with self.assertRaisesRegex(ValueError, "physical column .* out of range"):
+                        assemble_shared_shredding_selected_keys(
+                            physical, ["k"], pa.string(),
+                            ({0: "k"}, {0: [physical_index]}, set(), 1),
+                        )
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

@@ -140,6 +140,27 @@ public class SnapshotManagerTest {
         }
     }
 
+    @Test
+    public void testLatestSnapshotOfUserStopsAtSnapshotDeletedDuringRead() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        for (long id = 1; id <= 3; id++) {
+            fileIO.tryToWriteAtomic(
+                    snapshotManager.snapshotPath(id),
+                    createSnapshotWithMillis(id, id * 1000).toJson());
+        }
+        Path expiring = snapshotManager.snapshotPath(1);
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(expiring);
+                            throw new IOException("404 Not Found");
+                        })
+                .when(fileIO)
+                .newInputStream(expiring);
+
+        assertThat(snapshotManager.latestSnapshotOfUser("currentCommitUser")).isEmpty();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testEarliestSnapshot(boolean isRaceCondition) throws IOException {

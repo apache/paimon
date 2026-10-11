@@ -199,6 +199,36 @@ Expire snapshots.
 CALL sys.expire_snapshots(table => 'default.T', retain_max => 10, options => 'snapshot.expire.limit=1');
 ```
 
+## expire_changelogs
+
+Expire separated changelog files. Unspecified arguments fall back to table properties
+(`changelog.num-retained.max` / `changelog.num-retained.min` / `changelog.time-retained`, or the
+corresponding `snapshot.*` options when changelog options are not set, and `snapshot.expire.limit`
+for `max_deletes`). `retain_min` and `retain_max` are applied against the latest snapshot id, not
+the long-lived changelog count. The procedure returns `deleted_changelogs_count`, the number of
+changelogs successfully deleted. A missing changelog, one skipped after a file-skipper failure, or
+one whose changelog file is still present after a failed deletion, is not included.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier.
+- `retain_max` (`INT`, optional): the maximum number of completed changelogs to retain.
+- `retain_min` (`INT`, optional): the minimum number of completed changelogs to retain.
+- `older_than` (`STRING`, optional): timestamp before which changelogs will be removed.
+- `max_deletes` (`INT`, optional): the maximum number of changelogs that can be deleted at once.
+- `delete_all` (`BOOLEAN`, optional): when true, delete all separated changelogs. Cannot be combined with `retain_max`, `retain_min`, `older_than`, `max_deletes` or `options`.
+- `options` (`STRING`, optional): the additional dynamic options of the table. These override stored table properties and are overridden by explicit procedure arguments.
+
+```sql
+CALL sys.expire_changelogs(table => 'default.T', retain_max => 8);
+
+CALL sys.expire_changelogs(table => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 2);
+
+CALL sys.expire_changelogs(table => 'default.T', options => 'changelog.num-retained.max=8, changelog.num-retained.min=4');
+
+CALL sys.expire_changelogs(table => 'default.T', delete_all => true);
+```
+
 ## expire_partitions
 
 Expire partitions.
@@ -236,6 +266,8 @@ Remove the orphan data files and metadata files.
 - `parallelism` (`INT`, optional): The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.
 - `mode` (`STRING`, optional): The mode of remove orphan clean procedure (local or distributed) . By default is distributed.
 
+This procedure does not delete primary-key `.managed.blob` packs. Use [`remove_orphan_blobs`](#remove_orphan_blobs).
+
 ```sql
 CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00');
 
@@ -254,6 +286,41 @@ CALL sys.remove_orphan_files(
   table => 'default.T',
   older_than => '2023-10-31 12:00:00',
   dry_run => true,
+  parallelism => 5,
+  mode => 'local'
+);
+```
+
+## remove_orphan_blobs
+
+Remove unreferenced primary-key `.managed.blob` packs.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier. Use `database_name.*` to process the whole database.
+- `older_than` (`STRING`, optional): an absolute timestamp cutoff. Only packs whose modification time is earlier than this timestamp are candidates. The default cutoff is 1 day before the procedure starts.
+- `dry_run` (`BOOLEAN`, optional): when true, calculate the candidate file count and total bytes without deleting files. The procedure returns aggregate counts, not individual pack paths. Default is false.
+- `parallelism` (`INT`, optional): per-table concurrency. In `distributed` mode this is the Spark task parallelism of each table job (default: the larger of Spark's default parallelism and `spark.sql.shuffle.partitions`). In `local` mode this is the per-table file-operation thread limit (default: the number of processors available to the Java virtual machine). For `database_name.*`, `distributed` mode runs tables one Spark job at a time, so cluster concurrency stays within this per-table value; `local` mode may run several tables at once, so total threads can exceed this value.
+- `mode` (`STRING`, optional): The mode of remove orphan blob procedure (`local` or `distributed`). By default is `distributed`.
+
+```sql
+CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(table => 'default.*', older_than => '2023-10-31 12:00:00');
+
+CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true);
+
+CALL sys.remove_orphan_blobs(
+  table => 'default.T',
+  older_than => '2023-10-31 12:00:00',
+  dry_run => false,
+  parallelism => 5
+);
+
+CALL sys.remove_orphan_blobs(
+  table => 'default.T',
+  older_than => '2023-10-31 12:00:00',
+  dry_run => false,
   parallelism => 5,
   mode => 'local'
 );
@@ -278,6 +345,22 @@ CALL sys.remove_unexisting_files(table => 'mydb.myt');
 
 -- only check what files will be removed, but not really remove them (dry run)
 CALL sys.remove_unexisting_files(table => 'mydb.myt', dry_run => true);
+```
+
+## remove_unexisting_manifests
+
+Remove missing manifest files from the latest snapshot's manifest list and commit a replacement snapshot.
+
+This procedure may cause data loss when used outside of the documented repair cases.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier. To repair a branch, backtick-quote the table name so `$` stays inside the identifier.
+
+```sql
+CALL sys.remove_unexisting_manifests(table => 'mydb.myt');
+
+CALL sys.remove_unexisting_manifests(table => 'mydb.`myt$branch_rt`');
 ```
 
 ## purge_files
