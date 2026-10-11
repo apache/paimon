@@ -155,6 +155,11 @@ frames in `_ROW_ID` order; use it only when that order matches the source
 video's frame order. Adding the schema and backfilling the data are separate
 commits.
 
+If a concurrent row-ID reassignment moves the rows being backfilled, the stale
+update is rejected. Re-read the row IDs and rebuild the row-to-video-frame mapping
+before retrying; do not resubmit the old commit messages. Reassignment of a
+disjoint partition does not by itself invalidate the backfill.
+
 ### Update frame rows and replace a video
 
 Frame rows use the ordinary table update API for non-video columns. This writes
