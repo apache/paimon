@@ -123,12 +123,10 @@ file. Its video grouping policy coordinates normal, BLOB, and vector rolling
 at payload boundaries. A file may exceed its target before the next boundary.
 The normal `.blob` format is unchanged.
 
-### Add a Video Column to an Existing Table
+### Add a Video Column
 
-An existing append-only table with row tracking and data evolution enabled can
-add a video column without replacing its image column or rewriting its rows.
-Add the nullable BLOB column and register it in `video-frame-field` in **one**
-`alter_table` call:
+Add a nullable BLOB column and register it in `video-frame-field` in the same
+schema change; existing rows read NULL in the new column:
 
 ```python
 from pypaimon.schema.data_types import AtomicType
@@ -141,24 +139,7 @@ conn.catalog.alter_table("default.images", [
 images = conn.get_table("images")
 ```
 
-Historical rows have NULL in `image_video`; the existing image column is
-unchanged. If the table already has video columns, include all of them in the
-new `video-frame-field` value. Only columns created in this same schema change
-can be registered: an existing BLOB column cannot be reinterpreted as video,
-even if it currently contains only NULLs. New video columns must be nullable
-and have no default value. Removing existing video fields or changing this
-option through dynamic read options remains unsupported.
-
-Adding the column does not populate it. Backfill matching rows separately and
-validate them before switching readers. `replace_video` assigns consecutive
-frames in `_ROW_ID` order; use it only when that order matches the source
-video's frame order. Adding the schema and backfilling the data are separate
-commits.
-
-If a concurrent row-ID reassignment moves the rows being backfilled, the stale
-update is rejected. Re-read the row IDs and rebuild the row-to-video-frame mapping
-before retrying; do not resubmit the old commit messages. Reassignment of a
-disjoint partition does not by itself invalidate the backfill.
+If the table already has video fields, retain them in the option value.
 
 ### Update frame rows and replace a video
 
