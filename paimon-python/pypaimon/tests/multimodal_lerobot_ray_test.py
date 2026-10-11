@@ -192,8 +192,12 @@ class LeRobotRayImportTest(unittest.TestCase):
         table = self.conn.get_table("parallel").raw_table
         self.assertEqual(2, table.snapshot_manager().get_latest_snapshot().id)
 
-    @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("torch"),
-                         "PyAV and PyTorch are required")
+    @unittest.skipUnless(
+        importlib.util.find_spec("av")
+        and importlib.util.find_spec("torch")
+        and importlib.util.find_spec("datasets"),
+        "PyAV, PyTorch, and datasets are required",
+    )
     def test_real_videos_are_readable_after_parallel_import(self):
         self._source(video=True)
         self.conn.load_from_lerobot("videos", self.source, engine="ray", concurrency=2, batch_size=1)
