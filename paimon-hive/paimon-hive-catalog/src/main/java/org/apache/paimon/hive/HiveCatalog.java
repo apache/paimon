@@ -1946,7 +1946,8 @@ public class HiveCatalog extends AbstractCatalog {
                 new HiveCatalogLock(
                         clients(),
                         HiveCatalogLock.checkMaxSleep(hiveConf),
-                        HiveCatalogLock.acquireTimeout(hiveConf));
+                        HiveCatalogLock.acquireTimeout(hiveConf),
+                        HiveCatalogLock.leaseTimeout(hiveConf));
         return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 

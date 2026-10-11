@@ -43,7 +43,8 @@ public class HiveCatalogLockFactory implements CatalogLockFactory {
         return new HiveCatalogLock(
                 createClients(conf, hiveLockContext.options(), hiveLockContext.clientClassName()),
                 checkMaxSleep(conf),
-                acquireTimeout(conf));
+                acquireTimeout(conf),
+                HiveCatalogLock.leaseTimeout(conf));
     }
 
     @Override

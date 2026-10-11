@@ -72,6 +72,26 @@ The commit mechanism depends on the catalog and storage:
 All writers of the same table must use a compatible commit mechanism and shared locking
 configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
+## Commit Locks
+
+Configured catalog locks protect every snapshot publication attempt, including the first attempt.
+The writer acquires the lock before reading the latest snapshot, validating changes and preparing
+manifests. It checks that the lock is still valid immediately before publishing. Each snapshot has
+its own scope: APPEND and COMPACT snapshots produced by the same commit acquire separate locks.
+Post-commit callbacks run after the scope ends. Metadata-only manifest replacement validates the
+caller's prepared layout against the current head while holding the lock.
+
+`Catalog.createLock` supplies a table-bound `Lock` with one `runWithLock` contract. The existing
+`CatalogLockFactory` SPI remains compatible and its named locks are adapted to this contract.
+`lock.enabled` and `lock.type` continue to select filesystem catalog locks, including Hive and JDBC.
+Hive locks send heartbeats and validate ownership before publication. The client's
+`hive.txn.timeout` must match the metastore timeout. JDBC locks renew their
+leases and use an internal owner ID for renewal and release. Existing JDBC lock tables receive a
+nullable `lock_owner` column when the catalog initializes; this requires permission to alter that
+table. Older clients can still read the table, but all writers should upgrade before relying on
+owner-checked release after lease expiry. Filesystem locks still depend on the storage's atomic
+publication behavior; they do not provide a storage fencing token.
+
 ## Files conflict
 
 A writer validates file-level changes as well as the snapshot ID. For example, if two compactors
