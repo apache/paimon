@@ -25,6 +25,7 @@ import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTTokenRefresher;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.ReflectionUtils;
 import org.apache.paimon.utils.SensitiveConfigUtils;
@@ -50,6 +51,8 @@ import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -84,6 +87,7 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_SECOND_LEVEL_DOMAIN_ENABLED = "fs.oss.sld.enabled";
+    private static final String OSS_CREDENTIALS_PROVIDER = "fs.oss.credentials.provider";
 
     /**
      * Set to false for an OSS-compatible endpoint that is neither an official Aliyun domain nor a
@@ -138,6 +142,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private Options hadoopOptions;
     private boolean allowCache = true;
 
+    // Catalog options for RESTTokenCredentialsProvider when the options name a REST catalog table.
+    @Nullable private Map<String, String> restTokenOptions;
+
     @Override
     public boolean isObjectStore() {
         return true;
@@ -145,7 +152,13 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     @Override
     public void configure(CatalogContext context) {
-        allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
+        // Only a constant is read here, so an older paimon-common without the class still works.
+        restTokenOptions =
+                context.options().containsKey(RESTTokenRefresher.DATABASE)
+                        ? context.options().toMap()
+                        : null;
+        // The file system refreshes a table's token, so it must not be shared through the cache.
+        allowCache = context.options().get(FILE_IO_ALLOW_CACHE) && restTokenOptions == null;
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -203,6 +216,17 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                     // retrieve props from the file, which comes at a high cost
                     Configuration hadoopConf = new Configuration(SHARED_CONFIG);
                     hadoopOptions.toMap().forEach(hadoopConf::set);
+                    if (restTokenOptions != null) {
+                        hadoopConf.set(
+                                OSS_CREDENTIALS_PROVIDER,
+                                RESTTokenCredentialsProvider.class.getName());
+                        restTokenOptions.forEach(
+                                (key, value) ->
+                                        hadoopConf.set(
+                                                RESTTokenCredentialsProvider.CATALOG_OPTIONS_PREFIX
+                                                        + key,
+                                                value));
+                    }
                     URI fsUri = path.toUri();
                     if (scheme == null && authority == null) {
                         fsUri = FileSystem.getDefaultUri(hadoopConf);
