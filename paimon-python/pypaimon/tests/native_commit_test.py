@@ -24,6 +24,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.commit_message import CommitMessage
@@ -593,6 +594,56 @@ def test_custom_manifest_target_uses_native_commit(tmp_path, native_rest_catalog
         assert metas[0].num_added_files == 2
     finally:
         commit.close()
+
+
+def test_preserve_blob_abort_skips_native_and_keeps_pack(tmp_path):
+    table = _table(tmp_path, 'unpartitioned')
+    assert not native_messages_supported(table, [CommitMessage(
+        (), 0, [], preserve_blob_files_on_abort=True)])
+    bucket = tmp_path / 'bucket-0'
+    bucket.mkdir()
+    data_path = bucket / 'data.avro'
+    sidecar_path = bucket / 'data.avro.blobref'
+    pack_path = bucket / 'pack.managed.blob'
+    data_path.write_bytes(b'data')
+    sidecar_path.write_bytes(b'ref')
+    pack_path.write_bytes(b'pack')
+    message = CommitMessage(
+        partition=(),
+        bucket=0,
+        new_files=[DataFileMeta(
+            file_name='data.avro',
+            file_size=1,
+            row_count=0,
+            min_key=None,
+            max_key=None,
+            key_stats=None,
+            value_stats=None,
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=['data.avro.blobref', 'pack.managed.blob'],
+            file_path=str(data_path),
+        )],
+        preserve_blob_files_on_abort=True,
+    )
+    native = Mock()
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        with patch('pypaimon.write.native_commit.create_native_commit', return_value=native), \
+                patch('pypaimon.write.native_commit.to_native_commit_messages',
+                      side_effect=lambda _table, messages: messages):
+            commit.abort([CommitMessage((), 0, [])])
+            native.abort.assert_called_once()
+            native.reset_mock()
+            commit.abort([message])
+            native.abort.assert_not_called()
+    finally:
+        commit.close()
+    assert not data_path.exists()
+    assert not sidecar_path.exists()
+    assert pack_path.read_bytes() == b'pack'
 
 
 def test_close_releases_python_resources_even_if_native_close_fails(tmp_path):
