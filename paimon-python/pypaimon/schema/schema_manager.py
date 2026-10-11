@@ -788,7 +788,8 @@ class SchemaManager:
                 # data -- reject independently of the snapshot check
                 if change.key == "type":
                     raise ValueError(f"Change '{change.key}' is not supported yet.")
-                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
+                if (change.key in CoreOptions.IMMUTABLE_OPTIONS
+                        and change.key != "video-frame-field" and _has_snapshots()):
                     raise ValueError(f"Change '{change.key}' is not supported yet.")
                 new_options[change.key] = change.value
             elif isinstance(change, RemoveOption):
@@ -842,6 +843,22 @@ class SchemaManager:
             old_table_schema.primary_keys, rename_mappings
         )
         new_options = SchemaManager._apply_rename_columns_to_options(new_options, rename_mappings)
+
+        # Validate the complete change, independent of ADD COLUMN / SET OPTION order.
+        if (old_table_schema.options.get("video-frame-field")
+                != new_options.get("video-frame-field") and _has_snapshots()):
+            old_video_fields = CoreOptions(Options(old_table_schema.options)).video_frame_fields()
+            new_video_fields = CoreOptions(Options(new_options)).video_frame_fields()
+            if not old_video_fields.issubset(new_video_fields):
+                raise ValueError("Cannot remove existing fields from 'video-frame-field'.")
+            fields_by_name = {field.name: field for field in new_fields}
+            for name in new_video_fields - old_video_fields:
+                field = fields_by_name.get(name)
+                if (field is None or field.id <= old_table_schema.highest_field_id
+                        or not field.type.nullable or field.default_value is not None):
+                    raise ValueError(
+                        f"Field '{name}' added to 'video-frame-field' must be a new nullable BLOB "
+                        "column without a default, added in the same schema change.")
 
         new_schema = Schema(
             fields=new_fields,

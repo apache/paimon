@@ -536,6 +536,9 @@ class FileStoreTable(Table):
         return table
 
     def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
+        video_key = CoreOptions.VIDEO_FRAME_FIELD.key()
+        if video_key in options and options[video_key] != self.table_schema.options.get(video_key):
+            raise ValueError("Cannot change immutable option " + video_key)
         directory_key = CoreOptions.DATA_FILE_PATH_DIRECTORY.key()
         if directory_key in options and options[directory_key] != self.options.data_file_path_directory():
             raise ValueError('Cannot change immutable option ' + directory_key)
@@ -619,7 +622,8 @@ class FileStoreTable(Table):
                 (CoreOptions.VECTOR_FIELD.key(),),
                 (CoreOptions.BLOB_FIELD.key(),),
                 (CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), 'blob.stored-descriptor-fields'),
-                (CoreOptions.BLOB_VIEW_FIELD.key(),)):
+                (CoreOptions.BLOB_VIEW_FIELD.key(),),
+                (CoreOptions.VIDEO_FRAME_FIELD.key(),)):
             if any(key in dynamic_option_keys for key in keys):
                 # Preserve explicit overrides and removals, including those from earlier copies.
                 continue

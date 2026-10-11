@@ -65,6 +65,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -151,7 +152,11 @@ final class SchemaManagerUtils {
                 if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
-                if (hasSnapshots.get() && !unchanged) {
+                // Video registration is checked against the complete schema below, so
+                // ADD COLUMN and SET OPTION can appear in either order in one commit.
+                if (hasSnapshots.get()
+                        && !unchanged
+                        && !CoreOptions.VIDEO_FRAME_FIELD.key().equals(setOption.key())) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
                 if (!unchanged) {
@@ -461,8 +466,40 @@ final class SchemaManagerUtils {
                         newSchema.primaryKeys(),
                         newSchema.options(),
                         newSchema.comment());
+        if (!Objects.equals(
+                        oldOptions.get(CoreOptions.VIDEO_FRAME_FIELD.key()),
+                        newTableSchema.options().get(CoreOptions.VIDEO_FRAME_FIELD.key()))
+                && hasSnapshots.get()) {
+            validateAddedVideoFields(oldTableSchema, newTableSchema);
+        }
         SchemaValidation.validateTableSchema(newTableSchema);
         return newTableSchema;
+    }
+
+    private static void validateAddedVideoFields(TableSchema oldSchema, TableSchema newSchema) {
+        Set<String> oldVideoFields = new CoreOptions(oldSchema.options()).videoFrameFields();
+        Set<String> newVideoFields = new CoreOptions(newSchema.options()).videoFrameFields();
+        Preconditions.checkArgument(
+                newVideoFields.containsAll(oldVideoFields),
+                "Cannot remove existing fields from 'video-frame-field'.");
+        for (String name : newVideoFields) {
+            if (oldVideoFields.contains(name)) {
+                continue;
+            }
+            DataField field =
+                    newSchema.fields().stream()
+                            .filter(f -> f.name().equals(name))
+                            .findFirst()
+                            .orElse(null);
+            Preconditions.checkArgument(
+                    field != null
+                            && field.id() > oldSchema.highestFieldId()
+                            && field.type().isNullable()
+                            && field.defaultValue() == null,
+                    "Field '%s' added to 'video-frame-field' must be a new nullable BLOB column "
+                            + "without a default, added in the same schema change.",
+                    name);
+        }
     }
 
     // gets the rootType at the defined depth
