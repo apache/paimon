@@ -147,6 +147,12 @@ under the License.
             <td>If true, it will add a compact coordinator and worker operator after the writer operator,in order to compact several changelog files (for primary key tables) or newly created data files (for unaware bucket tables) from the same partition into large ones, which can decrease the number of small files.</td>
         </tr>
         <tr>
+            <td><h5>query-service.cache</h5></td>
+            <td style="word-wrap: break-word;">PARTIAL</td>
+            <td><p>Enum</p></td>
+            <td>The cache mode of Query Service. PARTIAL loads lookup files on demand. FULL materializes each executor's partition/bucket shard before registering the service and incrementally refreshes it. This option does not change the client's lookup.cache mode.<br /><br />Possible values:<ul><li>"PARTIAL"</li><li>"FULL"</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>read.shuffle-bucket-with-partition</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
