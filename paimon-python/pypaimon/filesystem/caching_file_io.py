@@ -28,23 +28,87 @@ the delegate FileIO.
 import hashlib
 import os
 import threading
+import uuid
+import weakref
 from collections import OrderedDict
+from concurrent.futures import Future
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
 
+class _WorkerCacheRegistry:
+    """Share active managers and retain a few after their task completes."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._active = weakref.WeakValueDictionary()
+        self._recent = OrderedDict()
+        self._pending = {}
+
+    def _remember(self, key, manager):
+        self._recent[key] = manager
+        self._recent.move_to_end(key)
+        if len(self._recent) > 8:
+            self._recent.popitem(last=False)
+
+    def restore(self, identity, cache_type, args):
+        key = (os.getpid(), identity, cache_type, args)
+        with self._lock:
+            manager = self._active.get(key)
+            if manager is not None:
+                self._remember(key, manager)
+                return manager
+            pending = self._pending.get(key)
+            create = pending is None
+            if create:
+                pending = Future()
+                self._pending[key] = pending
+
+        if not create:
+            return pending.result()
+
+        try:
+            manager = cache_type(*args)
+            manager._identity = identity
+        except BaseException as error:
+            with self._lock:
+                del self._pending[key]
+            pending.set_exception(error)
+            raise
+
+        with self._lock:
+            self._active[key] = manager
+            self._remember(key, manager)
+            del self._pending[key]
+        pending.set_result(manager)
+        return manager
+
+
+_WORKER_CACHE_REGISTRY = _WorkerCacheRegistry()
+
+
+def _restore_cache_manager(identity, cache_type, args):
+    return _WORKER_CACHE_REGISTRY.restore(identity, cache_type, args)
+
+
 class LocalMemoryCacheManager:
     """Block-level in-memory cache with LRU eviction."""
 
     def __init__(self, max_size_bytes: int, block_size: int = 1 * 1024 * 1024):
+        self._identity = uuid.uuid4().hex
         self._max_size_bytes = max_size_bytes
         self._block_size = block_size
         self._lock = threading.Lock()
         self._current_size = 0
         self._cache: OrderedDict = OrderedDict()
         self._file_size_cache: dict = {}
+
+    def __reduce__(self):
+        # Rebuild process-local state without serializing cached blocks or locks.
+        return (_restore_cache_manager,
+                (self._identity, type(self), (self._max_size_bytes, self._block_size)))
 
     @property
     def block_size(self) -> int:
@@ -83,6 +147,7 @@ class LocalDiskCacheManager:
 
     def __init__(self, cache_dir: str, max_size_bytes: int,
                  block_size: int = 1 * 1024 * 1024):
+        self._identity = uuid.uuid4().hex
         self._cache_dir = cache_dir
         self._max_size_bytes = max_size_bytes
         self._block_size = block_size
@@ -93,6 +158,11 @@ class LocalDiskCacheManager:
         self._entry_index: OrderedDict = OrderedDict()
         os.makedirs(cache_dir, exist_ok=True)
         self._current_size = self._scan_and_populate_index()
+
+    def __reduce__(self):
+        return (_restore_cache_manager,
+                (self._identity, type(self),
+                 (self._cache_dir, self._max_size_bytes, self._block_size)))
 
     @property
     def block_size(self) -> int:
@@ -329,8 +399,7 @@ class CachingFileIO(FileIO):
     """FileIO wrapper that caches reads at block granularity.
 
     Only file types in the whitelist are cached. Others are read directly
-    from the delegate. After pickling/unpickling, the cache is None and reads
-    fall through to the delegate directly.
+    from the delegate. Cache managers are restored process-locally when unpickled.
     """
 
     def __init__(self, delegate: FileIO, cache, whitelist=None):
@@ -342,9 +411,8 @@ class CachingFileIO(FileIO):
             self._whitelist = whitelist
 
     def __getstate__(self):
-        state = self.__dict__.copy()
-        state['_cache'] = None
-        return state
+        # Python 3.10 otherwise finds the delegate's hook through __getattr__.
+        return self.__dict__.copy()
 
     # Fallback caps when local-cache.max-size is unset (memory shares the heap).
     _DEFAULT_MEMORY_CACHE_MAX_SIZE = 256 * 1024 * 1024
