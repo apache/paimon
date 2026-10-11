@@ -18,11 +18,15 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.hive.conf.HiveConf;
+
+import javax.annotation.Nullable;
 
 import static org.apache.paimon.hive.HiveCatalogLock.LOCK_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
@@ -36,12 +40,18 @@ public class HiveCatalogLockFactory implements CatalogLockFactory {
     private static final long serialVersionUID = 1L;
 
     @Override
-    public CatalogLock createLock(CatalogLockContext context) {
+    public Lock createLock(
+            CatalogLockContext context,
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
         checkArgument(context instanceof HiveCatalogLockContext);
         HiveCatalogLockContext hiveLockContext = (HiveCatalogLockContext) context;
         HiveConf conf = hiveLockContext.hiveConf().conf();
         return new HiveCatalogLock(
                 createClients(conf, hiveLockContext.options(), hiveLockContext.clientClassName()),
+                identifier,
                 checkMaxSleep(conf),
                 acquireTimeout(conf),
                 HiveCatalogLock.leaseTimeout(conf));

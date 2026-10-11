@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 
 import java.util.concurrent.Callable;
@@ -32,14 +33,18 @@ public class TestCatalogLockFactory implements CatalogLockFactory {
     }
 
     @Override
-    public CatalogLock createLock(CatalogLockContext context) {
+    public Lock createLock(
+            CatalogLockContext context,
+            Identifier identifier,
+            String tableUuid,
+            String commitUser,
+            Options tableOptions) {
         Options options = context.options();
-        return new CatalogLock() {
+        return new Lock() {
             @Override
-            public <T> T runWithLock(String database, String table, Callable<T> callable)
-                    throws Exception {
-                options.set("test.lock.database", database);
-                options.set("test.lock.table", table);
+            public <T> T runWithLock(Callable<T> callable) throws Exception {
+                options.set("test.lock.database", identifier.getDatabaseName());
+                options.set("test.lock.table", identifier.getObjectName());
                 options.set("test.lock.held", "true");
                 try {
                     return callable.call();

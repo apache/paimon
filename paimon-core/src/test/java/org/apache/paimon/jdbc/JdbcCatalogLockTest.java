@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.options.Options;
 
@@ -67,8 +68,6 @@ class JdbcCatalogLockTest {
             JdbcCatalogLock lock = lock(pool);
             Runnable callback =
                     lock.runWithLock(
-                            "db",
-                            "table",
                             () -> {
                                 // The holder must not keep a pooled connection while the callback
                                 // borrows one.
@@ -93,8 +92,6 @@ class JdbcCatalogLockTest {
             dialect.createTable(pool, new Options());
             JdbcCatalogLock lock = lock(pool);
             lock.runWithLock(
-                    "db",
-                    "table",
                     () -> {
                         dialect.releaseLock(pool, "catalog.db.table");
                         assertThat(
@@ -117,8 +114,6 @@ class JdbcCatalogLockTest {
             dialect.createTable(pool, new Options());
             JdbcCatalogLock lock = lock(pool);
             lock.runWithLock(
-                    "db",
-                    "table",
                     () -> {
                         clock.set(TimeUnit.MILLISECONDS.toNanos(3000));
                         assertThatThrownBy(lock::ensureValid)
@@ -181,8 +176,6 @@ class JdbcCatalogLockTest {
             JdbcCatalogLock lock = lock(zeroUpdateCountPool(pool));
             assertThat(
                             lock.runWithLock(
-                                    "db",
-                                    "table",
                                     () -> {
                                         lock.ensureValid();
                                         assertThat(owner(pool)).isNotEmpty();
@@ -264,8 +257,6 @@ class JdbcCatalogLockTest {
         AtomicInteger requests = new AtomicInteger();
         try {
             lock.runWithLock(
-                    "db",
-                    "table",
                     () -> {
                         when(heartbeat.executeUpdate())
                                 .thenAnswer(
@@ -343,7 +334,8 @@ class JdbcCatalogLockTest {
     private JdbcCatalogLock lock(JdbcClientPool pool) {
         when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> future);
-        return new JdbcCatalogLock(pool, "catalog", 10, 3000, renewer, clock::get);
+        return new JdbcCatalogLock(
+                pool, "catalog", Identifier.create("db", "table"), 10, 3000, renewer, clock::get);
     }
 
     private String owner(JdbcClientPool pool) throws Exception {

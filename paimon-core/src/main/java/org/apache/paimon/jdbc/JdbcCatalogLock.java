@@ -18,7 +18,8 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.TimeUtils;
 
@@ -39,7 +40,7 @@ import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_ACQUIRE_TIMEOUT;
 import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_CHECK_MAX_SLEEP;
 
 /** Jdbc catalog lock. */
-public class JdbcCatalogLock implements CatalogLock {
+public class JdbcCatalogLock implements Lock {
     private static final ScheduledThreadPoolExecutor RENEWER = createRenewer();
     private final ScheduledExecutorService renewer;
     private final LongSupplier nanoTime;
@@ -48,18 +49,28 @@ public class JdbcCatalogLock implements CatalogLock {
     private final long checkMaxSleep;
     private final long acquireTimeout;
     private final String catalogKey;
+    private final Identifier identifier;
 
     public JdbcCatalogLock(
             JdbcClientPool connections,
             String catalogKey,
+            Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout) {
-        this(connections, catalogKey, checkMaxSleep, acquireTimeout, RENEWER, System::nanoTime);
+        this(
+                connections,
+                catalogKey,
+                identifier,
+                checkMaxSleep,
+                acquireTimeout,
+                RENEWER,
+                System::nanoTime);
     }
 
     JdbcCatalogLock(
             JdbcClientPool connections,
             String catalogKey,
+            Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout,
             ScheduledExecutorService renewer,
@@ -70,11 +81,15 @@ public class JdbcCatalogLock implements CatalogLock {
         this.checkMaxSleep = checkMaxSleep;
         this.acquireTimeout = acquireTimeout;
         this.catalogKey = catalogKey;
+        this.identifier = identifier;
     }
 
     @Override
-    public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        String lockUniqueName = String.format("%s.%s.%s", catalogKey, database, table);
+    public <T> T runWithLock(Callable<T> callable) throws Exception {
+        String lockUniqueName =
+                String.format(
+                        "%s.%s.%s",
+                        catalogKey, identifier.getDatabaseName(), identifier.getObjectName());
         String owner = UUID.randomUUID().toString();
         long startedAt = nanoTime.getAsLong();
         AbstractDistributedLockDialect dialect =

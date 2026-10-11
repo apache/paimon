@@ -57,7 +57,7 @@ public abstract class DelegateCatalog implements Catalog {
     public Lock createLock(
             Identifier identifier,
             @Nullable String tableUuid,
-            String commitUser,
+            @Nullable String commitUser,
             Options tableOptions) {
         return wrapped.createLock(identifier, tableUuid, commitUser, tableOptions);
     }

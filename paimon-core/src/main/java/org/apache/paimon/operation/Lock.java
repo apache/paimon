@@ -19,10 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.Identifier;
-
-import javax.annotation.Nullable;
 
 import java.util.concurrent.Callable;
 
@@ -50,57 +46,9 @@ public interface Lock extends AutoCloseable {
         public void close() {}
     }
 
-    static Lock fromCatalog(CatalogLock lock, Identifier tablePath) {
-        return fromCatalog(lock, tablePath, null, null);
-    }
-
-    static Lock fromCatalog(
-            CatalogLock lock,
-            Identifier tablePath,
-            @Nullable String tableUuid,
-            @Nullable String commitUser) {
-        return lock == null
-                ? empty()
-                : reentrant(new CatalogLockImpl(lock, tablePath, tableUuid, commitUser));
-    }
-
     /** Reuse the current scope for nested publication on the same thread. */
     static Lock reentrant(Lock lock) {
         return lock instanceof ReentrantLock ? lock : new ReentrantLock(lock);
-    }
-
-    /** Binds the legacy factory SPI to a table and writer. */
-    class CatalogLockImpl implements Lock {
-        private final CatalogLock catalogLock;
-        private final Identifier tablePath;
-        @Nullable private final String tableUuid;
-        @Nullable private final String commitUser;
-
-        private CatalogLockImpl(
-                CatalogLock catalogLock,
-                Identifier tablePath,
-                @Nullable String tableUuid,
-                @Nullable String commitUser) {
-            this.catalogLock = catalogLock;
-            this.tablePath = tablePath;
-            this.tableUuid = tableUuid;
-            this.commitUser = commitUser;
-        }
-
-        @Override
-        public <T> T runWithLock(Callable<T> callable) throws Exception {
-            return catalogLock.runWithLock(tablePath, tableUuid, commitUser, callable);
-        }
-
-        @Override
-        public void ensureValid() {
-            catalogLock.ensureValid();
-        }
-
-        @Override
-        public void close() throws Exception {
-            catalogLock.close();
-        }
     }
 
     /** Keeps the outer operation's scope until preparation and publication both finish. */

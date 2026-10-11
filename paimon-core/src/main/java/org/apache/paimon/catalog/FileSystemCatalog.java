@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -33,7 +34,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
@@ -140,12 +140,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
-        Optional<CatalogLockFactory> lockFactory = lockFactory();
-        try (Lock lock =
-                lockFactory
-                        .map(factory -> factory.createLock(lockContext().orElse(null)))
-                        .map(l -> Lock.fromCatalog(l, identifier))
-                        .orElseGet(Lock::empty)) {
+        try (Lock lock = createLock(identifier, null, null, new Options())) {
             return lock.runWithLock(callable);
         }
     }

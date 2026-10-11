@@ -19,12 +19,13 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.TableEnvironment;
@@ -199,11 +200,15 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         }
 
         @Override
-        public CatalogLock createLock(CatalogLockContext context) {
-            return new CatalogLock() {
+        public Lock createLock(
+                CatalogLockContext context,
+                Identifier identifier,
+                String tableUuid,
+                String commitUser,
+                Options tableOptions) {
+            return new Lock() {
                 @Override
-                public <T> T runWithLock(String database, String table, Callable<T> callable)
-                        throws Exception {
+                public <T> T runWithLock(Callable<T> callable) throws Exception {
                     LOCK_COUNT.incrementAndGet();
                     return callable.call();
                 }

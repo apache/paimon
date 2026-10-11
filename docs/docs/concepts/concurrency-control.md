@@ -81,8 +81,8 @@ its own scope: APPEND and COMPACT snapshots produced by the same commit acquire 
 Post-commit callbacks run after the scope ends. Metadata-only manifest replacement validates the
 caller's prepared layout against the current head while holding the lock.
 
-`Catalog.createLock` supplies a table-bound `Lock` with one `runWithLock` contract. The existing
-`CatalogLockFactory` SPI remains compatible and its named locks are adapted to this contract.
+`Catalog.createLock` supplies a table-bound `Lock` with one `runWithLock` contract. `CatalogLockFactory`
+binds the table, UUID and writer identity when creating a `Lock`.
 Each catalog interprets its own lock configuration. Hive and JDBC define the catalog options
 `lock.enabled`, `lock.type`, `lock-check-max-sleep` and `lock-acquire-timeout` in their own options
 classes. For these catalogs, locking is enabled on object stores and disabled on other filesystems

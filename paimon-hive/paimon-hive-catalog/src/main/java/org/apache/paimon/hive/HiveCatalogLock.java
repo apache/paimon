@@ -18,9 +18,10 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.hive.pool.CachedClientPool;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.TimeUtils;
@@ -52,14 +53,15 @@ import java.util.function.LongSupplier;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_ACQUIRE_TIMEOUT;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_CHECK_MAX_SLEEP;
 
-/** Hive {@link CatalogLock}. */
-public class HiveCatalogLock implements CatalogLock {
+/** Hive catalog lock. */
+public class HiveCatalogLock implements Lock {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalogLock.class);
 
     static final String LOCK_IDENTIFIER = "hive";
 
     private final ClientPool<IMetaStoreClient, TException> clients;
+    private final Identifier identifier;
     private final long checkMaxSleep;
     private final long acquireTimeout;
     private static final ScheduledThreadPoolExecutor RENEWER = createRenewer();
@@ -70,21 +72,31 @@ public class HiveCatalogLock implements CatalogLock {
 
     public HiveCatalogLock(
             ClientPool<IMetaStoreClient, TException> clients,
+            Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout) {
-        this(clients, checkMaxSleep, acquireTimeout, leaseTimeout(new HiveConf()));
+        this(clients, identifier, checkMaxSleep, acquireTimeout, leaseTimeout(new HiveConf()));
     }
 
     public HiveCatalogLock(
             ClientPool<IMetaStoreClient, TException> clients,
+            Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout,
             long leaseMillis) {
-        this(clients, checkMaxSleep, acquireTimeout, leaseMillis, RENEWER, System::nanoTime);
+        this(
+                clients,
+                identifier,
+                checkMaxSleep,
+                acquireTimeout,
+                leaseMillis,
+                RENEWER,
+                System::nanoTime);
     }
 
     HiveCatalogLock(
             ClientPool<IMetaStoreClient, TException> clients,
+            Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout,
             long leaseMillis,
@@ -94,13 +106,14 @@ public class HiveCatalogLock implements CatalogLock {
         this.renewer = renewer;
         this.nanoTime = nanoTime;
         this.clients = clients;
+        this.identifier = identifier;
         this.checkMaxSleep = checkMaxSleep;
         this.acquireTimeout = acquireTimeout;
     }
 
     @Override
-    public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        long lockId = lock(database, table);
+    public <T> T runWithLock(Callable<T> callable) throws Exception {
+        long lockId = lock(identifier.getDatabaseName(), identifier.getObjectName());
         Lease lease = null;
         try {
             long requestedAt = nanoTime.getAsLong();

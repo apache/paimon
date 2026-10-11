@@ -1954,17 +1954,9 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
-        if (!lockEnabled()) {
-            return callable.call();
+        try (Lock lock = createLock(identifier, null, null, new Options())) {
+            return lock.runWithLock(callable);
         }
-
-        HiveCatalogLock lock =
-                new HiveCatalogLock(
-                        clients(),
-                        HiveCatalogLock.checkMaxSleep(hiveConf),
-                        HiveCatalogLock.acquireTimeout(hiveConf),
-                        HiveCatalogLock.leaseTimeout(hiveConf));
-        return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 
     public static HiveConf createHiveConf(

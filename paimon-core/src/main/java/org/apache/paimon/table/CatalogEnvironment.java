@@ -137,11 +137,7 @@ public class CatalogEnvironment implements Serializable {
         if (catalogLoader != null && supportsVersionManagement) {
             return snapshotCommit(snapshotManager, Lock.empty());
         }
-        return snapshotCommit(
-                snapshotManager,
-                Lock.fromCatalog(
-                        lockFactory == null ? null : lockFactory.createLock(lockContext),
-                        identifier));
+        return snapshotCommit(snapshotManager, createFactoryLock(identifier, null, new Options()));
     }
 
     /** Use a supplied publication lock when the writer manages the complete operation scope. */
@@ -165,19 +161,9 @@ public class CatalogEnvironment implements Serializable {
             Catalog catalog = catalogLoader.load();
             Lock delegate;
             try {
-                Lock catalogLock =
+                delegate =
                         catalog.createLock(
                                 lockIdentifier, uuid, commitUser, options.toConfiguration());
-                // Keep serialized environments from third-party catalogs compatible with the
-                // legacy factory SPI until their catalogs implement createLock.
-                delegate =
-                        catalogLock instanceof Lock.EmptyLock && lockFactory != null
-                                ? Lock.fromCatalog(
-                                        lockFactory.createLock(lockContext),
-                                        lockIdentifier,
-                                        uuid,
-                                        commitUser)
-                                : catalogLock;
             } catch (RuntimeException e) {
                 IOUtils.closeQuietly(catalog);
                 throw e;
@@ -203,11 +189,16 @@ public class CatalogEnvironment implements Serializable {
                 }
             };
         }
-        return Lock.fromCatalog(
-                lockFactory == null ? null : lockFactory.createLock(lockContext),
-                lockIdentifier,
-                uuid,
-                commitUser);
+        return createFactoryLock(lockIdentifier, commitUser, options.toConfiguration());
+    }
+
+    private Lock createFactoryLock(
+            Identifier lockIdentifier, @Nullable String commitUser, Options tableOptions) {
+        return lockFactory == null
+                ? Lock.empty()
+                : Lock.reentrant(
+                        lockFactory.createLock(
+                                lockContext, lockIdentifier, uuid, commitUser, tableOptions));
     }
 
     @Nullable

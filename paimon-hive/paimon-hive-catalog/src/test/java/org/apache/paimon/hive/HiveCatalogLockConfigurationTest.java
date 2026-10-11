@@ -72,6 +72,11 @@ class HiveCatalogLockConfigurationTest {
                         catalog.createLock(
                                 Identifier.create("db", "table"), null, "writer", new Options())) {
             assertThat(lock.runWithLock(() -> options.get("test.lock.held"))).isEqualTo("true");
+            assertThat(
+                            catalog.runWithLock(
+                                    Identifier.create("db", "table"),
+                                    () -> options.get("test.lock.held")))
+                    .isEqualTo("true");
         }
         assertThat(options.get("test.lock.held")).isEqualTo("false");
     }

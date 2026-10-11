@@ -1334,13 +1334,13 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier table and branch to lock
      * @param tableUuid table incarnation, required by catalogs that fence table recreation
-     * @param commitUser exact logical writer identity, preserved across recovery
+     * @param commitUser exact logical writer identity for commits; null for catalog operations
      * @param tableOptions runtime table options controlling lock support
      */
     default Lock createLock(
             Identifier identifier,
             @Nullable String tableUuid,
-            String commitUser,
+            @Nullable String commitUser,
             Options tableOptions) {
         return Lock.empty();
     }

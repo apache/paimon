@@ -1022,11 +1022,14 @@ public abstract class HiveCatalogITCaseBase {
                     new Thread(
                             () -> {
                                 Lock lock =
-                                        Lock.fromCatalog(
-                                                catalogEnv
-                                                        .lockFactory()
-                                                        .createLock(catalogEnv.lockContext()),
-                                                identifier);
+                                        catalogEnv
+                                                .lockFactory()
+                                                .createLock(
+                                                        catalogEnv.lockContext(),
+                                                        identifier,
+                                                        null,
+                                                        null,
+                                                        new Options());
                                 for (int j = 0; j < 10; j++) {
                                     try {
                                         lock.runWithLock(unsafeIncrement);

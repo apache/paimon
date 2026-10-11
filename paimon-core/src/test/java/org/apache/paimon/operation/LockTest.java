@@ -18,9 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.Identifier;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -32,18 +29,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests the unified operation lock and compatibility with catalog lock factories. */
+/** Tests validity checks and reentrancy of operation locks. */
 class LockTest {
     @Test
     void nestedPublicationUsesOneScopeAndChecksValidity() throws Exception {
         List<String> events = new ArrayList<>();
-        CatalogLock backend =
-                new CatalogLock() {
+        Lock backend =
+                new Lock() {
                     @Override
-                    public <T> T runWithLock(String database, String table, Callable<T> action)
-                            throws Exception {
-                        assertThat(database).isEqualTo("db");
-                        assertThat(table).isEqualTo("table");
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
                         events.add("acquire");
                         try {
                             return action.call();
@@ -62,8 +56,7 @@ class LockTest {
                         events.add("close");
                     }
                 };
-        try (Lock lock =
-                Lock.fromCatalog(backend, Identifier.create("db", "table"), "table-id", "writer")) {
+        try (Lock lock = Lock.reentrant(backend)) {
             lock.runWithLock(
                     () -> {
                         events.add("head");
@@ -141,30 +134,47 @@ class LockTest {
     }
 
     @Test
-    void runtimeIdentityReachesBackend() throws Exception {
-        Identifier identifier = new Identifier("db", "table", "dev");
-        CatalogLock backend =
-                new CatalogLock() {
+    void failedInitialValidationReleasesScopeBeforeRetry() throws Exception {
+        List<String> events = new ArrayList<>();
+        AtomicBoolean expired = new AtomicBoolean(true);
+        Lock backend =
+                new Lock() {
                     @Override
-                    public <T> T runWithLock(String database, String table, Callable<T> action) {
-                        throw new AssertionError("Runtime identity lost");
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        events.add("acquire");
+                        try {
+                            return action.call();
+                        } finally {
+                            events.add("release");
+                        }
                     }
 
                     @Override
-                    public <T> T runWithLock(
-                            Identifier actual, String uuid, String owner, Callable<T> action)
-                            throws Exception {
-                        assertThat(actual).isEqualTo(identifier);
-                        assertThat(uuid).isEqualTo("table-id");
-                        assertThat(owner).isEqualTo("writer");
-                        return action.call();
+                    public void ensureValid() {
+                        if (expired.get()) {
+                            throw new IllegalStateException("Expired");
+                        }
                     }
 
                     @Override
                     public void close() {}
                 };
-        try (Lock lock = Lock.fromCatalog(backend, identifier, "table-id", "writer")) {
-            assertThat(lock.runWithLock(() -> "result")).isEqualTo("result");
-        }
+        Lock lock = Lock.reentrant(backend);
+        assertThatThrownBy(
+                        () ->
+                                lock.runWithLock(
+                                        () -> {
+                                            events.add("publish");
+                                            return null;
+                                        }))
+                .hasMessage("Expired");
+        assertThat(events).containsExactly("acquire", "release");
+        expired.set(false);
+        lock.runWithLock(
+                () -> {
+                    events.add("publish");
+                    return null;
+                });
+        assertThat(events).containsExactly("acquire", "release", "acquire", "publish", "release");
     }
 }

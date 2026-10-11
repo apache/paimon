@@ -124,15 +124,19 @@ public abstract class AbstractCatalog implements Catalog {
     public Lock createLock(
             Identifier identifier,
             @Nullable String tableUuid,
-            String commitUser,
+            @Nullable String commitUser,
             Options tableOptions) {
-        return Lock.fromCatalog(
-                lockFactory()
-                        .map(factory -> factory.createLock(lockContext().orElse(null)))
-                        .orElse(null),
-                identifier,
-                tableUuid,
-                commitUser);
+        return lockFactory()
+                .map(
+                        factory ->
+                                factory.createLock(
+                                        lockContext().orElse(null),
+                                        identifier,
+                                        tableUuid,
+                                        commitUser,
+                                        tableOptions))
+                .map(Lock::reentrant)
+                .orElseGet(Lock::empty);
     }
 
     /** Lock factory selected by the catalog's own locking policy. */

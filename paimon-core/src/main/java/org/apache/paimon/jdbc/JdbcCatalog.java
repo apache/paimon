@@ -83,8 +83,6 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
-import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
-import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
@@ -791,17 +789,8 @@ public class JdbcCatalog extends AbstractCatalog {
         // check-then-act.
         java.util.concurrent.locks.Lock localLock = LOCAL_LOCKS.get(lockKey(identifier));
         localLock.lock();
-        try {
-            if (!lockEnabled()) {
-                return callable.call();
-            }
-            JdbcCatalogLock lock =
-                    new JdbcCatalogLock(
-                            connections,
-                            catalogKey,
-                            checkMaxSleep(options.toMap()),
-                            acquireTimeout(options.toMap()));
-            return Lock.fromCatalog(lock, identifier).runWithLock(callable);
+        try (Lock lock = createLock(identifier, null, null, new Options())) {
+            return lock.runWithLock(callable);
         } finally {
             localLock.unlock();
         }

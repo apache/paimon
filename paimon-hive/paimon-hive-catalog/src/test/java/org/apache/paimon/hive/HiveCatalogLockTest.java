@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -74,8 +75,6 @@ class HiveCatalogLockTest {
         HiveCatalogLock lock = lock();
         Runnable renewal =
                 lock.runWithLock(
-                        "db",
-                        "table",
                         () -> {
                             clock.set(TimeUnit.MILLISECONDS.toNanos(2000));
                             Runnable task = renewal();
@@ -95,8 +94,6 @@ class HiveCatalogLockTest {
         HiveCatalogLock lock = lock();
         TException failure = new TException("Lost lock");
         lock.runWithLock(
-                "db",
-                "table",
                 () -> {
                     doThrow(failure).when(client).heartbeat(0L, 7L);
                     renewal().run();
@@ -110,8 +107,6 @@ class HiveCatalogLockTest {
     void expiryWithoutHeartbeatPreventsFurtherUse() throws Exception {
         HiveCatalogLock lock = lock();
         lock.runWithLock(
-                "db",
-                "table",
                 () -> {
                     clock.set(TimeUnit.MILLISECONDS.toNanos(3000));
                     assertThatThrownBy(lock::ensureValid).hasMessageContaining("no longer usable");
@@ -130,8 +125,6 @@ class HiveCatalogLockTest {
         assertThatThrownBy(
                         () ->
                                 lock.runWithLock(
-                                        "db",
-                                        "table",
                                         () -> {
                                             throw failure;
                                         }))
@@ -144,8 +137,6 @@ class HiveCatalogLockTest {
     void publicationChecksTheServerEvenWhenClientTimeoutIsLonger() throws Exception {
         HiveCatalogLock lock = lock();
         lock.runWithLock(
-                "db",
-                "table",
                 () -> {
                     NoSuchLockException missing = new NoSuchLockException("Expired on server");
                     doThrow(missing).when(client).heartbeat(0L, 7L);
@@ -165,8 +156,6 @@ class HiveCatalogLockTest {
         AtomicInteger requests = new AtomicInteger();
         try {
             lock.runWithLock(
-                    "db",
-                    "table",
                     () -> {
                         doAnswer(
                                         invocation -> {
@@ -200,7 +189,8 @@ class HiveCatalogLockTest {
         when(client.lock(any())).thenReturn(new LockResponse(7L, LockState.ACQUIRED));
         when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> future);
-        return new HiveCatalogLock(pool, 10, 3000, 3000, renewer, clock::get);
+        return new HiveCatalogLock(
+                pool, Identifier.create("db", "table"), 10, 3000, 3000, renewer, clock::get);
     }
 
     private Runnable renewal() {

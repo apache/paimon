@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
@@ -53,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link CatalogEnvironment}. */
@@ -181,37 +181,60 @@ class CatalogEnvironmentTest {
     }
 
     @Test
-    void testLegacyFactoryWithoutCatalogLoaderStillWorks() throws Exception {
+    void testFactoryBindsRuntimeIdentityWithoutCatalogLoader() throws Exception {
         CatalogLockFactory factory = mock(CatalogLockFactory.class);
         CatalogLockContext context = CatalogLockContext.fromOptions(new Options());
-        CatalogLock backend =
-                new CatalogLock() {
+        Lock backend =
+                new Lock() {
                     @Override
-                    public <T> T runWithLock(String database, String table, Callable<T> callable)
-                            throws Exception {
-                        assertThat(database).isEqualTo("db");
-                        assertThat(table).isEqualTo("table");
+                    public <T> T runWithLock(Callable<T> callable) throws Exception {
                         return callable.call();
                     }
 
                     @Override
                     public void close() {}
                 };
-        when(factory.createLock(context)).thenReturn(backend);
+        Options options = new Options();
+        options.set(CoreOptions.BRANCH, "dev");
+        Identifier branch = new Identifier("db", "table", "dev");
+        when(factory.createLock(context, branch, "table-id", "writer", options))
+                .thenReturn(backend);
         CatalogEnvironment environment =
                 new CatalogEnvironment(
                         Identifier.create("db", "table"),
-                        null,
+                        "table-id",
                         null,
                         factory,
                         context,
                         null,
                         false,
                         false);
+        try (Lock lock = environment.createLock(new CoreOptions(options), "writer")) {
+            assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
+        }
+        verify(factory).createLock(context, branch, "table-id", "writer", options);
+    }
+
+    @Test
+    void testCatalogPolicyIsAuthoritativeOverSerializedFactory() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        CatalogLockFactory factory = mock(CatalogLockFactory.class);
+        when(catalog.createLock(any(), any(), any(), any())).thenReturn(Lock.empty());
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        "table-id",
+                        () -> catalog,
+                        factory,
+                        CatalogLockContext.fromOptions(new Options()),
+                        null,
+                        false,
+                        false);
         try (Lock lock = environment.createLock(new CoreOptions(new Options()), "writer")) {
             assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
         }
-        verify(factory).createLock(context);
+        verifyNoInteractions(factory);
+        verify(catalog).close();
     }
 
     @Test
@@ -235,14 +258,13 @@ class CatalogEnvironmentTest {
     }
 
     @Test
-    void testDirectSnapshotCommitRetainsLegacyPublicationLock() throws Exception {
+    void testDirectSnapshotCommitUsesBoundPublicationLock() throws Exception {
         CatalogLockFactory factory = mock(CatalogLockFactory.class);
         AtomicBoolean held = new AtomicBoolean();
-        CatalogLock backend =
-                new CatalogLock() {
+        Lock backend =
+                new Lock() {
                     @Override
-                    public <T> T runWithLock(String database, String table, Callable<T> action)
-                            throws Exception {
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
                         held.set(true);
                         try {
                             return action.call();
@@ -255,7 +277,9 @@ class CatalogEnvironmentTest {
                     public void close() {}
                 };
         CatalogLockContext context = CatalogLockContext.fromOptions(new Options());
-        when(factory.createLock(context)).thenReturn(backend);
+        when(factory.createLock(
+                        context, Identifier.create("db", "table"), null, null, new Options()))
+                .thenReturn(backend);
         SnapshotManager manager = mock(SnapshotManager.class);
         FileIO fileIO = mock(FileIO.class);
         Path snapshotPath = new Path("file:/table/snapshot/snapshot-1");
@@ -285,7 +309,8 @@ class CatalogEnvironmentTest {
             assertThat(publisher.commit(null, snapshot, "main", Collections.emptyList())).isTrue();
         }
         assertThat(held.get()).isFalse();
-        verify(factory).createLock(context);
+        verify(factory)
+                .createLock(context, Identifier.create("db", "table"), null, null, new Options());
     }
 
     private static CatalogEnvironment environment(
