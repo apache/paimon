@@ -1377,9 +1377,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         createTableWithInterleavedPartitions();
         catalog.alterTable(
                 identifier(),
-                Arrays.asList(
-                        SchemaChange.addColumn("video", DataTypes.BLOB()),
-                        SchemaChange.setOption("video-frame-field", "video")),
+                SchemaChange.addColumn("video", DataTypes.BYTES(), "__VIDEO_FRAME_FIELD"),
                 false);
         return getTableDefault();
     }

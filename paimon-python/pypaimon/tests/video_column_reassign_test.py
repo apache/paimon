@@ -75,8 +75,7 @@ def test_video_backfill_reassign_interleavings(tmp_path, monkeypatch, phase, con
         table.add([{'pt': 'a' if group % 2 == 0 else 'b', 'id': i, 'image': bytes([i])}
                    for i in range(group * 2, group * 2 + 2)])
     conn.catalog.alter_table('default.images', [
-        SchemaChange.add_column('video', AtomicType('BLOB')),
-        SchemaChange.set_option('video-frame-field', 'video')])
+        SchemaChange.add_column('video', AtomicType('BYTES'), '__VIDEO_FRAME_FIELD')])
     table = conn.get_table('images')
     raw = table.raw_table
     source = tmp_path / 'source.mp4'

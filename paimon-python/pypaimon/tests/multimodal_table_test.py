@@ -132,8 +132,7 @@ class MultimodalTableTest(unittest.TestCase):
         table.raw_table.create_tag("before_video")
         old_table = table
         self.conn.catalog.alter_table("default.evolved_video", [
-            SchemaChange.set_option("video-frame-field", "video"),
-            SchemaChange.add_column("video", AtomicType("BLOB")),
+            SchemaChange.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD"),
         ])
         table = self.conn.get_table("evolved_video")
         self.assertEqual([None, None], [r["video"] for r in table.scan().to_list()])
@@ -180,23 +179,27 @@ class MultimodalTableTest(unittest.TestCase):
         for changes in [
             [C.set_option("video-frame-field", "image")],
             [C.set_option("video-frame-field", "missing")],
-            [C.add_column("bad", AtomicType("INT")), C.set_option("video-frame-field", "bad")],
-            [C.add_column("bad", AtomicType("BLOB", False)), C.set_option("video-frame-field", "bad")],
+            [C.add_column("bad", AtomicType("INT"), "__VIDEO_FRAME_FIELD")],
+            [C.add_column("bad", AtomicType("BLOB", False), "__VIDEO_FRAME_FIELD")],
             [C.add_column("bad", AtomicType("BLOB")), C.set_option("video-frame-field", "image,bad")],
         ]:
             with self.subTest(changes=changes):
                 with self.assertRaises(RuntimeError):
                     alter(changes)
                 self.assertEqual(0, self.conn.catalog.get_table(identifier).table_schema.id)
-        alter([C.add_column("video", AtomicType("BLOB")), C.set_option("video-frame-field", "video")])
-        alter([C.set_option("video-frame-field", "video,second"), C.add_column("second", AtomicType("BLOB"))])
+        alter([C.update_column_comment("image", "__VIDEO_FRAME_FIELD")])
+        self.assertNotIn("video-frame-field", self.conn.catalog.get_table(identifier).table_schema.options)
+        alter([C.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        alter([C.add_column("second", AtomicType("BLOB"), "__VIDEO_FRAME_FIELD")])
+        self.assertEqual(
+            "video,second", self.conn.catalog.get_table(identifier).table_schema.options["video-frame-field"])
         for change in [C.set_option("video-frame-field", "second"),
                        C.set_option("video-frame-field", ""), C.remove_option("video-frame-field")]:
             with self.assertRaises(RuntimeError):
                 alter([change])
         # A column added by a previous commit may already contain ordinary BLOB data.
         alter([C.add_column("later", AtomicType("BLOB"))])
-        with self.assertRaisesRegex(RuntimeError, "same schema change"):
+        with self.assertRaisesRegex(RuntimeError, "not supported yet"):
             alter([C.set_option("video-frame-field", "video,second,later")])
 
     def test_add_video_embeds_frame_ordinals_outside_normal_data(self):

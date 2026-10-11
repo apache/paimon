@@ -125,21 +125,20 @@ The normal `.blob` format is unchanged.
 
 ### Add a Video Column
 
-Add a nullable BLOB column and register it in `video-frame-field` in the same
-schema change; existing rows read NULL in the new column:
+Use `__VIDEO_FRAME_FIELD` to add and automatically register a nullable video
+column. Existing rows read NULL in the new column:
 
 ```python
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 
 conn.catalog.alter_table("default.images", [
-    SchemaChange.add_column("image_video", AtomicType("BLOB")),
-    SchemaChange.set_option("video-frame-field", "image_video"),
+    SchemaChange.add_column("image_video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD"),
 ])
 images = conn.get_table("images")
 ```
 
-If the table already has video fields, retain them in the option value.
+Existing video fields are preserved automatically.
 
 ### Update frame rows and replace a video
 

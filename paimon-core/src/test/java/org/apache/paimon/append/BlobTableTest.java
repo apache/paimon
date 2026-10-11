@@ -1546,9 +1546,7 @@ public class BlobTableTest extends TableTestBase {
         long oldSnapshot = oldTable.latestSnapshot().get().id();
         catalog.alterTable(
                 identifier(),
-                Arrays.asList(
-                        SchemaChange.setOption("video-frame-field", "video"),
-                        SchemaChange.addColumn("video", DataTypes.BLOB())),
+                SchemaChange.addColumn("video", DataTypes.BYTES(), "__VIDEO_FRAME_FIELD"),
                 false);
         FileStoreTable table = getTableDefault();
         List<InternalRow> rows = read(table);
@@ -1592,13 +1590,13 @@ public class BlobTableTest extends TableTestBase {
                                 .size())
                 .isEqualTo(1);
 
-        // Extending an existing video configuration works in the opposite change order too.
+        // Adding another video column automatically preserves the existing video field.
         catalog.alterTable(
                 identifier(),
-                Arrays.asList(
-                        SchemaChange.addColumn("second", DataTypes.BLOB()),
-                        SchemaChange.setOption("video-frame-field", "video,second")),
+                SchemaChange.addColumn("second", DataTypes.BLOB(), "__VIDEO_FRAME_FIELD"),
                 false);
+        assertThat(getTableDefault().schema().options().get("video-frame-field"))
+                .isEqualTo("video,second");
         for (InternalRow row : read(getTableDefault())) {
             assertThat(row.isNullAt(3)).isTrue();
         }
@@ -1618,40 +1616,51 @@ public class BlobTableTest extends TableTestBase {
         writeRows(
                 getTableDefault(),
                 Collections.singletonList(GenericRow.of(0, new BlobData(new byte[] {1}))));
-        List<List<SchemaChange>> invalidChanges =
+        for (List<SchemaChange> changes :
                 Arrays.asList(
                         Collections.singletonList(
                                 SchemaChange.setOption("video-frame-field", "image")),
-                        Collections.singletonList(
-                                SchemaChange.setOption("video-frame-field", "missing")),
-                        Arrays.asList(
-                                SchemaChange.addColumn("bad", DataTypes.INT()),
-                                SchemaChange.setOption("video-frame-field", "bad")),
-                        Arrays.asList(
-                                SchemaChange.addColumn("bad", DataTypes.BLOB().notNull()),
-                                SchemaChange.setOption("video-frame-field", "bad")),
                         Arrays.asList(
                                 SchemaChange.addColumn("bad", DataTypes.BLOB()),
-                                SchemaChange.setOption("video-frame-field", "image,bad")));
-        for (List<SchemaChange> changes : invalidChanges) {
+                                SchemaChange.setOption("video-frame-field", "bad")))) {
             assertThatThrownBy(() -> catalog.alterTable(identifier(), changes, false))
+                    .isInstanceOf(UnsupportedOperationException.class);
+            assertThat(getTableDefault().schema().id()).isZero();
+        }
+        for (org.apache.paimon.types.DataType type :
+                Arrays.asList(DataTypes.INT(), DataTypes.BLOB().notNull())) {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier(),
+                                            SchemaChange.addColumn(
+                                                    "bad", type, "__VIDEO_FRAME_FIELD"),
+                                            false))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(getTableDefault().schema().id()).isZero();
         }
+        // Editing an existing column's comment must not change its storage mode.
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.updateColumnComment(
+                                                "image", "__VIDEO_FRAME_FIELD"),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(getTableDefault().schema().options().containsKey("video-frame-field")).isFalse();
         catalog.alterTable(
                 identifier(),
-                Arrays.asList(
-                        SchemaChange.addColumn("video", DataTypes.BLOB()),
-                        SchemaChange.setOption("video-frame-field", "video")),
+                SchemaChange.addColumn("video", DataTypes.BLOB(), "__VIDEO_FRAME_FIELD"),
                 false);
-        for (String value : Arrays.asList("", "image")) {
+        for (String value : Arrays.asList("", "image", "video,image")) {
             assertThatThrownBy(
                             () ->
                                     catalog.alterTable(
                                             identifier(),
                                             SchemaChange.setOption("video-frame-field", value),
                                             false))
-                    .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(UnsupportedOperationException.class);
         }
         assertThatThrownBy(
                         () ->
@@ -1660,21 +1669,12 @@ public class BlobTableTest extends TableTestBase {
                                         SchemaChange.removeOption("video-frame-field"),
                                         false))
                 .isInstanceOf(UnsupportedOperationException.class);
-        catalog.alterTable(identifier(), SchemaChange.addColumn("later", DataTypes.BLOB()), false);
-        assertThatThrownBy(
-                        () ->
-                                catalog.alterTable(
-                                        identifier(),
-                                        SchemaChange.setOption("video-frame-field", "video,later"),
-                                        false))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("same schema change");
         assertThatThrownBy(
                         () ->
                                 getTableDefault()
                                         .copy(
                                                 Collections.singletonMap(
-                                                        "video-frame-field", "video,later")))
+                                                        "video-frame-field", "video,image")))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 

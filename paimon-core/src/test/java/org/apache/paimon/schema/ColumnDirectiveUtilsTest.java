@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
@@ -56,6 +57,53 @@ public class ColumnDirectiveUtilsTest {
                                 "normal comment", "col", DataTypes.BYTES(), opts))
                 .isNull();
         assertThat(opts).isEmpty();
+    }
+
+    @Test
+    public void testVideoFrameFieldDirective() {
+        for (DataType type :
+                new DataType[] {DataTypes.BYTES(), DataTypes.BINARY(8), DataTypes.BLOB()}) {
+            Map<String, String> opts = new HashMap<>();
+            opts.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "existing");
+            ColumnDirectiveUtils.ConvertedColumn result =
+                    ColumnDirectiveUtils.applyAddColumnDirective(
+                            "__VIDEO_FRAME_FIELD; camera frame", "video", type, opts);
+            assertThat(result.type()).isEqualTo(DataTypes.BLOB());
+            assertThat(result.comment()).isEqualTo("camera frame");
+            assertThat(opts).containsEntry(CoreOptions.VIDEO_FRAME_FIELD.key(), "existing,video");
+            result =
+                    ColumnDirectiveUtils.applyAddColumnDirective(
+                            "__VIDEO_FRAME_FIELD", "second", type, opts);
+            assertThat(result.comment()).isNull();
+            assertThat(opts)
+                    .containsEntry(CoreOptions.VIDEO_FRAME_FIELD.key(), "existing,video,second");
+        }
+    }
+
+    @Test
+    public void testInvalidVideoFrameFieldDirective() {
+        Map<String, String> opts = new HashMap<>();
+        for (String comment : new String[] {"__VIDEO_UNKNOWN", "__VIDEO_FRAME_FIELD_typo"}) {
+            assertThatThrownBy(
+                            () ->
+                                    ColumnDirectiveUtils.applyAddColumnDirective(
+                                            comment, "video", DataTypes.BYTES(), opts))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(opts).isEmpty();
+        }
+        for (DataType type :
+                new DataType[] {
+                    DataTypes.INT(),
+                    DataTypes.ARRAY(DataTypes.BYTES()),
+                    DataTypes.MAP(DataTypes.STRING(), DataTypes.BYTES())
+                }) {
+            assertThatThrownBy(
+                            () ->
+                                    ColumnDirectiveUtils.applyAddColumnDirective(
+                                            "__VIDEO_FRAME_FIELD", "video", type, opts))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(opts).isEmpty();
+        }
     }
 
     @Test

@@ -48,6 +48,7 @@ public final class ColumnDirectiveUtils {
     public static final String BLOB_FIELD_DIRECTIVE = "__BLOB_FIELD";
     public static final String BLOB_DESCRIPTOR_FIELD_DIRECTIVE = "__BLOB_DESCRIPTOR_FIELD";
     public static final String BLOB_VIEW_FIELD_DIRECTIVE = "__BLOB_VIEW_FIELD";
+    public static final String VIDEO_FRAME_FIELD_DIRECTIVE = "__VIDEO_FRAME_FIELD";
     public static final String VECTOR_FIELD_DIRECTIVE = "__VECTOR_FIELD";
 
     private ColumnDirectiveUtils() {}
@@ -56,7 +57,8 @@ public final class ColumnDirectiveUtils {
      * Parses the comment of an {@code ALTER TABLE ADD COLUMN} statement. Returns {@code null} when
      * the comment is a regular user comment; returns a {@link ParsedDirective} when the comment
      * begins with a supported directive. Throws {@link IllegalArgumentException} when the comment
-     * begins with {@code __BLOB} or {@code __VECTOR} but is not one of the supported directives.
+     * begins with {@code __BLOB}, {@code __VIDEO} or {@code __VECTOR} but is not one of the
+     * supported directives.
      */
     @Nullable
     public static ParsedDirective parseAddColumnComment(@Nullable String comment) {
@@ -67,11 +69,15 @@ public final class ColumnDirectiveUtils {
         if (comment.startsWith("__VECTOR")) {
             return parseVectorDirective(comment);
         }
-        if (!comment.startsWith("__BLOB")) {
+        if (!comment.startsWith("__BLOB") && !comment.startsWith("__VIDEO")) {
             return null;
         }
-        String optionKey = matchDirective(comment, BLOB_VIEW_FIELD_DIRECTIVE);
-        String marker = BLOB_VIEW_FIELD_DIRECTIVE;
+        String optionKey = matchDirective(comment, VIDEO_FRAME_FIELD_DIRECTIVE);
+        String marker = VIDEO_FRAME_FIELD_DIRECTIVE;
+        if (optionKey == null) {
+            optionKey = matchDirective(comment, BLOB_VIEW_FIELD_DIRECTIVE);
+            marker = BLOB_VIEW_FIELD_DIRECTIVE;
+        }
         if (optionKey == null) {
             optionKey = matchDirective(comment, BLOB_DESCRIPTOR_FIELD_DIRECTIVE);
             marker = BLOB_DESCRIPTOR_FIELD_DIRECTIVE;
@@ -82,12 +88,14 @@ public final class ColumnDirectiveUtils {
         }
         Preconditions.checkArgument(
                 optionKey != null,
-                "Unsupported BLOB directive in column comment: '%s'. Supported directives are "
-                        + "'%s', '%s' and '%s'.",
+                "Unsupported %s directive in column comment: '%s'. Supported directives are "
+                        + "'%s', '%s', '%s' and '%s'.",
+                comment.startsWith("__VIDEO") ? "VIDEO" : "BLOB",
                 comment,
                 BLOB_FIELD_DIRECTIVE,
                 BLOB_DESCRIPTOR_FIELD_DIRECTIVE,
-                BLOB_VIEW_FIELD_DIRECTIVE);
+                BLOB_VIEW_FIELD_DIRECTIVE,
+                VIDEO_FRAME_FIELD_DIRECTIVE);
         String realComment =
                 comment.length() == marker.length()
                         ? null
@@ -156,6 +164,8 @@ public final class ColumnDirectiveUtils {
             return CoreOptions.BLOB_DESCRIPTOR_FIELD.key();
         } else if (BLOB_VIEW_FIELD_DIRECTIVE.equals(marker)) {
             return CoreOptions.BLOB_VIEW_FIELD.key();
+        } else if (VIDEO_FRAME_FIELD_DIRECTIVE.equals(marker)) {
+            return CoreOptions.VIDEO_FRAME_FIELD.key();
         } else if (VECTOR_FIELD_DIRECTIVE.equals(marker)) {
             return CoreOptions.VECTOR_FIELD.key();
         } else {
@@ -298,6 +308,8 @@ public final class ColumnDirectiveUtils {
             option = CoreOptions.BLOB_DESCRIPTOR_FIELD;
         } else if (CoreOptions.BLOB_VIEW_FIELD.key().equals(optionKey)) {
             option = CoreOptions.BLOB_VIEW_FIELD;
+        } else if (CoreOptions.VIDEO_FRAME_FIELD.key().equals(optionKey)) {
+            option = CoreOptions.VIDEO_FRAME_FIELD;
         } else if (CoreOptions.VECTOR_FIELD.key().equals(optionKey)) {
             option = CoreOptions.VECTOR_FIELD;
         } else {
