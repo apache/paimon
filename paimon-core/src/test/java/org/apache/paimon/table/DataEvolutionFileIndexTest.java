@@ -115,6 +115,148 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     private static final String MISSING_F2 = "b050x";
 
     @Test
+    public void testBitmapFilterWithProjectedWriteSchemaAndRowSidecar() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("projected_schema_row_sidecar", options);
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType projection = latest.rowType().project("f2");
+        Predicate filter = equalF2(f2(50));
+        ReadBuilder readBuilder =
+                latest.newReadBuilder().withReadType(projection).withFilter(filter);
+        List<InternalRow> rows =
+                collect(
+                        readBuilder.newRead().executeFilter(),
+                        readBuilder.newScan().plan(),
+                        projection);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo(f2(50));
+
+        ReadBuilder rangeReadBuilder =
+                latest.newReadBuilder()
+                        .withReadType(projection)
+                        .withFilter(filter)
+                        .withRowRanges(Collections.singletonList(new Range(0L, ROW_COUNT - 1L)));
+        rows =
+                collect(
+                        rangeReadBuilder.newRead().executeFilter(),
+                        rangeReadBuilder.newScan().plan(),
+                        projection);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo(f2(50));
+
+        RowType rowIdType = rowTypeWithRowId(latest.rowType());
+        RowType rowIdProjection = rowIdType.project(SpecialFields.ROW_ID.name(), "f2");
+        PredicateBuilder rowIdBuilder = new PredicateBuilder(rowIdType);
+        Predicate rowIdFilter =
+                PredicateBuilder.and(
+                        rowIdBuilder.between(3, 0L, ROW_COUNT - 1L),
+                        rowIdBuilder.equal(2, BinaryString.fromString(f2(50))));
+        ReadBuilder rowIdReadBuilder =
+                latest.newReadBuilder().withReadType(rowIdProjection).withFilter(rowIdFilter);
+        rows =
+                collect(
+                        rowIdReadBuilder.newRead().executeFilter(),
+                        rowIdReadBuilder.newScan().plan(),
+                        rowIdProjection);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getLong(0)).isEqualTo(50L);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo(f2(50));
+    }
+
+    @Test
+    public void testFormatReaderCacheKeyIncludesPhysicalSchema() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("row_sidecar_physical_schema_key", options);
+        writeSplitColumns(table, ROW_COUNT, Collections.emptyMap(), bitmapOptions("f2"));
+        writeSecondSplitColumns(table, ROW_COUNT, bitmapOptions("f2"));
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType projection = latest.rowType().project(Arrays.asList("f1", "f2"));
+        List<InternalRow> rows = readWithFilter(table, equalF2(f2(50)), projection);
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows)
+                .extracting(row -> row.getString(0).toString())
+                .containsExactlyInAnyOrder(f1(50), "second-" + f1(50));
+        assertThat(rows).extracting(row -> row.getString(1).toString()).containsOnly(f2(50));
+    }
+
+    @Test
+    public void testBitmapFilterWithWideWriteSchemaAndRowSidecar() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        for (int i = 0; i < 7; i++) {
+            schemaBuilder.column("c" + i, DataTypes.INT());
+        }
+        schemaBuilder
+                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                .option(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        bitmapOptions("c6").forEach(schemaBuilder::option);
+        Identifier identifier = identifier("wide_schema_row_sidecar");
+        catalog.createTable(identifier, schemaBuilder.build(), false);
+        FileStoreTable table = getTable(identifier);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < ROW_COUNT; i++) {
+                write.write(GenericRow.of(i, i, i, i, i, i, i));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        Predicate filter = new PredicateBuilder(table.rowType()).equal(6, 50);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(filter);
+        List<InternalRow> rows =
+                collect(
+                        readBuilder.newRead().executeFilter(),
+                        readBuilder.newScan().plan(),
+                        table.rowType());
+
+        InternalRow row = assertSingleRow(rows);
+        for (int i = 0; i < 7; i++) {
+            assertThat(row.getInt(i)).isEqualTo(50);
+        }
+
+        ReadBuilder rangeReadBuilder =
+                table.newReadBuilder()
+                        .withFilter(filter)
+                        .withRowRanges(Collections.singletonList(new Range(0L, ROW_COUNT - 1L)));
+        rows =
+                collect(
+                        rangeReadBuilder.newRead().executeFilter(),
+                        rangeReadBuilder.newScan().plan(),
+                        table.rowType());
+        row = assertSingleRow(rows);
+        for (int i = 0; i < 7; i++) {
+            assertThat(row.getInt(i)).isEqualTo(50);
+        }
+
+        RowType rowIdType = rowTypeWithRowId(table.rowType());
+        PredicateBuilder rowIdBuilder = new PredicateBuilder(rowIdType);
+        Predicate rowIdFilter =
+                PredicateBuilder.and(
+                        rowIdBuilder.between(7, 0L, ROW_COUNT - 1L), rowIdBuilder.equal(6, 50));
+        ReadBuilder rowIdReadBuilder =
+                table.newReadBuilder().withReadType(rowIdType).withFilter(rowIdFilter);
+        rows =
+                collect(
+                        rowIdReadBuilder.newRead().executeFilter(),
+                        rowIdReadBuilder.newScan().plan(),
+                        rowIdType);
+        row = assertSingleRow(rows);
+        for (int i = 0; i < 7; i++) {
+            assertThat(row.getInt(i)).isEqualTo(50);
+        }
+        assertThat(row.getLong(7)).isEqualTo(50L);
+    }
+
+    @Test
     public void testSingleFileSkippedByFileIndex() throws Exception {
         // a standalone .index file, only the reader can evaluate it
         FileStoreTable table = createTable("single_file", bloomOptions("f1", "1 B"));
@@ -1036,6 +1178,35 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
         FileStoreTable latest = getTable(identifier(table.name()));
         long firstRowId = latest.snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = latest.copy(secondOptions).newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType1);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(BinaryString.fromString(f2(i))));
+            }
+            List<CommitMessage> commitables = write.prepareCommit();
+            setSingleFileFirstRowId(commitables, firstRowId);
+            commit.commit(commitables);
+        }
+    }
+
+    /** Writes f1 and f2 into a second merged group with a different physical schema. */
+    private void writeSecondSplitColumns(
+            FileStoreTable table, int count, Map<String, String> secondOptions) throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        RowType writeType0 = latest.rowType().project(Collections.singletonList("f1"));
+        BatchWriteBuilder builder = latest.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType0);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("second-" + f1(i))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        latest = getTable(identifier(table.name()));
+        long firstRowId = latest.snapshotManager().latestSnapshot().nextRowId() - count;
+        RowType writeType1 = latest.rowType().project(Collections.singletonList("f2"));
         builder = latest.copy(secondOptions).newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite().withWriteType(writeType1);
                 BatchTableCommit commit = builder.newCommit()) {
