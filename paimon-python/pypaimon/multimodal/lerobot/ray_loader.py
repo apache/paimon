@@ -25,6 +25,9 @@ from pypaimon.multimodal.lerobot.source import (
 )
 
 
+_CANCEL_DRAIN_SECONDS = 1.0
+
+
 def _require_ray():
     try:
         import ray
@@ -97,12 +100,26 @@ def _prepare_group(table, source_path, source_options, info, schema,
         if current_info != info:
             raise ValueError("LeRobot source metadata changed during import.")
         dataset = _RemoteLeRobotDataset(source, info)
+        messages = None
+        close_started = False
         try:
-            return _prepare_dataset(
+            messages = _prepare_dataset(
                 table, dataset, info, source, schema, batch_size,
                 metadata, video_fields, episode_indices)
-        finally:
+            close_started = True
             dataset.close()
+            return messages
+        except BaseException:
+            # _prepare_dataset aborts an unfinished writer. A cancellation
+            # after prepare_commit must also discard its returned files.
+            if messages is not None:
+                try:
+                    _abort_messages(table, messages)
+                except Exception:
+                    logging.exception("Failed to abort prepared LeRobot files.")
+            if not close_started:
+                dataset.close()
+            raise
 
 
 def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
@@ -129,13 +146,25 @@ def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
             ready, pending = ray.wait(pending, num_returns=1)
             messages.extend(ray.get(ready[0]))
     except BaseException:
-        # No snapshot was committed. Let in-flight writers finish so their
-        # prepared messages can be aborted as well.
+        # Soft cancellation raises KeyboardInterrupt in running Ray tasks,
+        # allowing their writer cleanup to run. Never wait without a bound.
         for task in pending:
             try:
-                messages.extend(ray.get(task))
-            except BaseException:
-                pass
+                ray.cancel(task)
+            except Exception:
+                logging.exception("Failed to cancel LeRobot import task.")
+        if pending:
+            try:
+                ready, _ = ray.wait(
+                    pending, num_returns=len(pending),
+                    timeout=_CANCEL_DRAIN_SECONDS)
+                for task in ready:
+                    try:
+                        messages.extend(ray.get(task, timeout=0))
+                    except Exception:
+                        pass
+            except Exception:
+                logging.exception("Failed to drain cancelled LeRobot tasks.")
         try:
             _abort_messages(table.raw_table, messages)
         except Exception:

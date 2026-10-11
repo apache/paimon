@@ -18,10 +18,11 @@ import importlib.util
 import io
 import json
 import tempfile
+import time
 import unittest
 from collections import Counter
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import numpy as np
@@ -32,7 +33,7 @@ from PIL import Image
 
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.lerobot.ray_loader import (
-    _episode_groups, _ray_source_uri, _task_groups,
+    _episode_groups, _prepare_group, _ray_source_uri, _task_groups,
 )
 
 
@@ -80,6 +81,23 @@ class LeRobotRayPlanningTest(unittest.TestCase):
     def test_reject_hub_id(self):
         with self.assertRaisesRegex(ValueError, "Hub repo_id"):
             _ray_source_uri("lerobot/example")
+
+    def test_cancel_after_prepare_aborts_worker_files(self):
+        table = object()
+        messages = [object()]
+        dataset = MagicMock()
+        dataset.close.side_effect = KeyboardInterrupt
+        with patch("pypaimon.multimodal.lerobot.ray_loader._resolved_source") as resolved, \
+                patch("pypaimon.multimodal.lerobot.ray_loader._RemoteLeRobotDataset",
+                      return_value=dataset), \
+                patch("pypaimon.multimodal.lerobot.ray_loader._prepare_dataset",
+                      return_value=messages), \
+                patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages") as abort:
+            resolved.return_value.__enter__.return_value = (object(), {})
+            with self.assertRaises(KeyboardInterrupt):
+                _prepare_group(table, "ignored", None, {}, None, 1, {}, (), [0])
+        abort.assert_called_once_with(table, messages)
+        dataset.close.assert_called_once()
 
     def test_validate_options_before_creating_tables(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -209,7 +227,8 @@ class LeRobotRayImportTest(unittest.TestCase):
                         "counted_%d" % data_files, self.source,
                         parallelism=2, batch_size=1)
                     reads = Counter(
-                        str(Path(urlparse(path).path).relative_to(self.source))
+                        str(Path(urlparse(path).path).resolve().relative_to(
+                            self.source.resolve()))
                         for path in trace_path.read_text().splitlines())
                     expected_workers = min(data_files, 2)
                     self.assertEqual(expected_workers, reads["meta/tasks.parquet"])
@@ -298,3 +317,25 @@ class LeRobotRayImportTest(unittest.TestCase):
         self.assertFalse(table.tag_manager().tag_exists("imported"))
         data_dir = Path(urlparse(table.table_path).path) / "data"
         self.assertEqual([], [path for path in data_dir.rglob("*") if path.is_file()])
+
+    def test_worker_failure_does_not_wait_for_blocked_task(self):
+        self._source(data_files=2)
+        marker = self.root / "blocked_task_started"
+
+        def prepare(*args):
+            if args[-1][0] == 0:
+                deadline = time.monotonic() + 3
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                raise ValueError("planned worker failure")
+            marker.touch()
+            time.sleep(10)
+            return []
+
+        start = time.monotonic()
+        with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group", prepare):
+            with self.assertRaisesRegex(Exception, "planned worker failure"):
+                self.conn.load_from_lerobot(
+                    "blocked", self.source, parallelism=2)
+        self.assertTrue(marker.exists())
+        self.assertLess(time.monotonic() - start, 6)
