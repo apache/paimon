@@ -20,9 +20,11 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.options.Options;
 
+import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 
 /** Jdbc distributed lock interface. */
@@ -47,36 +49,41 @@ public abstract class AbstractDistributedLockDialect implements JdbcDistributedL
                         }
                     }
                     // Older catalogs created the lock table without an owner column.
-                    try (ResultSet columns =
-                            dbMeta.getColumns(
-                                    null,
-                                    null,
-                                    JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME,
-                                    "lock_owner")) {
-                        if (!columns.next()) {
-                            try (PreparedStatement statement =
-                                    conn.prepareStatement(
-                                            "ALTER TABLE "
-                                                    + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
-                                                    + " ADD COLUMN lock_owner VARCHAR(36)")) {
-                                statement.execute();
-                            } catch (SQLException e) {
-                                // Another catalog may have upgraded the table concurrently.
-                                try (ResultSet updated =
-                                        dbMeta.getColumns(
-                                                null,
-                                                null,
-                                                JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME,
-                                                "lock_owner")) {
-                                    if (!updated.next()) {
-                                        throw e;
-                                    }
-                                }
+                    if (!hasOwnerColumn(conn)) {
+                        try (PreparedStatement statement =
+                                conn.prepareStatement(
+                                        "ALTER TABLE "
+                                                + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
+                                                + " ADD COLUMN lock_owner VARCHAR(36)")) {
+                            statement.execute();
+                        } catch (SQLException e) {
+                            // Another catalog may have upgraded the table concurrently.
+                            if (!hasOwnerColumn(conn)) {
+                                throw e;
                             }
                         }
                     }
                     return true;
                 });
+    }
+
+    private boolean hasOwnerColumn(Connection connection) throws SQLException {
+        // Resolve the same table as the lock SQL. JDBC metadata patterns can match other
+        // catalogs, schemas, tables or columns, particularly because these names contain '_'.
+        try (PreparedStatement statement =
+                        connection.prepareStatement(
+                                "SELECT * FROM "
+                                        + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
+                                        + " WHERE 1 = 0");
+                ResultSet result = statement.executeQuery()) {
+            ResultSetMetaData columns = result.getMetaData();
+            for (int i = 1; i <= columns.getColumnCount(); i++) {
+                if ("lock_owner".equalsIgnoreCase(columns.getColumnName(i))) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     public abstract String getCreateTableSql();

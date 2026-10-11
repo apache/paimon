@@ -31,7 +31,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -60,6 +64,7 @@ class JdbcCatalogLockTest {
     private final ScheduledFuture<?> future = mock(ScheduledFuture.class);
     private final AtomicLong clock = new AtomicLong();
     private final AbstractDistributedLockDialect dialect = new SqlLiteDistributedLockDialect();
+    private final Set<Thread> renewalThreads = ConcurrentHashMap.newKeySet();
 
     @Test
     void callbackCanUseThePoolAndRenewalExtendsLifetime() throws Exception {
@@ -82,7 +87,7 @@ class JdbcCatalogLockTest {
             assertThat(owner(pool)).isNull();
             callback.run();
             assertThat(owner(pool)).isNull();
-            verify(future).cancel(false);
+            verify(future).cancel(true);
         }
     }
 
@@ -130,16 +135,7 @@ class JdbcCatalogLockTest {
     @Test
     void legacyLockTableIsUpgradedWithoutRemovingRows() throws Exception {
         try (JdbcClientPool pool = pool()) {
-            pool.execute(
-                    connection -> {
-                        try (PreparedStatement statement =
-                                connection.prepareStatement(
-                                        "CREATE TABLE paimon_distributed_locks (lock_id VARCHAR(255) PRIMARY KEY, "
-                                                + "acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, "
-                                                + "expire_time_seconds BIGINT DEFAULT 0 NOT NULL)")) {
-                            statement.execute();
-                        }
-                    });
+            createLegacyLockTable(pool);
             assertThat(dialect.lockAcquire(pool, "old-lock", 3000)).isTrue();
             dialect.createTable(pool, new Options());
             dialect.createTable(pool, new Options());
@@ -147,6 +143,86 @@ class JdbcCatalogLockTest {
             assertThat(dialect.acquireOwned(pool, "new-lock", "new-owner", 3000)).isTrue();
             assertThat(dialect.releaseOwned(pool, "new-lock", "other-owner")).isFalse();
             assertThat(dialect.releaseOwned(pool, "new-lock", "new-owner")).isTrue();
+        }
+    }
+
+    @Test
+    void legacyLockTableUpgradeIgnoresSimilarlyNamedTable() throws Exception {
+        try (JdbcClientPool pool = pool()) {
+            createLegacyLockTable(pool);
+            pool.execute(
+                    connection -> {
+                        try (PreparedStatement statement =
+                                connection.prepareStatement(
+                                        "CREATE TABLE paimonXdistributedXlocks (lock_owner VARCHAR(36))")) {
+                            statement.execute();
+                        }
+                    });
+            dialect.createTable(pool, new Options());
+            assertThat(dialect.acquireOwned(pool, "lock", "owner", 3000)).isTrue();
+        }
+    }
+
+    @Test
+    void legacyLockTableUpgradeIgnoresSimilarlyNamedColumn() throws Exception {
+        try (JdbcClientPool pool = pool()) {
+            createLegacyLockTable(pool);
+            pool.execute(
+                    connection -> {
+                        try (PreparedStatement statement =
+                                connection.prepareStatement(
+                                        "ALTER TABLE paimon_distributed_locks ADD COLUMN lockXowner VARCHAR(36)")) {
+                            statement.execute();
+                        }
+                    });
+            dialect.createTable(pool, new Options());
+            assertThat(dialect.acquireOwned(pool, "lock", "owner", 3000)).isTrue();
+        }
+    }
+
+    @Test
+    void blockedRenewalsDoNotPreventOtherCatalogsFromRenewing() throws Exception {
+        CountDownLatch blocked = new CountDownLatch(2);
+        CountDownLatch renewed = new CountDownLatch(4);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService writers = Executors.newFixedThreadPool(2);
+        List<Future<?>> scopes = new ArrayList<>();
+        try (JdbcClientPool first = observedPool("first.db", blocked, new CountDownLatch(0));
+                JdbcClientPool second = observedPool("second.db", blocked, new CountDownLatch(0));
+                JdbcClientPool healthy =
+                        observedPool("healthy.db", new CountDownLatch(0), renewed)) {
+            try {
+                for (JdbcClientPool pool : new JdbcClientPool[] {first, second}) {
+                    dialect.createTable(pool, new Options());
+                    JdbcCatalogLock lock = defaultLock(pool);
+                    scopes.add(writers.submit(() -> holdScope(lock, pool, release)));
+                }
+                assertThat(blocked.await(10, TimeUnit.SECONDS)).isTrue();
+                dialect.createTable(healthy, new Options());
+                JdbcCatalogLock lock = defaultLock(healthy);
+                assertThat(
+                                lock.runWithLock(
+                                        () -> {
+                                            assertThat(renewed.await(10, TimeUnit.SECONDS))
+                                                    .isTrue();
+                                            lock.ensureValid();
+                                            return "published";
+                                        }))
+                        .isEqualTo("published");
+                assertThat(owner(healthy)).isNull();
+            } finally {
+                release.countDown();
+                for (Future<?> scope : scopes) {
+                    scope.get(10, TimeUnit.SECONDS);
+                }
+            }
+        } finally {
+            release.countDown();
+            writers.shutdownNow();
+        }
+        for (Thread thread : renewalThreads) {
+            thread.join(10000);
+            assertThat(thread.isAlive()).isFalse();
         }
     }
 
@@ -288,6 +364,60 @@ class JdbcCatalogLockTest {
     private JdbcClientPool pool() {
         return new JdbcClientPool(
                 1, "jdbc:sqlite:" + directory.resolve("locks.db"), Collections.emptyMap());
+    }
+
+    private void createLegacyLockTable(JdbcClientPool pool) throws Exception {
+        pool.execute(
+                connection -> {
+                    try (PreparedStatement statement =
+                            connection.prepareStatement(
+                                    "CREATE TABLE paimon_distributed_locks (lock_id VARCHAR(255) PRIMARY KEY, "
+                                            + "acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, "
+                                            + "expire_time_seconds BIGINT DEFAULT 0 NOT NULL)")) {
+                        statement.execute();
+                    }
+                });
+    }
+
+    private JdbcClientPool observedPool(
+            String name, CountDownLatch starting, CountDownLatch completed) {
+        return new JdbcClientPool(
+                1, "jdbc:sqlite:" + directory.resolve(name), Collections.emptyMap()) {
+            @Override
+            public <R> R run(ClientPool.Action<R, Connection, SQLException> action)
+                    throws SQLException, InterruptedException {
+                boolean renewal = Thread.currentThread().getName().startsWith("jdbc-lock-renew");
+                if (renewal) {
+                    renewalThreads.add(Thread.currentThread());
+                    starting.countDown();
+                }
+                R result = super.run(action);
+                if (renewal) {
+                    completed.countDown();
+                }
+                return result;
+            }
+        };
+    }
+
+    private JdbcCatalogLock defaultLock(JdbcClientPool pool) {
+        return new JdbcCatalogLock(pool, "catalog", Identifier.create("db", "table"), 10, 3000);
+    }
+
+    private Void holdConnection(CountDownLatch release) throws SQLException {
+        // Occupy this catalog's only connection while renewal tries to borrow it.
+        try {
+            assertThat(release.await(30, TimeUnit.SECONDS)).isTrue();
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SQLException(e);
+        }
+    }
+
+    private Void holdScope(JdbcCatalogLock lock, JdbcClientPool pool, CountDownLatch release)
+            throws Exception {
+        return lock.runWithLock(() -> pool.run(connection -> holdConnection(release)));
     }
 
     private JdbcClientPool zeroUpdateCountPool(JdbcClientPool pool) throws Exception {

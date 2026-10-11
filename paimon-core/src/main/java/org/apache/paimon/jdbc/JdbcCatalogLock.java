@@ -23,6 +23,8 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.TimeUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
@@ -41,8 +43,7 @@ import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_CHECK_MAX_SLEEP;
 
 /** Jdbc catalog lock. */
 public class JdbcCatalogLock implements Lock {
-    private static final ScheduledThreadPoolExecutor RENEWER = createRenewer();
-    private final ScheduledExecutorService renewer;
+    @Nullable private final ScheduledExecutorService renewer;
     private final LongSupplier nanoTime;
     private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
     private final JdbcClientPool connections;
@@ -63,7 +64,7 @@ public class JdbcCatalogLock implements Lock {
                 identifier,
                 checkMaxSleep,
                 acquireTimeout,
-                RENEWER,
+                null,
                 System::nanoTime);
     }
 
@@ -73,7 +74,7 @@ public class JdbcCatalogLock implements Lock {
             Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout,
-            ScheduledExecutorService renewer,
+            @Nullable ScheduledExecutorService renewer,
             LongSupplier nanoTime) {
         this.renewer = renewer;
         this.nanoTime = nanoTime;
@@ -99,14 +100,17 @@ public class JdbcCatalogLock implements Lock {
         while (true) {
             long requestedAt = nanoTime.getAsLong();
             if (dialect.acquireOwned(connections, lockUniqueName, owner, acquireTimeout)) {
-                Lease lease = new Lease(dialect, lockUniqueName, owner, requestedAt);
-                currentLease.set(lease);
+                Lease lease = null;
                 try {
+                    lease = new Lease(dialect, lockUniqueName, owner, requestedAt);
+                    currentLease.set(lease);
                     lease.ensureValid();
                     return callable.call();
                 } finally {
                     currentLease.remove();
-                    lease.close();
+                    if (lease != null) {
+                        lease.close();
+                    }
                     // The former holder must never delete a lease acquired after its expiry.
                     dialect.releaseOwned(connections, lockUniqueName, owner);
                 }
@@ -133,7 +137,7 @@ public class JdbcCatalogLock implements Lock {
 
     private static ScheduledThreadPoolExecutor createRenewer() {
         ScheduledThreadPoolExecutor executor =
-                new ScheduledThreadPoolExecutor(2, new ExecutorThreadFactory("jdbc-lock-renew"));
+                new ScheduledThreadPoolExecutor(1, new ExecutorThreadFactory("jdbc-lock-renew"));
         executor.setRemoveOnCancelPolicy(true);
         return executor;
     }
@@ -141,6 +145,7 @@ public class JdbcCatalogLock implements Lock {
     private class Lease implements AutoCloseable {
         private final AtomicBoolean closed = new AtomicBoolean();
         private final ScheduledFuture<?> renewal;
+        private final ScheduledExecutorService executor;
         private final AbstractDistributedLockDialect dialect;
         private final String lockId;
         private final String owner;
@@ -156,9 +161,11 @@ public class JdbcCatalogLock implements Lock {
             this.lockId = lockId;
             this.owner = owner;
             this.renewedAt = new AtomicLong(requestedAt);
+            // Blocking database calls must not consume another scope's renewal worker.
+            this.executor = renewer == null ? createRenewer() : renewer;
             long interval = Math.max(1, acquireTimeout / 3);
             this.renewal =
-                    renewer.scheduleWithFixedDelay(
+                    executor.scheduleWithFixedDelay(
                             this::renew, interval, interval, TimeUnit.MILLISECONDS);
         }
 
@@ -193,7 +200,10 @@ public class JdbcCatalogLock implements Lock {
         @Override
         public void close() {
             closed.set(true);
-            renewal.cancel(false);
+            renewal.cancel(true);
+            if (renewer == null) {
+                executor.shutdownNow();
+            }
         }
     }
 

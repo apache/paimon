@@ -29,6 +29,10 @@ import org.apache.thrift.TException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -86,7 +90,7 @@ class HiveCatalogLockTest {
         renewal.run();
         verify(client, times(3)).heartbeat(0L, 7L);
         verify(client).unlock(7L);
-        verify(future).cancel(false);
+        verify(future).cancel(true);
     }
 
     @Test
@@ -130,7 +134,7 @@ class HiveCatalogLockTest {
                                         }))
                 .isSameAs(failure);
         verify(client).unlock(7L);
-        verify(future).cancel(false);
+        verify(future).cancel(true);
     }
 
     @Test
@@ -183,6 +187,105 @@ class HiveCatalogLockTest {
             oldResponse.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void blockedRenewalsDoNotPreventOtherCatalogsFromRenewing() throws Exception {
+        Set<Thread> renewalThreads = ConcurrentHashMap.newKeySet();
+        CountDownLatch blocked = new CountDownLatch(2);
+        CountDownLatch renewed = new CountDownLatch(4);
+        CountDownLatch releaseScopes = new CountDownLatch(1);
+        CountDownLatch releaseRenewals = new CountDownLatch(1);
+        ExecutorService writers = Executors.newFixedThreadPool(2);
+        List<Future<?>> scopes = new ArrayList<>();
+        try {
+            for (int i = 0; i < 2; i++) {
+                IMetaStoreClient slow = mock(IMetaStoreClient.class);
+                when(slow.lock(any())).thenReturn(new LockResponse(7L, LockState.ACQUIRED));
+                doAnswer(
+                                invocation -> {
+                                    if (Thread.currentThread()
+                                            .getName()
+                                            .startsWith("hive-lock-renew")) {
+                                        renewalThreads.add(Thread.currentThread());
+                                        blocked.countDown();
+                                        assertThat(releaseRenewals.await(30, TimeUnit.SECONDS))
+                                                .isTrue();
+                                    }
+                                    return null;
+                                })
+                        .when(slow)
+                        .heartbeat(0L, 7L);
+                HiveCatalogLock lock =
+                        new HiveCatalogLock(
+                                pool(slow), Identifier.create("db", "slow" + i), 10, 3000, 3000);
+                scopes.add(
+                        writers.submit(
+                                () ->
+                                        lock.runWithLock(
+                                                () -> {
+                                                    assertThat(
+                                                                    releaseScopes.await(
+                                                                            30, TimeUnit.SECONDS))
+                                                            .isTrue();
+                                                    return null;
+                                                })));
+            }
+            assertThat(blocked.await(10, TimeUnit.SECONDS)).isTrue();
+            when(client.lock(any())).thenReturn(new LockResponse(7L, LockState.ACQUIRED));
+            doAnswer(
+                            invocation -> {
+                                if (Thread.currentThread()
+                                        .getName()
+                                        .startsWith("hive-lock-renew")) {
+                                    renewalThreads.add(Thread.currentThread());
+                                    renewed.countDown();
+                                }
+                                return null;
+                            })
+                    .when(client)
+                    .heartbeat(0L, 7L);
+            HiveCatalogLock healthy =
+                    new HiveCatalogLock(pool, Identifier.create("db", "healthy"), 10, 3000, 3000);
+            assertThat(
+                            healthy.runWithLock(
+                                    () -> {
+                                        assertThat(renewed.await(10, TimeUnit.SECONDS)).isTrue();
+                                        healthy.ensureValid();
+                                        return "published";
+                                    }))
+                    .isEqualTo("published");
+            verify(client).unlock(7L);
+        } finally {
+            releaseScopes.countDown();
+            releaseRenewals.countDown();
+            try {
+                for (Future<?> scope : scopes) {
+                    scope.get(10, TimeUnit.SECONDS);
+                }
+            } finally {
+                writers.shutdownNow();
+            }
+        }
+        for (Thread thread : renewalThreads) {
+            thread.join(10000);
+            assertThat(thread.isAlive()).isFalse();
+        }
+    }
+
+    private ClientPool<IMetaStoreClient, TException> pool(IMetaStoreClient client) {
+        return new ClientPool<IMetaStoreClient, TException>() {
+            @Override
+            public <R> R run(Action<R, IMetaStoreClient, TException> action) throws TException {
+                return action.run(client);
+            }
+
+            @Override
+            public void execute(ExecuteAction<IMetaStoreClient, TException> action)
+                    throws TException {
+                action.run(client);
+            }
+        };
     }
 
     private HiveCatalogLock lock() throws Exception {

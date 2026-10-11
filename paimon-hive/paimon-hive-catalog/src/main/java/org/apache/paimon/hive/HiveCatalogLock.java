@@ -38,6 +38,8 @@ import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Collections;
@@ -64,9 +66,8 @@ public class HiveCatalogLock implements Lock {
     private final Identifier identifier;
     private final long checkMaxSleep;
     private final long acquireTimeout;
-    private static final ScheduledThreadPoolExecutor RENEWER = createRenewer();
     private final long leaseMillis;
-    private final ScheduledExecutorService renewer;
+    @Nullable private final ScheduledExecutorService renewer;
     private final LongSupplier nanoTime;
     private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
 
@@ -90,7 +91,7 @@ public class HiveCatalogLock implements Lock {
                 checkMaxSleep,
                 acquireTimeout,
                 leaseMillis,
-                RENEWER,
+                null,
                 System::nanoTime);
     }
 
@@ -100,7 +101,7 @@ public class HiveCatalogLock implements Lock {
             long checkMaxSleep,
             long acquireTimeout,
             long leaseMillis,
-            ScheduledExecutorService renewer,
+            @Nullable ScheduledExecutorService renewer,
             LongSupplier nanoTime) {
         this.leaseMillis = leaseMillis;
         this.renewer = renewer;
@@ -143,13 +144,14 @@ public class HiveCatalogLock implements Lock {
 
     private static ScheduledThreadPoolExecutor createRenewer() {
         ScheduledThreadPoolExecutor executor =
-                new ScheduledThreadPoolExecutor(2, new ExecutorThreadFactory("hive-lock-renew"));
+                new ScheduledThreadPoolExecutor(1, new ExecutorThreadFactory("hive-lock-renew"));
         executor.setRemoveOnCancelPolicy(true);
         return executor;
     }
 
     private class Lease implements AutoCloseable {
         private final ScheduledFuture<?> renewal;
+        private final ScheduledExecutorService executor;
         private final long lockId;
         private final AtomicBoolean closed = new AtomicBoolean();
         private final AtomicLong renewedAt;
@@ -158,9 +160,11 @@ public class HiveCatalogLock implements Lock {
         private Lease(long lockId, long requestedAt) {
             this.lockId = lockId;
             renewedAt = new AtomicLong(requestedAt);
+            // A slow metastore heartbeat must not consume another scope's renewal worker.
+            executor = renewer == null ? createRenewer() : renewer;
             long interval = Math.max(1, leaseMillis / 3);
             renewal =
-                    renewer.scheduleWithFixedDelay(
+                    executor.scheduleWithFixedDelay(
                             () -> {
                                 if (closed.get()) {
                                     return;
@@ -199,7 +203,10 @@ public class HiveCatalogLock implements Lock {
         @Override
         public void close() {
             closed.set(true);
-            renewal.cancel(false);
+            renewal.cancel(true);
+            if (renewer == null) {
+                executor.shutdownNow();
+            }
         }
     }
 

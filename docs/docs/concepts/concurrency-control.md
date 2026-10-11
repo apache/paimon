@@ -96,8 +96,10 @@ Hive locks send heartbeats and validate ownership before publication. The client
 leases and use an internal owner ID for renewal and release. Existing JDBC lock tables receive a
 nullable `lock_owner` column when the catalog initializes; this requires permission to alter that
 table. Older clients can still read the table, but all writers should upgrade before relying on
-owner-checked release after lease expiry. Filesystem locks still depend on the storage's atomic
-publication behavior; they do not provide a storage fencing token.
+owner-checked release after lease expiry. Each active Hive or JDBC scope owns a renewal worker
+which is stopped when the scope ends, so blocked renewals do not occupy other scopes' scheduling
+threads. Filesystem locks still depend on the storage's atomic publication behavior; they do not
+provide a storage fencing token.
 
 ## Files conflict
 
