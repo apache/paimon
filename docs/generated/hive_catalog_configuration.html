@@ -78,6 +78,30 @@ you can set this option to true.
 </td>
         </tr>
         <tr>
+            <td><h5>lock-acquire-timeout</h5></td>
+            <td style="word-wrap: break-word;">8 min</td>
+            <td>Duration</td>
+            <td>The maximum time to wait for acquiring the lock.</td>
+        </tr>
+        <tr>
+            <td><h5>lock-check-max-sleep</h5></td>
+            <td style="word-wrap: break-word;">8 s</td>
+            <td>Duration</td>
+            <td>The maximum sleep time when retrying to check the lock.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.enabled</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Enable catalog locking. Defaults to enabled on object stores.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.type</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The catalog lock factory identifier. Defaults to the catalog's built-in lock factory.</td>
+        </tr>
+        <tr>
             <td><h5>metastore.client.class</h5></td>
             <td style="word-wrap: break-word;">"org.apache.hadoop.hive.metastore.HiveMetaStoreClient"</td>
             <td>String</td>

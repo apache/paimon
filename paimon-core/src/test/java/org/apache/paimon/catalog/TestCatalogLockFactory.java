@@ -16,27 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.jdbc;
+package org.apache.paimon.catalog;
 
-import org.apache.paimon.catalog.CatalogLockContext;
-import org.apache.paimon.catalog.CatalogLockFactory;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 
-import javax.annotation.Nullable;
+import java.util.concurrent.Callable;
 
-import java.util.Map;
-
-import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
-import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
-
-/** Jdbc catalog lock factory. */
-public class JdbcCatalogLockFactory implements CatalogLockFactory {
-
-    private static final long serialVersionUID = 1L;
-
-    public static final String IDENTIFIER = "jdbc";
+/** Records scopes acquired through the catalog lock factory SPI. */
+public class TestCatalogLockFactory implements CatalogLockFactory {
+    public static final String IDENTIFIER = "test-catalog-lock";
 
     @Override
     public String identifier() {
@@ -47,16 +36,27 @@ public class JdbcCatalogLockFactory implements CatalogLockFactory {
     public Lock createLock(
             CatalogLockContext context,
             Identifier identifier,
-            @Nullable String tableUuid,
-            @Nullable String commitUser,
+            String tableUuid,
+            String commitUser,
             Options tableOptions) {
-        JdbcCatalogLockContext lockContext = (JdbcCatalogLockContext) context;
-        Map<String, String> optionsMap = lockContext.options().toMap();
-        return new JdbcCatalogLock(
-                lockContext.connections(),
-                lockContext.catalogKey(),
-                identifier,
-                checkMaxSleep(optionsMap),
-                acquireTimeout(optionsMap));
+        Options options = context.options();
+        return new Lock() {
+            @Override
+            public <T> T runWithLock(Callable<T> callable) throws Exception {
+                options.set("test.lock.database", identifier.getDatabaseName());
+                options.set("test.lock.table", identifier.getObjectName());
+                options.set("test.lock.held", "true");
+                try {
+                    return callable.call();
+                } finally {
+                    options.set("test.lock.held", "false");
+                }
+            }
+
+            @Override
+            public void close() {
+                options.set("test.lock.closed", "true");
+            }
+        };
     }
 }

@@ -19,27 +19,23 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.Identifier;
 
 import java.util.concurrent.Callable;
 
-/**
- * An interface that allows file store to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
+/** A table lock covering an operation and its publication. */
 @Public
 public interface Lock extends AutoCloseable {
 
-    /** Run with lock. */
     <T> T runWithLock(Callable<T> callable) throws Exception;
+
+    /** Fail before publication when a held lease has expired or renewal has failed. */
+    default void ensureValid() {}
 
     static Lock empty() {
         return new EmptyLock();
     }
 
-    /** An empty lock. */
+    /** An operation with no external lock configured. */
     class EmptyLock implements Lock {
         @Override
         public <T> T runWithLock(Callable<T> callable) throws Exception {
@@ -50,33 +46,46 @@ public interface Lock extends AutoCloseable {
         public void close() {}
     }
 
-    static Lock fromCatalog(CatalogLock lock, Identifier tablePath) {
-        if (lock == null) {
-            return new EmptyLock();
-        }
-        return new CatalogLockImpl(lock, tablePath);
+    /** Reuse the current scope for nested publication on the same thread. */
+    static Lock reentrant(Lock lock) {
+        return lock instanceof ReentrantLock ? lock : new ReentrantLock(lock);
     }
 
-    /** A {@link Lock} to wrap {@link CatalogLock}. */
-    class CatalogLockImpl implements Lock {
+    /** Keeps the outer operation's scope until preparation and publication both finish. */
+    class ReentrantLock implements Lock {
+        private final Lock delegate;
+        private final ThreadLocal<Boolean> held = ThreadLocal.withInitial(() -> false);
 
-        private final CatalogLock catalogLock;
-        private final Identifier tablePath;
-
-        private CatalogLockImpl(CatalogLock catalogLock, Identifier tablePath) {
-            this.catalogLock = catalogLock;
-            this.tablePath = tablePath;
+        private ReentrantLock(Lock delegate) {
+            this.delegate = delegate;
         }
 
         @Override
         public <T> T runWithLock(Callable<T> callable) throws Exception {
-            return catalogLock.runWithLock(
-                    tablePath.getDatabaseName(), tablePath.getObjectName(), callable);
+            if (held.get()) {
+                delegate.ensureValid();
+                return callable.call();
+            }
+            return delegate.runWithLock(
+                    () -> {
+                        held.set(true);
+                        try {
+                            delegate.ensureValid();
+                            return callable.call();
+                        } finally {
+                            held.remove();
+                        }
+                    });
+        }
+
+        @Override
+        public void ensureValid() {
+            delegate.ensureValid();
         }
 
         @Override
         public void close() throws Exception {
-            this.catalogLock.close();
+            delegate.close();
         }
     }
 }

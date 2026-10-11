@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.jdbc.JdbcCatalog;
+import org.apache.paimon.jdbc.JdbcCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 
 import org.apache.flink.types.Row;
@@ -70,7 +71,7 @@ public class JdbcCatalogViewITCase extends CatalogITCaseBase {
         options.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
         options.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
         // Disable lock for simpler testing
-        options.put(CatalogOptions.LOCK_ENABLED.key(), "false");
+        options.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "false");
         return options;
     }
 

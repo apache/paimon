@@ -18,10 +18,12 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.hive.pool.CachedClientPool;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -40,38 +42,169 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 
-import static org.apache.paimon.options.CatalogOptions.LOCK_ACQUIRE_TIMEOUT;
-import static org.apache.paimon.options.CatalogOptions.LOCK_CHECK_MAX_SLEEP;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_ACQUIRE_TIMEOUT;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_CHECK_MAX_SLEEP;
 
-/** Hive {@link CatalogLock}. */
-public class HiveCatalogLock implements CatalogLock {
+/** Hive catalog lock. */
+public class HiveCatalogLock implements Lock {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalogLock.class);
 
     static final String LOCK_IDENTIFIER = "hive";
 
     private final ClientPool<IMetaStoreClient, TException> clients;
+    private final Identifier identifier;
     private final long checkMaxSleep;
     private final long acquireTimeout;
+    private static final ScheduledThreadPoolExecutor RENEWER = createRenewer();
+    private final long leaseMillis;
+    private final ScheduledExecutorService renewer;
+    private final LongSupplier nanoTime;
+    private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
 
     public HiveCatalogLock(
             ClientPool<IMetaStoreClient, TException> clients,
+            Identifier identifier,
             long checkMaxSleep,
             long acquireTimeout) {
+        this(clients, identifier, checkMaxSleep, acquireTimeout, leaseTimeout(new HiveConf()));
+    }
+
+    public HiveCatalogLock(
+            ClientPool<IMetaStoreClient, TException> clients,
+            Identifier identifier,
+            long checkMaxSleep,
+            long acquireTimeout,
+            long leaseMillis) {
+        this(
+                clients,
+                identifier,
+                checkMaxSleep,
+                acquireTimeout,
+                leaseMillis,
+                RENEWER,
+                System::nanoTime);
+    }
+
+    HiveCatalogLock(
+            ClientPool<IMetaStoreClient, TException> clients,
+            Identifier identifier,
+            long checkMaxSleep,
+            long acquireTimeout,
+            long leaseMillis,
+            ScheduledExecutorService renewer,
+            LongSupplier nanoTime) {
+        this.leaseMillis = leaseMillis;
+        this.renewer = renewer;
+        this.nanoTime = nanoTime;
         this.clients = clients;
+        this.identifier = identifier;
         this.checkMaxSleep = checkMaxSleep;
         this.acquireTimeout = acquireTimeout;
     }
 
     @Override
-    public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        long lockId = lock(database, table);
+    public <T> T runWithLock(Callable<T> callable) throws Exception {
+        long lockId = lock(identifier.getDatabaseName(), identifier.getObjectName());
+        Lease lease = null;
         try {
+            long requestedAt = nanoTime.getAsLong();
+            clients.execute(client -> client.heartbeat(0L, lockId));
+            lease = new Lease(lockId, requestedAt);
+            currentLease.set(lease);
+            lease.ensureValid();
             return callable.call();
         } finally {
+            currentLease.remove();
+            if (lease != null) {
+                lease.close();
+            }
             unlock(lockId);
         }
+    }
+
+    @Override
+    public void ensureValid() {
+        Lease lease = currentLease.get();
+        if (lease == null) {
+            throw new IllegalStateException("No Hive lock is held by this thread.");
+        }
+        lease.heartbeat();
+        lease.ensureValid();
+    }
+
+    private static ScheduledThreadPoolExecutor createRenewer() {
+        ScheduledThreadPoolExecutor executor =
+                new ScheduledThreadPoolExecutor(2, new ExecutorThreadFactory("hive-lock-renew"));
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
+
+    private class Lease implements AutoCloseable {
+        private final ScheduledFuture<?> renewal;
+        private final long lockId;
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final AtomicLong renewedAt;
+        private volatile Exception failure;
+
+        private Lease(long lockId, long requestedAt) {
+            this.lockId = lockId;
+            renewedAt = new AtomicLong(requestedAt);
+            long interval = Math.max(1, leaseMillis / 3);
+            renewal =
+                    renewer.scheduleWithFixedDelay(
+                            () -> {
+                                if (closed.get()) {
+                                    return;
+                                }
+                                heartbeat();
+                            },
+                            interval,
+                            interval,
+                            TimeUnit.MILLISECONDS);
+        }
+
+        private void heartbeat() {
+            if (closed.get() || failure != null) {
+                return;
+            }
+            try {
+                ensureValid();
+                long requestedAt = nanoTime.getAsLong();
+                clients.execute(client -> client.heartbeat(0L, lockId));
+                renewedAt.accumulateAndGet(requestedAt, Math::max);
+            } catch (Exception e) {
+                failure = e;
+            }
+        }
+
+        private void ensureValid() {
+            if (TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - renewedAt.get()) >= leaseMillis
+                    && failure == null) {
+                failure = new IllegalStateException("Hive lock expired locally.");
+            }
+            if (closed.get() || failure != null) {
+                throw new IllegalStateException("The Hive lock is no longer usable.", failure);
+            }
+        }
+
+        @Override
+        public void close() {
+            closed.set(true);
+            renewal.cancel(false);
+        }
+    }
+
+    public static long leaseTimeout(HiveConf conf) {
+        return HiveConf.getTimeVar(conf, HiveConf.ConfVars.HIVE_TXN_TIMEOUT, TimeUnit.MILLISECONDS);
     }
 
     private long lock(String database, String table)

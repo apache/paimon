@@ -53,30 +53,6 @@ public class CatalogOptions {
                     .defaultValue(CatalogTableType.MANAGED)
                     .withDescription("Type of table.");
 
-    public static final ConfigOption<Boolean> LOCK_ENABLED =
-            ConfigOptions.key("lock.enabled")
-                    .booleanType()
-                    .noDefaultValue()
-                    .withDescription("Enable Catalog Lock.");
-
-    public static final ConfigOption<String> LOCK_TYPE =
-            ConfigOptions.key("lock.type")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The Lock Type for Catalog, such as 'hive', 'zookeeper'.");
-
-    public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
-            key("lock-check-max-sleep")
-                    .durationType()
-                    .defaultValue(Duration.ofSeconds(8))
-                    .withDescription("The maximum sleep time when retrying to check the lock.");
-
-    public static final ConfigOption<Duration> LOCK_ACQUIRE_TIMEOUT =
-            key("lock-acquire-timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofMinutes(8))
-                    .withDescription("The maximum time to wait for acquiring the lock.");
-
     public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
             key("client-pool-size")
                     .intType()
