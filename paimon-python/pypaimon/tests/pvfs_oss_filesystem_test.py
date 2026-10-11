@@ -109,6 +109,21 @@ class GetOssFilesystemDispatchTest(unittest.TestCase):
         self.assertIs(fs, ossfs_sentinel)
         self.assertEqual(jindo_calls, [])
 
+    def test_cpp_keeps_python_jindo_or_legacy_backend(self):
+        fs, _, calls = self._dispatch('cpp', jindo_ossfs_available=True)
+        self.assertEqual(fs, 'JINDO_FS')
+        self.assertEqual(len(calls), 1)
+        fs, legacy, calls = self._dispatch('cpp', jindo_ossfs_available=False)
+        self.assertIs(fs, legacy)
+        self.assertEqual(calls, [])
+        pvfs = _make_pvfs({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'legacy'})
+        with mock.patch.object(pvfs_module, 'JINDO_AVAILABLE', True), \
+                mock.patch.object(pvfs_module, 'JINDO_OSSFS_AVAILABLE', True), \
+                mock.patch.object(PaimonVirtualFileSystem, '_get_ossfs_filesystem') as legacy:
+            self.assertFalse(pvfs._use_jindo_oss_backend())
+            self.assertIs(pvfs._get_oss_filesystem(self.token_options, self.STORAGE_LOCATION),
+                          legacy.return_value)
+
     def test_jindo_uses_jindo_when_available(self):
         fs, _, jindo_calls = self._dispatch("jindo", jindo_ossfs_available=True)
         self.assertEqual(fs, "JINDO_FS")
