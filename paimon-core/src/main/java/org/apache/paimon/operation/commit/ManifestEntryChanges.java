@@ -38,6 +38,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 public class ManifestEntryChanges {
 
     private final int defaultNumBucket;
+    private final boolean dropDeleteStats;
 
     public List<ManifestEntry> appendTableFiles;
     public List<ManifestEntry> appendChangelog;
@@ -47,7 +48,12 @@ public class ManifestEntryChanges {
     public List<IndexManifestEntry> compactIndexFiles;
 
     public ManifestEntryChanges(int defaultNumBucket) {
+        this(defaultNumBucket, false);
+    }
+
+    public ManifestEntryChanges(int defaultNumBucket, boolean dropDeleteStats) {
         this.defaultNumBucket = defaultNumBucket;
+        this.dropDeleteStats = dropDeleteStats;
         this.appendTableFiles = new ArrayList<>();
         this.appendChangelog = new ArrayList<>();
         this.appendIndexFiles = new ArrayList<>();
@@ -133,6 +139,10 @@ public class ManifestEntryChanges {
         Integer totalBuckets = commitMessage.totalBuckets();
         if (totalBuckets == null) {
             totalBuckets = defaultNumBucket;
+        }
+
+        if (kind == FileKind.DELETE && dropDeleteStats) {
+            file = file.copyWithoutStats();
         }
 
         return ManifestEntry.create(
