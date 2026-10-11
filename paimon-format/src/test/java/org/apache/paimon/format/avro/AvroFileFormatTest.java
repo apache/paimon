@@ -25,6 +25,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.SupportsFileMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -38,8 +39,11 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
+import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.file.SeekableFileInput;
 import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.BinaryDecoder;
@@ -62,6 +66,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -823,6 +828,31 @@ public class AvroFileFormatTest {
         try (PositionOutputStream out = localFileIO.newOutputStream(file, false)) {
             assertThatThrownBy(() -> format.createWriterFactory(rowType).create(out, "unsupported"))
                     .hasMessageContaining("Unrecognized codec: unsupported");
+        }
+    }
+
+    @Test
+    void testFileMetadata() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull());
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        SupportsFileMetadata writerFactory =
+                (SupportsFileMetadata) fileFormat.createWriterFactory(rowType);
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                FormatWriter writer =
+                        writerFactory.create(
+                                out,
+                                "zstd",
+                                Collections.singletonMap("custom-key", "custom-value"))) {
+            writer.addElement(GenericRow.of(1));
+        }
+
+        try (DataFileReader<GenericRecord> reader =
+                new DataFileReader<>(
+                        new SeekableFileInput(new File(file.toUri())),
+                        new GenericDatumReader<>())) {
+            assertThat(reader.getMetaString("custom-key")).isEqualTo("custom-value");
         }
     }
 }
