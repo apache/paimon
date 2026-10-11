@@ -1101,6 +1101,16 @@ public class CoreOptions implements Serializable {
                             "Ratio of the deleted rows in a data file to be forced compacted for "
                                     + "append-only table.");
 
+    public static final ConfigOption<Boolean> APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED =
+            key("append.compaction.row-group-copy.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable Parquet RowGroup copy fast path for append-only "
+                                    + "table compaction. When enabled and all whitelist conditions "
+                                    + "are met, compaction concatenates compressed RowGroups "
+                                    + "without decoding and re-encoding rows.");
+
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
                     .enumType(ChangelogProducer.class)
@@ -3952,6 +3962,10 @@ public class CoreOptions implements Serializable {
 
     public double compactionDeleteRatioThreshold() {
         return options.get(COMPACTION_DELETE_RATIO_THRESHOLD);
+    }
+
+    public boolean appendCompactionRowGroupCopyEnabled() {
+        return options.get(APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED);
     }
 
     public long dynamicBucketTargetRowNum() {
