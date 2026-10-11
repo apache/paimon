@@ -366,7 +366,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         self.assertEqual("from-snapshot", copied_options[0]["scan.mode"])
         self.assertEqual("17", copied_options[0]["scan.snapshot-id"])
         self.assertIsNone(copied_options[0]["scan.tag-name"])
-        self.assertEqual("false", copied_options[0]["scan.native-plan.enabled"])
+        self.assertNotIn("scan.native-plan.enabled", copied_options[0])
 
     def test_pk_index_source_policy_matches_java(self):
         compact = SimpleNamespace(file_source=1, level=1)

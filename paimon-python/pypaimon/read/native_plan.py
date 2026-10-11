@@ -365,9 +365,11 @@ def _native_table(table):
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
-    if hasattr(table, '_read_snapshot'):
+    # Only explicitly stored state captures a view; None means a fixed empty view.
+    table_state = vars(table)
+    if '_read_snapshot' in table_state:
         from pypaimon.common.json_util import JSON
-        snapshot = table._read_snapshot
+        snapshot = table_state['_read_snapshot']
         rt = rt.copy_with_pinned_snapshot(JSON.to_json(snapshot) if snapshot is not None else None)
     return rt
 
