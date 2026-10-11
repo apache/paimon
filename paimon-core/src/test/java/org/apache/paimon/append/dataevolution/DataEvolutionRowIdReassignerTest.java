@@ -878,8 +878,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         CatalogEnvironment environment =
                 new CatalogEnvironment(null, null, null, null, null, null, false, false) {
                     @Override
-                    public SnapshotCommit snapshotCommit(SnapshotManager manager) {
-                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                    public SnapshotCommit snapshotCommit(
+                            SnapshotManager manager, Lock publicationLock) {
+                        SnapshotCommit delegate =
+                                new RenamingSnapshotCommit(manager, publicationLock);
                         return new SnapshotCommit() {
                             @Override
                             public boolean commit(
