@@ -531,11 +531,6 @@ class FileStoreTable(Table):
         options[CoreOptions.SCAN_MODE.key()] = "from-snapshot" if snapshot is not None else "default"
         if snapshot is not None:
             options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot.id)
-        # Native planning cannot consume retained tag metadata or a pinned empty view.
-        # scan.version can resolve to a tag as well.
-        if snapshot is None or any(option.key() in self.table_schema.options for option in (
-                CoreOptions.SCAN_TAG_NAME, CoreOptions.SCAN_VERSION)):
-            options[CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key()] = "false"
         table = self.copy_without_time_travel(options)
         table._read_snapshot = snapshot
         return table

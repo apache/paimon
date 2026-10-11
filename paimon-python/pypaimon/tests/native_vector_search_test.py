@@ -215,12 +215,20 @@ def test_java_pk_index_results_are_physical_selections(pk_vector_table, filtered
         assert split.scores is not None
 
 
-def test_native_search_failure_falls_back(vector_table):
-    native = vector_table.copy({'read.native.enabled': 'true'})
-    expected = _scores(_single(native.copy({'read.native.enabled': 'false'})).execute_local())
+@pytest.mark.parametrize('batch', [False, True])
+def test_native_search_failure_is_propagated_without_retry(vector_table, batch):
     from pypaimon.table.source import native_vector_search
-    with patch.object(native_vector_search, '_native_table', side_effect=RuntimeError('unavailable')):
-        _assert_scores(_scores(_single(native).execute_local()), expected)
+    from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
+    table = vector_table.copy({'read.native.enabled': 'true'})
+    builder = (table.new_batch_vector_search_builder().with_vector_column('embedding')
+               .with_query_vectors([[1, 0], [0, 1]]).with_limit(3)) if batch else _single(table)
+    method = 'execute_batch_local' if batch else 'execute_local'
+    with patch.object(native_vector_search, '_native_table', side_effect=RuntimeError('unavailable')), \
+            patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search retried')), \
+            patch.object(BatchVectorSearchReadImpl, 'read_batch_plan',
+                         side_effect=AssertionError('Python batch search retried')):
+        with pytest.raises(RuntimeError, match='unavailable'):
+            getattr(builder, method)()
 
 
 def test_explicit_disable_uses_python(vector_table):

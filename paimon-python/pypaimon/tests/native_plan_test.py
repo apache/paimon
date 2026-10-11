@@ -902,13 +902,23 @@ class NativePlanTest(unittest.TestCase):
                 patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved):
             for _ in range(3):
                 self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
+            native_table.copy_with_pinned_snapshot.assert_not_called()
+            # Capturing empty uses a read-view copy, keeping the cached base
+            # reusable when a later caller has no captured snapshot.
+            pinned_table = native_table.copy_with_pinned_snapshot.return_value
+            table._read_snapshot = None
+            self.assertIs(_native_read_builder(table), pinned_table.new_read_builder.return_value)
+            native_table.copy_with_pinned_snapshot.assert_called_once_with(None)
+            del table._read_snapshot
+            self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
         fake_df.PaimonCatalog.assert_not_called()
         fake_df.Table.from_rest_response.assert_called_once_with(
             response, database='db', table='t$branch_dev',
             rest_options=_catalog_options(table))
         self.assertEqual(native_table.copy_with_resolved_schema.call_args_list,
-                         [call(resolved, branch='dev')] * 3)
-        self.assertEqual(native_table.new_read_builder.call_count, 3)
+                         [call(resolved, branch='dev')] * 5)
+        self.assertEqual(native_table.new_read_builder.call_count, 4)
+        pinned_table.new_read_builder.assert_called_once_with()
 
     def test_native_rest_cache_invalidation_and_serialization(self):
         import pickle
@@ -1207,6 +1217,7 @@ class NativePlanTest(unittest.TestCase):
             plan = native_plan(table)
             self.assertEqual(plan.snapshot_id, 7)
             scan.plan.assert_called_once_with()
+            rt.copy_with_pinned_snapshot.assert_not_called()
             rt.branch.return_value = 'main'
             with self.assertRaisesRegex(RuntimeError, 'requested branch'):
                 native_plan(table)

@@ -331,7 +331,7 @@ def _rest_data_token(table):
 
 
 def _native_table(table):
-    """Return the current schema and shared REST FileIO for Native operations."""
+    """Transport the resolved schema, shared FileIO and captured read view."""
     rest_response = _resolved_rest_table_response(table)
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
@@ -365,6 +365,12 @@ def _native_table(table):
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
+    # Only explicitly stored state captures a view; None means a fixed empty view.
+    table_state = vars(table)
+    if '_read_snapshot' in table_state:
+        from pypaimon.common.json_util import JSON
+        snapshot = table_state['_read_snapshot']
+        rt = rt.copy_with_pinned_snapshot(JSON.to_json(snapshot) if snapshot is not None else None)
     return rt
 
 

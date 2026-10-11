@@ -18,7 +18,6 @@
 """Transport an existing local hybrid query to one Rust core operation."""
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
-from pypaimon.common.json_util import JSON
 from pypaimon.globalindex.full_text.native_full_text_global_index_reader import NativeFullTextIndexOptions
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
@@ -47,9 +46,6 @@ def try_native_hybrid_search(builder):
             table.options.options.to_map()).to_native_options().items()}
         table = table.copy(options)
     native = _native_table(table).new_hybrid_search_builder()
-    if hasattr(table, '_read_snapshot'):
-        snapshot = table._read_snapshot
-        native.with_snapshot(JSON.to_json(snapshot) if snapshot is not None else None)
     native.with_limit(builder._limit).with_ranker(builder._ranker)
     for route in builder._routes:
         if route.is_vector():
