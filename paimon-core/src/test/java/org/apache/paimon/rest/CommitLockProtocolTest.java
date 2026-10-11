@@ -1,0 +1,252 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.rest;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.requests.CommitLockRequest;
+import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.responses.CommitLockResponse;
+import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Instant;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.InstantiationUtil;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
+
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.nio.file.Path;
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests the owner lease wire protocol without changing legacy snapshot requests. */
+class CommitLockProtocolTest {
+    @Test
+    void acquireRenewAndCommitUseTheSameOwnerWithoutToken() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Options options = new Options();
+            options.set(RESTCatalogOptions.URI, server.url("/").toString());
+            options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            options.set(RESTCatalogOptions.TOKEN, "token");
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            RESTApi api = new RESTApi(options, false);
+            Identifier identifier = Identifier.create("db", "table");
+            CommitLockResponse grant =
+                    new CommitLockResponse(true, "morax-job", 100000, 60000, snapshot(1));
+            server.enqueue(json(RESTApi.toJson(grant)));
+            CommitLockResponse acquired =
+                    api.acquireCommitLock(identifier, "table-id", "morax-job");
+            assertThat(acquired.isAcquired()).isTrue();
+            assertThat(acquired.getSnapshot().id()).isEqualTo(1);
+            RecordedRequest acquire = server.takeRequest(10, TimeUnit.SECONDS);
+            assertThat(acquire.getPath())
+                    .isEqualTo("/v1/catalog/databases/db/tables/table/commit-lock");
+            CommitLockRequest request =
+                    RESTApi.fromJson(acquire.getBody().readUtf8(), CommitLockRequest.class);
+            assertThat(request.getTableId()).isEqualTo("table-id");
+            assertThat(request.getCommitUser()).isEqualTo("morax-job");
+            server.enqueue(json(RESTApi.toJson(grant)));
+            assertThat(api.renewCommitLock(identifier, "table-id", "morax-job")).isTrue();
+            assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath())
+                    .endsWith("/commit-lock/renew");
+            server.enqueue(json("{\"success\":true}"));
+            assertThat(
+                            api.commitSnapshot(
+                                    identifier,
+                                    "table-id",
+                                    null,
+                                    snapshot(2),
+                                    Collections.emptyList()))
+                    .isTrue();
+            String commitBody = server.takeRequest(10, TimeUnit.SECONDS).getBody().readUtf8();
+            ObjectNode payload = RESTApi.fromJson(commitBody, ObjectNode.class);
+            assertThat(payload.has("lockToken")).isFalse();
+            assertThat(payload.has("commitUser")).isFalse();
+            assertThat(
+                            RESTApi.fromJson(commitBody, CommitTableRequest.class)
+                                    .getSnapshot()
+                                    .commitUser())
+                    .isEqualTo("morax-job");
+            assertThat(RESTApi.fromJson(commitBody, CommitTableRequest.class).getTableId())
+                    .isEqualTo("table-id");
+        }
+    }
+
+    @Test
+    void rollbackWithinLeaseCarriesOwnerAndLegacyPayloadStaysUnchanged() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Options options = new Options();
+            options.set(RESTCatalogOptions.URI, server.url("/").toString());
+            options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            options.set(RESTCatalogOptions.TOKEN, "token");
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options), false);
+            Identifier identifier = new Identifier("db", "table", "dev");
+            server.enqueue(json("{}"));
+            catalog.rollbackTo(identifier, "table-id", Instant.snapshot(1L), 2L, "morax-job");
+            RecordedRequest owned = server.takeRequest(10, TimeUnit.SECONDS);
+            assertThat(owned.getPath()).endsWith("/rollback");
+            RollbackTableRequest request =
+                    RESTApi.fromJson(owned.getBody().readUtf8(), RollbackTableRequest.class);
+            assertThat(request.getTableId()).isEqualTo("table-id");
+            assertThat(request.getCommitUser()).isEqualTo("morax-job");
+            assertThat(request.getFromSnapshot()).isEqualTo(2L);
+            server.enqueue(json("{}"));
+            catalog.rollbackTo(identifier, Instant.snapshot(1L), 2L);
+            ObjectNode legacy =
+                    RESTApi.fromJson(
+                            server.takeRequest(10, TimeUnit.SECONDS).getBody().readUtf8(),
+                            ObjectNode.class);
+            assertThat(legacy.has("tableId")).isFalse();
+            assertThat(legacy.has("commitUser")).isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void restTableCarriesSerializableCatalogLockEntry(boolean external, @TempDir Path directory)
+            throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            Options options = new Options();
+            options.set(RESTCatalogOptions.URI, server.url("/").toString());
+            options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
+            options.set(RESTCatalogOptions.TOKEN, "token");
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            options.set(RESTTokenFileIO.DATA_TOKEN_ENABLED, false);
+            GetTableResponse tableResponse =
+                    new GetTableResponse(
+                            "table-id",
+                            "db",
+                            "table$branch_dev",
+                            directory.toUri().toString(),
+                            external,
+                            0,
+                            Schema.newBuilder().column("id", DataTypes.INT()).build(),
+                            null,
+                            0,
+                            null,
+                            0,
+                            null);
+            server.enqueue(json(RESTApi.toJson(tableResponse)));
+            options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
+            RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options), false);
+            Identifier identifier = new Identifier("db", "table", "dev");
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath()).contains("table");
+            CatalogEnvironment environment = InstantiationUtil.clone(table.catalogEnvironment());
+            assertThat(environment.uuid()).isEqualTo("table-id");
+            if (external) {
+                assertThat(environment.catalogLoader()).isNull();
+                assertThat(environment.lockFactory()).isNull();
+                assertThat(environment.lockContext()).isNull();
+                assertThat(environment.snapshotCommit(table.snapshotManager()))
+                        .isInstanceOf(RenamingSnapshotCommit.class);
+                return;
+            }
+            assertThat(environment.lockFactory()).isNull();
+            assertThat(
+                            FactoryUtil.discoverFactory(
+                                    getClass().getClassLoader(), CatalogLockFactory.class, "rest"))
+                    .isInstanceOf(RESTCatalogLockFactory.class);
+            server.enqueue(
+                    json(
+                            RESTApi.toJson(
+                                    new CommitLockResponse(
+                                            true, "morax-job", 100000, 60000, snapshot(1)))));
+            Options tableOptions = Options.fromMap(table.options());
+            tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
+            try (Catalog writerCatalog = environment.catalogLoader().load();
+                    Lock lock =
+                            writerCatalog.createLock(
+                                    identifier, environment.uuid(), "morax-job", tableOptions)) {
+                assertThat(
+                                lock.runWithLock(
+                                        () -> {
+                                            lock.ensureValid();
+                                            return "published";
+                                        }))
+                        .isEqualTo("published");
+                RecordedRequest acquire = server.takeRequest(10, TimeUnit.SECONDS);
+                assertThat(acquire.getPath()).endsWith("/commit-lock");
+                assertThat(acquire.getHeader("Authorization")).isEqualTo("Bearer token");
+                CommitLockRequest request =
+                        RESTApi.fromJson(acquire.getBody().readUtf8(), CommitLockRequest.class);
+                assertThat(request.getTableId()).isEqualTo("table-id");
+                assertThat(request.getCommitUser()).isEqualTo("morax-job");
+            }
+        }
+    }
+
+    private static Snapshot snapshot(long id) {
+        return new Snapshot(
+                id,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "morax-job",
+                null,
+                0L,
+                Snapshot.CommitKind.APPEND,
+                1000L,
+                0L,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private static MockResponse json(String body) {
+        return new MockResponse()
+                .setResponseCode(200)
+                .setBody(body)
+                .addHeader("Content-Type", "application/json");
+    }
+}

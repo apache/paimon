@@ -19,10 +19,17 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.RESTCatalogFactory;
@@ -32,13 +39,18 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -136,6 +148,157 @@ class CatalogEnvironmentTest {
         table.newRead();
 
         verify(environment).dependencyReadContext();
+    }
+
+    @Test
+    void testWriterLockUsesCatalogAndRuntimeOptions() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Lock delegate = mock(Lock.class);
+        when(delegate.runWithLock(any()))
+                .thenAnswer(invocation -> ((Callable<?>) invocation.getArgument(0)).call());
+        Options options = new Options();
+        options.set(CoreOptions.BRANCH, "dev");
+        options.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
+        Identifier branch = new Identifier("db", "table", "dev");
+        when(catalog.createLock(branch, "table-id", "writer", options)).thenReturn(delegate);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        "table-id",
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        true,
+                        false);
+        try (Lock lock = environment.createLock(new CoreOptions(options), "writer")) {
+            assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
+            lock.ensureValid();
+        }
+        verify(catalog).createLock(branch, "table-id", "writer", options);
+        verify(delegate).ensureValid();
+        verify(delegate).close();
+        verify(catalog).close();
+    }
+
+    @Test
+    void testLegacyFactoryWithoutCatalogLoaderStillWorks() throws Exception {
+        CatalogLockFactory factory = mock(CatalogLockFactory.class);
+        CatalogLockContext context = CatalogLockContext.fromOptions(new Options());
+        CatalogLock backend =
+                new CatalogLock() {
+                    @Override
+                    public <T> T runWithLock(String database, String table, Callable<T> callable)
+                            throws Exception {
+                        assertThat(database).isEqualTo("db");
+                        assertThat(table).isEqualTo("table");
+                        return callable.call();
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        when(factory.createLock(context)).thenReturn(backend);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        null,
+                        null,
+                        factory,
+                        context,
+                        null,
+                        false,
+                        false);
+        try (Lock lock = environment.createLock(new CoreOptions(new Options()), "writer")) {
+            assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
+        }
+        verify(factory).createLock(context);
+    }
+
+    @Test
+    void testFailedLockCreationClosesCatalog() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.createLock(any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("Unsupported"));
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        "table-id",
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        true,
+                        false);
+        assertThatThrownBy(() -> environment.createLock(new CoreOptions(new Options()), "writer"))
+                .hasMessage("Unsupported");
+        verify(catalog).close();
+    }
+
+    @Test
+    void testDirectSnapshotCommitRetainsLegacyPublicationLock() throws Exception {
+        CatalogLockFactory factory = mock(CatalogLockFactory.class);
+        AtomicBoolean held = new AtomicBoolean();
+        CatalogLock backend =
+                new CatalogLock() {
+                    @Override
+                    public <T> T runWithLock(String database, String table, Callable<T> action)
+                            throws Exception {
+                        held.set(true);
+                        try {
+                            return action.call();
+                        } finally {
+                            held.set(false);
+                        }
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        CatalogLockContext context = CatalogLockContext.fromOptions(new Options());
+        when(factory.createLock(context)).thenReturn(backend);
+        SnapshotManager manager = mock(SnapshotManager.class);
+        FileIO fileIO = mock(FileIO.class);
+        Path snapshotPath = new Path("file:/table/snapshot/snapshot-1");
+        when(manager.fileIO()).thenReturn(fileIO);
+        when(manager.branch()).thenReturn("main");
+        when(manager.snapshotPath(1L)).thenReturn(snapshotPath);
+        when(fileIO.tryToWriteAtomic(snapshotPath, "{}")).thenReturn(true);
+        Snapshot snapshot = mock(Snapshot.class);
+        when(snapshot.id()).thenReturn(1L);
+        when(snapshot.toJson())
+                .thenAnswer(
+                        invocation -> {
+                            assertThat(held.get()).isTrue();
+                            return "{}";
+                        });
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        null,
+                        null,
+                        factory,
+                        context,
+                        null,
+                        false,
+                        false);
+        try (SnapshotCommit publisher = environment.snapshotCommit(manager)) {
+            assertThat(publisher.commit(null, snapshot, "main", Collections.emptyList())).isTrue();
+        }
+        assertThat(held.get()).isFalse();
+        verify(factory).createLock(context);
+    }
+
+    @Test
+    void testAutomaticRollbackPreservesTableIncarnationAndOwner() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Identifier identifier = new Identifier("db", "table", "dev");
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        identifier, "table-id", () -> catalog, null, null, null, true, false);
+        Instant instant = Instant.snapshot(1L);
+        environment.catalogTableRollback("writer").rollbackTo(instant, 2L);
+        verify(catalog).rollbackTo(identifier, "table-id", instant, 2L, "writer");
     }
 
     private static CatalogEnvironment environment(

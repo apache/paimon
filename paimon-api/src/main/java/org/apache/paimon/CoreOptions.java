@@ -973,6 +973,12 @@ public class CoreOptions implements Serializable {
                             "Specify how to initialize the next sequence number for primary key "
                                     + "table writers.");
 
+    public static final ConfigOption<Boolean> REST_COMMIT_LOCK_ENABLED =
+            key("rest.commit.lock-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Enable the REST catalog's table commit lease capability.");
+
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
             key("commit.timeout")
                     .durationType()
@@ -3898,6 +3904,10 @@ public class CoreOptions implements Serializable {
 
     public SequenceNumberInitMode writeSequenceNumberInitMode() {
         return options.get(WRITE_SEQUENCE_NUMBER_INIT_MODE);
+    }
+
+    public boolean restCommitLockEnabled() {
+        return options.get(REST_COMMIT_LOCK_ENABLED);
     }
 
     public long commitTimeout() {
