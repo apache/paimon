@@ -28,17 +28,33 @@ the delegate FileIO.
 import hashlib
 import os
 import threading
+import uuid
 from collections import OrderedDict
+from functools import lru_cache
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
 
+@lru_cache(maxsize=8)
+def _worker_cache_manager(pid, identity, cache_type, args):
+    # Keep recently restored managers alive across independently pickled tasks.
+    manager = cache_type(*args)
+    manager._identity = identity
+    return manager
+
+
+def _restore_cache_manager(identity, cache_type, args):
+    # A forked child must not reuse a manager (or its lock) from its parent.
+    return _worker_cache_manager(os.getpid(), identity, cache_type, args)
+
+
 class LocalMemoryCacheManager:
     """Block-level in-memory cache with LRU eviction."""
 
     def __init__(self, max_size_bytes: int, block_size: int = 1 * 1024 * 1024):
+        self._identity = uuid.uuid4().hex
         self._max_size_bytes = max_size_bytes
         self._block_size = block_size
         self._lock = threading.Lock()
@@ -48,7 +64,8 @@ class LocalMemoryCacheManager:
 
     def __reduce__(self):
         # Rebuild process-local state without serializing cached blocks or locks.
-        return type(self), (self._max_size_bytes, self._block_size)
+        return (_restore_cache_manager,
+                (self._identity, type(self), (self._max_size_bytes, self._block_size)))
 
     @property
     def block_size(self) -> int:
@@ -87,6 +104,7 @@ class LocalDiskCacheManager:
 
     def __init__(self, cache_dir: str, max_size_bytes: int,
                  block_size: int = 1 * 1024 * 1024):
+        self._identity = uuid.uuid4().hex
         self._cache_dir = cache_dir
         self._max_size_bytes = max_size_bytes
         self._block_size = block_size
@@ -99,7 +117,9 @@ class LocalDiskCacheManager:
         self._current_size = self._scan_and_populate_index()
 
     def __reduce__(self):
-        return type(self), (self._cache_dir, self._max_size_bytes, self._block_size)
+        return (_restore_cache_manager,
+                (self._identity, type(self),
+                 (self._cache_dir, self._max_size_bytes, self._block_size)))
 
     @property
     def block_size(self) -> int:
@@ -336,7 +356,7 @@ class CachingFileIO(FileIO):
     """FileIO wrapper that caches reads at block granularity.
 
     Only file types in the whitelist are cached. Others are read directly
-    from the delegate. Cache managers rebuild their local state when unpickled.
+    from the delegate. Cache managers are restored process-locally when unpickled.
     """
 
     def __init__(self, delegate: FileIO, cache, whitelist=None):

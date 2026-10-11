@@ -57,6 +57,24 @@ def _read_cached_twice(file_io, path, connection):
     connection.close()
 
 
+def _read_independent_pickles(payload, path, connection):
+    first = pickle.loads(payload)
+    second = pickle.loads(payload)
+    values = []
+    for file_io in (first, second):
+        with file_io.new_input_stream(path) as stream:
+            values.append(stream.read())
+    connection.send((values, first._delegate.opens, second._delegate.opens,
+                     first._cache is second._cache))
+    connection.close()
+
+
+def _restore_cache_after_fork(payload, connection):
+    cache = pickle.loads(payload)
+    connection.send(cache.get_block("snapshot-1", 0))
+    connection.close()
+
+
 class LocalDiskCacheManagerTest(unittest.TestCase):
 
     def setUp(self):
@@ -451,6 +469,51 @@ class CachingFileIOTest(unittest.TestCase):
         self.assertEqual(b"worker block",
                          second._cache.get_block("snapshot-1", 0))
 
+    def test_independent_pickles_reuse_worker_cache(self):
+        for disk in (False, True):
+            with self.subTest(disk=disk):
+                cache = (LocalDiskCacheManager(
+                    os.path.join(self.cache_dir, "blocks"), 128, 64)
+                    if disk else LocalMemoryCacheManager(128, 64))
+                payload = pickle.dumps(CachingFileIO(_CountingLocalFileIO(), cache))
+                first = pickle.loads(payload)
+                second = pickle.loads(payload)
+                self.assertIs(first._cache, second._cache)
+                self.assertIsNot(cache, first._cache)
+                first._cache.put_block("snapshot-1", 0, b"worker block")
+                self.assertEqual(b"worker block",
+                                 second._cache.get_block("snapshot-1", 0))
+
+    def test_separate_memory_cache_identities_remain_isolated(self):
+        first = pickle.loads(pickle.dumps(LocalMemoryCacheManager(128, 64)))
+        second = pickle.loads(pickle.dumps(LocalMemoryCacheManager(128, 64)))
+        self.assertIsNot(first, second)
+        first.put_block("snapshot-1", 0, b"first catalog")
+        self.assertIsNone(second.get_block("snapshot-1", 0))
+
+    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(),
+                         "fork is unavailable")
+    def test_fork_does_not_reuse_parent_cache_manager(self):
+        payload = pickle.dumps(LocalMemoryCacheManager(128, 64))
+        parent_cache = pickle.loads(payload)
+        parent_cache.put_block("snapshot-1", 0, b"parent block")
+        context = multiprocessing.get_context("fork")
+        parent, child = context.Pipe()
+        process = context.Process(
+            target=_restore_cache_after_fork, args=(payload, child))
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(parent.poll(30), "worker timed out")
+            self.assertIsNone(parent.recv())
+            process.join(10)
+            self.assertEqual(0, process.exitcode)
+        finally:
+            parent.close()
+            if process.is_alive():
+                process.terminate()
+            process.join(10)
+
     def test_pickle_disabled_cache(self):
         restored = pickle.loads(pickle.dumps(
             CachingFileIO(_CountingLocalFileIO(), None)))
@@ -484,6 +547,32 @@ class CachingFileIOTest(unittest.TestCase):
                     if process.is_alive():
                         process.terminate()
                     process.join(10)
+
+    def test_spawn_worker_reuses_cache_across_independent_pickles(self):
+        path = os.path.join(self.cache_dir, "snapshot-1")
+        with open(path, "wb") as output:
+            output.write(b"cached data")
+        cache = LocalMemoryCacheManager(128, 64)
+        payload = pickle.dumps(CachingFileIO(_CountingLocalFileIO(), cache))
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(
+            target=_read_independent_pickles, args=(payload, path, child))
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(parent.poll(30), "worker timed out")
+            values, first_opens, second_opens, shared = parent.recv()
+            process.join(10)
+            self.assertEqual(0, process.exitcode)
+            self.assertEqual([b"cached data", b"cached data"], values)
+            self.assertEqual((1, 0), (first_opens, second_opens))
+            self.assertTrue(shared)
+        finally:
+            parent.close()
+            if process.is_alive():
+                process.terminate()
+            process.join(10)
 
     def test_to_filesystem_path_forwarded_to_delegate(self):
         delegate = MagicMock()

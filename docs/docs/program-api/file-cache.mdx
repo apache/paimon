@@ -167,6 +167,6 @@ reference to the shared manager; the last reference releases the shared entry. A
 
 ### PyPaimon workers
 
-PyPaimon's cache is removed when `CachingFileIO` is pickled. An unpickled copy reads directly from
-storage. Create a catalog with cache options on each Python worker when you need caching there.
-The Java worker lifecycle above does not apply to Python serialization.
+PyPaimon preserves cache configuration when `CachingFileIO` is pickled. Workers reuse a bounded set
+of process-local cache managers across tasks; memory entries are not copied from the parent. A disk
+cache scans its configured directory when first restored in a worker.
