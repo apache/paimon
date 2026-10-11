@@ -148,7 +148,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     }
 
     @Test
-    void testCatalogWithLockForSchema() throws Exception {
+    void testCatalogIgnoresBackendLockOptionsForSchema() throws Exception {
         LOCK_COUNT.set(0);
         tEnv.executeSql(
                         String.format(
@@ -165,7 +165,9 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         tEnv.executeSql("CREATE TABLE table2 (a STRING, b STRING, c STRING)").await();
         tEnv.executeSql("CREATE TABLE table3 (a STRING, b STRING, c STRING)").await();
         tEnv.executeSql("DROP TABLE table3").await();
-        assertThat(LOCK_COUNT.get()).isEqualTo(3);
+        assertThat(LOCK_COUNT.get()).isZero();
+        assertThat(collect("SHOW TABLES"))
+                .containsExactlyInAnyOrder(Row.of("table1"), Row.of("table2"));
     }
 
     private void innerTestWriteRead() throws Exception {
