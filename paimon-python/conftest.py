@@ -28,7 +28,7 @@ _native_plan_count = 0
 _native_read_count = 0
 _native_write_count = 0
 _native_commit_count = 0
-_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental', 'merge'), 0)
+_native_update_counts = dict.fromkeys(('row_id', 'grouped', 'predicate', 'upsert', 'incremental', 'merge', 'shard'), 0)
 _force_native_for_test = False
 _force_native_read_for_test = False
 _force_native_write_for_test = False
@@ -176,7 +176,7 @@ def pytest_configure(config):
         from pypaimon.write.native_merge_into import NativeTableMergeInto
         from pypaimon.write.native_update import (
             NativeBatchTableUpdate, NativePredicateTableUpdate,
-            NativeTableUpdateByRowId, NativeTableUpsert,
+            NativeTableUpdateByRowId, NativeTableUpsert, NativeShardTableUpdator,
         )
 
         def track_update(cls, method, kind):
@@ -196,6 +196,7 @@ def pytest_configure(config):
         track_update(NativeTableUpsert, 'upsert', 'upsert')
         track_update(NativeTableUpdateByRowId, 'update_columns', 'incremental')
         track_update(NativeTableMergeInto, 'prepare_commit', 'merge')
+        track_update(NativeShardTableUpdator, 'prepare_commit', 'shard')
 
 
 def pytest_collection_modifyitems(items):
