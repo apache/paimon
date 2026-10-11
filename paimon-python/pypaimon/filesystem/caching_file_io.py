@@ -410,6 +410,10 @@ class CachingFileIO(FileIO):
         else:
             self._whitelist = whitelist
 
+    def __getstate__(self):
+        # Python 3.10 otherwise finds the delegate's hook through __getattr__.
+        return self.__dict__.copy()
+
     # Fallback caps when local-cache.max-size is unset (memory shares the heap).
     _DEFAULT_MEMORY_CACHE_MAX_SIZE = 256 * 1024 * 1024
     _DEFAULT_DISK_CACHE_MAX_SIZE = 10 * 1024 * 1024 * 1024

@@ -71,6 +71,15 @@ def _read_independent_pickles(payload, path, connection):
     connection.close()
 
 
+def _read_rest_cached_twice(file_io, path, connection):
+    values = []
+    for _ in range(2):
+        with file_io.new_input_stream(path) as stream:
+            values.append(stream.read())
+    connection.send((values, file_io._cache.get_block(path, 0)))
+    connection.close()
+
+
 class LocalDiskCacheManagerTest(unittest.TestCase):
 
     def setUp(self):
@@ -582,6 +591,44 @@ class CachingFileIOTest(unittest.TestCase):
             self.assertEqual([b"cached data", b"cached data"], values)
             self.assertEqual((1, 0), (first_opens, second_opens))
             self.assertTrue(shared)
+        finally:
+            parent.close()
+            if process.is_alive():
+                process.terminate()
+            process.join(10)
+
+    def test_spawn_rest_file_io_preserves_cache_wrapper(self):
+        from pypaimon.catalog.rest.rest_token import RESTToken
+        from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.options import Options
+
+        path = os.path.join(self.cache_dir, "snapshot-1")
+        with open(path, "wb") as output:
+            output.write(b"cached data")
+        delegate = RESTTokenFileIO(
+            Identifier.create("db", "t"), "file://" + self.cache_dir,
+            Options({"uri": "http://127.0.0.1:1", "token.provider": "bear",
+                     "token": "local-test-token"}))
+        delegate.token = RESTToken({}, 2 ** 63 - 1)
+        file_io = CachingFileIO(delegate, LocalMemoryCacheManager(128, 64))
+        restored = pickle.loads(pickle.dumps(file_io))
+        self.assertIsInstance(restored._delegate, RESTTokenFileIO)
+        self.assertIsInstance(restored._cache, LocalMemoryCacheManager)
+
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(
+            target=_read_rest_cached_twice, args=(file_io, path, child))
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(parent.poll(30), "worker timed out")
+            values, cached_block = parent.recv()
+            process.join(10)
+            self.assertEqual(0, process.exitcode)
+            self.assertEqual([b"cached data", b"cached data"], values)
+            self.assertEqual(b"cached data", cached_block)
         finally:
             parent.close()
             if process.is_alive():
