@@ -33,7 +33,7 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 def _publish_reassigned_partition(table, partition_value):
     """Publish the metadata-only OVERWRITE shape emitted by Java reassign.
 
-    The real Java reassign algorithm is exercised by VideoColumnReassignTest.
+    The real Java reassign algorithm is exercised by DataEvolutionRowIdReassignerTest.
     Preserve shared row ranges across normal/image column files in this fixture.
     """
     latest = table.snapshot_manager().get_latest_snapshot()

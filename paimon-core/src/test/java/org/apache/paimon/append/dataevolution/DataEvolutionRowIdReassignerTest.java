@@ -25,8 +25,10 @@ import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.VideoFrameDescriptor;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -61,6 +63,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -81,8 +84,11 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.UriReader;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -123,6 +129,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DataEvolutionRowIdReassigner}. */
 public class DataEvolutionRowIdReassignerTest extends TableTestBase {
+
+    private static final byte[] VIDEO_PAYLOAD = new byte[] {11, 22, 33, 44};
 
     private static final int LARGE_ENTRY_COUNT = 10_000;
     private static final int LARGE_MANIFEST_FILE_COUNT = 20;
@@ -1307,6 +1315,118 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .isNotEqualTo(oldFirstRowId);
         assertThat(readTableRows(table))
                 .containsExactly("0|a|v0", "100|c|v100", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a", "b"})
+    void testReassignBeforeVideoBackfillCommit(String reassignedPartition) throws Exception {
+        FileStoreTable table = createTableAndAddVideo();
+        String originalFile = currentEntriesAtRange(table, "pt=a/", 0, 0).get(0).file().fileName();
+        List<CommitMessage> pending = prepareVideo(table, 0);
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(
+                                table, partitionPredicate(table, reassignedPartition))
+                        .reassign();
+        assertThat(result.newSnapshotId).isGreaterThan(result.previousSnapshotId);
+        long afterReassign = table.latestSnapshot().get().id();
+        if (reassignedPartition.equals("a")) {
+            assertThatThrownBy(() -> commitDefault(pending))
+                    .hasMessageContaining("Row ID existence conflict");
+            assertThat(table.latestSnapshot().get().id()).isEqualTo(afterReassign);
+            assertVideoBackfillRows(table, false);
+            long newRowId =
+                    currentEntries(table).stream()
+                            .map(ManifestEntry::file)
+                            .filter(file -> file.fileName().equals(originalFile))
+                            .findFirst()
+                            .get()
+                            .nonNullFirstRowId();
+            assertThat(newRowId).isGreaterThanOrEqualTo(5);
+            commitDefault(prepareVideo(table, newRowId));
+        } else {
+            commitDefault(pending);
+        }
+        assertVideoBackfillRows(table, true);
+    }
+
+    @Test
+    void testVideoBackfillCommitsAfterReassignPlanning() throws Exception {
+        FileStoreTable table = createTableAndAddVideo();
+        List<CommitMessage> pending = prepareVideo(table, 0);
+        AtomicBoolean injected = new AtomicBoolean();
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(
+                                table,
+                                partitionPredicate(table, "a"),
+                                () -> {
+                                    if (injected.compareAndSet(false, true)) {
+                                        try {
+                                            commitDefault(pending);
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .reassign();
+        assertThat(injected).isTrue();
+        assertThat(result.newSnapshotId).isGreaterThan(result.previousSnapshotId);
+        assertVideoBackfillRows(table, true);
+    }
+
+    private FileStoreTable createTableAndAddVideo() throws Exception {
+        createTableWithInterleavedPartitions();
+        catalog.alterTable(
+                identifier(),
+                Arrays.asList(
+                        SchemaChange.addColumn("video", DataTypes.BLOB()),
+                        SchemaChange.setOption("video-frame-field", "video")),
+                false);
+        return getTableDefault();
+    }
+
+    private List<CommitMessage> prepareVideo(FileStoreTable table, long firstRowId)
+            throws Exception {
+        long snapshot = table.latestSnapshot().get().id();
+        java.nio.file.Path source = tempPath.resolve("source.mp4");
+        java.nio.file.Files.write(source, VIDEO_PAYLOAD);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                builder.newWrite()
+                        .withWriteType(table.rowType().project(Arrays.asList("pt", "video")))) {
+            VideoFrameDescriptor frame =
+                    new VideoFrameDescriptor(
+                            new Path(source.toUri()).toString(), 0, VIDEO_PAYLOAD.length, 7, -1, 0);
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("a"),
+                            Blob.fromDescriptor(UriReader.fromFile(LocalFileIO.create()), frame)));
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages, firstRowId);
+            messages.replaceAll(
+                    message -> ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot));
+            return messages;
+        }
+    }
+
+    private void assertVideoBackfillRows(FileStoreTable table, boolean backfilled)
+            throws Exception {
+        List<InternalRow> rows = read(table, Pair.of(CoreOptions.BLOB_AS_DESCRIPTOR, "true"));
+        rows.sort((a, b) -> Integer.compare(a.getInt(1), b.getInt(1)));
+        assertThat(rows).hasSize(5);
+        for (int id = 0; id < 5; id++) {
+            InternalRow row = rows.get(id);
+            assertThat(row.getInt(1)).isEqualTo(id);
+            assertThat(row.getString(2).toString()).isEqualTo("v" + id);
+            if (backfilled && id == 0) {
+                VideoFrameDescriptor descriptor =
+                        (VideoFrameDescriptor) row.getBlob(3).toDescriptor();
+                assertThat(descriptor.frameIndex()).isEqualTo(7 + id);
+                assertThat(descriptor.uri()).endsWith(".video");
+                assertThat(row.getBlob(3).toData()).isEqualTo(VIDEO_PAYLOAD);
+            } else {
+                assertThat(row.isNullAt(3)).isTrue();
+            }
+        }
     }
 
     @Test
