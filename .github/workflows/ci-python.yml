@@ -251,16 +251,16 @@ jobs:
             build-essential git curl cmake \
             && sudo rm -rf /var/lib/apt/lists/*
 
-      - name: Verify core installation on Python 3.8
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.8'
-      - name: Install core package (3.8)
+      # python:3.8-slim has no C or C++ compiler, so a dependency that has only an
+      # sdist for 3.8 fails here instead of being built with build-essential.
+      - name: Verify core installation on Python 3.8 without a compiler
         run: |
-          cd paimon-python && python -m pip install --upgrade pip
-          TEMP_DIR=$(mktemp -d)
-          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ Core package OK on Python 3.8"
+          docker run --rm -v "$PWD/paimon-python:/src:ro" python:3.8-slim sh -ec '
+            cp -r /src /tmp/paimon-python
+            python -m pip install --upgrade pip
+            python -m pip install /tmp/paimon-python
+          '
+          echo "✓ Core package OK on Python 3.8"
 
       - name: Verify core installation on Python 3.9
         uses: actions/setup-python@v5
