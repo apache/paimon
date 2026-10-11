@@ -85,6 +85,8 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
+import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.jdbc.JdbcCatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
@@ -756,6 +758,20 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     public boolean caseSensitive() {
         return false;
+    }
+
+    @Override
+    public Optional<CatalogLockFactory> lockFactory() {
+        if (!lockEnabled()) {
+            return Optional.empty();
+        }
+        String type = options.get(LOCK_TYPE);
+        return type == null ? defaultLockFactory() : Optional.of(CatalogLockFactory.discover(type));
+    }
+
+    @Override
+    protected boolean lockEnabled() {
+        return options.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     @Override

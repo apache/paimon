@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.factories.Factory;
+import org.apache.paimon.factories.FactoryUtil;
 
 import java.io.Serializable;
 
@@ -26,4 +27,9 @@ import java.io.Serializable;
 public interface CatalogLockFactory extends Factory, Serializable {
 
     CatalogLock createLock(CatalogLockContext context);
+
+    static CatalogLockFactory discover(String identifier) {
+        return FactoryUtil.discoverFactory(
+                CatalogLockFactory.class.getClassLoader(), CatalogLockFactory.class, identifier);
+    }
 }

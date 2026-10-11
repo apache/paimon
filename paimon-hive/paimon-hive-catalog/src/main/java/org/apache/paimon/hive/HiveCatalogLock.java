@@ -49,8 +49,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
-import static org.apache.paimon.options.CatalogOptions.LOCK_ACQUIRE_TIMEOUT;
-import static org.apache.paimon.options.CatalogOptions.LOCK_CHECK_MAX_SLEEP;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_ACQUIRE_TIMEOUT;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_CHECK_MAX_SLEEP;
 
 /** Hive {@link CatalogLock}. */
 public class HiveCatalogLock implements CatalogLock {

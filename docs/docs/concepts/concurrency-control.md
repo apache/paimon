@@ -83,7 +83,11 @@ caller's prepared layout against the current head while holding the lock.
 
 `Catalog.createLock` supplies a table-bound `Lock` with one `runWithLock` contract. The existing
 `CatalogLockFactory` SPI remains compatible and its named locks are adapted to this contract.
-`lock.enabled` and `lock.type` continue to select filesystem catalog locks, including Hive and JDBC.
+Each catalog interprets its own lock configuration. Hive and JDBC retain the catalog options
+`lock.enabled`, `lock.type`, `lock-check-max-sleep` and `lock-acquire-timeout`. Unless explicitly
+set, locking is enabled on object stores and disabled on other filesystems. The filesystem catalog
+also retains `lock.enabled` and `lock.type` for custom `CatalogLockFactory` providers. Catalogs
+without a locking policy use a no-op lock.
 Hive locks send heartbeats and validate ownership before publication. The client's
 `hive.txn.timeout` must match the metastore timeout. JDBC locks renew their
 leases and use an internal owner ID for renewal and release. Existing JDBC lock tables receive a

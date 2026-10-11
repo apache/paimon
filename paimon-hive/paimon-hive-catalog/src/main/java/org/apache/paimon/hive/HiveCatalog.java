@@ -123,6 +123,8 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_SKIP_UPDATE_STATS;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
@@ -211,6 +213,20 @@ public class HiveCatalog extends AbstractCatalog {
 
     private boolean formatTableDisabled() {
         return !options.get(FORMAT_TABLE_ENABLED);
+    }
+
+    @Override
+    public Optional<CatalogLockFactory> lockFactory() {
+        if (!lockEnabled()) {
+            return Optional.empty();
+        }
+        String type = options.get(LOCK_TYPE);
+        return type == null ? defaultLockFactory() : Optional.of(CatalogLockFactory.discover(type));
+    }
+
+    @Override
+    protected boolean lockEnabled() {
+        return options.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     @Override
