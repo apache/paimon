@@ -547,6 +547,18 @@ class TableUpdate:
             predicate: Optional[Predicate],
             commit_identifier: int,
     ) -> List[CommitMessage]:
+        try:
+            from pypaimon.write.native_update import create_native_predicate_delete
+            native = create_native_predicate_delete(
+                self.table, self.commit_user, predicate)
+        except Exception as error:
+            logger.debug('Native predicate delete preparation failed: %s', error)
+        else:
+            if native is not None:
+                # Matching and DV preparation share one snapshot in Rust.
+                # Keep operation failures outside the preparation fallback;
+                # returned/staged commit files must never be auto-aborted.
+                return native.delete()
         partition_filter = self._partition_only_delete_filter(predicate)
         if partition_filter is not None:
             return self._delete_by_partition_filter(partition_filter)

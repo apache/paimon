@@ -34,13 +34,10 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
 
-def _native_row_id_table(table):
-    """Resolve an eligible table before creating a native row-ID writer."""
+def _native_update_table(table):
+    """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
-            or not table.options.data_evolution_enabled()
-            or not table.options.row_tracking_enabled()
-            or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
             or table.options.with_vector_format()
             or table.options.changelog_producer() != ChangelogProducer.NONE
@@ -52,6 +49,16 @@ def _native_row_id_table(table):
             schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
         return None
     return create_native_write_table(table)
+
+
+def _native_row_id_table(table):
+    """Row-level operations additionally require a data-evolution table."""
+    if (type(table) is not FileStoreTable
+            or not table.options.data_evolution_enabled()
+            or not table.options.row_tracking_enabled()
+            or table.is_primary_key_table):
+        return None
+    return _native_update_table(table)
 
 
 def create_native_update(table, commit_user, columns):
@@ -255,6 +262,25 @@ def native_predicate_row_ids(scan_table, predicate, splits):
     return row_ids
 
 
+def create_native_predicate_delete(table, commit_user, predicate):
+    """Delegate matching and partition metadata deletion to the core updater."""
+    from pypaimon.read.native_plan import _predicate_to_native, native_method_available
+    if not native_method_available('BatchTableUpdate', 'delete_by_predicate'):
+        return None
+    # Core selects whole-partition metadata deletes for append/PK tables too;
+    # only the row-level branch requires row tracking and deletion vectors.
+    native_table = _native_update_table(table)
+    if native_table is None:
+        return None
+    native_predicate = None if predicate is None else _predicate_to_native(predicate)
+    if native_predicate is not None:
+        # Resolve all fields/operators before selecting the mutating operation.
+        native_table.new_read_builder().with_filter(native_predicate)
+    writer = (native_table.new_batch_write_builder()
+              ._with_commit_user(commit_user).new_update())
+    return NativePredicateTableUpdate(table, writer, native_predicate)
+
+
 def create_native_delete(table, commit_user):
     """Select Rust's deletion-vector writer for supported batch deletes."""
     if not table.options.deletion_vectors_enabled(False):
@@ -390,3 +416,7 @@ class NativePredicateTableUpdate:
             self.table,
             self.writer.update_by_predicate(
                 self.predicate, dict(assignments), list(read_columns or ())))
+
+    def delete(self):
+        return from_native_commit_messages(
+            self.table, self.writer.delete_by_predicate(self.predicate))
