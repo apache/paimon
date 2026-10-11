@@ -393,28 +393,67 @@ class LeRobotRayImportTest(unittest.TestCase):
                 self.assertEqual([], _bucket_files(table))
 
     def test_worker_failure_does_not_wait_for_blocked_task(self):
+        import ray
+        if ray.cluster_resources().get("CPU", 0) < 2:
+            self.skipTest("Two Ray CPUs are required to run both tasks")
         self._source(data_files=2)
-        marker = self.root / "blocked_task_started"
+        started = self.root / "blocked_task_started"
+        triggered = self.root / "failure_triggered"
+        release = self.root / "release_blocked_task"
+        stopped = self.root / "blocked_task_stopped"
+        refs = set()
+
+        class TrackingRay:
+            def __getattr__(self, name):
+                return getattr(ray, name)
+
+            def wait(self, tasks, **kwargs):
+                refs.update(tasks)
+                return ray.wait(tasks, **kwargs)
 
         def prepare(*args):
             if args[-1][0] == 0:
-                deadline = time.monotonic() + 3
-                while not marker.exists() and time.monotonic() < deadline:
+                deadline = time.monotonic() + 30
+                while not started.exists():
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Blocked worker did not start.")
                     time.sleep(0.01)
+                triggered.write_text(str(time.monotonic()))
                 raise ValueError("planned worker failure")
-            marker.touch()
-            time.sleep(10)
-            return []
+            started.touch()
+            try:
+                deadline = time.monotonic() + 15
+                while not release.exists():
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Blocked task was not released.")
+                    time.sleep(0.05)
+                return []
+            finally:
+                stopped.touch()
 
-        start = time.monotonic()
         from pypaimon.multimodal.lerobot.ray_loader import _abort_messages
-        with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group", prepare), \
-                patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
-                      wraps=_abort_messages) as abort:
-            with self.assertRaisesRegex(Exception, "planned worker failure"):
-                self.conn.load_from_lerobot(
-                    "blocked", self.source, parallelism=2)
-        abort.assert_called_once()
-        self.assertEqual([], abort.call_args[0][1])
-        self.assertTrue(marker.exists())
-        self.assertLess(time.monotonic() - start, 6)
+        try:
+            with patch("pypaimon.multimodal.lerobot.ray_loader._require_ray",
+                       return_value=TrackingRay()), \
+                    patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                          prepare), \
+                    patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
+                          wraps=_abort_messages) as abort:
+                with self.assertRaisesRegex(Exception, "planned worker failure"):
+                    self.conn.load_from_lerobot(
+                        "blocked", self.source, parallelism=2)
+            elapsed = time.monotonic() - float(triggered.read_text())
+            abort.assert_called_once()
+            self.assertEqual([], abort.call_args[0][1])
+            self.assertLess(elapsed, 6)
+        finally:
+            release.touch()
+            deadline = time.monotonic() + 5
+            while not stopped.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            if not stopped.exists():
+                for ref in refs:
+                    ray.cancel(ref, force=True)
+            if refs:
+                ray.wait(list(refs), num_returns=len(refs), timeout=2)
+        self.assertTrue(stopped.exists())
