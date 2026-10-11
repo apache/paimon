@@ -141,16 +141,30 @@ class MultimodalTableTest(unittest.TestCase):
         with open(video_path, "wb") as out:
             out.write(b"complete-video-payload")
         table.replace_video("id < 2", pmm.Blob.from_local(video_path), first_frame=7)
+        # A retained writer must not stamp its old schema onto a new snapshot.
+        old_table.add([{"id": 3, "image": b"image-3"}])
+        snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(table.raw_table.table_schema.id, snapshot.schema_id)
+        table.raw_table.create_tag("after_old_append")
         rows = sorted(table.scan().select(["id", "image", "video", "_ROW_ID"]).to_list(),
                       key=lambda row: row["id"])
-        self.assertEqual([0, 1, 2], [row["_ROW_ID"] for row in rows])
+        self.assertEqual([0, 1, 2, 3], [row["_ROW_ID"] for row in rows])
         self.assertEqual([7, 8], [pmm.VideoFrameDescriptor.deserialize(row["video"]).frame_index
                                   for row in rows[:2]])
-        self.assertIsNone(rows[2]["video"])
+        self.assertTrue(all(row["video"] is None for row in rows[2:]))
         _, images = table.scan().read_blobs("image")
-        self.assertEqual([b"image-0", b"image-1", b"image-2"], images["image"])
+        self.assertEqual([b"image-0", b"image-1", b"image-2", b"image-3"], images["image"])
         _, videos = table.scan().where("id < 2").read_blobs("video")
         self.assertEqual([b"complete-video-payload"] * 2, videos["video"])
+        for options in ({"scan.snapshot-id": str(snapshot.id)}, {"scan.tag-name": "after_old_append"}):
+            with self.subTest(options=options):
+                historical = table.raw_table.copy(options)
+                self.assertEqual(["id", "image", "video"], [field.name for field in historical.fields])
+                read = historical.new_read_builder()
+                restored = sorted(read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist(),
+                                  key=lambda row: row["id"])
+                self.assertEqual([0, 1, 2, 3], [row["id"] for row in restored])
+                self.assertEqual([row["video"] for row in rows], [row["video"] for row in restored])
         historical = self.conn.catalog.get_table("default.evolved_video").copy({"scan.tag-name": "before_video"})
         self.assertNotIn("video-frame-field", historical.table_schema.options)
         # The retained old schema still reads the original rows after the backfill.
