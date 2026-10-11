@@ -304,12 +304,11 @@ public class CompactReassignReuseTest extends TableTestBase {
                 new CatalogEnvironment(null, null, null, null, null, null, false, false) {
                     @Override
                     public SnapshotCommit snapshotCommit(
-                            SnapshotManager manager, Lock publicationLock) {
-                        SnapshotCommit delegate =
-                                new RenamingSnapshotCommit(manager, publicationLock);
-                        return new SnapshotCommit() {
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit(Lock.empty()) {
                             @Override
-                            public boolean commit(
+                            protected boolean commitImpl(
                                     String baseUuid,
                                     Snapshot snapshot,
                                     String branch,
@@ -325,7 +324,7 @@ public class CompactReassignReuseTest extends TableTestBase {
                             }
 
                             @Override
-                            public void close() throws Exception {
+                            protected void closeImpl() throws Exception {
                                 delegate.close();
                             }
                         };
@@ -375,12 +374,11 @@ public class CompactReassignReuseTest extends TableTestBase {
                 new CatalogEnvironment(null, null, null, null, null, null, false, false) {
                     @Override
                     public SnapshotCommit snapshotCommit(
-                            SnapshotManager manager, Lock publicationLock) {
-                        SnapshotCommit delegate =
-                                new RenamingSnapshotCommit(manager, publicationLock);
-                        return new SnapshotCommit() {
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit(Lock.empty()) {
                             @Override
-                            public boolean commit(
+                            protected boolean commitImpl(
                                     String baseUuid,
                                     Snapshot snapshot,
                                     String branch,
@@ -472,7 +470,7 @@ public class CompactReassignReuseTest extends TableTestBase {
                             }
 
                             @Override
-                            public void close() throws Exception {
+                            protected void closeImpl() throws Exception {
                                 delegate.close();
                             }
                         };
@@ -617,12 +615,11 @@ public class CompactReassignReuseTest extends TableTestBase {
                 new CatalogEnvironment(null, null, null, null, null, null, false, false) {
                     @Override
                     public SnapshotCommit snapshotCommit(
-                            SnapshotManager manager, Lock publicationLock) {
-                        SnapshotCommit delegate =
-                                new RenamingSnapshotCommit(manager, publicationLock);
-                        return new SnapshotCommit() {
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit(Lock.empty()) {
                             @Override
-                            public boolean commit(
+                            protected boolean commitImpl(
                                     String baseUuid,
                                     Snapshot snapshot,
                                     String branch,
@@ -653,7 +650,7 @@ public class CompactReassignReuseTest extends TableTestBase {
                             }
 
                             @Override
-                            public void close() throws Exception {
+                            protected void closeImpl() throws Exception {
                                 delegate.close();
                             }
                         };

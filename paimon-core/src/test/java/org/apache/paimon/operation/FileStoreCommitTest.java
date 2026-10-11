@@ -124,11 +124,13 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 /** Tests for {@link FileStoreCommitImpl}. */
 public class FileStoreCommitTest {
@@ -1799,8 +1801,11 @@ public class FileStoreCommitTest {
                     @Override
                     public void close() {}
                 };
-        SnapshotCommit publisher = mock(SnapshotCommit.class);
-        when(publisher.commit(any(), any(), any(), any()))
+        TestingSnapshotCommit publisher =
+                mock(
+                        TestingSnapshotCommit.class,
+                        withSettings().useConstructor(lock).defaultAnswer(CALLS_REAL_METHODS));
+        when(publisher.commitImpl(any(), any(), any(), any()))
                 .thenAnswer(
                         invocation -> {
                             assertThat(held.get()).isTrue();
@@ -1821,7 +1826,7 @@ public class FileStoreCommitTest {
                                     invocation.getArgument(3));
                         });
         try (FileStoreCommitImpl commit =
-                newCommitWithSnapshotCommit(store, "morax-job", publisher).withLock(lock)) {
+                newCommitWithSnapshotCommit(store, "morax-job", publisher)) {
             commit.commit(checkNotNull(prepared.get()), false);
         }
         Snapshot latest = store.snapshotManager().latestSnapshot();
@@ -1886,9 +1891,12 @@ public class FileStoreCommitTest {
                     @Override
                     public void close() {}
                 };
-        SnapshotCommit publisher = mock(SnapshotCommit.class);
+        TestingSnapshotCommit publisher =
+                mock(
+                        TestingSnapshotCommit.class,
+                        withSettings().useConstructor(lock).defaultAnswer(CALLS_REAL_METHODS));
         SnapshotCommit delegate = new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty());
-        when(publisher.commit(any(), any(), any(), any()))
+        when(publisher.commitImpl(any(), any(), any(), any()))
                 .thenAnswer(
                         invocation -> {
                             assertThat(held.get()).isTrue();
@@ -1910,13 +1918,12 @@ public class FileStoreCommitTest {
                 .call(any());
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(
-                                store,
-                                "writer",
-                                publisher,
-                                store.options(),
-                                false,
-                                Collections.singletonList(callback))
-                        .withLock(lock)) {
+                        store,
+                        "writer",
+                        publisher,
+                        store.options(),
+                        false,
+                        Collections.singletonList(callback))) {
             commit.commit(committable, false);
         }
         assertThat(store.snapshotManager().snapshot(1).commitKind())
@@ -1964,18 +1971,110 @@ public class FileStoreCommitTest {
                     @Override
                     public void close() {}
                 };
-        SnapshotCommit publisher = mock(SnapshotCommit.class);
+        TestingSnapshotCommit publisher =
+                mock(
+                        TestingSnapshotCommit.class,
+                        withSettings().useConstructor(lock).defaultAnswer(CALLS_REAL_METHODS));
         Options options = Options.fromMap(store.options().toMap());
         options.set(CoreOptions.COMMIT_MAX_RETRIES, 0);
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(
-                                store, "writer", publisher, new CoreOptions(options), false)
-                        .withLock(lock)) {
+                        store, "writer", publisher, new CoreOptions(options), false)) {
             assertThatThrownBy(() -> commit.commit(checkNotNull(prepared.get()), false))
                     .satisfies(anyCauseMatches(IllegalStateException.class, "Lost lease"));
         }
-        verify(publisher, never()).commit(any(), any(), any(), any());
+        verify(publisher, never()).commitImpl(any(), any(), any(), any());
         assertThat(store.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"append", "replace-manifest-list", "rollback", "compact-manifest"})
+    public void testLeaseLostDuringPreparationPreventsPublication(String operation)
+            throws Exception {
+        TestFileStore store = createStore(false);
+        List<KeyValue> rows =
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a"));
+        Snapshot target = store.commitData(rows, gen::getPartition, value -> 0).get(0);
+        store.overwriteData(rows, gen::getPartition, value -> 0, Collections.emptyMap());
+        Snapshot head = store.snapshotManager().latestSnapshot();
+        AtomicReference<ManifestCommittable> prepared = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 2L, null, "b")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> prepared.set(committable));
+        AtomicBoolean held = new AtomicBoolean();
+        AtomicInteger validityChecks = new AtomicInteger();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        assertThat(held.getAndSet(true)).isFalse();
+                        try {
+                            return action.call();
+                        } finally {
+                            held.set(false);
+                        }
+                    }
+
+                    @Override
+                    public void ensureValid() {
+                        assertThat(held.get()).isTrue();
+                        // The lease is valid on acquisition but expires during preparation.
+                        if (validityChecks.incrementAndGet() > 1) {
+                            throw new IllegalStateException("Lost lease");
+                        }
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        TestingSnapshotCommit publisher =
+                mock(
+                        TestingSnapshotCommit.class,
+                        withSettings().useConstructor(lock).defaultAnswer(CALLS_REAL_METHODS));
+        Options options = Options.fromMap(store.options().toMap());
+        options.set(CoreOptions.COMMIT_MAX_RETRIES, 0);
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store, "writer", publisher, new CoreOptions(options), false)) {
+            assertThatThrownBy(
+                            () -> {
+                                switch (operation) {
+                                    case "append":
+                                        commit.commit(checkNotNull(prepared.get()), false);
+                                        break;
+                                    case "replace-manifest-list":
+                                        commit.replaceManifestList(
+                                                head,
+                                                head.totalRecordCount(),
+                                                Pair.of(
+                                                        head.baseManifestList(),
+                                                        head.baseManifestListSize()),
+                                                Pair.of(
+                                                        head.deltaManifestList(),
+                                                        head.deltaManifestListSize()));
+                                        break;
+                                    case "rollback":
+                                        commit.rollbackToAsLatest(target);
+                                        break;
+                                    case "compact-manifest":
+                                        commit.compactManifest();
+                                        break;
+                                    default:
+                                        throw new AssertionError(operation);
+                                }
+                            })
+                    .satisfies(anyCauseMatches(IllegalStateException.class, "Lost lease"));
+        }
+        verify(publisher, never()).commitImpl(any(), any(), any(), any());
+        assertThat(validityChecks.get()).isEqualTo(2);
+        assertThat(held.get()).isFalse();
+        assertThat(store.snapshotManager().latestSnapshot()).isEqualTo(head);
     }
 
     @Test
@@ -2576,7 +2675,22 @@ public class FileStoreCommitTest {
         return Arrays.asList(attempts);
     }
 
-    private static class ConflictingSnapshotCommit implements SnapshotCommit {
+    /** Exposes the backend hook to Mockito while retaining the final publication scope. */
+    public abstract static class TestingSnapshotCommit extends SnapshotCommit {
+        public TestingSnapshotCommit(Lock lock) {
+            super(lock);
+        }
+
+        @Override
+        public abstract boolean commitImpl(
+                @Nullable String baseSnapshotUuid,
+                Snapshot snapshot,
+                String branch,
+                List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                throws Exception;
+    }
+
+    private static class ConflictingSnapshotCommit extends SnapshotCommit {
 
         private final SnapshotCommit delegate;
         private final SnapshotManager snapshotManager;
@@ -2596,6 +2710,7 @@ public class FileStoreCommitTest {
                 ManifestFile manifestFile,
                 boolean mergeConflictManifests,
                 List<List<ManifestEntry>> conflictDeltaFilesByAttempt) {
+            super(Lock.empty());
             this.delegate = delegate;
             this.snapshotManager = snapshotManager;
             this.manifestList = manifestList;
@@ -2607,7 +2722,7 @@ public class FileStoreCommitTest {
         }
 
         @Override
-        public boolean commit(
+        protected boolean commitImpl(
                 @Nullable String baseSnapshotUuid,
                 Snapshot snapshot,
                 String branch,
@@ -2739,22 +2854,23 @@ public class FileStoreCommitTest {
         }
 
         @Override
-        public void close() throws Exception {
+        protected void closeImpl() throws Exception {
             delegate.close();
         }
     }
 
-    private static class FalseSuccessSnapshotCommit implements SnapshotCommit {
+    private static class FalseSuccessSnapshotCommit extends SnapshotCommit {
 
         private final SnapshotCommit delegate;
         private boolean firstCommit = true;
 
         private FalseSuccessSnapshotCommit(SnapshotCommit delegate) {
+            super(Lock.empty());
             this.delegate = delegate;
         }
 
         @Override
-        public boolean commit(
+        protected boolean commitImpl(
                 @Nullable String baseSnapshotUuid,
                 Snapshot snapshot,
                 String branch,
@@ -2770,7 +2886,7 @@ public class FileStoreCommitTest {
         }
 
         @Override
-        public void close() throws Exception {
+        protected void closeImpl() throws Exception {
             delegate.close();
         }
     }

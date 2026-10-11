@@ -83,6 +83,9 @@ caller's prepared layout against the current head while holding the lock.
 
 `Catalog.createLock` supplies a table-bound `Lock` with one `runWithLock` contract. `CatalogLockFactory`
 binds the table, UUID and writer identity when creating a `Lock`.
+`SnapshotCommit` owns this lock together with its publisher resources. Its `commit` method always
+uses the bound lock, including direct publication. Writers use `SnapshotCommit.runWithLock` to
+cover head reads and preparation; publication reuses that scope and revalidates the lease.
 Each catalog interprets its own lock configuration. Hive and JDBC define the catalog options
 `lock.enabled`, `lock.type`, `lock-check-max-sleep` and `lock-acquire-timeout` in their own options
 classes. For these catalogs, locking is enabled on object stores and disabled on other filesystems

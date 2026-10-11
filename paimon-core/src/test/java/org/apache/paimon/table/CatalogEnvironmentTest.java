@@ -41,7 +41,10 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,6 +53,7 @@ import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -150,8 +154,10 @@ class CatalogEnvironmentTest {
         verify(environment).dependencyReadContext();
     }
 
-    @Test
-    void testWriterLockUsesCatalogAndRuntimeOptions() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testWriterLockUsesCatalogAndRuntimeOptions(boolean supportsVersionManagement)
+            throws Exception {
         Catalog catalog = mock(Catalog.class);
         Lock delegate = mock(Lock.class);
         when(delegate.runWithLock(any()))
@@ -168,16 +174,78 @@ class CatalogEnvironmentTest {
                         null,
                         null,
                         null,
-                        true,
+                        supportsVersionManagement,
                         false);
-        try (Lock lock = environment.createLock(new CoreOptions(options), "writer")) {
-            assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
-            lock.ensureValid();
+        try (SnapshotCommit publisher =
+                environment.snapshotCommit(
+                        mock(SnapshotManager.class), new CoreOptions(options), "writer")) {
+            assertThat(publisher.runWithLock(() -> "published")).isEqualTo("published");
         }
         verify(catalog).createLock(branch, "table-id", "writer", options);
         verify(delegate).ensureValid();
         verify(delegate).close();
         verify(catalog).close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testLockCloseFailureStillClosesCatalog(boolean supportsVersionManagement)
+            throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Lock lock = mock(Lock.class);
+        when(catalog.createLock(any(), any(), any(), any())).thenReturn(lock);
+        doThrow(new IOException("Lock close failed")).when(lock).close();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        "table-id",
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        supportsVersionManagement,
+                        false);
+        SnapshotCommit publisher =
+                environment.snapshotCommit(
+                        mock(SnapshotManager.class), new CoreOptions(new Options()), "writer");
+        assertThatThrownBy(publisher::close)
+                .isInstanceOf(IOException.class)
+                .hasMessage("Lock close failed");
+        verify(lock).close();
+        verify(catalog).close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testPublisherCreationFailureClosesResources(boolean useCatalogLoader) throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Lock lock = mock(Lock.class);
+        when(catalog.createLock(any(), any(), any(), any())).thenReturn(lock);
+        CatalogLockFactory factory = mock(CatalogLockFactory.class);
+        when(factory.createLock(any(), any(), any(), any(), any())).thenReturn(lock);
+        SnapshotManager manager = mock(SnapshotManager.class);
+        when(manager.fileIO()).thenThrow(new IllegalStateException("IO unavailable"));
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        "table-id",
+                        useCatalogLoader ? () -> catalog : null,
+                        factory,
+                        CatalogLockContext.fromOptions(new Options()),
+                        null,
+                        false,
+                        false);
+        assertThatThrownBy(
+                        () ->
+                                environment.snapshotCommit(
+                                        manager, new CoreOptions(new Options()), "writer"))
+                .hasMessage("IO unavailable");
+        verify(lock).close();
+        if (useCatalogLoader) {
+            verify(catalog).close();
+        } else {
+            verifyNoInteractions(catalog);
+        }
     }
 
     @Test
@@ -209,8 +277,10 @@ class CatalogEnvironmentTest {
                         null,
                         false,
                         false);
-        try (Lock lock = environment.createLock(new CoreOptions(options), "writer")) {
-            assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
+        try (SnapshotCommit publisher =
+                environment.snapshotCommit(
+                        mock(SnapshotManager.class), new CoreOptions(options), "writer")) {
+            assertThat(publisher.runWithLock(() -> "published")).isEqualTo("published");
         }
         verify(factory).createLock(context, branch, "table-id", "writer", options);
     }
@@ -230,8 +300,10 @@ class CatalogEnvironmentTest {
                         null,
                         false,
                         false);
-        try (Lock lock = environment.createLock(new CoreOptions(new Options()), "writer")) {
-            assertThat(lock.runWithLock(() -> "published")).isEqualTo("published");
+        try (SnapshotCommit publisher =
+                environment.snapshotCommit(
+                        mock(SnapshotManager.class), new CoreOptions(new Options()), "writer")) {
+            assertThat(publisher.runWithLock(() -> "published")).isEqualTo("published");
         }
         verifyNoInteractions(factory);
         verify(catalog).close();
@@ -252,7 +324,12 @@ class CatalogEnvironmentTest {
                         null,
                         true,
                         false);
-        assertThatThrownBy(() -> environment.createLock(new CoreOptions(new Options()), "writer"))
+        assertThatThrownBy(
+                        () ->
+                                environment.snapshotCommit(
+                                        mock(SnapshotManager.class),
+                                        new CoreOptions(new Options()),
+                                        "writer"))
                 .hasMessage("Unsupported");
         verify(catalog).close();
     }
@@ -278,7 +355,7 @@ class CatalogEnvironmentTest {
                 };
         CatalogLockContext context = CatalogLockContext.fromOptions(new Options());
         when(factory.createLock(
-                        context, Identifier.create("db", "table"), null, null, new Options()))
+                        context, Identifier.create("db", "table"), null, "writer", new Options()))
                 .thenReturn(backend);
         SnapshotManager manager = mock(SnapshotManager.class);
         FileIO fileIO = mock(FileIO.class);
@@ -305,12 +382,14 @@ class CatalogEnvironmentTest {
                         null,
                         false,
                         false);
-        try (SnapshotCommit publisher = environment.snapshotCommit(manager)) {
+        try (SnapshotCommit publisher =
+                environment.snapshotCommit(manager, new CoreOptions(new Options()), "writer")) {
             assertThat(publisher.commit(null, snapshot, "main", Collections.emptyList())).isTrue();
         }
         assertThat(held.get()).isFalse();
         verify(factory)
-                .createLock(context, Identifier.create("db", "table"), null, null, new Options());
+                .createLock(
+                        context, Identifier.create("db", "table"), null, "writer", new Options());
     }
 
     private static CatalogEnvironment environment(

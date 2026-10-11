@@ -45,7 +45,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.concurrent.Callable;
 import java.util.function.LongConsumer;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
@@ -132,24 +131,9 @@ public class CatalogEnvironment implements Serializable {
         return SchemaModification.create(catalog, identifier);
     }
 
-    @Nullable
-    public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
-        if (catalogLoader != null && supportsVersionManagement) {
-            return snapshotCommit(snapshotManager, Lock.empty());
-        }
-        return snapshotCommit(snapshotManager, createFactoryLock(identifier, null, new Options()));
-    }
-
-    /** Use a supplied publication lock when the writer manages the complete operation scope. */
-    public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager, Lock publicationLock) {
-        if (catalogLoader != null && supportsVersionManagement) {
-            return new CatalogSnapshotCommit(catalogLoader.load(), identifier, uuid);
-        }
-        return new RenamingSnapshotCommit(snapshotManager, publicationLock);
-    }
-
-    /** Create a writer's lock independently of the snapshot publication mechanism. */
-    public Lock createLock(CoreOptions options, String commitUser) {
+    /** Create a publisher owning the writer's lock and its catalog resources. */
+    public SnapshotCommit snapshotCommit(
+            SnapshotManager snapshotManager, CoreOptions options, String commitUser) {
         Identifier lockIdentifier =
                 identifier == null
                         ? null
@@ -159,46 +143,41 @@ public class CatalogEnvironment implements Serializable {
                                 options.branch());
         if (catalogLoader != null) {
             Catalog catalog = catalogLoader.load();
-            Lock delegate;
+            Lock lock = null;
             try {
-                delegate =
+                lock =
                         catalog.createLock(
                                 lockIdentifier, uuid, commitUser, options.toConfiguration());
+                if (supportsVersionManagement) {
+                    return new CatalogSnapshotCommit(catalog, identifier, uuid, lock);
+                }
+                return new RenamingSnapshotCommit(snapshotManager, lock) {
+                    @Override
+                    protected void closeImpl() throws Exception {
+                        catalog.close();
+                    }
+                };
             } catch (RuntimeException e) {
+                IOUtils.closeQuietly(lock);
                 IOUtils.closeQuietly(catalog);
                 throw e;
             }
-            return new Lock() {
-                @Override
-                public <T> T runWithLock(Callable<T> callable) throws Exception {
-                    return delegate.runWithLock(callable);
-                }
-
-                @Override
-                public void ensureValid() {
-                    delegate.ensureValid();
-                }
-
-                @Override
-                public void close() throws Exception {
-                    try {
-                        delegate.close();
-                    } finally {
-                        catalog.close();
-                    }
-                }
-            };
         }
-        return createFactoryLock(lockIdentifier, commitUser, options.toConfiguration());
+        Lock lock = createFactoryLock(lockIdentifier, commitUser, options.toConfiguration());
+        try {
+            return new RenamingSnapshotCommit(snapshotManager, lock);
+        } catch (RuntimeException e) {
+            IOUtils.closeQuietly(lock);
+            throw e;
+        }
     }
 
     private Lock createFactoryLock(
             Identifier lockIdentifier, @Nullable String commitUser, Options tableOptions) {
         return lockFactory == null
                 ? Lock.empty()
-                : Lock.reentrant(
-                        lockFactory.createLock(
-                                lockContext, lockIdentifier, uuid, commitUser, tableOptions));
+                : lockFactory.createLock(
+                        lockContext, lockIdentifier, uuid, commitUser, tableOptions);
     }
 
     @Nullable

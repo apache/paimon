@@ -20,7 +20,6 @@ package org.apache.paimon;
 
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.data.InternalRow;
@@ -43,7 +42,6 @@ import org.apache.paimon.metastore.VisibilityWaitCallback;
 import org.apache.paimon.operation.ChainTablePartitionExpire;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.NormalPartitionExpire;
 import org.apache.paimon.operation.PartitionExpire;
@@ -291,10 +289,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     public FileStoreCommitImpl newCommit(String commitUser, FileStoreTable table) {
         SnapshotManager snapshotManager = snapshotManager();
         SnapshotCommit snapshotCommit =
-                catalogEnvironment.snapshotCommit(snapshotManager, Lock.empty());
-        if (snapshotCommit == null) {
-            snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
-        }
+                catalogEnvironment.snapshotCommit(snapshotManager, options, commitUser);
         ConflictDetection.Factory conflictDetectFactory =
                 scanner ->
                         ConflictDetection.create(
@@ -317,26 +312,25 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             rollback = new CommitRollback(tableRollback);
         }
         return new FileStoreCommitImpl(
-                        snapshotCommit,
-                        fileIO,
-                        schemaManager,
-                        tableName,
-                        commitUser,
-                        partitionType,
-                        options,
-                        pathFactory(),
-                        snapshotManager,
-                        manifestFileFactory(),
-                        manifestListFactory(),
-                        indexManifestFileFactory(),
-                        this::newScan,
-                        newStatsFileHandler(),
-                        bucketMode(),
-                        createCommitPreCallbacks(table),
-                        createCommitCallbacks(commitUser, table),
-                        conflictDetectFactory,
-                        rollback)
-                .withLock(catalogEnvironment.createLock(options, commitUser));
+                snapshotCommit,
+                fileIO,
+                schemaManager,
+                tableName,
+                commitUser,
+                partitionType,
+                options,
+                pathFactory(),
+                snapshotManager,
+                manifestFileFactory(),
+                manifestListFactory(),
+                indexManifestFileFactory(),
+                this::newScan,
+                newStatsFileHandler(),
+                bucketMode(),
+                createCommitPreCallbacks(table),
+                createCommitCallbacks(commitUser, table),
+                conflictDetectFactory,
+                rollback);
     }
 
     @Override
