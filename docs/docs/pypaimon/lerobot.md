@@ -213,8 +213,9 @@ For map-style training, pass an image- or video-backed table group created by
 ```python
 from pypaimon.multimodal import PaimonLeRobotDataset
 
+table = conn.get_table("robot_data")
 dataset = PaimonLeRobotDataset(
-    conn.get_table("robot_data"),
+    table,
     tag_name=tag,
 )
 loader = dataset.to_dataloader(
@@ -231,6 +232,10 @@ Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
 on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GOPs, then fetch
 uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
 `video_backend` to force either decoder.
+
+Set `table = table.copy({"read.video.max-open-decoders": "8"})` before
+constructing the dataset to limit cached decoders per camera per worker (default: 16).
+Each open decoder uses memory and a file handle, so usage grows with cameras and workers.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 

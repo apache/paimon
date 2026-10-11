@@ -34,6 +34,7 @@ from types import SimpleNamespace
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.lerobot.metadata import (
     _companion_table_identifiers,
     _restore_pandas_metadata,
@@ -267,6 +268,12 @@ class PaimonDatasetReader(ABC):
         if self._video_keys and self._file_io is None:
             raise ValueError(
                 "A video-backed PaimonDatasetReader must expose file_io.")
+        table_options = getattr(self._read_table, "options", None)
+        cache_size = (
+            table_options.read_video_max_open_decoders()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.default_value()
+        )
         self._video_collators = [
             VideoFrameCollator(
                 access,
@@ -277,6 +284,7 @@ class PaimonDatasetReader(ABC):
                 output_column=key,
                 collate_fn=_identity,
                 range_parallelism=self.blob_parallelism,
+                max_open_videos=cache_size,
             )
             for key in self._video_keys
         ]

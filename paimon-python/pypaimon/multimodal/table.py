@@ -102,6 +102,12 @@ class MultimodalTable:
         self.raw_table = raw_table
         self.table = raw_table
 
+    def copy(self, options: dict) -> 'MultimodalTable':
+        """Return a table view with dynamic Paimon options."""
+        raw_table = self.raw_table.copy(options)
+        return MultimodalTable(
+            self.catalog, raw_table.identifier.get_full_name(), raw_table)
+
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         write_builder = self.raw_table.new_batch_write_builder()
