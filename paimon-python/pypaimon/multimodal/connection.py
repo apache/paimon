@@ -143,8 +143,7 @@ class MultimodalConnection:
             options=None,
             source_options=None,
             tag_name=None,
-            engine="python",
-            concurrency=None) -> None:
+            parallelism=1) -> None:
         """Import LeRobot Dataset v3 into a new Paimon table group."""
         from pypaimon.multimodal.lerobot import load_from_lerobot
         load_from_lerobot(
@@ -155,8 +154,7 @@ class MultimodalConnection:
             options=options,
             source_options=source_options,
             tag_name=tag_name,
-            engine=engine,
-            concurrency=concurrency,
+            parallelism=parallelism,
         )
 
     def create_lerobot_tag(self, table_name: str, tag_name: str):

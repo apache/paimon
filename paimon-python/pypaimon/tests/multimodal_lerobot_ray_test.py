@@ -53,9 +53,9 @@ class LeRobotRayPlanningTest(unittest.TestCase):
     def test_validate_options_before_creating_tables(self):
         with tempfile.TemporaryDirectory() as directory:
             conn = pm.connect(options={"warehouse": Path(directory).as_uri()})
-            for options in ({"engine": "invalid"}, {"concurrency": 2},
-                            {"engine": "ray", "concurrency": 0},
-                            {"engine": "ray", "concurrency": True}):
+            for options in ({"parallelism": 0}, {"parallelism": -1},
+                            {"parallelism": True}, {"parallelism": 1.5},
+                            {"parallelism": "2"}):
                 with self.subTest(options=options):
                     with self.assertRaises(ValueError):
                         conn.load_from_lerobot("invalid", "missing", **options)
@@ -158,13 +158,14 @@ class LeRobotRayImportTest(unittest.TestCase):
     def _import_serial(self):
         # FileIO sources use the native Parquet reader, not the LeRobot class.
         with patch("pypaimon.multimodal.lerobot.api._import_lerobot_dataset", return_value=None):
-            self.conn.load_from_lerobot("serial", self.source.as_uri(), batch_size=1)
+            self.conn.load_from_lerobot("serial", self.source.as_uri(),
+                                        batch_size=1, parallelism=1)
 
     def test_images_match_serial_import(self):
         self._source()
         self._import_serial()
-        self.conn.load_from_lerobot("parallel", self.source, engine="ray",
-                                    concurrency=2, batch_size=1, tag_name="imported")
+        self.conn.load_from_lerobot("parallel", self.source, parallelism=2,
+                                    batch_size=1, tag_name="imported")
         for suffix in ("", "__episodes", "__tasks", "__info"):
             def read(name, tag=None):
                 table = self.conn.catalog.get_table("default." + name)
@@ -200,7 +201,7 @@ class LeRobotRayImportTest(unittest.TestCase):
     )
     def test_real_videos_are_readable_after_parallel_import(self):
         self._source(video=True)
-        self.conn.load_from_lerobot("videos", self.source, engine="ray", concurrency=2, batch_size=1)
+        self.conn.load_from_lerobot("videos", self.source, parallelism=2, batch_size=1)
         self._import_serial()
         from pypaimon.multimodal.lerobot import PaimonLeRobotDataset
         first = PaimonLeRobotDataset(self.conn.get_table("videos"), video_backend="pyav", return_uint8=True)
@@ -219,8 +220,8 @@ class LeRobotRayImportTest(unittest.TestCase):
                                pa.array([0, 1, 0, 1, 0, 1, 0, 99], type=pa.int64()))
         pq.write_table(rows, self.source / "data/chunk-000/file-000.parquet")
         with self.assertRaisesRegex(Exception, "frame_index"):
-            self.conn.load_from_lerobot("broken", self.source, engine="ray",
-                                        concurrency=1, tag_name="imported")
+            self.conn.load_from_lerobot("broken", self.source, parallelism=2,
+                                        tag_name="imported")
         table = self.conn.get_table("broken").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertFalse(table.tag_manager().tag_exists("imported"))

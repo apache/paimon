@@ -80,16 +80,16 @@ import ray
 ray.init(address="auto")
 conn.load_from_lerobot(
     "robot_data", "oss://source-bucket/lerobot_dataset",
-    engine="ray", concurrency=8,
+    parallelism=8,
 )
 ```
 
-Pass OSS credentials through `source_options` as above. Source and target storage
-must be accessible from every worker. Ray imports accept FileIO URIs or shared
-directories, not Hub IDs. `concurrency` defaults to cluster CPU count and is
-limited by independent Episode/video groups. Keep the source unchanged during
-import. Failed imports may leave partial tables; retry with a new table name.
-Publishing companion tables is not atomic.
+`parallelism=1` (default) uses the single-process importer. Larger values cap
+concurrent Ray tasks by independent Episode/video groups. All workers need
+source and target access; use FileIO URIs or shared directories, not Hub IDs.
+Pass OSS credentials through `source_options` as above. Keep the source unchanged.
+Failed imports may leave partial tables; retry with a new table name. Publishing
+companion tables is not atomic.
 
 Before training, finish any related data/metadata updates and pause writes to
 this table group. Create a common named tag over the current component snapshots:

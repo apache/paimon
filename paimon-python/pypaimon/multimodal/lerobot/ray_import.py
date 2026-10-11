@@ -29,9 +29,9 @@ def _require_ray():
     try:
         import ray
     except ImportError as error:
-        raise ImportError("Ray import requires 'pypaimon[ray,lerobot]'.") from error
+        raise ImportError("Parallel import requires 'pypaimon[ray,lerobot]'.") from error
     if not ray.is_initialized():
-        raise RuntimeError("Call ray.init() before using engine='ray'.")
+        raise RuntimeError("Call ray.init() before using parallelism > 1.")
     return ray
 
 
@@ -41,7 +41,7 @@ def _ray_source_uri(source):
     if isinstance(source, Path) or isinstance(source, str) and Path(source).is_dir():
         return Path(source).expanduser().resolve().as_uri()
     raise ValueError(
-        "Ray import requires a FileIO URI or shared directory, not a Hub repo_id.")
+        "Parallel import requires a FileIO URI or shared directory, not a Hub repo_id.")
 
 
 def _episode_groups(info, episodes, video_fields):
@@ -85,11 +85,11 @@ def _prepare_group(table, source_path, source_options, info, schema,
 
 
 def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
-                       metadata, video_fields=(), *, concurrency=None,
+                       metadata, video_fields=(), *, parallelism,
                        source_options=None):
     ray = _require_ray()
     groups = iter(_episode_groups(info, metadata["episodes"], video_fields))
-    limit = concurrency or max(1, int(ray.cluster_resources().get("CPU", 1)))
+    limit = parallelism
     # Share only validated metadata, never the driver's dataset or open streams.
     table_ref = ray.put(table.raw_table)
     info_ref = ray.put(info)
