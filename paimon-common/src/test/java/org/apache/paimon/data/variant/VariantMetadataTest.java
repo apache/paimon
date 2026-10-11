@@ -42,8 +42,7 @@ public class VariantMetadataTest {
     void testEmptyAdoptsFirstBuffer() {
         GenericVariant variant = GenericVariant.fromJson("{\"a\":1,\"b\":\"x\"}");
         VariantMetadata metadata = VariantMetadata.empty();
-        metadata.setCurrent(variant.metadataBuffer());
-        metadata.adopt();
+        metadata.adopt(variant.metadataBuffer());
 
         assertThat(metadata.length()).isEqualTo(2);
         assertThat(metadata.get(0)).isEqualTo("a");
@@ -54,10 +53,8 @@ public class VariantMetadataTest {
     void testAdoptKeepsKeysForIdenticalBytes() {
         GenericVariant variant = GenericVariant.fromJson("{\"a\":1,\"b\":\"x\"}");
         VariantMetadata metadata = VariantMetadata.empty();
-        metadata.setCurrent(variant.metadataBuffer());
-        metadata.adopt();
-        metadata.setCurrent(variant.metadataBuffer());
-        metadata.adopt();
+        metadata.adopt(variant.metadataBuffer());
+        metadata.adopt(variant.metadataBuffer());
 
         assertThat(metadata.length()).isEqualTo(2);
         assertThat(metadata.get(0)).isEqualTo("a");
@@ -69,10 +66,8 @@ public class VariantMetadataTest {
         GenericVariant first = GenericVariant.fromJson("{\"a\":1}");
         GenericVariant second = GenericVariant.fromJson("{\"c\":1}");
         VariantMetadata metadata = VariantMetadata.empty();
-        metadata.setCurrent(first.metadataBuffer());
-        metadata.adopt();
-        metadata.setCurrent(second.metadataBuffer());
-        metadata.adopt();
+        metadata.adopt(first.metadataBuffer());
+        metadata.adopt(second.metadataBuffer());
 
         assertThat(metadata.length()).isEqualTo(1);
         assertThat(metadata.get(0)).isEqualTo("c");
@@ -83,8 +78,7 @@ public class VariantMetadataTest {
         // Arrays do not use dictionary keys.
         GenericVariant variant = GenericVariant.fromJson("[1,2]");
         VariantMetadata metadata = VariantMetadata.empty();
-        metadata.setCurrent(variant.metadataBuffer());
-        metadata.adopt();
+        metadata.adopt(variant.metadataBuffer());
 
         assertThat(metadata.length()).isZero();
     }
@@ -93,8 +87,7 @@ public class VariantMetadataTest {
     void testKeysDecodeLazilyAndMemoize() {
         GenericVariant variant = GenericVariant.fromJson("{\"a\":1,\"b\":\"x\"}");
         VariantMetadata metadata = VariantMetadata.empty();
-        metadata.setCurrent(variant.metadataBuffer());
-        metadata.adopt();
+        metadata.adopt(variant.metadataBuffer());
 
         assertThat(metadata.get(0)).isEqualTo("a");
         assertThat(metadata.get(0)).isEqualTo("a");
@@ -105,8 +98,7 @@ public class VariantMetadataTest {
     void testOutOfBoundDictionaryIdIsRejected() {
         GenericVariant variant = GenericVariant.fromJson("{\"a\":1}");
         VariantMetadata metadata = VariantMetadata.empty();
-        metadata.setCurrent(variant.metadataBuffer());
-        metadata.adopt();
+        metadata.adopt(variant.metadataBuffer());
 
         assertThatThrownBy(() -> metadata.get(1)).hasMessageContaining("MALFORMED_VARIANT");
         assertThatThrownBy(() -> metadata.get(-1)).hasMessageContaining("MALFORMED_VARIANT");
@@ -127,8 +119,7 @@ public class VariantMetadataTest {
 
         assertThatThrownBy(
                         () -> {
-                            metadata.setCurrent(corrupt);
-                            metadata.adopt();
+                            metadata.adopt(corrupt);
                         })
                 .hasMessageContaining("MALFORMED_VARIANT");
     }
@@ -141,8 +132,7 @@ public class VariantMetadataTest {
 
         assertThatThrownBy(
                         () -> {
-                            metadata.setCurrent(corrupt);
-                            metadata.adopt();
+                            metadata.adopt(corrupt);
                         })
                 .hasMessageContaining("MALFORMED_VARIANT");
     }
@@ -161,14 +151,12 @@ public class VariantMetadataTest {
         VariantMetadata metadata = VariantMetadata.empty();
 
         ByteBuffer view = ByteBuffer.wrap(shared).order(ByteOrder.LITTLE_ENDIAN);
-        metadata.setCurrent(view);
-        metadata.adopt();
+        metadata.adopt(view);
         assertThat(metadata.get(0)).isEqualTo("a");
 
         // The vector reuses the same array for the next batch's metadata.
         secondMetadata.duplicate().get(shared);
-        metadata.setCurrent(view);
-        metadata.adopt();
+        metadata.adopt(view);
         assertThat(metadata.get(0)).isEqualTo("c");
     }
 
@@ -196,5 +184,29 @@ public class VariantMetadataTest {
             assertThat(rebuiltWithSharedMetadata.toJson())
                     .isEqualTo(GenericVariant.fromJson(json).toJson());
         }
+    }
+
+    @Test
+    void testAdoptByteOrderIndependentForDirectBuffer() {
+        GenericVariant first = GenericVariant.fromJson("{\"a\":1}");
+        GenericVariant second = GenericVariant.fromJson("{\"c\":1}");
+        byte[] firstMeta = first.metadata();
+        byte[] secondMeta = second.metadata();
+
+        VariantMetadata metadata = VariantMetadata.empty();
+        metadata.adopt(ByteBuffer.wrap(firstMeta).order(ByteOrder.LITTLE_ENDIAN));
+        assertThat(metadata.get(0)).isEqualTo("a");
+
+        // Next row provides different metadata through a direct BIG_ENDIAN buffer.
+        ByteBuffer directSecond = ByteBuffer.allocateDirect(secondMeta.length);
+        directSecond.put(secondMeta).position(0); // default BIG_ENDIAN
+        metadata.adopt(directSecond);
+        assertThat(metadata.get(0)).isEqualTo("c");
+
+        // And a direct buffer carrying the very same bytes must be recognized as unchanged.
+        ByteBuffer directFirst = ByteBuffer.allocateDirect(firstMeta.length);
+        directFirst.put(firstMeta).position(0);
+        metadata.adopt(directFirst);
+        assertThat(metadata.get(0)).isEqualTo("a");
     }
 }

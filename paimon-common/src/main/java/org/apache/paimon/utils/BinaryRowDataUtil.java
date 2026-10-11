@@ -25,6 +25,7 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 
 /**
@@ -119,17 +120,19 @@ public class BinaryRowDataUtil {
                     BYTE_ARRAY_BASE_OFFSET + b.arrayOffset() + b.position(),
                     n);
         }
-        int aPos = a.position();
-        int bPos = b.position();
+        ByteBuffer aDup = a.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer bDup = b.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        int aPos = aDup.position();
+        int bPos = bDup.position();
         int i = 0;
         while (i <= n - 8) {
-            if (a.getLong(aPos + i) != b.getLong(bPos + i)) {
+            if (aDup.getLong(aPos + i) != bDup.getLong(bPos + i)) {
                 return false;
             }
             i += 8;
         }
         while (i < n) {
-            if (a.get(aPos + i) != b.get(bPos + i)) {
+            if (aDup.get(aPos + i) != bDup.get(bPos + i)) {
                 return false;
             }
             i += 1;

@@ -141,11 +141,27 @@ public class BinaryRowDataUtilTest {
     }
 
     @Test
-    void testByteBufferEqualsLittleEndianOrder() {
-        // The comparison is byte-wise, so byte order must not affect the result.
+    void testByteBufferEqualsByteOrderIndependent() {
         byte[] content = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
-        ByteBuffer littleEndian = ByteBuffer.wrap(content).order(ByteOrder.LITTLE_ENDIAN);
-        ByteBuffer bigEndian = ByteBuffer.wrap(content).order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer littleEndian =
+                ByteBuffer.allocateDirect(content.length)
+                        .put(content)
+                        .order(ByteOrder.LITTLE_ENDIAN);
+        littleEndian.position(0);
+        ByteBuffer bigEndian =
+                ByteBuffer.allocateDirect(content.length).put(content).order(ByteOrder.BIG_ENDIAN);
+        bigEndian.position(0);
         assertThat(BinaryRowDataUtil.byteBufferEquals(littleEndian, bigEndian)).isTrue();
+        assertThat(BinaryRowDataUtil.byteBufferEquals(bigEndian, littleEndian)).isTrue();
+
+        byte[] a = {1, 2, 3, 4, 5, 6, 7, 8};
+        byte[] b = {8, 7, 6, 5, 4, 3, 2, 1};
+        ByteBuffer aLe = ByteBuffer.allocateDirect(a.length).put(a).order(ByteOrder.LITTLE_ENDIAN);
+        aLe.position(0);
+        ByteBuffer bBe = ByteBuffer.allocateDirect(b.length).put(b).order(ByteOrder.BIG_ENDIAN);
+        bBe.position(0);
+
+        assertThat(BinaryRowDataUtil.byteBufferEquals(aLe, bBe)).isFalse();
+        assertThat(BinaryRowDataUtil.byteBufferEquals(bBe, aLe)).isFalse();
     }
 }

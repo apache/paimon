@@ -126,7 +126,7 @@ public class BaseVariantReader {
     /** A util function to rebuild the variant in binary format from a variant value. */
     protected Variant rebuildVariant(InternalRow row, ByteBuffer topLevelMetadata) {
         GenericVariantBuilder builder = new GenericVariantBuilder(false);
-        cachedMetadata.setCurrent(topLevelMetadata);
+        cachedMetadata.adopt(topLevelMetadata);
         ShreddingUtils.rebuild(
                 new PaimonShreddingUtils.PaimonShreddedRow(row), cachedMetadata, schema, builder);
         return builder.result();

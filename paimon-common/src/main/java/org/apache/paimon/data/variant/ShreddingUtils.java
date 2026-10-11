@@ -93,7 +93,7 @@ public class ShreddingUtils {
             }
             return new GenericVariant(row.getBinaryBuffer(schema.variantIdx), metadata);
         }
-        cachedMetadata.setCurrent(metadata);
+        cachedMetadata.adopt(metadata);
         GenericVariantBuilder builder = new GenericVariantBuilder(false);
         rebuild(row, cachedMetadata, schema, builder);
         return builder.result();
@@ -198,7 +198,6 @@ public class ShreddingUtils {
                     if (v.getType() != GenericVariantUtil.Type.OBJECT) {
                         throw malformedVariant();
                     }
-                    cachedMetadata.adopt();
                     for (int i = 0; i < v.objectSize(); ++i) {
                         String key = cachedMetadata.get(v.getDictionaryIdAtIndex(i));
                         // `value` must not contain any shredded field.

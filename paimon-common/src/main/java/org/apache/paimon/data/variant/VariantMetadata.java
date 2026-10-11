@@ -19,7 +19,6 @@
 package org.apache.paimon.data.variant;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Arrays;
 
 import static org.apache.paimon.utils.BinaryRowDataUtil.byteBufferEquals;
@@ -89,6 +88,11 @@ public class VariantMetadata {
         }
     }
 
+    public void adopt(ByteBuffer metadata) {
+        setCurrent(metadata);
+        adopt();
+    }
+
     public int length() {
         return dictSize;
     }
@@ -128,6 +132,6 @@ public class VariantMetadata {
         ByteBuffer copy = buffer.duplicate();
         byte[] bytes = new byte[copy.remaining()];
         copy.get(bytes);
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        return ByteBuffer.wrap(bytes).order(buffer.order());
     }
 }
