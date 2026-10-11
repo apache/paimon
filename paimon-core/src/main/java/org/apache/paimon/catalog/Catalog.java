@@ -25,6 +25,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
@@ -1320,6 +1322,28 @@ public interface Catalog extends AutoCloseable {
      */
     TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
+
+    // ========================== Locking ==============================
+
+    /**
+     * Create a lock bound to the table incarnation and exact writer identity.
+     *
+     * <p>The caller owns the returned lock and must close it. A lease may end when its snapshot is
+     * published; each additional snapshot must use a new {@link Lock#runWithLock} scope. Catalogs
+     * without configured locking return a no-op lock.
+     *
+     * @param identifier table and branch to lock
+     * @param tableUuid table incarnation, required by catalogs that fence table recreation
+     * @param commitUser exact logical writer identity, preserved across recovery
+     * @param tableOptions runtime table options controlling lock support
+     */
+    default Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            String commitUser,
+            Options tableOptions) {
+        return Lock.empty();
+    }
 
     // ==================== Catalog Information ==========================
 
