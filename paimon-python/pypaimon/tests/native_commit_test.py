@@ -441,16 +441,17 @@ def test_publication_response_loss_does_not_duplicate_or_delete_files(
 
 @pytest.mark.parametrize('properties', [{}, {'source': 'python'}])
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_snapshot_properties_select_python_before_native(tmp_path, properties, overwrite):
+def test_non_rest_snapshot_properties_keep_python_commit(tmp_path, properties, overwrite):
     table = _table(tmp_path)
     builder = table.new_batch_write_builder()
     if overwrite:
         builder.overwrite()
     commit = builder.new_commit()
     with patch('pypaimon.write.native_commit.create_native_commit',
-               side_effect=AssertionError('must not initialize native')) as create:
+               wraps=create_native_commit) as create:
         commit.commit(_prepare(builder, [{'id': 1, 'pt': None}]), snapshot_properties=properties)
-        create.assert_not_called()
+        create.assert_called_once()
+        assert commit._native_commit is None
     assert table.snapshot_manager().get_latest_snapshot().properties == (properties or None)
     commit.close()
 
