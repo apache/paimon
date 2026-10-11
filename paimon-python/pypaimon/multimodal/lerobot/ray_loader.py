@@ -16,6 +16,7 @@
 
 """Ray workers prepare LeRobot files; only the driver commits snapshots."""
 
+import logging
 from pathlib import Path
 
 from pypaimon.multimodal.lerobot.loader import _commit_messages, _prepare_dataset
@@ -44,7 +45,7 @@ def _ray_source_uri(source):
 
 
 def _episode_groups(info, episodes, video_fields):
-    # Keep Episodes sharing any camera payload in the same task.
+    # Keep Episodes sharing a data or video file in the same task.
     parents = list(range(len(episodes)))
 
     def root(i):
@@ -56,17 +57,38 @@ def _episode_groups(info, episodes, video_fields):
     owners = {}
     for i in range(len(episodes)):
         episode = episodes[i]
+        data_path = _RemoteLeRobotDataset._data_path(episode, info)
+        previous = owners.setdefault(("data", data_path), i)
+        parents[root(i)] = root(previous)
         for field in video_fields:
             prefix = "videos/%s/" % field
             path = info["video_path"].format(
                 video_key=field, chunk_index=episode[prefix + "chunk_index"],
                 file_index=episode[prefix + "file_index"])
-            previous = owners.setdefault(path, i)
+            previous = owners.setdefault(("video", path), i)
             parents[root(i)] = root(previous)
     groups = {}
     for i in range(len(episodes)):
         groups.setdefault(root(i), []).append(i)
     return list(groups.values())
+
+
+def _task_groups(info, episodes, video_fields, parallelism):
+    groups = _episode_groups(info, episodes, video_fields)
+    tasks = [[] for _ in range(min(parallelism, len(groups)))]
+    for i, group in enumerate(groups):
+        tasks[i % len(tasks)].extend(group)
+    return [sorted(task) for task in tasks]
+
+
+def _abort_messages(table, messages):
+    if not messages:
+        return
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        commit.abort(messages)
+    finally:
+        commit.close()
 
 
 def _prepare_group(table, source_path, source_options, info, schema,
@@ -87,8 +109,7 @@ def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
                        metadata, video_fields=(), *, parallelism,
                        source_options=None):
     ray = _require_ray()
-    groups = iter(_episode_groups(info, metadata["episodes"], video_fields))
-    limit = parallelism
+    groups = _task_groups(info, dataset._episodes, video_fields, parallelism)
     # Share only validated metadata, never the driver's dataset or open streams.
     table_ref = ray.put(table.raw_table)
     info_ref = ray.put(info)
@@ -100,23 +121,25 @@ def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
     pending = []
     messages = []
     try:
-        exhausted = False
-        while pending or not exhausted:
-            while not exhausted and len(pending) < limit:
-                group = next(groups, None)
-                if group is None:
-                    exhausted = True
-                    break
-                pending.append(prepare.remote(
-                    table_ref, source.path, source_options, info_ref,
-                    source_schema, batch_size, metadata_ref, video_fields, group))
-            if pending:
-                ready, pending = ray.wait(pending, num_returns=1)
-                messages.extend(ray.get(ready[0]))
+        for group in groups:
+            pending.append(prepare.remote(
+                table_ref, source.path, source_options, info_ref,
+                source_schema, batch_size, metadata_ref, video_fields, group))
+        while pending:
+            ready, pending = ray.wait(pending, num_returns=1)
+            messages.extend(ray.get(ready[0]))
     except BaseException:
+        # No snapshot was committed. Let in-flight writers finish so their
+        # prepared messages can be aborted as well.
         for task in pending:
-            ray.cancel(task)
-        # Prepared files may outlive failed tasks; never delete committed data.
+            try:
+                messages.extend(ray.get(task))
+            except BaseException:
+                pass
+        try:
+            _abort_messages(table.raw_table, messages)
+        except Exception:
+            logging.exception("Failed to abort prepared LeRobot files.")
         raise
 
     return _commit_messages(table.raw_table, messages)

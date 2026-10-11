@@ -19,8 +19,10 @@ import io
 import json
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -29,15 +31,39 @@ import pyarrow.parquet as pq
 from PIL import Image
 
 import pypaimon.multimodal as pm
-from pypaimon.multimodal.lerobot.ray_loader import _episode_groups, _ray_source_uri
+from pypaimon.multimodal.lerobot.ray_loader import (
+    _episode_groups, _ray_source_uri, _task_groups,
+)
+
+
+def _counted_prepare_group(trace_path, *args):
+    from pypaimon.multimodal.lerobot import source as source_module
+    from pypaimon.multimodal.lerobot.ray_loader import _prepare_group
+
+    original = source_module._read_remote_parquet
+
+    def counted(file_io, path, *read_args, **read_kwargs):
+        with open(trace_path, "a") as trace:
+            trace.write(path + "\n")
+        return original(file_io, path, *read_args, **read_kwargs)
+
+    source_module._read_remote_parquet = counted
+    try:
+        return _prepare_group(*args)
+    finally:
+        source_module._read_remote_parquet = original
 
 
 class LeRobotRayPlanningTest(unittest.TestCase):
     def test_groups_shared_payloads_across_cameras(self):
-        info = {"video_path": "{video_key}/{chunk_index}/{file_index}.mp4"}
+        info = {
+            "data_path": "data/{chunk_index}/{file_index}.parquet",
+            "video_path": "{video_key}/{chunk_index}/{file_index}.mp4",
+        }
         episodes = []
         for a, b in ((0, 0), (0, 1), (2, 1), (3, 3)):
             episodes.append({
+                "data/chunk_index": 0, "data/file_index": len(episodes),
                 "videos/a/chunk_index": 0, "videos/a/file_index": a,
                 "videos/b/chunk_index": 0, "videos/b/file_index": b,
             })
@@ -45,6 +71,11 @@ class LeRobotRayPlanningTest(unittest.TestCase):
                          _episode_groups(info, episodes, ("a", "b")))
         self.assertEqual([[0], [1], [2], [3]],
                          _episode_groups(info, episodes, ()))
+        episodes[1]["data/file_index"] = 0
+        self.assertEqual([[0, 1], [2], [3]],
+                         _episode_groups(info, episodes, ()))
+        self.assertEqual([[0, 1, 3], [2]],
+                         _task_groups(info, episodes, (), 2))
 
     def test_reject_hub_id(self):
         with self.assertRaisesRegex(ValueError, "Hub repo_id"):
@@ -87,10 +118,10 @@ class LeRobotRayImportTest(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
-    def _source(self, video=False):
+    def _source(self, video=False, data_files=1):
         root = self.source
-        (root / "meta/episodes/chunk-000").mkdir(parents=True)
-        (root / "data/chunk-000").mkdir(parents=True)
+        (root / "meta/episodes/chunk-000").mkdir(parents=True, exist_ok=True)
+        (root / "data/chunk-000").mkdir(parents=True, exist_ok=True)
         features = {key: {"dtype": "int64", "shape": [1]} for key in
                     ("index", "episode_index", "frame_index", "task_index")}
         features.update({
@@ -112,7 +143,8 @@ class LeRobotRayImportTest(unittest.TestCase):
         for e in range(4):
             row = {"episode_index": e, "dataset_from_index": e * 2,
                    "dataset_to_index": e * 2 + 2, "length": 2, "tasks": ["pick"],
-                   "data/chunk_index": 0, "data/file_index": 0}
+                   "data/chunk_index": 0,
+                   "data/file_index": e // (4 // data_files)}
             if video:
                 row.update({"videos/camera/chunk_index": 0,
                             "videos/camera/file_index": e // 2,
@@ -152,8 +184,41 @@ class LeRobotRayImportTest(unittest.TestCase):
                 Image.new("RGB", (16, 16), (i * 20, 0, 0)).save(buffer, format="PNG")
                 images.append({"bytes": buffer.getvalue(), "path": None})
             rows = rows.append_column("camera", pa.array(images))
-        pq.write_table(rows, root / "data/chunk-000/file-000.parquet")
+        for file_index in range(data_files):
+            episode_count = 4 // data_files
+            pq.write_table(
+                rows.slice(file_index * episode_count * 2, episode_count * 2),
+                root / ("data/chunk-000/file-%03d.parquet" % file_index))
         return rows
+
+    def test_source_files_are_read_once_per_worker(self):
+        trace_path = self.root / "reads.txt"
+
+        def counted_prepare(*args):
+            return _counted_prepare_group(str(trace_path), *args)
+
+        with patch(
+                "pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                counted_prepare):
+            for data_files in (1, 4):
+                with self.subTest(data_files=data_files):
+                    self._source(data_files=data_files)
+                    if trace_path.exists():
+                        trace_path.unlink()
+                    self.conn.load_from_lerobot(
+                        "counted_%d" % data_files, self.source,
+                        parallelism=2, batch_size=1)
+                    reads = Counter(
+                        str(Path(urlparse(path).path).relative_to(self.source))
+                        for path in trace_path.read_text().splitlines())
+                    expected_workers = min(data_files, 2)
+                    self.assertEqual(expected_workers, reads["meta/tasks.parquet"])
+                    self.assertEqual(
+                        expected_workers,
+                        reads["meta/episodes/chunk-000/file-000.parquet"])
+                    for file_index in range(data_files):
+                        self.assertEqual(
+                            1, reads["data/chunk-000/file-%03d.parquet" % file_index])
 
     def _import_serial(self):
         # FileIO sources use the native Parquet reader, not the LeRobot class.
@@ -214,14 +279,22 @@ class LeRobotRayImportTest(unittest.TestCase):
             second.close()
 
     def test_worker_failure_does_not_publish_frames_or_tags(self):
-        rows = self._source()
+        rows = self._source(data_files=4)
         # Corruption in the last Episode is detected by its worker, after planning.
         rows = rows.set_column(rows.schema.get_field_index("frame_index"), "frame_index",
                                pa.array([0, 1, 0, 1, 0, 1, 0, 99], type=pa.int64()))
-        pq.write_table(rows, self.source / "data/chunk-000/file-000.parquet")
-        with self.assertRaisesRegex(Exception, "frame_index"):
-            self.conn.load_from_lerobot("broken", self.source, parallelism=2,
-                                        tag_name="imported")
+        pq.write_table(rows.slice(6, 2),
+                       self.source / "data/chunk-000/file-003.parquet")
+        from pypaimon.multimodal.lerobot.ray_loader import _abort_messages
+        with patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
+                   wraps=_abort_messages) as abort:
+            with self.assertRaisesRegex(Exception, "frame_index"):
+                self.conn.load_from_lerobot("broken", self.source, parallelism=2,
+                                            tag_name="imported")
+        abort.assert_called_once()
+        self.assertTrue(abort.call_args[0][1])
         table = self.conn.get_table("broken").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertFalse(table.tag_manager().tag_exists("imported"))
+        data_dir = Path(urlparse(table.table_path).path) / "data"
+        self.assertEqual([], [path for path in data_dir.rglob("*") if path.is_file()])
