@@ -18,6 +18,7 @@
 """Java cast rules shared by old-file readers."""
 
 from decimal import Decimal, localcontext, ROUND_HALF_UP
+import math
 
 import pyarrow as pa
 
@@ -43,7 +44,11 @@ def _numeric_to_integer(array, target_type):
         # Number.byteValue/shortValue first convert floats to int; Java's
         # float-to-int/long conversion saturates before the final narrowing.
         if floating:
-            value = lower if value <= lower else upper if value >= upper else int(value)
+            # Java's floating-point narrowing maps NaN to zero.
+            if math.isnan(value):
+                value = 0
+            else:
+                value = lower if value <= lower else upper if value >= upper else int(value)
         else:
             # BigDecimal.longValue truncates towards zero and retains low bits.
             value = int(value)
