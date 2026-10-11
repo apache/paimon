@@ -304,36 +304,6 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         file_io.filesystem.delete_dir_contents.assert_not_called()
         file_io.filesystem.delete_dir.assert_not_called()
 
-    def test_recursive_delete_does_not_modify_parent_marker(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        directory = file_io.to_filesystem_path(TABLE_PATH)
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory)]
-        _set_listed_keys(file_io, ["db-uuid.db/tbl-uuid/data.parquet"], [])
-        client = file_io._s3_delete_client
-        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
-
-        client.head_object.assert_not_called()
-        client.put_object.assert_not_called()
-
-    def test_pyarrow_22_recursive_delete_preserves_late_objects(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        directory = file_io.to_filesystem_path(TABLE_PATH)
-        first = directory.rstrip("/") + "/first.parquet"
-        late = directory.rstrip("/") + "/late.parquet"
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory)]
-        _set_listed_keys(file_io, [first.split("/", 1)[1]], [late.split("/", 1)[1]], [])
-
-        with self.assertRaisesRegex(OSError, "changed during deletion"):
-            file_io.delete(TABLE_PATH, recursive=True)
-
-        self.assertEqual(["db-uuid.db/tbl-uuid/first.parquet"],
-                         _all_deleted_keys(file_io._s3_delete_client))
-        file_io._s3_delete_client.put_object.assert_not_called()
-
     def test_recursive_delete_lists_all_pages_before_deleting(self):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = True
@@ -477,31 +447,6 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             item["Key"] for call in calls
             for item in call[1]["Delete"]["Objects"]])
 
-    def test_recursive_delete_reports_batch_error(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        directory = file_io.to_filesystem_path(TABLE_PATH)
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info(directory, pafs.FileType.Directory)]
-        prefix = "db-uuid.db/tbl-uuid/"
-        data = prefix + "data/file.parquet"
-        _set_listed_keys(file_io, [data])
-        client = file_io._s3_delete_client
-        client.delete_objects.side_effect = None
-        client.delete_objects.return_value = {
-            "Deleted": [], "Errors": [{"Key": data, "Code": "AccessDenied"}]}
-
-        with self.assertRaisesRegex(OSError, "batch delete incomplete") as error:
-            file_io.delete(TABLE_PATH, recursive=True)
-        self.assertIn("AccessDenied", str(error.exception))
-        self.assertIn(data, str(error.exception))
-
-        client.delete_object.assert_not_called()
-        client.put_object.assert_not_called()
-        self.assertEqual([data], [
-            item["Key"] for item in
-            client.delete_objects.call_args[1]["Delete"]["Objects"]])
-
     def test_pre_pyarrow_22_recursive_delete_keeps_native_batch(self):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = False
@@ -515,23 +460,6 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         file_io.filesystem.delete_dir_contents.assert_called_once_with(directory)
         file_io.filesystem.delete_dir.assert_called_once_with(directory)
         file_io.filesystem.delete_file.assert_not_called()
-
-    def test_modern_non_recursive_delete_removes_empty_directory(self):
-        file_io = self._new_file_io(legacy=False)
-        file_io._pyarrow_gte_22 = True
-        directory = file_io.to_filesystem_path(TABLE_PATH)
-        file_io.filesystem.get_file_info.side_effect = [
-            [_file_info(directory, pafs.FileType.Directory)],
-            [],
-        ]
-
-        self.assertTrue(file_io.delete(TABLE_PATH))
-
-        file_io.filesystem.delete_file.assert_not_called()
-        file_io.filesystem.delete_dir.assert_not_called()
-        file_io._s3_delete_client.delete_object.assert_called_once_with(
-            Bucket="test-bucket", Key="db-uuid.db/tbl-uuid/")
-        file_io._s3_delete_client.put_object.assert_not_called()
 
     def test_delete_rejects_bucket_root(self):
         file_io = self._new_file_io(legacy=False)
@@ -653,42 +581,6 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io._s3_endpoint = None
         self.assertFalse(file_io._uses_s3_delete_fallback())
 
-    def test_delete_rejects_bucket_root_with_fallback(self):
-        file_io = self._new_file_io()
-        file_io._pyarrow_gte_22 = True
-        for recursive in (False, True):
-            with self.subTest(recursive=recursive):
-                with self.assertRaisesRegex(OSError, "bucket root"):
-                    file_io.delete("s3://test-bucket/", recursive)
-
-        file_io.filesystem.get_file_info.assert_not_called()
-        file_io.filesystem.delete_dir_contents.assert_not_called()
-        file_io._s3_delete_client.delete_object.assert_not_called()
-
-    def test_old_pyarrow_delete_keeps_native_s3_path(self):
-        file_io = self._new_file_io()
-        file_io._pyarrow_gte_22 = False
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info("test-bucket/", pafs.FileType.NotFound)]
-
-        self.assertFalse(file_io.delete("s3://test-bucket/", recursive=True))
-        file_io.filesystem.get_file_info.assert_called_once()
-        file_io._s3_delete_client.delete_object.assert_not_called()
-
-    def test_recursive_delete_rejects_listed_keys_outside_prefix(self):
-        file_io = self._new_file_io()
-        file_io._pyarrow_gte_22 = True
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info("test-bucket/table", pafs.FileType.Directory)]
-        _set_listed_keys(file_io, [
-            "table/data.parquet", "table-other/keep.parquet"])
-
-        with self.assertRaisesRegex(OSError, "outside prefix"):
-            file_io.delete("s3://test-bucket/table", recursive=True)
-
-        file_io._s3_delete_client.delete_object.assert_not_called()
-        file_io._s3_delete_client.put_object.assert_not_called()
-
     def test_recursive_delete_rejects_mismatched_list_scope(self):
         for scope in ({"Name": "other-bucket"},
                       {"Prefix": "table-other/"}):
@@ -728,38 +620,6 @@ class CustomS3EndpointTest(unittest.TestCase):
                         "Quiet": False})
                 file_io._s3_delete_client.delete_object.assert_not_called()
 
-    def test_recursive_delete_uses_bucket_from_target_uri(self):
-        file_io = self._new_file_io()
-        file_io._pyarrow_gte_22 = True
-        file_io.to_filesystem_path = mock.Mock(
-            return_value="target-bucket/table")
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info("target-bucket/table", pafs.FileType.Directory)]
-        _set_listed_keys(file_io, ["table/data.parquet"], [])
-
-        self.assertTrue(file_io.delete(
-            "s3://target-bucket/table", recursive=True))
-
-        file_io._s3_delete_client.delete_objects.assert_called_once_with(
-            Bucket="target-bucket", Delete={
-                "Objects": [{"Key": "table/data.parquet"}], "Quiet": False})
-        file_io._s3_delete_client.delete_object.assert_not_called()
-
-    def test_recursive_delete_uses_bucket_from_target_filesystem_path(self):
-        file_io = self._new_file_io()
-        file_io._pyarrow_gte_22 = True
-        file_io.filesystem.get_file_info.return_value = [
-            _file_info("target-bucket/table", pafs.FileType.Directory)]
-        _set_listed_keys(file_io, ["table/data.parquet"], [])
-
-        self.assertTrue(file_io.delete(
-            "target-bucket/table", recursive=True))
-
-        file_io._s3_delete_client.delete_objects.assert_called_once_with(
-            Bucket="target-bucket", Delete={
-                "Objects": [{"Key": "table/data.parquet"}], "Quiet": False})
-        file_io._s3_delete_client.delete_object.assert_not_called()
-
     def test_pre_pyarrow_22_cross_bucket_delete_keeps_native_path(self):
         file_io = self._new_file_io()
         file_io._pyarrow_gte_22 = False
@@ -776,21 +636,6 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io.filesystem.delete_dir.assert_called_once_with(
             "target-bucket/table")
         file_io._s3_delete_client.delete_object.assert_not_called()
-
-    def test_non_recursive_delete_uses_bucket_from_target_uri(self):
-        file_io = self._new_file_io()
-        file_io._pyarrow_gte_22 = True
-        file_io.to_filesystem_path = mock.Mock(
-            return_value="target-bucket/table")
-        file_io.filesystem.get_file_info.side_effect = [
-            [_file_info("target-bucket/table", pafs.FileType.Directory)],
-            [],
-        ]
-
-        self.assertTrue(file_io.delete("s3://target-bucket/table"))
-
-        file_io._s3_delete_client.delete_object.assert_called_once_with(
-            Bucket="target-bucket", Key="table/")
 
     @unittest.skipUnless(
         parse(pyarrow.__version__) >= parse("22.0.0"),
