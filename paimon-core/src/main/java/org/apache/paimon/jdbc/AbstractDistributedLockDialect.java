@@ -147,19 +147,41 @@ public abstract class AbstractDistributedLockDialect implements JdbcDistributedL
 
     boolean renewOwned(JdbcClientPool connections, String lockId, String owner)
             throws SQLException, InterruptedException {
-        return updateOwned(
-                connections,
-                "UPDATE "
-                        + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
-                        + " SET acquired_at = CASE WHEN acquired_at > "
-                        + getRenewalTime()
-                        + " THEN acquired_at ELSE "
-                        + getRenewalTime()
-                        + " END WHERE lock_id = ? AND lock_owner = ? AND NOT ("
-                        + getOwnedExpirationCondition()
-                        + ")",
-                lockId,
-                owner);
+        boolean renewed =
+                updateOwned(
+                        connections,
+                        "UPDATE "
+                                + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
+                                + " SET acquired_at = CASE WHEN acquired_at > "
+                                + getRenewalTime()
+                                + " THEN acquired_at ELSE "
+                                + getRenewalTime()
+                                + " END WHERE lock_id = ? AND lock_owner = ? AND NOT ("
+                                + getOwnedExpirationCondition()
+                                + ")",
+                        lockId,
+                        owner);
+        if (renewed) {
+            return true;
+        }
+        // Drivers configured to report changed rows can return zero when a timestamp with
+        // second precision has not changed. Confirm that the same unexpired lease still exists.
+        return connections.run(
+                connection -> {
+                    try (PreparedStatement statement =
+                            connection.prepareStatement(
+                                    "SELECT 1 FROM "
+                                            + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
+                                            + " WHERE lock_id = ? AND lock_owner = ? AND NOT ("
+                                            + getOwnedExpirationCondition()
+                                            + ")")) {
+                        statement.setString(1, lockId);
+                        statement.setString(2, owner);
+                        try (ResultSet result = statement.executeQuery()) {
+                            return result.next();
+                        }
+                    }
+                });
     }
 
     boolean releaseOwned(JdbcClientPool connections, String lockId, String owner)

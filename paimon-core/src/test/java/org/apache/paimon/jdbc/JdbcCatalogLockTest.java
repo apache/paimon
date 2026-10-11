@@ -43,9 +43,11 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -173,6 +175,48 @@ class JdbcCatalogLockTest {
     }
 
     @Test
+    void zeroAffectedRowsDoesNotInvalidateUnchangedLease() throws Exception {
+        try (JdbcClientPool pool = pool()) {
+            dialect.createTable(pool, new Options());
+            JdbcCatalogLock lock = lock(zeroUpdateCountPool(pool));
+            assertThat(
+                            lock.runWithLock(
+                                    "db",
+                                    "table",
+                                    () -> {
+                                        lock.ensureValid();
+                                        assertThat(owner(pool)).isNotEmpty();
+                                        return "published";
+                                    }))
+                    .isEqualTo("published");
+            assertThat(owner(pool)).isNull();
+        }
+    }
+
+    @Test
+    void zeroAffectedRowsStillRejectsMissingExpiredOrReplacedOwner() throws Exception {
+        try (JdbcClientPool pool = pool()) {
+            dialect.createTable(pool, new Options());
+            JdbcClientPool affectedRowsPool = zeroUpdateCountPool(pool);
+            assertThat(dialect.acquireOwned(pool, "lock", "owner", 3000)).isTrue();
+            assertThat(dialect.renewOwned(affectedRowsPool, "missing", "owner")).isFalse();
+            assertThat(dialect.renewOwned(affectedRowsPool, "lock", "other-owner")).isFalse();
+            pool.execute(
+                    connection -> {
+                        try (PreparedStatement statement =
+                                connection.prepareStatement(
+                                        "UPDATE paimon_distributed_locks SET acquired_at = '2000-01-01 00:00:00'")) {
+                            statement.executeUpdate();
+                        }
+                    });
+            assertThat(dialect.renewOwned(affectedRowsPool, "lock", "owner")).isFalse();
+            assertThat(dialect.acquireOwned(pool, "lock", "successor", 3000)).isTrue();
+            assertThat(dialect.renewOwned(affectedRowsPool, "lock", "owner")).isFalse();
+            assertThat(dialect.renewOwned(affectedRowsPool, "lock", "successor")).isTrue();
+        }
+    }
+
+    @Test
     void acquisitionPropagatesSqlFailuresOtherThanDuplicateKeys() throws Exception {
         JdbcClientPool pool = mock(JdbcClientPool.class);
         Connection connection = mock(Connection.class);
@@ -253,6 +297,47 @@ class JdbcCatalogLockTest {
     private JdbcClientPool pool() {
         return new JdbcClientPool(
                 1, "jdbc:sqlite:" + directory.resolve("locks.db"), Collections.emptyMap());
+    }
+
+    private JdbcClientPool zeroUpdateCountPool(JdbcClientPool pool) throws Exception {
+        JdbcClientPool affectedRowsPool = mock(JdbcClientPool.class);
+        when(affectedRowsPool.getProtocol()).thenReturn(pool.getProtocol());
+        when(affectedRowsPool.run(any()))
+                .thenAnswer(
+                        invocation ->
+                                pool.run(
+                                        connection ->
+                                                ((ClientPool.Action<?, Connection, SQLException>)
+                                                                invocation.getArgument(0))
+                                                        .run(
+                                                                zeroUpdateCountConnection(
+                                                                        connection))));
+        return affectedRowsPool;
+    }
+
+    private Connection zeroUpdateCountConnection(Connection connection) throws SQLException {
+        Connection reported = mock(Connection.class, delegatesTo(connection));
+        doAnswer(
+                        preparation -> {
+                            String sql = preparation.getArgument(0);
+                            PreparedStatement statement = connection.prepareStatement(sql);
+                            if (!sql.startsWith("UPDATE ")) {
+                                return statement;
+                            }
+                            PreparedStatement changedRows =
+                                    mock(PreparedStatement.class, delegatesTo(statement));
+                            doAnswer(
+                                            update -> {
+                                                statement.executeUpdate();
+                                                return 0;
+                                            })
+                                    .when(changedRows)
+                                    .executeUpdate();
+                            return changedRows;
+                        })
+                .when(reported)
+                .prepareStatement(anyString());
+        return reported;
     }
 
     private JdbcCatalogLock lock(JdbcClientPool pool) {
