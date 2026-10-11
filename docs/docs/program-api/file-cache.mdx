@@ -167,6 +167,7 @@ reference to the shared manager; the last reference releases the shared entry. A
 
 ### PyPaimon workers
 
-PyPaimon preserves cache configuration when `CachingFileIO` is pickled. Workers reuse a bounded set
-of process-local cache managers across tasks; memory entries are not copied from the parent. A disk
-cache scans its configured directory when first restored in a worker.
+With `spawn`, PyPaimon preserves cache configuration when `CachingFileIO` is pickled. Workers reuse
+process-local managers across tasks; memory entries are not copied from the parent, and disk caches
+scan their directory on first restore. With `fork`, create the catalog after forking to avoid
+inheriting cache locks.

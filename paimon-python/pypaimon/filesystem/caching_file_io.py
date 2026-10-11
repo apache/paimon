@@ -29,25 +29,68 @@ import hashlib
 import os
 import threading
 import uuid
+import weakref
 from collections import OrderedDict
-from functools import lru_cache
+from concurrent.futures import Future
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
 
-@lru_cache(maxsize=8)
-def _worker_cache_manager(pid, identity, cache_type, args):
-    # Keep recently restored managers alive across independently pickled tasks.
-    manager = cache_type(*args)
-    manager._identity = identity
-    return manager
+class _WorkerCacheRegistry:
+    """Share active managers and retain a few after their task completes."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._active = weakref.WeakValueDictionary()
+        self._recent = OrderedDict()
+        self._pending = {}
+
+    def _remember(self, key, manager):
+        self._recent[key] = manager
+        self._recent.move_to_end(key)
+        if len(self._recent) > 8:
+            self._recent.popitem(last=False)
+
+    def restore(self, identity, cache_type, args):
+        key = (os.getpid(), identity, cache_type, args)
+        with self._lock:
+            manager = self._active.get(key)
+            if manager is not None:
+                self._remember(key, manager)
+                return manager
+            pending = self._pending.get(key)
+            create = pending is None
+            if create:
+                pending = Future()
+                self._pending[key] = pending
+
+        if not create:
+            return pending.result()
+
+        try:
+            manager = cache_type(*args)
+            manager._identity = identity
+        except BaseException as error:
+            with self._lock:
+                del self._pending[key]
+            pending.set_exception(error)
+            raise
+
+        with self._lock:
+            self._active[key] = manager
+            self._remember(key, manager)
+            del self._pending[key]
+        pending.set_result(manager)
+        return manager
+
+
+_WORKER_CACHE_REGISTRY = _WorkerCacheRegistry()
 
 
 def _restore_cache_manager(identity, cache_type, args):
-    # A forked child must not reuse a manager (or its lock) from its parent.
-    return _worker_cache_manager(os.getpid(), identity, cache_type, args)
+    return _WORKER_CACHE_REGISTRY.restore(identity, cache_type, args)
 
 
 class LocalMemoryCacheManager:

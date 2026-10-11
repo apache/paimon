@@ -18,6 +18,7 @@
 
 """Tests for LocalDiskCacheManager, CachingInputStream, and CachingFileIO."""
 
+import gc
 import io
 import multiprocessing
 import os
@@ -26,7 +27,8 @@ import shutil
 import tempfile
 import threading
 import unittest
-from unittest.mock import MagicMock
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import MagicMock, patch
 
 from pypaimon.filesystem.caching_file_io import (
     LocalDiskCacheManager,
@@ -66,12 +68,6 @@ def _read_independent_pickles(payload, path, connection):
             values.append(stream.read())
     connection.send((values, first._delegate.opens, second._delegate.opens,
                      first._cache is second._cache))
-    connection.close()
-
-
-def _restore_cache_after_fork(payload, connection):
-    cache = pickle.loads(payload)
-    connection.send(cache.get_block("snapshot-1", 0))
     connection.close()
 
 
@@ -491,28 +487,46 @@ class CachingFileIOTest(unittest.TestCase):
         first.put_block("snapshot-1", 0, b"first catalog")
         self.assertIsNone(second.get_block("snapshot-1", 0))
 
-    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(),
-                         "fork is unavailable")
-    def test_fork_does_not_reuse_parent_cache_manager(self):
+    def test_active_manager_survives_recent_cache_eviction(self):
         payload = pickle.dumps(LocalMemoryCacheManager(128, 64))
-        parent_cache = pickle.loads(payload)
-        parent_cache.put_block("snapshot-1", 0, b"parent block")
-        context = multiprocessing.get_context("fork")
-        parent, child = context.Pipe()
-        process = context.Process(
-            target=_restore_cache_after_fork, args=(payload, child))
-        process.start()
-        child.close()
-        try:
-            self.assertTrue(parent.poll(30), "worker timed out")
-            self.assertIsNone(parent.recv())
-            process.join(10)
-            self.assertEqual(0, process.exitcode)
-        finally:
-            parent.close()
-            if process.is_alive():
-                process.terminate()
-            process.join(10)
+        first = pickle.loads(payload)
+        first.put_block("snapshot-1", 0, b"worker block")
+        for _ in range(9):
+            pickle.loads(pickle.dumps(LocalMemoryCacheManager(128, 64)))
+        second = pickle.loads(payload)
+        self.assertIs(first, second)
+        self.assertEqual(b"worker block", second.get_block("snapshot-1", 0))
+
+    def test_recent_manager_survives_task_teardown(self):
+        payload = pickle.dumps(LocalMemoryCacheManager(128, 64))
+        first = pickle.loads(payload)
+        first.put_block("snapshot-1", 0, b"worker block")
+        del first
+        gc.collect()
+        second = pickle.loads(payload)
+        self.assertEqual(b"worker block", second.get_block("snapshot-1", 0))
+
+    def test_concurrent_restore_creates_one_manager(self):
+        payload = pickle.dumps(LocalMemoryCacheManager(128, 64))
+        barrier = threading.Barrier(8)
+        constructor_calls = []
+        original_init = LocalMemoryCacheManager.__init__
+
+        def slow_init(manager, *args, **kwargs):
+            constructor_calls.append(1)
+            threading.Event().wait(0.1)
+            original_init(manager, *args, **kwargs)
+
+        def restore():
+            barrier.wait(5)
+            return pickle.loads(payload)
+
+        with patch.object(LocalMemoryCacheManager, "__init__", slow_init):
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = [pool.submit(restore) for _ in range(8)]
+                restored = [future.result(timeout=10) for future in futures]
+        self.assertEqual(1, len(constructor_calls))
+        self.assertTrue(all(manager is restored[0] for manager in restored))
 
     def test_pickle_disabled_cache(self):
         restored = pickle.loads(pickle.dumps(
