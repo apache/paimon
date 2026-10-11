@@ -828,6 +828,16 @@ public class SnapshotManager implements Serializable {
         return -1;
     }
 
+    /**
+     * Reads the LATEST hint, telling an absent hint apart from one that cannot be read.
+     *
+     * @return the hinted snapshot id, or empty if there is no usable LATEST hint
+     * @throws IOException if the hint file cannot be read
+     */
+    public Optional<Long> readLatestHintStrictly() throws IOException {
+        return HintFileUtils.readHintStrictly(fileIO, HintFileUtils.LATEST, snapshotDirectory());
+    }
+
     public void deleteLatestHint() throws IOException {
         HintFileUtils.deleteLatestHint(fileIO, snapshotDirectory());
     }

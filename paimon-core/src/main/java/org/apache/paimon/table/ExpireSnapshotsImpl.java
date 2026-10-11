@@ -72,16 +72,38 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final Executor fileExecutor;
     private final TagManager tagManager;
     private final int snapshotExpireBatchSize;
+    /** Whether commits keep the LATEST hint up to date, see {@link #keepHintedSnapshots}. */
+    private final boolean protectLatestHint;
+
+    @Nullable private Long lastWarnedLatestHint;
+    private boolean latestHintUncheckable;
 
     private ExpireConfig expireConfig;
     private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
 
+    @VisibleForTesting
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
             @Nullable Integer scanManifestParallelism) {
+        this(
+                snapshotManager,
+                changelogManager,
+                snapshotDeletion,
+                tagManager,
+                scanManifestParallelism,
+                true);
+    }
+
+    public ExpireSnapshotsImpl(
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            SnapshotDeletion snapshotDeletion,
+            TagManager tagManager,
+            @Nullable Integer scanManifestParallelism,
+            boolean protectLatestHint) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.consumerManager =
@@ -97,6 +119,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 scanManifestParallelism == null || scanManifestParallelism <= 0
                         ? Runtime.getRuntime().availableProcessors()
                         : scanManifestParallelism;
+        this.protectLatestHint = protectLatestHint;
     }
 
     @VisibleForTesting
@@ -176,8 +199,91 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return expireUntil(earliest, maxExclusive);
     }
 
+    /**
+     * Keeps the snapshot the LATEST hint points to and all later ones. {@code findLatest} trusts
+     * the hint as long as the snapshot after it does not exist, so expiring the hinted snapshot and
+     * the one after it would make it return a missing snapshot. If the hinted snapshot is already
+     * missing, {@code findLatest} only works while the snapshot after it exists, so that one and
+     * all later ones are kept.
+     *
+     * @return the exclusive end to expire until, or null if nothing should be expired because the
+     *     boundary cannot be established
+     */
+    @Nullable
+    private Long keepHintedSnapshots(long endExclusiveId) {
+        Optional<Long> latestHint;
+        Long kept;
+        try {
+            latestHint = snapshotManager.readLatestHintStrictly();
+            if (!latestHint.isPresent() || latestHint.get() >= endExclusiveId) {
+                latestHintUncheckable = false;
+                return endExclusiveId;
+            }
+            long hint = latestHint.get();
+            if (snapshotManager.snapshotExists(hint)) {
+                kept = hint;
+            } else if (snapshotManager.snapshotExists(hint + 1)) {
+                kept = hint + 1;
+            } else {
+                kept = null;
+            }
+        } catch (Exception e) {
+            if (!latestHintUncheckable) {
+                latestHintUncheckable = true;
+                LOG.warn(
+                        "Cannot check the LATEST hint in {}, skip expiring snapshots "
+                                + "until it can be checked.",
+                        snapshotManager.snapshotDirectory(),
+                        e);
+            }
+            return null;
+        }
+        latestHintUncheckable = false;
+
+        Long hint = latestHint.get();
+        if (!hint.equals(lastWarnedLatestHint)) {
+            lastWarnedLatestHint = hint;
+            if (kept != null) {
+                LOG.warn(
+                        "The LATEST hint {} in {} is behind the latest snapshot {}. "
+                                + "Keeping snapshot {} and later ones instead of expiring up to {}.",
+                        hint,
+                        snapshotManager.snapshotDirectory(),
+                        listLatestSnapshotId(),
+                        kept,
+                        endExclusiveId);
+            } else {
+                LOG.warn(
+                        "The LATEST hint {} in {} points to a snapshot that does not exist, "
+                                + "neither does the next one, while the latest snapshot is {}. "
+                                + "Skip expiring snapshots until the hint is updated.",
+                        hint,
+                        snapshotManager.snapshotDirectory(),
+                        listLatestSnapshotId());
+            }
+        }
+        return kept;
+    }
+
+    private String listLatestSnapshotId() {
+        try {
+            return String.valueOf(
+                    snapshotManager.snapshotIdStream().reduce(Math::max).orElse(null));
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
     @VisibleForTesting
     public int expireUntil(long earliestId, long endExclusiveId) {
+        if (protectLatestHint && endExclusiveId > earliestId) {
+            Long kept = keepHintedSnapshots(endExclusiveId);
+            if (kept == null) {
+                return 0;
+            }
+            endExclusiveId = kept;
+        }
+
         try {
             return innerExpireUntil(earliestId, endExclusiveId);
         } catch (InterruptedException e) {

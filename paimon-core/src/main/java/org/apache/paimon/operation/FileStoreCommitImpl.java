@@ -1073,6 +1073,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 if (snapshot.commitUser().equals(commitUser)
                         && snapshot.commitIdentifier() == identifier
                         && snapshot.commitKind() == commitKind) {
+                    LOG.warn(
+                            "Snapshot #{} of table {} was already committed by a previous "
+                                    + "attempt of this commit. The LATEST hint may not have been "
+                                    + "updated.",
+                            snapshot.id(),
+                            tableName);
                     lastCommittedSnapshotId = snapshot.id();
                     return new SuccessCommitResult();
                 }

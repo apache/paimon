@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
@@ -39,6 +40,42 @@ public class HintFileUtils {
 
     private static final int READ_HINT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_INTERVAL = 1;
+
+    /**
+     * Reads a hint like {@link #readHint}, but throws if the hint file cannot be read instead of
+     * returning null. Content that is not a positive number is ignored by {@link #findLatest}, so
+     * it is returned as absent.
+     *
+     * @return the hinted id, or empty if there is no usable hint
+     * @throws IOException if the hint file cannot be read after retries
+     */
+    public static Optional<Long> readHintStrictly(FileIO fileIO, String fileName, Path dir)
+            throws IOException {
+        Path path = new Path(dir, fileName);
+        int retryNumber = 0;
+        while (true) {
+            Optional<String> content;
+            try {
+                content = fileIO.readOverwrittenFileUtf8(path);
+            } catch (IOException e) {
+                if (++retryNumber >= READ_HINT_RETRY_NUM) {
+                    throw e;
+                }
+                try {
+                    TimeUnit.MILLISECONDS.sleep(READ_HINT_RETRY_INTERVAL);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(ie);
+                }
+                continue;
+            }
+            try {
+                return content.map(Long::parseLong).filter(id -> id > 0);
+            } catch (NumberFormatException e) {
+                return Optional.empty();
+            }
+        }
+    }
 
     @Nullable
     public static Long findLatest(FileIO fileIO, Path dir, String prefix, Function<Long, Path> file)
