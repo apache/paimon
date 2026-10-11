@@ -663,7 +663,14 @@ class PyArrowFileIO(FileIO):
         if self._s3_delete_client is not None:
             return self._s3_delete_client
 
-        import boto3
+        try:
+            import boto3
+        except ModuleNotFoundError as error:
+            if error.name != "boto3":
+                raise
+            raise ImportError(
+                "S3/OSS batch deletion requires pypaimon[s3] or pypaimon[oss]."
+            ) from error
         from botocore.config import Config
 
         if self._is_oss:

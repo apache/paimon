@@ -37,6 +37,17 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
+@pytest.mark.parametrize("chunked", [False, True])
+def test_predicate_assignment_rejects_reordered_struct_fields(chunked):
+    values = pa.array([{'a': 1, 'b': 2}])
+    if chunked:
+        values = pa.chunked_array([values])
+    target = pa.struct([('b', pa.int32()), ('a', pa.int32())])
+
+    with pytest.raises(ValueError, match="struct fields must match in order"):
+        BatchTableUpdate._assignment_to_array(values, target, 1)
+
+
 # ======================================================================
 # Shared base for batch & stream table-update tests
 # ======================================================================
