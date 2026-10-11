@@ -17,6 +17,7 @@
 """LeRobot frame conversion and batch writing."""
 
 import io
+import logging
 import math
 import numbers
 from array import array
@@ -54,6 +55,7 @@ _NUMERIC_DTYPES = {
 }
 _BOOLEAN_DTYPES = {"bool", "boolean"}
 _VIDEO_TIMESTAMP_TOLERANCE = 1e-4
+_LOGGER = logging.getLogger(__name__)
 
 
 def _strict_lerobot_table(data, target_schema, source, batch_index):
@@ -95,6 +97,16 @@ def _commit_messages(table, messages):
         table_commit.close()
 
 
+def _abort_messages(table, messages):
+    if not messages:
+        return
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        commit.abort(messages)
+    finally:
+        commit.close()
+
+
 def _prepare_dataset(
         table, dataset, info, source, source_schema, batch_size, metadata,
         video_fields=(), episode_indices=None):
@@ -102,6 +114,7 @@ def _prepare_dataset(
     write_builder = table.new_batch_write_builder()
     table_write = None
     prepared = False
+    messages = None
     batch_count = 0
     row_count = 0
     episodes = metadata["episodes"]
@@ -182,7 +195,17 @@ def _prepare_dataset(
         raise
     finally:
         if table_write is not None:
-            table_write.close()
+            try:
+                table_write.close()
+            except BaseException:
+                # prepare_commit handed off these files; writer.abort() no
+                # longer owns them, and no caller has received the messages.
+                if messages is not None:
+                    try:
+                        _abort_messages(table, messages)
+                    except Exception:
+                        _LOGGER.exception("Failed to abort prepared LeRobot files.")
+                raise
 
 
 def _episode_batches(

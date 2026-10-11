@@ -55,6 +55,11 @@ def _counted_prepare_group(trace_path, *args):
         source_module._read_remote_parquet = original
 
 
+def _bucket_files(table):
+    bucket = Path(urlparse(table.table_path).path).resolve() / "bucket-0"
+    return sorted(path for path in bucket.rglob("*") if path.is_file())
+
+
 class LeRobotRayPlanningTest(unittest.TestCase):
     def test_groups_shared_payloads_across_cameras(self):
         info = {
@@ -304,19 +309,88 @@ class LeRobotRayImportTest(unittest.TestCase):
                                pa.array([0, 1, 0, 1, 0, 1, 0, 99], type=pa.int64()))
         pq.write_table(rows.slice(6, 2),
                        self.source / "data/chunk-000/file-003.parquet")
+        import ray
         from pypaimon.multimodal.lerobot.ray_loader import _abort_messages
-        with patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
-                   wraps=_abort_messages) as abort:
+        received = self.root / "success_received"
+        files_before_failure = []
+        connection = self.conn
+
+        class MarkingRay:
+            def __getattr__(self, name):
+                return getattr(ray, name)
+
+            def get(self, ref, **kwargs):
+                result = ray.get(ref, **kwargs)
+                if isinstance(result, list) and result and hasattr(result[0], "new_files"):
+                    table = connection.get_table("broken").raw_table
+                    files_before_failure.extend(_bucket_files(table))
+                    received.touch()
+                return result
+
+        def prepare(*args):
+            if 3 in args[-1]:
+                deadline = time.monotonic() + 30
+                while not received.exists():
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Successful task result was not received.")
+                    time.sleep(0.01)
+            return _prepare_group(*args)
+
+        with patch("pypaimon.multimodal.lerobot.ray_loader._require_ray",
+                   return_value=MarkingRay()), \
+                patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                      prepare), \
+                patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
+                      wraps=_abort_messages) as abort:
             with self.assertRaisesRegex(Exception, "frame_index"):
                 self.conn.load_from_lerobot("broken", self.source, parallelism=2,
                                             tag_name="imported")
+        self.assertTrue(files_before_failure)
         abort.assert_called_once()
         self.assertTrue(abort.call_args[0][1])
         table = self.conn.get_table("broken").raw_table
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
         self.assertFalse(table.tag_manager().tag_exists("imported"))
-        data_dir = Path(urlparse(table.table_path).path) / "data"
-        self.assertEqual([], [path for path in data_dir.rglob("*") if path.is_file()])
+        self.assertEqual([], _bucket_files(table))
+        self.assertTrue(all(not path.exists() for path in files_before_failure))
+
+    def test_writer_close_failure_aborts_prepared_files(self):
+        self._source()
+        for error_type in (RuntimeError, KeyboardInterrupt):
+            with self.subTest(error_type=error_type):
+                table_name = "close_" + error_type.__name__.lower()
+                trace = self.root / (table_name + ".json")
+
+                def prepare(*args):
+                    from pypaimon.multimodal.lerobot.ray_loader import _prepare_group
+                    from pypaimon.write.table_write import BatchTableWrite
+
+                    original_close = BatchTableWrite.close
+
+                    def fail_close(write):
+                        original_close(write)
+                        trace.write_text(json.dumps(
+                            [path.name for path in _bucket_files(args[0])]))
+                        raise error_type("injected writer close")
+
+                    BatchTableWrite.close = fail_close
+                    try:
+                        return _prepare_group(*args)
+                    finally:
+                        BatchTableWrite.close = original_close
+
+                with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group",
+                           prepare):
+                    with self.assertRaisesRegex(BaseException, "injected writer close"):
+                        self.conn.load_from_lerobot(
+                            table_name, self.source, parallelism=2)
+                before = json.loads(trace.read_text())
+                self.assertTrue(any(name.endswith(".parquet") for name in before), before)
+                self.assertTrue(any(".vector." in name for name in before), before)
+                self.assertTrue(any(name.endswith(".blob") for name in before), before)
+                table = self.conn.get_table(table_name).raw_table
+                self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+                self.assertEqual([], _bucket_files(table))
 
     def test_worker_failure_does_not_wait_for_blocked_task(self):
         self._source(data_files=2)
@@ -333,9 +407,14 @@ class LeRobotRayImportTest(unittest.TestCase):
             return []
 
         start = time.monotonic()
-        with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group", prepare):
+        from pypaimon.multimodal.lerobot.ray_loader import _abort_messages
+        with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group", prepare), \
+                patch("pypaimon.multimodal.lerobot.ray_loader._abort_messages",
+                      wraps=_abort_messages) as abort:
             with self.assertRaisesRegex(Exception, "planned worker failure"):
                 self.conn.load_from_lerobot(
                     "blocked", self.source, parallelism=2)
+        abort.assert_called_once()
+        self.assertEqual([], abort.call_args[0][1])
         self.assertTrue(marker.exists())
         self.assertLess(time.monotonic() - start, 6)

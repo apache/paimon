@@ -19,7 +19,9 @@
 import logging
 from pathlib import Path
 
-from pypaimon.multimodal.lerobot.loader import _commit_messages, _prepare_dataset
+from pypaimon.multimodal.lerobot.loader import (
+    _abort_messages, _commit_messages, _prepare_dataset,
+)
 from pypaimon.multimodal.lerobot.source import (
     _RemoteLeRobotDataset, _resolved_source,
 )
@@ -82,16 +84,6 @@ def _task_groups(info, episodes, video_fields, parallelism):
     for i, group in enumerate(groups):
         tasks[i % len(tasks)].extend(group)
     return [sorted(task) for task in tasks]
-
-
-def _abort_messages(table, messages):
-    if not messages:
-        return
-    commit = table.new_batch_write_builder().new_commit()
-    try:
-        commit.abort(messages)
-    finally:
-        commit.close()
 
 
 def _prepare_group(table, source_path, source_options, info, schema,
