@@ -176,7 +176,7 @@ def test_data_delete_rejects_disabled_dv_without_fallback(native_rest_catalog, m
     predicate = pb.equal('id', 999)
     if mixed:
         predicate = pb.or_predicates([predicate, pb.equal('p', 'a')])
-    with _core_only(), pytest.raises(Exception, match='deletion-vectors.enabled'):
+    with _core_only(), pytest.raises(NotImplementedError, match='deletion-vectors.enabled'):
         table.new_batch_write_builder().new_update().delete_by_predicate(predicate)
     assert _ids(table) == [0, 1, 2, 3]
 
