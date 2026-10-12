@@ -193,14 +193,15 @@ def native_commit_callback(table, callbacks):
     from pypaimon.table.row.generic_row import GenericRow
     from pypaimon.write.commit_callback import CommitCallbackContext
 
-    def notify(snapshot_json, native_entries, identifier):
+    def notify(native_context):
         entries = []
-        for kind, total_buckets, native_message in native_entries:
-            message = from_native_commit_messages(table, [native_message])[0]
+        for entry in native_context.commit_entries:
+            message = from_native_commit_messages(table, [entry._to_commit_message()])[0]
             entries.append(ManifestEntry(
-                kind, GenericRow(list(message.partition), table.partition_keys_fields),
-                message.bucket, total_buckets, message.new_files[0]))
-        context = CommitCallbackContext(JSON.from_json(snapshot_json, Snapshot), entries, identifier)
+                entry.kind, GenericRow(list(message.partition), table.partition_keys_fields),
+                entry.bucket, entry.total_buckets, message.new_files[0]))
+        context = CommitCallbackContext(
+            JSON.from_json(native_context._snapshot_json(), Snapshot), entries, native_context.identifier)
         for callback in callbacks:
             callback.call(context)
 

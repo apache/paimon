@@ -133,7 +133,7 @@ class TableCommit:
             # Callbacks may be registered after the native committer is created.
             # FileStoreCommit owns their close lifecycle in either execution path.
             if self._commit_callbacks and not self._native_callbacks_registered:
-                self._native_commit._add_commit_callback(native_commit_callback(self.table, self._commit_callbacks))
+                self._native_commit.add_commit_callback(native_commit_callback(self.table, self._commit_callbacks))
                 self._native_callbacks_registered = True
             return self._native_commit, native_messages
         except Exception as error:
