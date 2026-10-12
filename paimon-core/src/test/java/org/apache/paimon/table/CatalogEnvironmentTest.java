@@ -255,8 +255,8 @@ class CatalogEnvironmentTest {
         Lock backend =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> callable) throws Exception {
-                        return callable.call();
+                    public AutoCloseable acquire() throws Exception {
+                        return () -> {};
                     }
 
                     @Override
@@ -341,13 +341,11 @@ class CatalogEnvironmentTest {
         Lock backend =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         held.set(true);
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             held.set(false);
-                        }
+                        };
                     }
 
                     @Override

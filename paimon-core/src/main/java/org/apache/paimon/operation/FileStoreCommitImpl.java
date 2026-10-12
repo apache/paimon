@@ -53,9 +53,7 @@ import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
-import org.apache.paimon.operation.commit.RetryCommitResult.LockAcquireRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
-import org.apache.paimon.operation.commit.RetryCommitResult.RollbackRetryResult;
 import org.apache.paimon.operation.commit.RowIdConflictChecker;
 import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
 import org.apache.paimon.operation.commit.StrictModeChecker;
@@ -78,7 +76,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
-import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IndexFilePathFactories;
@@ -908,25 +905,34 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         RetryCommitResult retryResult = null;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            CommitResult result =
-                    tryCommitOnce(
-                            retryResult,
-                            changesProvider,
-                            identifier,
-                            watermark,
-                            properties,
-                            commitKind,
-                            allowRollback,
-                            snapshotManager::latestSnapshot,
-                            detectConflicts,
-                            statsFileName);
-            notifyCommitSuccess(result);
+            Exception failure;
+            try {
+                CommitResult result =
+                        tryCommitOnce(
+                                retryResult,
+                                changesProvider,
+                                identifier,
+                                watermark,
+                                properties,
+                                commitKind,
+                                allowRollback,
+                                snapshotManager::latestSnapshot,
+                                detectConflicts,
+                                statsFileName);
+                notifyCommitSuccess(result);
 
-            if (result.isSuccess()) {
-                break;
+                if (result.isSuccess()) {
+                    break;
+                }
+
+                retryResult = (RetryCommitResult) result;
+                failure = retryResult.exception;
+            } catch (Lock.AcquisitionException e) {
+                // Nothing was prepared or published. Retain any previous publication retry
+                // state, including its head, conflict scan and merged manifests.
+                failure = e;
+                LOG.warn("Failed to acquire commit lock for table {}.", tableName, e);
             }
-
-            retryResult = (RetryCommitResult) result;
 
             if (System.currentTimeMillis() - startMillis > options.commitTimeout()
                     || retryCount >= options.commitMaxRetries()) {
@@ -934,7 +940,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         String.format(
                                 "Commit failed for table %s after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 tableName, options.commitTimeout(), retryCount);
-                throw new RuntimeException(message, retryResult.exception);
+                throw new RuntimeException(message, failure);
             }
 
             retryWaiter.retryWait(retryCount);
@@ -1041,7 +1047,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
-            @Nullable String newStatsFileName) {
+            @Nullable String newStatsFileName)
+            throws Lock.AcquisitionException {
         CommitResult result =
                 tryCommitOnce(
                         retryResult,
@@ -1068,85 +1075,26 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             Supplier<Snapshot> latestSnapshotSupplier,
             boolean detectConflicts,
-            @Nullable String newStatsFileName) {
-        // No publication happened during a failed acquisition. Do not reconcile it as an
-        // uncertain publication or reuse preparation state on the next attempt.
-        RetryCommitResult previousAttempt =
-                retryResult instanceof LockAcquireRetryResult ? null : retryResult;
-        CommitAttempt attempt = new CommitAttempt(previousAttempt);
+            @Nullable String newStatsFileName)
+            throws Lock.AcquisitionException {
         try {
-            return runWithLock(
-                    () -> {
-                        try {
-                            attempt.result =
-                                    tryCommitOnceWithoutLock(
-                                            previousAttempt,
-                                            changesProvider,
-                                            identifier,
-                                            watermark,
-                                            properties,
-                                            commitKind,
-                                            allowRollback,
-                                            latestSnapshotSupplier.get(),
-                                            detectConflicts,
-                                            newStatsFileName);
-                            return attempt.result;
-                        } catch (RuntimeException | Error e) {
-                            attempt.failure = e;
-                            throw e;
-                        }
-                    });
-        } catch (RuntimeException e) {
-            boolean interrupted =
-                    ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent();
-            if (interrupted) {
-                Thread.currentThread().interrupt();
-            }
-            if (attempt.failure != null) {
-                // A release failure must not turn a preparation or validation failure into a
-                // retryable lock failure, nor hide the original cause.
-                if (attempt.failure != e) {
-                    attempt.failure.addSuppressed(e);
-                }
-                if (attempt.failure instanceof Error) {
-                    throw (Error) attempt.failure;
-                }
-                throw (RuntimeException) attempt.failure;
-            }
-
-            LOG.warn("Exception in commit lock for table {} by user {}.", tableName, commitUser, e);
-            if (attempt.result != null && attempt.result.isSuccess()) {
-                // Publication (or reconciliation of an uncertain publication) succeeded. A
-                // release failure cannot undo it; retain its result and post-commit callbacks.
-                return attempt.result;
-            }
-            if (interrupted) {
-                // Cancellation while waiting for the lock must not start another attempt.
-                throw e;
-            }
-            if (attempt.result instanceof CommitFailRetryResult) {
-                // Acquisition can fail between publication retries. Keep the previous head,
-                // conflict scan and merged manifests so that the next attempt can recover it.
-                CommitFailRetryResult previous = (CommitFailRetryResult) attempt.result;
-                return RetryCommitResult.forCommitFail(
-                        previous.latestSnapshot,
-                        previous.baseDataFiles,
-                        e,
-                        previous.manifestMergeResult);
-            }
-            if (attempt.result instanceof RollbackRetryResult) {
-                return RetryCommitResult.forRollback(e);
-            }
-            return RetryCommitResult.forLockAcquire(e);
-        }
-    }
-
-    private static class CommitAttempt {
-        @Nullable private CommitResult result;
-        @Nullable private Throwable failure;
-
-        private CommitAttempt(@Nullable RetryCommitResult previous) {
-            this.result = previous;
+            return snapshotCommit.runWithLock(
+                    () ->
+                            tryCommitOnceWithoutLock(
+                                    retryResult,
+                                    changesProvider,
+                                    identifier,
+                                    watermark,
+                                    properties,
+                                    commitKind,
+                                    allowRollback,
+                                    latestSnapshotSupplier.get(),
+                                    detectConflicts,
+                                    newStatsFileName));
+        } catch (Lock.AcquisitionException | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to run commit with table lock.", e);
         }
     }
 

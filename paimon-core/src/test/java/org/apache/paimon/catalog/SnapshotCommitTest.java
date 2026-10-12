@@ -30,7 +30,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -170,16 +169,14 @@ class SnapshotCommitTest {
         private boolean failClose;
 
         @Override
-        public <T> T runWithLock(Callable<T> callable) throws Exception {
+        public AutoCloseable acquire() throws Exception {
             assertThat(held).isFalse();
             events.add("acquire");
             held = true;
-            try {
-                return callable.call();
-            } finally {
+            return () -> {
                 held = false;
                 events.add("release");
-            }
+            };
         }
 
         @Override

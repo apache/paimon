@@ -21,8 +21,6 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 
-import java.util.concurrent.Callable;
-
 /** Records scopes acquired through the catalog lock factory SPI. */
 public class TestCatalogLockFactory implements CatalogLockFactory {
     public static final String IDENTIFIER = "test-catalog-lock";
@@ -42,15 +40,13 @@ public class TestCatalogLockFactory implements CatalogLockFactory {
         Options options = context.options();
         return new Lock() {
             @Override
-            public <T> T runWithLock(Callable<T> callable) throws Exception {
+            public AutoCloseable acquire() throws Exception {
                 options.set("test.lock.database", identifier.getDatabaseName());
                 options.set("test.lock.table", identifier.getObjectName());
                 options.set("test.lock.held", "true");
-                try {
-                    return callable.call();
-                } finally {
+                return () -> {
                     options.set("test.lock.held", "false");
-                }
+                };
             }
 
             @Override

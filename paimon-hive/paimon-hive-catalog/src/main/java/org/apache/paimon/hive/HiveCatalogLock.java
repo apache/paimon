@@ -43,7 +43,6 @@ import javax.annotation.Nullable;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Collections;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -113,7 +112,7 @@ public class HiveCatalogLock implements Lock {
     }
 
     @Override
-    public <T> T runWithLock(Callable<T> callable) throws Exception {
+    public AutoCloseable acquire() throws Exception {
         long lockId = lock(identifier.getDatabaseName(), identifier.getObjectName());
         Lease lease = null;
         try {
@@ -122,12 +121,22 @@ public class HiveCatalogLock implements Lock {
             lease = new Lease(lockId, requestedAt);
             currentLease.set(lease);
             lease.ensureValid();
-            return callable.call();
-        } finally {
-            currentLease.remove();
+            Lease acquired = lease;
+            return () -> release(acquired, lockId);
+        } catch (Exception | Error e) {
+            Lease partial = lease;
+            Lock.release(() -> release(partial, lockId), e);
+            throw e;
+        }
+    }
+
+    private void release(@Nullable Lease lease, long lockId) throws Exception {
+        currentLease.remove();
+        try {
             if (lease != null) {
                 lease.close();
             }
+        } finally {
             unlock(lockId);
         }
     }
@@ -247,7 +256,7 @@ public class HiveCatalogLock implements Lock {
         } finally {
             if (lockResponse.getState() != LockState.ACQUIRED) {
                 // unlock if not acquired
-                unlock(lockId);
+                Lock.release(() -> unlock(lockId), null);
             }
         }
 
@@ -265,14 +274,9 @@ public class HiveCatalogLock implements Lock {
         throw new RuntimeException("Acquire lock failed " + msg);
     }
 
-    private void unlock(long lockId) {
-        if (lockId <= 0) {
-            return;
-        }
-        try {
+    private void unlock(long lockId) throws TException, InterruptedException {
+        if (lockId > 0) {
             clients.execute(client -> client.unlock(lockId));
-        } catch (Exception e) {
-            LOG.warn("Unlock failed for lockId={}", lockId, e);
         }
     }
 

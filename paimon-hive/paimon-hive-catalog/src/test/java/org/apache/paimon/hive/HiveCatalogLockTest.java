@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.operation.Lock;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.LockResponse;
@@ -27,6 +28,8 @@ import org.apache.hadoop.hive.metastore.api.LockState;
 import org.apache.hadoop.hive.metastore.api.NoSuchLockException;
 import org.apache.thrift.TException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
@@ -73,6 +76,49 @@ class HiveCatalogLockTest {
                     action.run(client);
                 }
             };
+
+    @Test
+    void failedInitialHeartbeatReleasesAcquiredLockAndPreservesCause() throws Exception {
+        HiveCatalogLock lock = lock();
+        TException failure = new TException("Initial heartbeat failed");
+        TException releaseFailure = new TException("Release failed");
+        doThrow(failure).when(client).heartbeat(0L, 7L);
+        doThrow(releaseFailure).when(client).unlock(7L);
+        AtomicInteger operations = new AtomicInteger();
+        assertThatThrownBy(() -> lock.runWithLock(operations::incrementAndGet))
+                .isInstanceOf(Lock.AcquisitionException.class)
+                .hasCause(failure);
+        assertThat(failure.getSuppressed()).containsExactly(releaseFailure);
+        assertThat(operations.get()).isZero();
+        verify(client).unlock(7L);
+        assertThatThrownBy(lock::ensureValid).hasMessageContaining("No Hive lock");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void releaseFailurePreservesOperationOutcome(boolean failOperation) throws Exception {
+        HiveCatalogLock lock = lock();
+        TException releaseFailure = new TException("Release failed");
+        RuntimeException operationFailure = new RuntimeException("Preparation failed");
+        doThrow(releaseFailure).when(client).unlock(7L);
+        java.util.concurrent.Callable<String> operation =
+                () -> {
+                    if (failOperation) {
+                        throw operationFailure;
+                    }
+                    return "published";
+                };
+        if (failOperation) {
+            assertThatThrownBy(() -> lock.runWithLock(operation))
+                    .isSameAs(operationFailure)
+                    .hasSuppressedException(releaseFailure);
+        } else {
+            assertThat(lock.runWithLock(operation)).isEqualTo("published");
+        }
+        verify(client).unlock(7L);
+        verify(future).cancel(true);
+        assertThatThrownBy(lock::ensureValid).hasMessageContaining("No Hive lock");
+    }
 
     @Test
     void heartbeatExtendsLeaseAndStopsAfterScope() throws Exception {

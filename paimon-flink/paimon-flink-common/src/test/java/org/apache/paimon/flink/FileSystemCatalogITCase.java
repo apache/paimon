@@ -39,7 +39,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -208,9 +207,9 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                 Options tableOptions) {
             return new Lock() {
                 @Override
-                public <T> T runWithLock(Callable<T> callable) throws Exception {
+                public AutoCloseable acquire() throws Exception {
                     LOCK_COUNT.incrementAndGet();
-                    return callable.call();
+                    return () -> {};
                 }
 
                 @Override

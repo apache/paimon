@@ -50,6 +50,11 @@ public abstract class SnapshotCommit implements Lock {
     }
 
     @Override
+    public final AutoCloseable acquire() throws Exception {
+        return lock.acquire();
+    }
+
+    @Override
     public final <T> T runWithLock(Callable<T> callable) throws Exception {
         return lock.runWithLock(callable);
     }

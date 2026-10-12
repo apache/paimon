@@ -107,7 +107,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1768,7 +1767,7 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         if (acquisitions.incrementAndGet() <= failures) {
                             if ("checked".equals(failureKind)) {
                                 throw new IOException("Transient acquisition failure");
@@ -1776,7 +1775,7 @@ public class FileStoreCommitTest {
                             if ("runtime".equals(failureKind)) {
                                 throw new IllegalStateException("Transient acquisition failure");
                             }
-                            return action.call();
+                            return () -> {};
                         }
                         // Another writer advances the head while this attempt waits for its lock.
                         store.commitData(
@@ -1784,7 +1783,7 @@ public class FileStoreCommitTest {
                                         gen.nextInsert("20211110", 9, 2L, null, "b")),
                                 gen::getPartition,
                                 value -> 0);
-                        return action.call();
+                        return () -> {};
                     }
 
                     @Override
@@ -1831,7 +1830,7 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         if (acquisitions.incrementAndGet() == 1) {
                             // Interrupted blocking calls throw with the interrupt flag cleared.
                             InterruptedException interrupted =
@@ -1841,7 +1840,7 @@ public class FileStoreCommitTest {
                             }
                             throw interrupted;
                         }
-                        return action.call();
+                        return () -> {};
                     }
 
                     @Override
@@ -1875,15 +1874,13 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         acquisitions.incrementAndGet();
                         held.set(true);
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             held.set(false);
                             throw new IOException("Release failed after publication");
-                        }
+                        };
                     }
 
                     @Override
@@ -1921,11 +1918,11 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         if (acquisitions.incrementAndGet() == 2) {
                             throw new IOException("Transient acquisition failure");
                         }
-                        return action.call();
+                        return () -> {};
                     }
 
                     @Override
@@ -1967,13 +1964,11 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         acquisitions.incrementAndGet();
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             throw new IOException("Release failed after validation failure");
-                        }
+                        };
                     }
 
                     @Override
@@ -2019,6 +2014,44 @@ public class FileStoreCommitTest {
         assertThat(store.snapshotManager().latestSnapshot()).isNull();
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWithoutLockPreCommitFailureFollowsOriginalPath(boolean interrupted)
+            throws Exception {
+        TestFileStore store = createStore(false);
+        ManifestCommittable prepared = prepareLockRetryCommittable(store);
+        RuntimeException failure =
+                interrupted
+                        ? new RuntimeException(new InterruptedException("Action interrupted"))
+                        : new IllegalStateException("Validation failed");
+        CommitPreCallback preCallback = mock(CommitPreCallback.class);
+        doAnswer(
+                        invocation -> {
+                            throw failure;
+                        })
+                .when(preCallback)
+                .call(any(), any(), any(), any());
+        assertThat(Thread.currentThread().isInterrupted()).isFalse();
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "writer",
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.options(),
+                        false,
+                        Collections.emptyList(),
+                        Collections.singletonList(preCallback))) {
+            assertThatThrownBy(() -> commit.commit(prepared, false))
+                    .isSameAs(failure)
+                    .hasNoSuppressedExceptions();
+            assertThat(Thread.currentThread().isInterrupted()).isFalse();
+        } finally {
+            Thread.interrupted();
+        }
+        verify(preCallback, times(1)).call(any(), any(), any(), any());
+        assertThat(store.snapshotManager().latestSnapshot()).isNull();
+    }
+
     private ManifestCommittable prepareLockRetryCommittable(TestFileStore store) throws Exception {
         AtomicReference<ManifestCommittable> prepared = new AtomicReference<>();
         store.commitDataImpl(
@@ -2057,7 +2090,7 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         assertThat(held.get()).isFalse();
                         int attempt = attempts.incrementAndGet();
                         // A writer publishes while this writer is waiting to acquire its first
@@ -2071,12 +2104,10 @@ public class FileStoreCommitTest {
                         }
                         held.set(true);
                         events.add("acquire");
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             held.set(false);
                             events.add("release");
-                        }
+                        };
                     }
 
                     @Override
@@ -2158,15 +2189,13 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         assertThat(held.getAndSet(true)).isFalse();
                         events.add("acquire");
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             held.set(false);
                             events.add("release");
-                        }
+                        };
                     }
 
                     @Override
@@ -2245,8 +2274,8 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
-                        return action.call();
+                    public AutoCloseable acquire() throws Exception {
+                        return () -> {};
                     }
 
                     @Override
@@ -2298,13 +2327,11 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         assertThat(held.getAndSet(true)).isFalse();
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             held.set(false);
-                        }
+                        };
                     }
 
                     @Override
@@ -2459,18 +2486,16 @@ public class FileStoreCommitTest {
         Lock lock =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         int attempt = acquisitions.incrementAndGet();
                         if (lockFailures && attempt == 2) {
                             throw new IOException("Acquisition failed between publication retries");
                         }
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             if (lockFailures && attempt == 1) {
                                 throw new IOException("Release failed after publication conflict");
                             }
-                        }
+                        };
                     }
 
                     @Override

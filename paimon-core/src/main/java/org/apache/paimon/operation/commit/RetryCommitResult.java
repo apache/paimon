@@ -45,10 +45,6 @@ public abstract class RetryCommitResult implements CommitResult {
         return new CommitFailRetryResult(snapshot, baseDataFiles, exception, manifestMergeResult);
     }
 
-    public static RetryCommitResult forLockAcquire(Exception exception) {
-        return new LockAcquireRetryResult(exception);
-    }
-
     public static RetryCommitResult forRollback(Exception exception) {
         return new RollbackRetryResult(exception);
     }
@@ -90,14 +86,6 @@ public abstract class RetryCommitResult implements CommitResult {
                     Collections.unmodifiableList(new ArrayList<>(mergeBeforeManifests));
             this.mergeAfterManifests =
                     Collections.unmodifiableList(new ArrayList<>(mergeAfterManifests));
-        }
-    }
-
-    /** Retry result when lock acquisition failed before preparation or publication. */
-    public static class LockAcquireRetryResult extends RetryCommitResult {
-
-        private LockAcquireRetryResult(Exception exception) {
-            super(exception);
         }
     }
 

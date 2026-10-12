@@ -20,10 +20,13 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Path;
@@ -40,9 +43,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -53,6 +58,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,6 +71,73 @@ class JdbcCatalogLockTest {
     private final AtomicLong clock = new AtomicLong();
     private final AbstractDistributedLockDialect dialect = new SqlLiteDistributedLockDialect();
     private final Set<Thread> renewalThreads = ConcurrentHashMap.newKeySet();
+
+    @Test
+    void failedLeaseInitializationReleasesOwnershipBeforeRetry() throws Exception {
+        try (JdbcClientPool pool = pool()) {
+            dialect.createTable(pool, new Options());
+            JdbcCatalogLock lock = lock(pool);
+            RejectedExecutionException failure =
+                    new RejectedExecutionException("Renewer unavailable");
+            when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
+                    .thenThrow(failure);
+            AtomicInteger operations = new AtomicInteger();
+            assertThatThrownBy(() -> lock.runWithLock(operations::incrementAndGet))
+                    .isInstanceOf(Lock.AcquisitionException.class)
+                    .hasCause(failure);
+            assertThat(operations.get()).isZero();
+            assertThat(owner(pool)).isNull();
+            doReturn(future)
+                    .when(renewer)
+                    .scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any());
+            assertThat(lock.runWithLock(operations::incrementAndGet)).isEqualTo(1);
+            assertThat(owner(pool)).isNull();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void releaseFailurePreservesOperationOutcome(boolean failOperation) throws Exception {
+        AtomicBoolean failRelease = new AtomicBoolean();
+        SQLException releaseFailure = new SQLException("Release unavailable");
+        RuntimeException operationFailure = new RuntimeException("Preparation failed");
+        try (JdbcClientPool pool =
+                new JdbcClientPool(
+                        1, "jdbc:sqlite:" + directory.resolve("locks.db"), Collections.emptyMap()) {
+                    @Override
+                    public <R> R run(ClientPool.Action<R, Connection, SQLException> action)
+                            throws SQLException, InterruptedException {
+                        if (failRelease.get()) {
+                            throw releaseFailure;
+                        }
+                        return super.run(action);
+                    }
+                }) {
+            dialect.createTable(pool, new Options());
+            JdbcCatalogLock lock = lock(pool);
+            java.util.concurrent.Callable<String> operation =
+                    () -> {
+                        failRelease.set(true);
+                        if (failOperation) {
+                            throw operationFailure;
+                        }
+                        return "published";
+                    };
+            if (failOperation) {
+                assertThatThrownBy(() -> lock.runWithLock(operation))
+                        .isSameAs(operationFailure)
+                        .hasSuppressedException(releaseFailure);
+            } else {
+                assertThat(lock.runWithLock(operation)).isEqualTo("published");
+            }
+            failRelease.set(false);
+            assertThatThrownBy(lock::ensureValid).hasMessageContaining("No JDBC lock");
+            verify(future).cancel(true);
+            assertThat(owner(pool)).isNotEmpty();
+            // A failed release retains the row until expiry; remove it for this test's next scope.
+            dialect.releaseLock(pool, "catalog.db.table");
+        }
+    }
 
     @Test
     void callbackCanUseThePoolAndRenewalExtendsLifetime() throws Exception {

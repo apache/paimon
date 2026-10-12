@@ -29,7 +29,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -86,7 +85,7 @@ public class JdbcCatalogLock implements Lock {
     }
 
     @Override
-    public <T> T runWithLock(Callable<T> callable) throws Exception {
+    public AutoCloseable acquire() throws Exception {
         String lockUniqueName =
                 String.format(
                         "%s.%s.%s",
@@ -105,14 +104,12 @@ public class JdbcCatalogLock implements Lock {
                     lease = new Lease(dialect, lockUniqueName, owner, requestedAt);
                     currentLease.set(lease);
                     lease.ensureValid();
-                    return callable.call();
-                } finally {
-                    currentLease.remove();
-                    if (lease != null) {
-                        lease.close();
-                    }
-                    // The former holder must never delete a lease acquired after its expiry.
-                    dialect.releaseOwned(connections, lockUniqueName, owner);
+                    Lease acquired = lease;
+                    return () -> release(acquired, dialect, lockUniqueName, owner);
+                } catch (Exception | Error e) {
+                    Lease partial = lease;
+                    Lock.release(() -> release(partial, dialect, lockUniqueName, owner), e);
+                    throw e;
                 }
             }
             long elapsed = TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - startedAt);
@@ -122,6 +119,23 @@ public class JdbcCatalogLock implements Lock {
             }
             nextSleep = Math.min(nextSleep * 2, checkMaxSleep);
             Thread.sleep(Math.min(nextSleep, acquireTimeout - elapsed));
+        }
+    }
+
+    private void release(
+            @Nullable Lease lease,
+            AbstractDistributedLockDialect dialect,
+            String lockUniqueName,
+            String owner)
+            throws Exception {
+        currentLease.remove();
+        try {
+            if (lease != null) {
+                lease.close();
+            }
+        } finally {
+            // The former holder must never delete a lease acquired after its expiry.
+            dialect.releaseOwned(connections, lockUniqueName, owner);
         }
     }
 

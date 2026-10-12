@@ -20,11 +20,12 @@ package org.apache.paimon.operation;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,18 +33,131 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests validity checks and reentrancy of operation locks. */
 class LockTest {
     @Test
+    void emptyLockBypassesLockHandlingAndPropagatesTheOriginalFailure() throws Exception {
+        Lock empty = Lock.empty();
+        assertThat(Lock.reentrant(empty)).isSameAs(empty);
+        Object result = new Object();
+        assertThat(empty.runWithLock(() -> result)).isSameAs(result);
+        InterruptedException failure = new InterruptedException("Action interrupted");
+        assertThatThrownBy(
+                        () ->
+                                empty.runWithLock(
+                                        () -> {
+                                            throw failure;
+                                        }))
+                .isSameAs(failure)
+                .hasNoSuppressedExceptions();
+        assertThat(Thread.currentThread().isInterrupted()).isFalse();
+    }
+
+    @Test
+    void emptyLockDoesNotAcquireOrValidateAScope() throws Exception {
+        Lock empty =
+                new Lock.EmptyLock() {
+                    @Override
+                    public AutoCloseable acquire() {
+                        throw new AssertionError("No-lock path must not acquire a scope");
+                    }
+
+                    @Override
+                    public void ensureValid() {
+                        throw new AssertionError("No-lock path must not validate a lease");
+                    }
+                };
+        Object result = new Object();
+        assertThat(Lock.reentrant(empty).runWithLock(() -> result)).isSameAs(result);
+    }
+
+    @Test
+    void releaseFailureKeepsSuccessfulResult() throws Exception {
+        ScopeLock backend = new ScopeLock();
+        backend.releaseFailure = new IOException("Release failed");
+        Lock lock = Lock.reentrant(backend);
+        Object result = new Object();
+        assertThat(lock.runWithLock(() -> result)).isSameAs(result);
+        assertThat(backend.releases).isEqualTo(1);
+        assertThat(lock.<Object>runWithLock(() -> null)).isNull();
+        assertThat(backend.releases).isEqualTo(2);
+    }
+
+    @Test
+    void releaseFailureDoesNotMaskTheActionFailure() {
+        ScopeLock backend = new ScopeLock();
+        backend.releaseFailure = new IOException("Release failed");
+        RuntimeException failure = new RuntimeException("Action failed");
+        assertThatThrownBy(
+                        () ->
+                                Lock.reentrant(backend)
+                                        .runWithLock(
+                                                () -> {
+                                                    throw failure;
+                                                }))
+                .isSameAs(failure)
+                .hasSuppressedException(backend.releaseFailure);
+        assertThat(backend.releases).isEqualTo(1);
+    }
+
+    @Test
+    void acquisitionFailureNeverRunsTheOperation() {
+        ScopeLock lock = new ScopeLock();
+        IOException failure = new IOException("Acquisition failed");
+        lock.acquisitionFailure = failure;
+        AtomicInteger operations = new AtomicInteger();
+        assertThatThrownBy(() -> lock.runWithLock(operations::incrementAndGet))
+                .isInstanceOf(Lock.AcquisitionException.class)
+                .hasCause(failure);
+        assertThat(operations.get()).isZero();
+        assertThat(lock.releases).isZero();
+    }
+
+    @Test
+    void checkedOperationFailureIsPropagatedWithoutLockClassification() {
+        ScopeLock lock = new ScopeLock();
+        IOException failure = new IOException("Operation failed");
+        assertThatThrownBy(
+                        () ->
+                                lock.runWithLock(
+                                        () -> {
+                                            throw failure;
+                                        }))
+                .isSameAs(failure)
+                .hasNoSuppressedExceptions();
+        assertThat(lock.releases).isEqualTo(1);
+    }
+
+    private static class ScopeLock implements Lock {
+        private Exception acquisitionFailure;
+        private Exception releaseFailure;
+        private int releases;
+
+        @Override
+        public AutoCloseable acquire() throws Exception {
+            if (acquisitionFailure != null) {
+                throw acquisitionFailure;
+            }
+            return () -> {
+                releases++;
+                if (releaseFailure != null) {
+                    throw releaseFailure;
+                }
+            };
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    @Test
     void nestedPublicationUsesOneScopeAndChecksValidity() throws Exception {
         List<String> events = new ArrayList<>();
         Lock backend =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         events.add("acquire");
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             events.add("release");
-                        }
+                        };
                     }
 
                     @Override
@@ -95,13 +209,11 @@ class LockTest {
         Lock backend =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         events.add("acquire");
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             events.add("release");
-                        }
+                        };
                     }
 
                     @Override
@@ -140,13 +252,11 @@ class LockTest {
         Lock backend =
                 new Lock() {
                     @Override
-                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                    public AutoCloseable acquire() throws Exception {
                         events.add("acquire");
-                        try {
-                            return action.call();
-                        } finally {
+                        return () -> {
                             events.add("release");
-                        }
+                        };
                     }
 
                     @Override
@@ -167,7 +277,8 @@ class LockTest {
                                             events.add("publish");
                                             return null;
                                         }))
-                .hasMessage("Expired");
+                .isInstanceOf(Lock.AcquisitionException.class)
+                .hasRootCauseMessage("Expired");
         assertThat(events).containsExactly("acquire", "release");
         expired.set(false);
         lock.runWithLock(
