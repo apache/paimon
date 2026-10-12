@@ -182,11 +182,30 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public TableRollback catalogTableRollback() {
+        return catalogTableRollback(null, null);
+    }
+
+    /** Create rollback with the writer's lock context on its runtime branch. */
+    @Nullable
+    public TableRollback catalogTableRollback(
+            @Nullable String branch, @Nullable String commitUser) {
         if (catalogLoader != null && supportsVersionManagement) {
             Catalog catalog = catalogLoader.load();
+            Identifier rollbackIdentifier =
+                    branch == null
+                            ? identifier
+                            : new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    branch);
             return (instant, fromSnapshot) -> {
                 try {
-                    catalog.rollbackTo(identifier, instant, fromSnapshot);
+                    catalog.rollbackTo(
+                            rollbackIdentifier,
+                            commitUser == null ? null : uuid,
+                            instant,
+                            fromSnapshot,
+                            commitUser);
                 } catch (Catalog.TableNotExistException e) {
                     throw new RuntimeException(e);
                 }

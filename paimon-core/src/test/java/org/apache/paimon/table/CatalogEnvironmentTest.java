@@ -64,6 +64,62 @@ class CatalogEnvironmentTest {
 
     private static final String READ_VIA_OPTION = RESTApi.HEADER_PREFIX + RESTApi.READ_VIA_HEADER;
 
+    @ParameterizedTest
+    @ValueSource(strings = {"main", "dev"})
+    void testCatalogTableRollbackUsesRuntimeBranchAndOwner(String branch) throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        new Identifier("db", "table", "original"),
+                        "table-id",
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        true,
+                        false);
+        Instant instant = Instant.snapshot(1L);
+        environment.catalogTableRollback(branch, "writer").rollbackTo(instant, 2L);
+        verify(catalog)
+                .rollbackTo(
+                        new Identifier("db", "table", branch), "table-id", instant, 2L, "writer");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"main", "dev"})
+    void testCatalogTableRollbackWithoutOwnerUsesEmptyLockContext(String branch) throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        new Identifier("db", "table", branch),
+                        "table-id",
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        true,
+                        false);
+        Instant instant = Instant.tag("tag-1");
+        environment.catalogTableRollback().rollbackTo(instant, null);
+        verify(catalog)
+                .rollbackTo(new Identifier("db", "table", branch), null, instant, null, null);
+    }
+
+    @Test
+    void testCatalogTableRollbackWithoutCatalogReturnsNull() {
+        assertThat(CatalogEnvironment.empty().catalogTableRollback()).isNull();
+    }
+
+    @Test
+    void testCatalogTableRollbackWithoutVersionManagementReturnsNull() {
+        Catalog catalog = mock(Catalog.class);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, () -> catalog, null, null, null, false, false);
+        assertThat(environment.catalogTableRollback()).isNull();
+        assertThat(environment.catalogTableRollback("dev", "writer")).isNull();
+        verifyNoInteractions(catalog);
+    }
+
     @Test
     void testDependencyReadContextForRestCatalog() {
         Identifier root = Identifier.create("db", "root$branch_dev");

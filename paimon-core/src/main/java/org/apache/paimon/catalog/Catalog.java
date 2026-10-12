@@ -715,7 +715,7 @@ public interface Catalog extends AutoCloseable {
      * <ul>
      *   <li>{@link #commitSnapshot(Identifier, String, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
-     *   <li>{@link #rollbackTo(Identifier, Instant)}.
+     *   <li>{@link #rollbackTo(Identifier, String, Instant, Long, String)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
      *   <li>{@link #renameBranch(Identifier, String, String)}.
@@ -840,31 +840,25 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * rollback table by the given {@link Identifier} and instant.
+     * Rollback table by the given {@link Identifier} and instant.
      *
      * @param identifier path of the table
-     * @param instant like snapshotId or tagName
-     * @throws Catalog.TableNotExistException if the table does not exist
-     * @throws UnsupportedOperationException if the catalog does not {@link
-     *     #supportsVersionManagement()}
-     */
-    default void rollbackTo(Identifier identifier, Instant instant)
-            throws Catalog.TableNotExistException {
-        rollbackTo(identifier, instant, null);
-    }
-
-    /**
-     * rollback table by the given {@link Identifier} and instant.
-     *
-     * @param identifier path of the table
+     * @param tableUuid expected table incarnation when rolling back within a writer's lock, or null
+     *     when no writer lock is used
      * @param instant like snapshotId or tagName
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
-     *     snapshot.
+     *     snapshot
+     * @param commitUser owner of the writer's lock, or null when no writer lock is used
      * @throws Catalog.TableNotExistException if the table does not exist
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+    void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String commitUser)
             throws Catalog.TableNotExistException;
 
     /**
