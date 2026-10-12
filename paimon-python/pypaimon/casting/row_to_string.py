@@ -38,6 +38,7 @@ it would have emitted anyway:
 
 from typing import Any, Optional
 
+from pypaimon.casting.temporal_string import format_time, format_timestamp
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
 _UNSUPPORTED_TYPES = ("FLOAT", "REAL", "DOUBLE", "TIMESTAMP_LTZ",
@@ -107,39 +108,9 @@ def _is_unsupported(data_type) -> bool:
 
 
 def _format_timestamp(value, precision: int) -> str:
-    """Format as ``yyyy-MM-dd HH:mm:ss[.fraction]``.
-
-    The fraction is padded to nine digits and then stripped of trailing zeros
-    down to ``precision`` digits, as ``DateTimeUtils.formatTimestamp`` does.
-    Python datetimes are microsecond resolution, so the last three digits of a
-    TIMESTAMP(7..9) value are always zero.
-    """
-    text = "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(
-        value.year, value.month, value.day,
-        value.hour, value.minute, value.second)
-    fraction = "{:09d}".format(value.microsecond * 1000)
-    while len(fraction) > precision and fraction.endswith("0"):
-        fraction = fraction[:-1]
-    return (text + "." + fraction) if fraction else text
+    return format_timestamp(value, precision)
 
 
 def _format_time(value, precision: int) -> str:
-    """Format as ``HH:mm:ss[.fraction]``.
-
-    Digit by digit off the millisecond part, exactly as
-    ``DateTimeUtils.formatTimestampMillis`` does: it stops only once nothing
-    but zeros is left, so a truncated non zero tail keeps the zero before it
-    (``.10`` for 101 ms at precision 2, not ``.1``).
-    """
-    text = "{:02d}:{:02d}:{:02d}".format(value.hour, value.minute, value.second)
-    if precision <= 0:
-        return text
-    millis = value.microsecond // 1000
-    digits = []
-    while precision > 0:
-        digits.append(str(millis // 100))
-        millis = millis % 100 * 10
-        if millis == 0:
-            break
-        precision -= 1
-    return text + "." + "".join(digits)
+    millis = ((value.hour * 60 + value.minute) * 60 + value.second) * 1000 + value.microsecond // 1000
+    return format_time(millis, precision)
