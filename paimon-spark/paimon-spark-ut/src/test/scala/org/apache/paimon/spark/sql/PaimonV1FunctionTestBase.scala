@@ -22,11 +22,133 @@ import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.spark.function.FunctionResources._
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.expressions.Explode
 
 import java.io.File
 
 abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBase {
+
+  private val hivePosExplode = "org.apache.hadoop.hive.ql.udf.generic.GenericUDTFPosExplode"
+
+  test("Paimon V1 Function: persistent Hive UDTF in lateral view") {
+    withUserDefinedFunction("udtf_pos_explode" -> false) {
+      sql(s"CREATE FUNCTION udtf_pos_explode AS '$hivePosExplode'")
+      withTable("udtf_input") {
+        sql("CREATE TABLE udtf_input (id INT, items ARRAY<INT>) USING paimon")
+        sql("INSERT INTO udtf_input VALUES (1, array(10, 20)), (2, array()), (3, NULL)")
+
+        // Resolve a cold REST catalog function before any SELECT invocation populates its registry.
+        Seq("udtf_pos_explode", "test.udtf_pos_explode").foreach {
+          name =>
+            checkAnswer(
+              sql(s"""SELECT id, position, item FROM udtf_input
+                     |LATERAL VIEW $name(items) u AS position, item
+                     |""".stripMargin),
+              Seq(Row(1, 0, 10), Row(1, 1, 20))
+            )
+        }
+
+        checkAnswer(
+          sql("""SELECT id, position, item FROM udtf_input
+                |LATERAL VIEW OUTER udtf_pos_explode(items) u AS position, item
+                |""".stripMargin),
+          Seq(Row(1, 0, 10), Row(1, 1, 20), Row(2, null, null), Row(3, null, null))
+        )
+        checkAnswer(
+          sql("SELECT id, paimon.test.udtf_pos_explode(items) FROM udtf_input"),
+          Seq(Row(1, 0, 10), Row(1, 1, 20)))
+
+        val session = spark.newSession()
+        session.sql("USE paimon.test")
+        checkAnswer(
+          session.sql("""SELECT id, position, item FROM udtf_input
+                        |LATERAL VIEW udtf_pos_explode(items) u AS position, item
+                        |""".stripMargin),
+          Seq(Row(1, 0, 10), Row(1, 1, 20))
+        )
+      }
+    }
+  }
+
+  test("Paimon V1 Function: lateral view database name can match a catalog") {
+    withDatabase("paimon.paimon") {
+      sql("CREATE DATABASE paimon.paimon")
+      withUserDefinedFunction("paimon.paimon.udtf_pos_explode" -> false) {
+        sql(s"CREATE FUNCTION paimon.paimon.udtf_pos_explode AS '$hivePosExplode'")
+        checkAnswer(
+          sql("""SELECT position, item FROM VALUES (array(10, 20)) AS t(items)
+                |LATERAL VIEW paimon.udtf_pos_explode(items) u AS position, item
+                |""".stripMargin),
+          Seq(Row(0, 10), Row(1, 20))
+        )
+      }
+    }
+  }
+
+  test("Paimon V1 Function: Hive UDTF in CTE and dependent lateral views") {
+    withUserDefinedFunction("udtf_pos_explode" -> false) {
+      sql(s"CREATE FUNCTION udtf_pos_explode AS '$hivePosExplode'")
+      checkAnswer(
+        sql("""WITH expanded AS (
+              |  SELECT id, item FROM VALUES (1, array(10, 20)) AS t(id, items)
+              |  LATERAL VIEW udtf_pos_explode(items) u AS position, item
+              |)
+              |SELECT * FROM expanded
+              |""".stripMargin),
+        Seq(Row(1, 10), Row(1, 20))
+      )
+      checkAnswer(
+        sql("""SELECT id, a.item, b.item FROM VALUES (1, array(10, 20)) AS t(id, items)
+              |LATERAL VIEW udtf_pos_explode(items) a AS position, item
+              |LATERAL VIEW udtf_pos_explode(array(a.item, a.item + 1)) b AS position, item
+              |""".stripMargin),
+        Seq(Row(1, 10, 10), Row(1, 10, 11), Row(1, 20, 20), Row(1, 20, 21))
+      )
+    }
+  }
+
+  test("Paimon V1 Function: lateral view preserves built-in and temporary function lookup") {
+    withUserDefinedFunction("udtf_pos_explode" -> false) {
+      sql(s"CREATE FUNCTION udtf_pos_explode AS '$hivePosExplode'")
+      withUserDefinedFunction("udtf_pos_explode" -> true) {
+        spark.sessionState.functionRegistry.createOrReplaceTempFunction(
+          "udtf_pos_explode",
+          children => Explode(children.head),
+          "scala_udf")
+        checkAnswer(
+          sql("""SELECT item FROM VALUES (array(10, 20)) AS t(items)
+                |LATERAL VIEW udtf_pos_explode(items) u AS item
+                |""".stripMargin),
+          Seq(Row(10), Row(20))
+        )
+        checkAnswer(
+          sql("""SELECT position, item FROM VALUES (array(10, 20)) AS t(items)
+                |LATERAL VIEW test.udtf_pos_explode(items) u AS position, item
+                |""".stripMargin),
+          Seq(Row(0, 10), Row(1, 20))
+        )
+        checkAnswer(
+          sql("""SELECT position, item FROM VALUES (array(10, 20)) AS t(items)
+                |LATERAL VIEW posexplode(items) u AS position, item
+                |""".stripMargin),
+          Seq(Row(0, 10), Row(1, 20))
+        )
+      }
+    }
+  }
+
+  test("Paimon V1 Function: reject a scalar function in lateral view") {
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class' USING JAR '$testUDFJarPath'")
+      val error = intercept[AnalysisException] {
+        sql("""SELECT item FROM VALUES (1, 2) AS t(a, b)
+              |LATERAL VIEW udf_add2(a, b) u AS item
+              |""".stripMargin)
+      }
+      assert(error.getErrorClass == "UNSUPPORTED_GENERATOR.NOT_GENERATOR")
+    }
+  }
 
   test("Paimon V1 Function: create or replace function") {
     withUserDefinedFunction("udf_add2" -> false) {
