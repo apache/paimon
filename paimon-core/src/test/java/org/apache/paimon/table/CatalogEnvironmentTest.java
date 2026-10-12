@@ -100,14 +100,14 @@ class CatalogEnvironmentTest {
                         true,
                         false);
         Instant instant = Instant.tag("tag-1");
-        environment.catalogTableRollback().rollbackTo(instant, null);
+        environment.catalogTableRollback(null, null).rollbackTo(instant, null);
         verify(catalog)
                 .rollbackTo(new Identifier("db", "table", branch), null, instant, null, null);
     }
 
     @Test
     void testCatalogTableRollbackWithoutCatalogReturnsNull() {
-        assertThat(CatalogEnvironment.empty().catalogTableRollback()).isNull();
+        assertThat(CatalogEnvironment.empty().catalogTableRollback(null, null)).isNull();
     }
 
     @Test
@@ -115,7 +115,7 @@ class CatalogEnvironmentTest {
         Catalog catalog = mock(Catalog.class);
         CatalogEnvironment environment =
                 new CatalogEnvironment(null, null, () -> catalog, null, null, null, false, false);
-        assertThat(environment.catalogTableRollback()).isNull();
+        assertThat(environment.catalogTableRollback(null, null)).isNull();
         assertThat(environment.catalogTableRollback("dev", "writer")).isNull();
         verifyNoInteractions(catalog);
     }

@@ -180,11 +180,6 @@ public class CatalogEnvironment implements Serializable {
                         lockContext, lockIdentifier, uuid, commitUser, tableOptions);
     }
 
-    @Nullable
-    public TableRollback catalogTableRollback() {
-        return catalogTableRollback(null, null);
-    }
-
     /** Create rollback with the writer's lock context on its runtime branch. */
     @Nullable
     public TableRollback catalogTableRollback(
