@@ -256,10 +256,10 @@ class ConflictDetection:
             if conflict is not None:
                 return conflict
 
-        conflict = self.check_overwrite_from_snapshot(
-            latest_snapshot, delta_entries, commit_kind)
-        if conflict is not None:
-            return conflict
+        # Match Java's default conflict checks: appends with fresh row IDs
+        # may coexist with prepared deletes. File/DV replacement and writes
+        # to existing row IDs are checked below; do not reject a whole
+        # partition merely because it received new rows after preparation.
 
         conflict = self.check_deletion_vector_index_conflicts(
             latest_snapshot, delta_index_entries, base_entries, delta_entries)
@@ -290,6 +290,12 @@ class ConflictDetection:
 
         conflict = self.check_global_index_row_id_existence(
             base_entries, delta_index_entries)
+        if conflict is not None:
+            return conflict
+
+        from pypaimon.write.commit.global_index_source_check import check_global_index_sources
+        conflict = check_global_index_sources(
+            self, latest_snapshot, merged_entries, delta_entries, delta_index_entries)
         if conflict is not None:
             return conflict
 
@@ -484,41 +490,6 @@ class ConflictDetection:
             entry for entry in (index_entries or [])
             if entry.kind == 0 and entry.index_file.global_index_meta is not None
         ]
-
-    def check_overwrite_from_snapshot(self, latest_snapshot, delta_entries, commit_kind):
-        if commit_kind != "OVERWRITE":
-            return None
-        if self._row_id_check_from_snapshot is None:
-            return None
-        if latest_snapshot is None or latest_snapshot.id <= self._row_id_check_from_snapshot:
-            return None
-        if not any(entry.kind == 1 for entry in delta_entries):
-            return None
-
-        check_snapshot = self.snapshot_manager.get_snapshot_by_id(
-            self._row_id_check_from_snapshot)
-        if check_snapshot is None:
-            return RuntimeError(
-                "Overwrite conflict detected: base snapshot {} cannot be found.".format(
-                    self._row_id_check_from_snapshot))
-
-        for snapshot_id in range(
-                self._row_id_check_from_snapshot + 1,
-                latest_snapshot.id + 1):
-            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
-            if snapshot is None:
-                return RuntimeError(
-                    "Overwrite conflict detected: snapshot {} cannot be found.".format(
-                        snapshot_id))
-            incremental_entries = (
-                self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
-                    snapshot, delta_entries))
-            if incremental_entries:
-                return RuntimeError(
-                    "Overwrite conflict detected: target partitions were modified "
-                    "after snapshot {}.".format(self._row_id_check_from_snapshot))
-
-        return None
 
     def check_row_id_existence(self, base_entries, delta_entries, next_row_id=None):
         if not self.data_evolution_enabled:

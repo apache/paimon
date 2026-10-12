@@ -1530,6 +1530,163 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
+    public void testAddVideoColumnToExistingImages() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("image", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable oldTable = getTableDefault();
+        byte[] image = "original-image".getBytes();
+        writeRows(oldTable, Collections.singletonList(GenericRow.of(0, new BlobData(image))));
+        long oldSnapshot = oldTable.latestSnapshot().get().id();
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn("video", DataTypes.BYTES(), "__VIDEO_FRAME_FIELD"),
+                false);
+        FileStoreTable table = getTableDefault();
+        List<InternalRow> rows = read(table);
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).getBlob(1).toData()).isEqualTo(image);
+        assertThat(rows.get(0).isNullAt(2)).isTrue();
+
+        // An already running writer can still append rows using the old schema.
+        writeRows(oldTable, Collections.singletonList(GenericRow.of(1, new BlobData(image))));
+        byte[] payload = "complete-video".getBytes();
+        java.nio.file.Path source = tempPath.resolve("evolved-video.mp4");
+        java.nio.file.Files.write(source, payload);
+        writeRows(
+                table,
+                Collections.singletonList(
+                        GenericRow.of(
+                                2,
+                                new BlobData(image),
+                                Blob.fromDescriptor(
+                                        UriReader.fromFile(LocalFileIO.create()),
+                                        new VideoFrameDescriptor(
+                                                new Path(source.toUri()).toString(),
+                                                0,
+                                                payload.length,
+                                                7,
+                                                -1,
+                                                0)))));
+        rows = read(table, org.apache.paimon.utils.Pair.of(CoreOptions.BLOB_AS_DESCRIPTOR, "true"));
+        rows.sort((a, b) -> Integer.compare(a.getInt(0), b.getInt(0)));
+        assertThat(rows.size()).isEqualTo(3);
+        assertThat(rows.get(0).isNullAt(2)).isTrue();
+        assertThat(rows.get(1).isNullAt(2)).isTrue();
+        assertThat(rows.get(2).getBlob(2).toData()).isEqualTo(payload);
+        assertThat(((VideoFrameDescriptor) rows.get(2).getBlob(2).toDescriptor()).frameIndex())
+                .isEqualTo(7);
+        assertThat(liveVideoFiles(table).size()).isEqualTo(1);
+        assertThat(
+                        read(table.copy(
+                                        Collections.singletonMap(
+                                                "scan.snapshot-id", "" + oldSnapshot)))
+                                .size())
+                .isEqualTo(1);
+
+        // Adding another video column automatically preserves the existing video field.
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn("second", DataTypes.BLOB(), "__VIDEO_FRAME_FIELD"),
+                false);
+        assertThat(getTableDefault().schema().options().get("video-frame-field"))
+                .isEqualTo("video,second");
+        for (InternalRow row : read(getTableDefault())) {
+            assertThat(row.isNullAt(3)).isTrue();
+        }
+
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("video"), false);
+        assertThat(getTableDefault().schema().options().get("video-frame-field"))
+                .isEqualTo("second");
+        assertThat(read(getTableDefault()).size()).isEqualTo(3);
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("second"), false);
+        assertThat(getTableDefault().schema().options().containsKey("video-frame-field")).isFalse();
+        assertThat(read(getTableDefault()).size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testRejectUnsafeVideoColumnEvolution() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("image", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        writeRows(
+                getTableDefault(),
+                Collections.singletonList(GenericRow.of(0, new BlobData(new byte[] {1}))));
+        for (List<SchemaChange> changes :
+                Arrays.asList(
+                        Collections.singletonList(
+                                SchemaChange.setOption("video-frame-field", "image")),
+                        Arrays.asList(
+                                SchemaChange.addColumn("bad", DataTypes.BLOB()),
+                                SchemaChange.setOption("video-frame-field", "bad")))) {
+            assertThatThrownBy(() -> catalog.alterTable(identifier(), changes, false))
+                    .isInstanceOf(UnsupportedOperationException.class);
+            assertThat(getTableDefault().schema().id()).isZero();
+        }
+        for (org.apache.paimon.types.DataType type :
+                Arrays.asList(DataTypes.INT(), DataTypes.BLOB().notNull())) {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier(),
+                                            SchemaChange.addColumn(
+                                                    "bad", type, "__VIDEO_FRAME_FIELD"),
+                                            false))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(getTableDefault().schema().id()).isZero();
+        }
+        // Editing an existing column's comment must not change its storage mode.
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.updateColumnComment(
+                                                "image", "__VIDEO_FRAME_FIELD"),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(getTableDefault().schema().options().containsKey("video-frame-field")).isFalse();
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn("video", DataTypes.BLOB(), "__VIDEO_FRAME_FIELD"),
+                false);
+        for (String value : Arrays.asList("", "image", "video,image")) {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier(),
+                                            SchemaChange.setOption("video-frame-field", value),
+                                            false))
+                    .isInstanceOf(UnsupportedOperationException.class);
+        }
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.removeOption("video-frame-field"),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(
+                        () ->
+                                getTableDefault()
+                                        .copy(
+                                                Collections.singletonMap(
+                                                        "video-frame-field", "video,image")))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     public void testVideoRollingAndCompaction() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("id", DataTypes.INT());

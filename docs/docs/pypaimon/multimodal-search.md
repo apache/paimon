@@ -181,9 +181,10 @@ leaves existing coverage intact; ambiguous commit failures leave output files
 for normal orphan-file maintenance rather than risking deletion of published
 files.
 
-The API requires data evolution and a latest-table handle. It uses the Python
-committer for its strict snapshot check. This is an opt-in maintenance pass, not
-a background daemon: an application scheduler or Ray job owns its trigger,
+The API requires data evolution and a latest-table handle. It uses Python index
+planning and the Python committer to preserve rebuild ranges and the strict
+snapshot check, even when native writes are enabled on the table. This is an
+opt-in maintenance pass, not a background daemon: an application scheduler or Ray job owns its trigger,
 backoff, and retry policy. For example, a Ray task can load its catalog/table and
 run a pass after a completed backfill; serialize maintenance jobs for each table
 to avoid competing rebuilds. Continuous writers may require a quiet interval

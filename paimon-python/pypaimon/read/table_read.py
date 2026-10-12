@@ -791,8 +791,7 @@ class TableRead:
     def _native_split_files_supported(split):
         for data_file in split.files:
             file_name = data_file.file_name.lower()
-            if ('.vector.' not in file_name
-                    and not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
+            if (not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
                     and not file_name.endswith(_NATIVE_BLOB_FILE_SUFFIXES)):
                 return False
         return True

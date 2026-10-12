@@ -25,7 +25,7 @@ from pypaimon.ray.vector_search import (
     _execution_options, _map_tasks, _require_ray, _shared_scalar_filters, _worker_pre_filter,
 )
 from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl, _filtered_raw_row_ranges, _offer_score, _scored_result,
+    BatchVectorSearchReadImpl, _filtered_raw_row_ranges, _offer_score, _scored_result, _split_search_splits,
 )
 
 
@@ -47,6 +47,10 @@ class _RayBatchVectorSearchRead(BatchVectorSearchReadImpl):
                          reader._filter, reader._partition_filter, reader._options)
         self._concurrency = concurrency
         self._remote_args = remote_args
+
+    def _prepare_search_splits(self, splits, snapshot):
+        # Scalar evaluation and candidate verification belong to the workers.
+        return _split_search_splits(splits)
 
     def _search_index_splits(self, splits, query, search_limit, snapshot, batch=False):
         # Send predicates and metadata, leaving each worker to build and consume

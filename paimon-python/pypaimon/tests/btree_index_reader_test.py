@@ -29,6 +29,8 @@ from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
 from pypaimon.globalindex.btree.btree_index_writer import BTreeIndexWriter
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
+from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.schema.data_types import AtomicType
 
 
@@ -110,6 +112,73 @@ class BTreeIndexReaderTest(unittest.TestCase):
                 finally:
                     reader.close()
                 self.assertTrue(file_io.input_stream.closed)
+
+    def test_string_prefix_intervals_are_exact(self):
+        values = [None, '', '\x00', 'ke', 'keep', 'keep', 'keeper', 'kf', 'missing-after',
+                  '\x7f', '\x7fa', '\u0080', '\u00ff', '\u00ffa', '\u0100',
+                  '\u07ff', '\u07ffa', '\u0800', '\uffff', '\uffffa', '\U00010000',
+                  '\U0010ffff', '\U0010ffffa']
+        serializer = create_serializer(AtomicType('STRING'))
+        with tempfile.TemporaryDirectory() as directory:
+            file_io = LocalFileIO()
+            writer = BTreeIndexWriter(file_io, directory, serializer, block_size=32)
+            for row_id, value in sorted(enumerate(values), key=lambda item: (item[1] is not None, item[1])):
+                writer.write(value, row_id)
+            entry = writer.finish()[0]
+            with open(os.path.join(directory, entry.file_name), 'rb') as stream:
+                data = stream.read()
+        io_meta = GlobalIndexIOMeta(entry.file_name, len(data), entry.meta)
+        for input_type in (_TrackingInput, _PreadInput):
+            reader = BTreeIndexReader(serializer, self._file_io(data, input_type), '/unused', io_meta)
+            try:
+                for prefix in ('', '\x00', 'ke', 'keep', 'missing', 'absent', 'zz',
+                               '\x7f', '\u00ff', '\u07ff', '\uffff', '\U0010ffff'):
+                    with self.subTest(input_type=input_type, prefix=prefix):
+                        result = reader.visit_starts_with(prefix)
+                        self.assertTrue(result.is_exact())
+                        self.assertEqual(
+                            [row_id for row_id, value in enumerate(values)
+                             if value is not None and value.startswith(prefix)],
+                            result.results().to_list())
+            finally:
+                reader.close()
+
+    def test_prefix_query_on_null_only_file_is_exact_and_empty(self):
+        serializer = create_serializer(AtomicType('STRING'))
+        with tempfile.TemporaryDirectory() as directory:
+            file_io = LocalFileIO()
+            writer = BTreeIndexWriter(file_io, directory, serializer, block_size=32)
+            writer.write(None, 0)
+            writer.write(None, 1)
+            entry = writer.finish()[0]
+            file_size = os.path.getsize(os.path.join(directory, entry.file_name))
+            io_meta = GlobalIndexIOMeta(entry.file_name, file_size, entry.meta)
+            reader = BTreeIndexReader(serializer, file_io, directory, io_meta)
+            try:
+                for prefix in ('', 'ke'):
+                    with self.subTest(prefix=prefix):
+                        result = reader.visit_starts_with(prefix)
+                        self.assertTrue(result.is_exact())
+                        self.assertTrue(result.results().is_empty())
+            finally:
+                reader.close()
+
+    def test_string_prefix_file_selection_uses_utf8_byte_bounds(self):
+        values = ['', '\x00', 'ke', 'kf', '\x7f', '\x7fa', '\u0080', '\u00ff', '\u00ffa', '\u0100',
+                  '\u07ff', '\u07ffa', '\u0800', '\uffff', '\uffffa', '\U00010000', '\U0010ffff', None]
+        serializer = create_serializer(AtomicType('STRING'))
+        files = []
+        for row_id, value in enumerate(values):
+            key = None if value is None else serializer.serialize(value)
+            meta = SortedIndexFileMeta(key, key, value is None)
+            files.append((GlobalIndexIOMeta(str(row_id), 0, meta.serialize()), meta))
+        selector = SortedFileMetaSelector(files, serializer)
+        for prefix in ('', '\x00', 'ke', 'keep', '\x7f', '\u00ff', '\u07ff', '\uffff', '\U0010ffff'):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(
+                    [str(row_id) for row_id, value in enumerate(values)
+                     if value is not None and value.startswith(prefix)],
+                    [file.file_name for file in selector.select_starts_with(prefix)])
 
     def test_unsupported_versions_rejected_before_sst_read(self):
         for input_type in (_TrackingInput, _PreadInput):

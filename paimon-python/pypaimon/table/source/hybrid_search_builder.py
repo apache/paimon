@@ -174,7 +174,7 @@ class HybridSearchBuilder(ABC):
 
     @abstractmethod
     def with_filter(self, predicate) -> 'HybridSearchBuilder':
-        """Scalar predicate used to pre-filter vector routes."""
+        """Scalar predicate used to pre-filter every route before Top-K."""
         pass
 
     @abstractmethod
@@ -277,6 +277,14 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         self._ranker = RRF_RANKER
         self._filter = None
         self._partition_filter = None
+
+    def execute_local(self) -> ScoredGlobalIndexResult:
+        from pypaimon.table.source.native_hybrid_search import try_native_hybrid_search
+
+        result = try_native_hybrid_search(self)
+        if result is not None:
+            return result
+        return super().execute_local()
 
     def with_limit(self, limit: int) -> 'HybridSearchBuilder':
         self._limit = limit

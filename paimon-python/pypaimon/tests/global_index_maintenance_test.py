@@ -206,6 +206,28 @@ def test_multiple_definitions_publish_once(docs):
     assert {entry.index_file.index_type for entry in entries(docs)} == {"ivf-flat", "btree"}
 
 
+@pytest.mark.parametrize("rebuild", [False, True])
+def test_maintenance_keeps_python_planning_with_native_writes(docs, rebuild):
+    spec = {"column": "id", "type": "btree"}
+    docs.maintain_indexes([spec])
+    old = names(docs)
+    docs.add([{"id": 4, "pt": "a", "embedding": [4., 1.]}])
+    before = docs.raw_table.snapshot_manager().get_latest_snapshot().id
+    docs.raw_table = docs.raw_table.copy({
+        "write.native.enabled": "true", "deletion-vectors.enabled": "false"})
+    # Maintenance must use its pinned snapshot and Python rebuild ranges even
+    # when the table is eligible for the new native index-build entry point.
+    with patch("pypaimon.globalindex.native_index_build.native_method_available",
+               side_effect=AssertionError("maintenance delegated to native index planning")):
+        assert docs.maintain_indexes([spec], rebuild=rebuild) == (3 if rebuild else 1)
+    assert docs.raw_table.snapshot_manager().get_latest_snapshot().id == before + 1
+    if rebuild:
+        assert names(docs).isdisjoint(old)
+    else:
+        assert names(docs).issuperset(old)
+    assert docs.raw_table.options.native_write_enabled()
+
+
 def test_rebuild_repairs_ignored_updates(docs):
     docs.maintain_indexes([SPEC])
     docs.raw_table = docs.raw_table.copy({"global-index.column-update-action": "IGNORE"})

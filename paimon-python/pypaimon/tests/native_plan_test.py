@@ -902,13 +902,23 @@ class NativePlanTest(unittest.TestCase):
                 patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved):
             for _ in range(3):
                 self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
+            native_table.copy_with_pinned_snapshot.assert_not_called()
+            # Capturing empty uses a read-view copy, keeping the cached base
+            # reusable when a later caller has no captured snapshot.
+            pinned_table = native_table.copy_with_pinned_snapshot.return_value
+            table._read_snapshot = None
+            self.assertIs(_native_read_builder(table), pinned_table.new_read_builder.return_value)
+            native_table.copy_with_pinned_snapshot.assert_called_once_with(None)
+            del table._read_snapshot
+            self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
         fake_df.PaimonCatalog.assert_not_called()
         fake_df.Table.from_rest_response.assert_called_once_with(
             response, database='db', table='t$branch_dev',
             rest_options=_catalog_options(table))
         self.assertEqual(native_table.copy_with_resolved_schema.call_args_list,
-                         [call(resolved, branch='dev')] * 3)
-        self.assertEqual(native_table.new_read_builder.call_count, 3)
+                         [call(resolved, branch='dev')] * 5)
+        self.assertEqual(native_table.new_read_builder.call_count, 4)
+        pinned_table.new_read_builder.assert_called_once_with()
 
     def test_native_rest_cache_invalidation_and_serialization(self):
         import pickle
@@ -1207,6 +1217,7 @@ class NativePlanTest(unittest.TestCase):
             plan = native_plan(table)
             self.assertEqual(plan.snapshot_id, 7)
             scan.plan.assert_called_once_with()
+            rt.copy_with_pinned_snapshot.assert_not_called()
             rt.branch.return_value = 'main'
             with self.assertRaisesRegex(RuntimeError, 'requested branch'):
                 native_plan(table)
@@ -1367,7 +1378,7 @@ class NativePlanTest(unittest.TestCase):
         fs._apply_push_down_limit.assert_not_called()
         fs.scan.assert_not_called()
 
-    def test_primary_key_shard_index_refinement_and_limit_are_planned_in_rust(self):
+    def test_primary_key_shard_uses_native_index_refinement(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.is_primary_key_table = True
@@ -1376,12 +1387,9 @@ class NativePlanTest(unittest.TestCase):
         fs.idx_of_this_subtask, fs.number_of_para_subtasks = 1, 2
         scan.predicate = Mock()
         splits = [Mock(bucket=0), Mock(bucket=0)]
-        # Native planning owns sorted-index refinement before LIMIT. Python
-        # must preserve its selected splits instead of refining them again.
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits, 3)) as native:
-            plan = scan.plan()
-        self.assertEqual(plan.splits(), splits)
-        self.assertEqual(plan.snapshot_id, 3)
+        # Rust receives the predicate and owns refinement before LIMIT.
+        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits[1:], 3)) as native:
+            self.assertEqual(scan.plan().splits(), splits[1:])
         self.assertEqual(native.call_args[1]['shard'], (1, 2))
         self.assertEqual(native.call_args[1]['limit'], 1)
         self.assertIs(native.call_args[1]['predicate'], scan.predicate)

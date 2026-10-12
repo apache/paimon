@@ -55,8 +55,12 @@ def maintain_global_indexes(table, indexes, *, rebuild=False, partitions=None):
     if not definitions:
         raise ValueError("indexes must be nonempty.")
     snapshot = table.snapshot_manager().get_latest_snapshot()
-    # The strict snapshot guard currently belongs to the Python committer.
-    table = table.copy({"commit.native.enabled": "false"})._copy_with_snapshot(snapshot)
+    # Maintenance owns snapshot/range planning (including full rebuilds), while
+    # the native index builder owns its own incremental plan. Keep both building
+    # and the strict snapshot guard on the Python path for this operation.
+    table = table.copy({
+        "write.native.enabled": "false", "commit.native.enabled": "false",
+    })._copy_with_snapshot(snapshot)
     builders = []
     identities = set()
     for definition in definitions:

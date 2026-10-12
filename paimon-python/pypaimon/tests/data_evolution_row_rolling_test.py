@@ -646,7 +646,9 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                 'vector.file.format': 'parquet',
             })
 
-        files = self._write_files(table, self._vector_rows(7))
+        # Native writers check the row limit at Arrow batch boundaries.
+        data = pa.Table.from_batches(self._vector_rows(7).to_batches(max_chunksize=3))
+        files = self._write_files(table, data)
 
         data_rows = sorted(
             f.row_count for f in files
@@ -667,7 +669,9 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
                 'vector.file.format': 'parquet',
             })
 
-        files = self._write_files(table, self._blob_vector_rows(7))
+        # Keep all dedicated writers aligned while rolling between batches.
+        data = pa.Table.from_batches(self._blob_vector_rows(7).to_batches(max_chunksize=3))
+        files = self._write_files(table, data)
 
         data_rows = sorted(
             f.row_count for f in files
