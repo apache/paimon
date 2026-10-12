@@ -69,10 +69,6 @@ class IoCacheRoutingFileIO(FileIO):
     def _call(self, op: Op, path: str, action):
         return action(self._file_io(self._route(op, path)))
 
-    def read_file_io(self, path: str) -> FileIO:
-        """FileIO for native readers that open files using their own storage client."""
-        return self._file_io(self._route(Op.READ, path))
-
     def _call_batch(self, op: Op, paths: List[str], action) -> list:
         """Runs action(file_io, paths) once per routed group; results follow the order of paths."""
         results = [None] * len(paths)

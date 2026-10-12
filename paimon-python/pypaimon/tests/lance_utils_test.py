@@ -23,35 +23,9 @@ from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.read.reader.lance_utils import to_lance_specified
-from pypaimon.read.reader.vortex_utils import to_vortex_specified
 
 
 class LanceUtilsTest(unittest.TestCase):
-
-    def test_native_reads_use_target_addressing_and_writes_use_origin(self):
-        path = "oss://bkt/t/bucket-0/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-1.lance"
-        options = {
-            "fs.oss.endpoint": "https://origin.example.com",
-            "fs.oss.accessKeyId": "ak",
-            "fs.oss.accessKeySecret": "sk",
-            "io-cache.enabled": "true",
-            "io-cache.policy": "read,meta",
-            "io-cache.endpoint": "http://cache.example.com:8080",
-            "io-cache.target.default.path-style-access": "true",
-        }
-        routing = IoCacheRouting.create(options)
-        origin = FileIO.get(path, Options(routing.origin_options(options)))
-        file_io = IoCacheRoutingFileIO(routing, origin, lambda name: FileIO.get(
-            path, Options(routing.target_options(options, name))))
-        for convert in (to_lance_specified, to_vortex_specified):
-            with self.subTest(convert=convert.__name__):
-                _, read = convert(file_io, path, is_read=True)
-                self.assertEqual("http://cache.example.com:8080", read["endpoint"])
-                self.assertEqual("false", read["virtual_hosted_style_request"])
-                self.assertEqual("true", read["allow_http"])
-                _, write = convert(file_io, path)
-                self.assertEqual("https://bkt.origin.example.com", write["endpoint"])
-                self.assertEqual("true", write["virtual_hosted_style_request"])
 
     def test_oss_url_bucket_extraction_correctness(self):
         file_path = "oss://test-bucket/db-name.db/table-name/bucket-0/data.lance"
@@ -77,6 +51,30 @@ class LanceUtilsTest(unittest.TestCase):
         self.assertTrue('fs.oss.endpoint' in storage_options)
         self.assertTrue('fs.oss.accessKeyId' in storage_options)
         self.assertTrue('fs.oss.accessKeySecret' in storage_options)
+
+    def test_io_cache_routing_hands_lance_the_origin(self):
+        # Lance builds its own client from these options, so it reads from origin, never a target.
+        file_path = "oss://bkt/db.db/t/bucket-0/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.lance"
+        options = {
+            OssOptions.OSS_ENDPOINT.key(): "accel.example.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+            "io-cache.enabled": "true",
+            "io-cache.origin.endpoint": "origin.example.com",
+            "io-cache.endpoint": "http://127.0.0.1:8080",
+            "io-cache.target.default.path-style-access": "true",
+            "io-cache.policy": "meta,read",
+        }
+        routing = IoCacheRouting.create(options)
+        origin = FileIO.get(file_path, Options(routing.origin_options(options)))
+        created = []
+        file_io = IoCacheRoutingFileIO(routing, origin, lambda name: created.append(name))
+
+        _, storage_options = to_lance_specified(file_io, file_path)
+
+        self.assertEqual("https://bkt.origin.example.com", storage_options['endpoint'])
+        self.assertEqual('true', storage_options['virtual_hosted_style_request'])
+        self.assertEqual([], created)
 
     def test_oss_url_with_security_token(self):
         file_path = "oss://my-bucket/path/to/file.lance"
