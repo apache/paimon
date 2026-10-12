@@ -112,3 +112,54 @@ def test_bigint_to_timestamp_keeps_lenient_arrow_storage_overflow(unit, expected
     source = pa.array([9223372036854775, -9223372036854775, None], type=pa.int64())
     result = cast_array_for_schema_evolution(source, pa.timestamp(unit))
     assert result.cast(pa.int64()).to_pylist() == expected
+
+
+@pytest.mark.parametrize('precision,whole,nonzero', [
+    (0, '1970-01-01 00:00:00', '1970-01-01 00:00:00.123456789'),
+    (1, '1970-01-01 00:00:00.0', '1970-01-01 00:00:00.123456789'),
+    (3, '1970-01-01 00:00:00.000', '1970-01-01 00:00:00.123456789'),
+    (6, '1970-01-01 00:00:00.000000', '1970-01-01 00:00:00.123456789'),
+    (9, '1970-01-01 00:00:00.000000000', '1970-01-01 00:00:00.123456789'),
+])
+@pytest.mark.parametrize('chunked', [False, True])
+def test_java_timestamp_string_preserves_nanos_and_declared_precision(precision, whole, nonzero, chunked):
+    source = pa.array([None, 0, 123456789, -1, None, 0], type=pa.timestamp('ns')).slice(1, 4)
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 2), source.slice(2)])
+    result = cast_array_for_schema_evolution(
+        source, pa.string(), AtomicType('TIMESTAMP(%d)' % precision), AtomicType('STRING'))
+    assert result.to_pylist() == [whole, nonzero, '1969-12-31 23:59:59.999999999', None]
+
+
+@pytest.mark.parametrize('precision,expected', [
+    (0, ['00:00:00', '00:00:00', '00:00:00', '23:59:59']),
+    (1, ['00:00:00.0', '00:00:00.1', '00:00:00.1', '23:59:59.9']),
+    (2, ['00:00:00.0', '00:00:00.1', '00:00:00.10', '23:59:59.99']),
+    (3, ['00:00:00.0', '00:00:00.1', '00:00:00.101', '23:59:59.999']),
+    (9, ['00:00:00.0', '00:00:00.1', '00:00:00.101', '23:59:59.999']),
+])
+def test_java_time_string_fraction_and_negative_millis(precision, expected):
+    source = pa.array([None, 0, 100, 101, -1, None, 0], type=pa.time32('ms')).slice(1, 5)
+    result = cast_array_for_schema_evolution(
+        source, pa.string(), AtomicType('TIME(%d)' % precision), AtomicType('STRING'))
+    assert result.to_pylist() == expected + [None]
+
+
+@pytest.mark.parametrize('raw,expected', [
+    (253402300800000, '0000-01-01 00:00:00.000'),  # year 10000: Java int4
+    (-62167219200000, '0000-01-01 00:00:00.000'),  # year 0
+    (-62198755200000, '000/-01-01 00:00:00.000'),  # year -1: signed remainder
+    (2 ** 63 - 1, '/+-.-04-06 07:12:55.807'),  # signed epoch-day narrowing
+    (-(2 ** 63), '5471-09-26 16:47:04.192'),
+])
+def test_timestamp_string_keeps_arrow_dates_outside_python_datetime_range(raw, expected):
+    source = pa.array([raw, None], type=pa.timestamp('ms'))
+    assert cast_array_for_schema_evolution(
+        source, pa.string(), AtomicType('TIMESTAMP(3)'), AtomicType('STRING')).to_pylist() == [expected, None]
+
+
+def test_timestamp_seconds_wrapping_keeps_wrapped_millisecond_fraction():
+    source = pa.array([9223372036854776, None], type=pa.timestamp('s'))
+    assert cast_array_for_schema_evolution(
+        source, pa.string(), AtomicType('TIMESTAMP(3)'), AtomicType('STRING')).to_pylist() == [
+        '5471-09-26 16:47:04.384', None]

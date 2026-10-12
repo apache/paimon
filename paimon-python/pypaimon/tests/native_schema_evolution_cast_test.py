@@ -18,6 +18,7 @@
 """Read existing Python schema changes through Native using REST tables."""
 
 from contextlib import ExitStack
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -26,7 +27,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.schema.data_types import AtomicType, PyarrowFieldParser
+from pypaimon.schema.data_types import AtomicType, DataField, MapType, PyarrowFieldParser, RowType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_plan_rest_test
 
@@ -48,15 +49,18 @@ def _write(table, data):
         commit.close()
 
 
-def _table(catalog, mode, arrow_type, values):
+def _table(catalog, mode, arrow_type, values, paimon_type=None):
     options = {'file.format': 'parquet', 'read.batch-size': '2'}
     if mode == 'pk':
         options['bucket'] = '1'
     elif mode == 'de':
         options.update({'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true'})
     schema = pa.schema([('id', pa.int64()), ('v', arrow_type)])
-    catalog.create_table('default.t', Schema.from_pyarrow_schema(
-        schema, primary_keys=['id'] if mode == 'pk' else [], options=options), False)
+    table_schema = Schema.from_pyarrow_schema(
+        schema, primary_keys=['id'] if mode == 'pk' else [], options=options)
+    if paimon_type is not None:
+        table_schema.fields[1].type = paimon_type
+    catalog.create_table('default.t', table_schema, False)
     table = catalog.get_table('default.t')
     _write(table, pa.table({'id': list(range(len(values))), 'v': pa.array(values, type=arrow_type)}))
 
@@ -79,6 +83,66 @@ def _read(table, native, predicate=None, projection=None):
         plan = scan.plan()
         result = builder.new_read().to_arrow(plan.splits())
     return result.sort_by([('id', 'ascending')])
+
+
+_TEMPORAL_STRING_CASES = [
+    (pa.time32('ms'), [0, 100, 101, 12345678, None],
+     ['00:00:00.0', '00:00:00.1', '00:00:00.101', '03:25:45.678', None]),
+    (pa.timestamp('ms'), [0, 100, -1, 12345678, None],
+     ['1970-01-01 00:00:00.000', '1970-01-01 00:00:00.100',
+      '1969-12-31 23:59:59.999', '1970-01-01 03:25:45.678', None]),
+    (pa.timestamp('ns'), [0, 123456789, -1, 1000000000, None],
+     ['1970-01-01 00:00:00.000000000', '1970-01-01 00:00:00.123456789',
+      '1969-12-31 23:59:59.999999999', '1970-01-01 00:00:01.000000000', None]),
+]
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+@pytest.mark.parametrize('source_type,values,expected', _TEMPORAL_STRING_CASES)
+@pytest.mark.parametrize('target_name', ['STRING', 'VARCHAR(12)', 'CHAR(35)'])
+def test_temporal_character_strings_read_old_rest_files(
+        rest_catalog, mode, source_type, values, expected, target_name):
+    _check_temporal_string_reads(rest_catalog, mode, source_type, values, expected, target_name)
+
+
+def _check_temporal_string_reads(rest_catalog, mode, source_type, values, expected, target_name):
+    catalog, _ = rest_catalog
+    _table(catalog, mode, source_type, values,
+           AtomicType('TIME(3)') if pa.types.is_time(source_type) else None)
+    catalog.alter_table('default.t', [SchemaChange.update_column_type('v', AtomicType(target_name))], False)
+    table = catalog.get_table('default.t')
+    if target_name == 'VARCHAR(12)':
+        expected = [value[:12] if value is not None else None for value in expected]
+    elif target_name == 'CHAR(35)':
+        expected = [value.ljust(35) if value is not None else None for value in expected]
+    predicate = table.new_read_builder().new_predicate_builder().equal('v', expected[0])
+    for native in (False, True):
+        assert _read(table, native).column('v').to_pylist() == expected
+        matches = [index for index, value in enumerate(expected) if value == expected[0]]
+        assert _read(table, native, predicate, ['id']).column('id').to_pylist() == matches
+
+
+@pytest.mark.parametrize('mode', ['append', 'de'])
+@pytest.mark.parametrize('target_name', ['STRING', 'VARCHAR(12)', 'CHAR(35)'])
+def test_wide_timestamp_strings_read_old_rest_files(rest_catalog, mode, target_name):
+    # The existing Python PK writer materializes datetimes while merging rows,
+    # so it cannot create this input; append and DE retain the raw Arrow ticks.
+    _check_temporal_string_reads(rest_catalog, mode, pa.timestamp('ms'),
+                                 [253402300800000, -62167219200000, 2 ** 63 - 1, -(2 ** 63), None],
+                                 ['0000-01-01 00:00:00.000', '0000-01-01 00:00:00.000',
+                                  '/+-.-04-06 07:12:55.807', '5471-09-26 16:47:04.192', None], target_name)
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+def test_ltz_string_uses_local_zone_without_zone_suffix(rest_catalog, mode):
+    catalog, _ = rest_catalog
+    # Check a winter and a summer instant: the system zone may observe DST.
+    instants = [datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 7, 1, tzinfo=timezone.utc)]
+    expected = [value.astimezone().strftime('%Y-%m-%d %H:%M:%S') + '.000' for value in instants] + [None]
+    _table(catalog, mode, pa.timestamp('ms', 'UTC'), instants + [None])
+    catalog.alter_table('default.t', [SchemaChange.update_column_type('v', AtomicType('STRING'))], False)
+    for native in (False, True):
+        assert _read(catalog.get_table('default.t'), native).column('v').to_pylist() == expected
 
 
 _NUMERIC_CASES = [
@@ -335,3 +399,33 @@ def test_nested_epoch_seconds_evolution_and_projection(rest_catalog, mode, integ
         assert selected.column('m_positive').cast(pa.int64()).to_pylist() == [42000, None, None]
         assert selected.column('m_negative').cast(pa.int64()).to_pylist() == [-42000, None, None]
         assert selected.column('m_missing').null_count == 3
+
+
+_NESTED_TEMPORAL_STRING_CASES = [
+    (pa.list_(pa.timestamp('ns')), None, [[0, -1, None], None, [], [1000000000]],
+     ['[1970-01-01 00:00:00.000000000, 1969-12-31 23:59:59.999999999, null]', None,
+      '[]', '[1970-01-01 00:00:01.000000000]']),
+    (pa.map_(pa.string(), pa.time32('ms')), MapType(True, AtomicType('STRING'), AtomicType('TIME(3)')),
+     [[('x', 0), ('y', 101), ('n', None)], None, [], [('p', 100)]],
+     ['{x -> 00:00:00.0, y -> 00:00:00.101, n -> null}', None, '{}', '{p -> 00:00:00.1}']),
+    (pa.struct([('t', pa.time32('ms')), ('ts', pa.timestamp('ns'))]),
+     RowType(True, [DataField(2, 't', AtomicType('TIME(3)')), DataField(3, 'ts', AtomicType('TIMESTAMP(9)'))]),
+     [{'t': 0, 'ts': -1}, None, {'t': None, 'ts': None}, {'t': 100, 'ts': 0}],
+     ['{00:00:00.0, 1969-12-31 23:59:59.999999999}', None, '{null, null}',
+      '{00:00:00.1, 1970-01-01 00:00:00.000000000}']),
+]
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+@pytest.mark.parametrize('target_name', ['STRING', 'CHAR(8)'])
+@pytest.mark.parametrize('arrow_type,paimon_type,values,expected', _NESTED_TEMPORAL_STRING_CASES)
+def test_constructed_string_evolution_uses_temporal_child_casts(
+        rest_catalog, mode, target_name, arrow_type, paimon_type, values, expected):
+    catalog, _ = rest_catalog
+    _table(catalog, mode, arrow_type, values, paimon_type)
+    catalog.alter_table('default.t', [SchemaChange.update_column_type('v', AtomicType(target_name))], False)
+    table = catalog.get_table('default.t')
+    # Java's constructed cast does not trim/pad the overall result. Its scalar
+    # children use STRING, retaining their own declared temporal precision.
+    for native in (False, True):
+        assert _read(table, native).column('v').to_pylist() == expected
