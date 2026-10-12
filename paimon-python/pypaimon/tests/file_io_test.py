@@ -16,6 +16,7 @@
 # under the License.
 
 import os
+import pickle
 import shutil
 import tempfile
 import unittest
@@ -181,10 +182,13 @@ class FileIOTest(unittest.TestCase):
                     patch('pypaimon.filesystem.pyarrow_file_io.pafs.AwsStandardS3RetryStrategy', create=True), \
                     patch('pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem') as s3_file_system:
                 oss_io = OssFileIO("oss://test-bucket/warehouse", options)
-            kwargs = s3_file_system.call_args[1]
+                kwargs = s3_file_system.call_args[1]
+                # unpickling (e.g. in a Ray worker) must keep path-style addressing
+                restored = pickle.loads(pickle.dumps(oss_io))
             self.assertEqual('10.0.0.1:8080', kwargs['endpoint_override'])
             self.assertEqual(virtual, kwargs.get('force_virtual_addressing'))
             self.assertFalse(oss_io._oss_bucket_in_endpoint)
+            self.assertFalse(restored._oss_bucket_in_endpoint)
         oss_io = OssFileIO("oss://test-bucket/warehouse", options)
         self.assertEqual("test-bucket/warehouse/data-1.parquet",
                          oss_io.to_filesystem_path("oss://test-bucket/warehouse/data-1.parquet"))

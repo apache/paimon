@@ -63,11 +63,10 @@ class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        self._set_pyarrow_version()
         scheme, netloc, _ = self.parse_location(path)
         # Path-style addressing sends bucket/key to the endpoint itself, so the bucket stays out of it.
         self._oss_path_style = scheme == "oss" and self.properties.get(OssOptions.OSS_SECOND_LEVEL_DOMAIN_ENABLE)
-        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16 and not self._oss_path_style
+        self._set_pyarrow_version()
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._is_s3 = scheme in {"s3", "s3a", "s3n"}
@@ -120,7 +119,7 @@ class PyArrowFileIO(FileIO):
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
         self._pyarrow_gte_16 = parse(pyarrow.__version__) >= parse("16.0.0")
-        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16
+        self._oss_bucket_in_endpoint = not self._pyarrow_gte_16 and not getattr(self, "_oss_path_style", False)
 
     def _uses_s3_compatibility(self) -> bool:
         return (not self._use_jindo
