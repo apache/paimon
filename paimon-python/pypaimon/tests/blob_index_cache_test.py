@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import multiprocessing
+import os
 import pickle
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -26,8 +28,10 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.blob_index_cache import BlobIndexCache
 from pypaimon.common.memory_size import MemorySize
+from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.read.reader import format_blob_reader
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 @pytest.mark.parametrize('budget', [1, 1024 * 1024])
@@ -49,7 +53,7 @@ def test_concurrent_load_result_and_failure_are_shared(budget, error_type):
         owner = executor.submit(cache.get_or_load, 'file.blob', loader)
         try:
             assert entered.wait(10)
-            pending = cache._loading['file.blob']
+            pending = cache._state().loading['file.blob']
             original_result = pending.result
 
             def wait_for_result():
@@ -69,7 +73,7 @@ def test_concurrent_load_result_and_failure_are_shared(budget, error_type):
         finally:
             release.set()
     assert loader.call_count == 1
-    assert not cache._loading
+    assert not cache._state().loading
     retained = error_type is None and budget > 1
     assert len(cache) == int(retained)
     retry = Mock(return_value=index)
@@ -110,7 +114,7 @@ def test_disabled_cache_does_not_share_or_retain_loads():
             assert future.result(timeout=10) == ((1,), (0,))
     assert loader.call_count == 2
     assert len(cache) == 0
-    assert not cache._loading
+    assert not cache._state().loading
 
 
 def test_hot_cache_does_not_create_a_future():
@@ -138,12 +142,148 @@ def test_serialization_does_not_copy_inflight_loads():
             restored = pickle.loads(pickle.dumps(cache))
             assert restored.max_size_bytes == cache.max_size_bytes
             assert len(restored) == 0
-            assert not restored._loading
+            assert not restored._state().loading
             assert restored.get_or_load('a.blob', lambda: ((2,), (0,))) == ((2,), (0,))
         finally:
             release.set()
         assert owner.result(timeout=10) == ((1,), (0,))
     assert cache.get('a.blob') == ((1,), (0,))
+
+
+@pytest.fixture
+def fork_context():
+    if 'fork' not in multiprocessing.get_all_start_methods():
+        pytest.skip('fork required')
+    return multiprocessing.get_context('fork')
+
+
+def test_forked_blob_reader_does_not_wait_for_parent_load(tmp_path, fork_context):
+    cache = BlobIndexCache(MemorySize.of_mebi_bytes(1))
+    file_io = LocalFileIO(str(tmp_path), Options({}))
+    path = str(tmp_path / 'payload.blob')
+    expected = [b'first', None, b'last']
+    file_io.write_blob(path, pa.table({'payload': expected}, schema=pa.schema([
+        ('payload', pa.large_binary())])))
+    field = DataField(0, 'payload', AtomicType('BLOB'))
+    entered, release = threading.Event(), threading.Event()
+    parent_pid = os.getpid()
+    original_decode = format_blob_reader._decode_blob_index
+
+    def decode(data):
+        if os.getpid() == parent_pid:
+            entered.set()
+            assert release.wait(10)
+        return original_decode(data)
+
+    def read():
+        reader = format_blob_reader.FormatBlobReader(
+            file_io, path, [field.name], [field], None, False, index_cache=cache)
+        try:
+            return reader.read_arrow_batch().column(0).to_pylist()
+        finally:
+            reader.close()
+
+    def child(connection):
+        try:
+            # The parent finishes first, but its Future remains incomplete here.
+            connection.recv()
+            with patch.object(format_blob_reader, '_decode_blob_index',
+                              wraps=original_decode) as child_decode:
+                values = [read(), read()]
+                connection.send((values, child_decode.call_count, len(cache)))
+        except BaseException as error:
+            connection.send(('error', repr(error)))
+        finally:
+            connection.close()
+
+    receiving, sending = fork_context.Pipe()
+    process = fork_context.Process(target=child, args=(sending,))
+    with patch.object(format_blob_reader, '_decode_blob_index', side_effect=decode), \
+            ThreadPoolExecutor(max_workers=1) as executor:
+        owner = executor.submit(read)
+        try:
+            assert entered.wait(5)
+            assert cache._state().lock.acquire(blocking=False)
+            cache._state().lock.release()
+            process.start()
+            sending.close()
+            release.set()
+            assert owner.result(timeout=5) == expected
+            assert not cache._state().loading
+            receiving.send('parent finished')
+            assert receiving.poll(5), 'child waited for an inherited Future'
+            assert receiving.recv() == ([expected, expected], 1, 1)
+            process.join(5)
+            assert process.exitcode == 0
+            assert len(cache) == 1
+        finally:
+            release.set()
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
+            receiving.close()
+            sending.close()
+
+
+def test_forked_cache_concurrent_first_access_avoids_parent_lock(fork_context):
+    cache = BlobIndexCache(MemorySize.of_mebi_bytes(1))
+    cache.put('parent.blob', (1,), (0,))
+
+    def child(connection):
+        creating, resume = threading.Event(), threading.Event()
+        results = []
+        loader = Mock(return_value=((2,), (0,)))
+        original_lock = threading.Lock
+
+        def new_lock():
+            if threading.current_thread().name == 'first':
+                creating.set()
+                assert resume.wait(5)
+            return original_lock()
+
+        def access():
+            results.append(cache.get_or_load('child.blob', loader))
+
+        try:
+            with patch('pypaimon.common.blob_index_cache.Lock', side_effect=new_lock):
+                first = threading.Thread(target=access, name='first', daemon=True)
+                second = threading.Thread(target=access, name='second', daemon=True)
+                first.start()
+                assert creating.wait(3), 'child reused the parent lock'
+                second.start()
+                second.join(3)
+                assert not second.is_alive()
+                resume.set()
+                first.join(3)
+                assert not first.is_alive()
+            connection.send((results, loader.call_count, len(cache),
+                             cache.get('parent.blob'), cache.size_bytes > 0))
+            cache.clear()
+            assert len(cache) == 0 and 'child.blob' not in cache
+        except BaseException as error:
+            connection.send(('error', repr(error)))
+        finally:
+            resume.set()
+            connection.close()
+
+    receiving, sending = fork_context.Pipe(duplex=False)
+    process = fork_context.Process(target=child, args=(sending,))
+    with cache._state().lock:
+        try:
+            process.start()
+            sending.close()
+            assert receiving.poll(10), 'child deadlocked on the inherited lock'
+            assert receiving.recv() == ([((2,), (0,))] * 2, 1, 1, None, True)
+            process.join(5)
+            assert process.exitcode == 0
+        finally:
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
+            receiving.close()
+            sending.close()
+    assert cache.get('parent.blob') == ((1,), (0,))
+    assert cache.get('child.blob') is None
 
 
 @pytest.mark.python_plan
@@ -210,4 +350,4 @@ def test_public_shard_reads_share_index_and_keep_payloads(tmp_path, blob_paralle
             assert decode.call_count == 1
             assert all(stream.closed for stream in streams)
     assert len(cache) == 1
-    assert not cache._loading
+    assert not cache._state().loading

@@ -15,10 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
 import sys
 from collections import namedtuple
 from concurrent.futures import Future
 from threading import Lock
+from types import SimpleNamespace
 
 from cachetools import LRUCache
 
@@ -41,18 +43,27 @@ class BlobIndexCache:
         if not isinstance(max_size, MemorySize):
             raise ValueError("cache.blob-index.max-size must be a memory size")
         self.max_size_bytes = max_size.get_bytes()
-        self._cache = LRUCache(
-            maxsize=self.max_size_bytes,
-            getsizeof=lambda entry: entry.size_bytes,
-        )
-        self._lock = Lock()
-        self._loading = {}
+        self._states = {}
+
+    def _state(self):
+        pid = os.getpid()
+        states = self._states
+        state = states.get(pid)
+        if state is None:
+            # Publish a complete state atomically; never touch inherited locks or Futures.
+            state = states.setdefault(pid, SimpleNamespace(
+                lock=Lock(), loading={}, cache=LRUCache(
+                    maxsize=self.max_size_bytes,
+                    getsizeof=lambda entry: entry.size_bytes)))
+            self._states = {pid: state}
+        return state
 
     def get(self, file_path):
         if self.max_size_bytes == 0:
             return None
-        with self._lock:
-            entry = self._cache.get(file_path)
+        state = self._state()
+        with state.lock:
+            entry = state.cache.get(file_path)
         if entry is None:
             return None
         return entry.blob_lengths, entry.blob_offsets
@@ -71,22 +82,24 @@ class BlobIndexCache:
         if size_bytes > self.max_size_bytes:
             return
         entry = _CachedBlobIndex(blob_lengths, blob_offsets, size_bytes)
-        with self._lock:
-            self._cache[file_path] = entry
+        state = self._state()
+        with state.lock:
+            state.cache[file_path] = entry
 
     def get_or_load(self, file_path, loader):
         """Share an in-flight load without holding the cache lock during I/O."""
         if self.max_size_bytes == 0:
             return loader()
-        with self._lock:
-            entry = self._cache.get(file_path)
+        state = self._state()
+        with state.lock:
+            entry = state.cache.get(file_path)
             if entry is not None:
                 return entry.blob_lengths, entry.blob_offsets
-            pending = self._loading.get(file_path)
+            pending = state.loading.get(file_path)
             owner = pending is None
             if owner:
                 pending = Future()
-                self._loading[file_path] = pending
+                state.loading[file_path] = pending
 
         if not owner:
             return pending.result()
@@ -101,25 +114,29 @@ class BlobIndexCache:
             pending.set_result(index)
             return index
         finally:
-            with self._lock:
-                del self._loading[file_path]
+            with state.lock:
+                del state.loading[file_path]
 
     def __len__(self):
-        with self._lock:
-            return len(self._cache)
+        state = self._state()
+        with state.lock:
+            return len(state.cache)
 
     def __contains__(self, file_path):
-        with self._lock:
-            return file_path in self._cache
+        state = self._state()
+        with state.lock:
+            return file_path in state.cache
 
     def clear(self):
-        with self._lock:
-            self._cache.clear()
+        state = self._state()
+        with state.lock:
+            state.cache.clear()
 
     @property
     def size_bytes(self):
-        with self._lock:
-            return self._cache.currsize
+        state = self._state()
+        with state.lock:
+            return state.cache.currsize
 
     def __reduce__(self):
         return type(self), (MemorySize.of_bytes(self.max_size_bytes),)
