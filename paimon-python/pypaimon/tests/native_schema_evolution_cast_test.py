@@ -229,6 +229,14 @@ _TEMPORAL_CASES = [
      [42, -1, -43, 2147483650, None]),
     (pa.timestamp('ns', 'UTC'), 'BIGINT', [42000000001, -1, -42000000001, 2147483650000000000, None],
      [42, -1, -43, 2147483650, None]),
+    (pa.int32(), 'TIMESTAMP(0)', [42, -42, 2147483647, -2147483648, None],
+     [42, -42, 2147483647, -2147483648, None]),
+    (pa.int32(), 'TIMESTAMP(1)', [42, -42, 2147483647, -2147483648, None],
+     [42000, -42000, 2147483647000, -2147483648000, None]),
+    (pa.int32(), 'TIMESTAMP(4)', [42, -42, 2147483647, -2147483648, None],
+     [42000000, -42000000, 2147483647000000, -2147483648000000, None]),
+    (pa.int32(), 'TIMESTAMP(7)', [42, -42, 2147483647, -2147483648, None],
+     [42000000000, -42000000000, 2147483647000000000, -2147483648000000000, None]),
     (pa.int64(), 'TIMESTAMP(0)', [42, -42, 2147483650, 2 ** 63 - 1, -(2 ** 63), None],
      [42, -42, 2147483650, -1, 0, None]),
     (pa.int64(), 'TIMESTAMP(1)', [42, -42, 2147483650, 2 ** 63 - 1, -(2 ** 63), None],
@@ -280,13 +288,14 @@ def test_single_value_epoch_stats_do_not_prune_converted_match(
 
 
 @pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
-def test_nested_epoch_seconds_evolution_and_projection(rest_catalog, mode):
+@pytest.mark.parametrize('integer_type', [pa.int32(), pa.int64()])
+def test_nested_epoch_seconds_evolution_and_projection(rest_catalog, mode, integer_type):
     catalog, _ = rest_catalog
     schema = pa.schema([
         ('id', pa.int64()),
-        ('r', pa.struct([('t', pa.timestamp('us')), ('s', pa.int64())])),
+        ('r', pa.struct([('t', pa.timestamp('us')), ('s', integer_type)])),
         ('a', pa.list_(pa.timestamp('ns'))),
-        ('m', pa.map_(pa.string(), pa.int64())),
+        ('m', pa.map_(pa.string(), integer_type)),
     ])
     options = {'file.format': 'parquet', 'read.batch-size': '1'}
     if mode == 'pk':
@@ -295,11 +304,13 @@ def test_nested_epoch_seconds_evolution_and_projection(rest_catalog, mode):
         options.update({'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true'})
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
         schema, primary_keys=['id'] if mode == 'pk' else [], options=options), False)
+    boundary = 2 ** 63 - 1 if integer_type == pa.int64() else -(2 ** 31)
+    expected_boundary = -1000000 if integer_type == pa.int64() else -2147483648000000
     _write(catalog.get_table('default.t'), pa.Table.from_pylist([
         {'id': 0, 'r': {'t': 42000001, 's': 42}, 'a': [42000000001, None, -1],
          'm': [('positive', 42), ('negative', -42)]},
         {'id': 1, 'r': None, 'a': None, 'm': None},
-        {'id': 2, 'r': {'t': -1, 's': 2 ** 63 - 1}, 'a': [], 'm': []},
+        {'id': 2, 'r': {'t': -1, 's': boundary}, 'a': [], 'm': []},
     ], schema=schema))
     catalog.alter_table('default.t', [
         SchemaChange.update_column_type(['r', 't'], AtomicType('BIGINT')),
@@ -313,12 +324,12 @@ def test_nested_epoch_seconds_evolution_and_projection(rest_catalog, mode):
     for native in (False, True):
         actual = _read(table, native)
         assert actual.column('r').flatten()[0].to_pylist() == [42, None, -1]
-        assert actual.column('r').flatten()[1].cast(pa.int64()).to_pylist() == [42000000, None, -1000000]
+        assert actual.column('r').flatten()[1].cast(pa.int64()).to_pylist() == [42000000, None, expected_boundary]
         assert actual.column('a').to_pylist() == [[42, None, -1], None, []]
         assert actual.column('m').to_pylist() == expected_map
         leaves = _read(table, native, projection=['id', 'r.t', 'r.s'])
         assert leaves.column('r_t').to_pylist() == [42, None, -1]
-        assert leaves.column('r_s').cast(pa.int64()).to_pylist() == [42000000, None, -1000000]
+        assert leaves.column('r_s').cast(pa.int64()).to_pylist() == [42000000, None, expected_boundary]
         selected = _read(table, native, projection=[
             'id', "m['positive']", "m['negative']", "m['missing']"])
         assert selected.column('m_positive').cast(pa.int64()).to_pylist() == [42000, None, None]

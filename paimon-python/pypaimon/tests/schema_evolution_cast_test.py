@@ -74,12 +74,17 @@ def test_timestamp_to_bigint_uses_epoch_seconds_flooring(unit, ticks, zone, chun
 
 @pytest.mark.parametrize('unit,ticks', [('s', 1), ('ms', 1000), ('us', 1000000), ('ns', 1000000000)])
 @pytest.mark.parametrize('chunked', [False, True])
-def test_bigint_to_timestamp_uses_epoch_seconds_and_java_millis_wrapping(unit, ticks, chunked):
+@pytest.mark.parametrize('source_type', [pa.int32(), pa.int64()])
+def test_integer_to_timestamp_uses_epoch_seconds_and_java_millis_wrapping(unit, ticks, chunked, source_type):
     values = [42, -42, 1700000000, None]
     expected = [42 * ticks, -42 * ticks, 1700000000 * ticks, None]
-    values.extend([2 ** 63 - 1, -(2 ** 63), 2 ** 63 - 2])
-    expected.extend([-ticks, 0, -2 * ticks])
-    source = pa.array([None] + values + [None], type=pa.int64()).slice(1, len(values))
+    if source_type == pa.int64():
+        values.extend([2 ** 63 - 1, -(2 ** 63), 2 ** 63 - 2])
+        expected.extend([-ticks, 0, -2 * ticks])
+    else:
+        values.extend([2 ** 31 - 1, -(2 ** 31), 0])
+        expected.extend([(2 ** 31 - 1) * ticks, -(2 ** 31) * ticks, 0])
+    source = pa.array([None] + values + [None], type=source_type).slice(1, len(values))
     if chunked:
         source = pa.chunked_array([source.slice(0, 1), source.slice(1)])
     result = cast_array_for_schema_evolution(source, pa.timestamp(unit))
