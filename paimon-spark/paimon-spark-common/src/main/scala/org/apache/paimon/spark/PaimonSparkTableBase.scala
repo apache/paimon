@@ -173,6 +173,11 @@ abstract class PaimonSparkTableBase(val table: Table)
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     table match {
       case fileStoreTable: FileStoreTable =>
+        if (coreOptions.bucketPerPartitionCountEnabled()) {
+          throw new UnsupportedOperationException(
+            "Spark does not support writing tables with per-partition bucket counts. " +
+              "Use Flink to write this table or disable 'bucket.per-partition-count-enabled'.")
+        }
         val options = Options.fromMap(info.options)
         if (useV2Write) {
           new PaimonV2WriteBuilder(fileStoreTable, info.schema(), options)
