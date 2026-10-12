@@ -78,7 +78,9 @@ def test_partition_replacement_is_atomic_and_old_snapshot_remains_readable(docs)
     assert names(docs, before) == old
     for name in old:
         assert docs.raw_table.file_io.exists(docs.raw_table.path_factory().global_index_path_factory().to_path(name))
-    assert docs.search([0., 1.], snapshot_id=before.id).select(["id"]).limit(1).to_list() == [{"id": 0}]
+    # Inner product with [0, 1] ties every row. Row IDs depend on partition
+    # write order, so use a query whose unique best match is id=0.
+    assert docs.search([-1., 1.], snapshot_id=before.id).select(["id"]).limit(1).to_list() == [{"id": 0}]
 
 
 def test_concurrent_commit_rejects_replacement(docs):
