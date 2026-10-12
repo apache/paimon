@@ -816,21 +816,13 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         if not raw_row_ranges:
             return [DictBasedScoredIndexResult({}) for _ in range(n)]
 
-        import pyarrow as pa
+        metric = self._search_metric(index_type)
         table_read, splits = self._plan_raw_read(raw_row_ranges, True, snapshot)
         reader, batches = table_read._new_arrow_batch_reader(splits)
+        # Score each bounded batch and merge only per-query Top-K candidates, so
+        # peak memory tracks the configured read batch, not the whole raw tail.
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-            collected = [b for b in batch_reader]
-        if not collected:
-            return [DictBasedScoredIndexResult({}) for _ in range(n)]
-        table = pa.Table.from_batches(collected)
-        if table.num_rows == 0:
-            return [DictBasedScoredIndexResult({}) for _ in range(n)]
-
-        metric = self._search_metric(index_type)
-
-        return _raw_batch_search_from_arrow(
-            table, self._vector_column.name, self._query_vectors, metric, self._limit)
+            return self._score_raw_batch_queries(batch_reader, metric)
 
     def _score_raw_batch_queries(self, batches, metric):
         heaps = [[] for _ in self._query_vectors]
@@ -1367,7 +1359,10 @@ def _numpy_topk(row_id_array, stored_matrix, query_np, metric, limit):
         )
 
     best_ids = np.empty(0, dtype=row_id_array.dtype)
-    best_scores = np.empty(0, dtype=np.float32)
+    # Accumulate in float64. Downcasting to float32 would collapse finite but
+    # large/small legal scores into Infinity or zero across the tile merge,
+    # selecting the wrong row for inputs with more than ROW_TILE rows.
+    best_scores = np.empty(0, dtype=np.float64)
 
     for r_start in range(0, n_rows, ROW_TILE):
         r_end = min(r_start + ROW_TILE, n_rows)
@@ -1377,7 +1372,8 @@ def _numpy_topk(row_id_array, stored_matrix, query_np, metric, limit):
         tile_top = _topk_indices(tile_scores, tile_rids, limit)
 
         best_ids = np.concatenate([best_ids, tile_rids[tile_top]])
-        best_scores = np.concatenate([best_scores, tile_scores[tile_top]])
+        best_scores = np.concatenate(
+            [best_scores, np.asarray(tile_scores, dtype=np.float64)[tile_top]])
 
     final_top = _topk_indices(best_scores, best_ids, limit)
     return DictBasedScoredIndexResult(
@@ -1428,156 +1424,3 @@ def _topk_indices(scores, row_id_array, limit):
 
     final_order = np.lexsort((row_id_array[result], -scores[result]))
     return result[final_order]
-
-
-def _raw_batch_search_from_arrow(arrow_table, vector_column_name, query_vectors,
-                                 metric, limit, score_candidates=None):
-    """Batch raw search: multiple queries against the same Arrow table in one SGEMM call."""
-    import numpy as np
-    import pyarrow.compute as pc
-
-    row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
-    vectors_col = arrow_table.column(vector_column_name)
-
-    valid_mask = pc.is_valid(vectors_col)
-    if not pc.all(valid_mask).as_py():
-        arrow_table = arrow_table.filter(valid_mask)
-        row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
-        vectors_col = arrow_table.column(vector_column_name)
-
-    row_id_array = row_ids_col.to_numpy()
-    try:
-        if hasattr(vectors_col, 'combine_chunks'):
-            vectors_arr = vectors_col.combine_chunks()
-        else:
-            vectors_arr = vectors_col
-        flat = vectors_arr.values
-        dim = vectors_arr.type.list_size
-        if dim is not None and flat is not None:
-            stored_matrix = flat.to_numpy(zero_copy_only=False).reshape(-1, dim).astype(
-                np.float64)
-        else:
-            stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float64)
-    except (AttributeError, TypeError, ValueError):
-        stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float64)
-
-    query_matrix = np.array(
-        [q if isinstance(q, np.ndarray) else list(q) for q in query_vectors],
-        dtype=np.float64)
-
-    n = len(query_vectors)
-
-    if stored_matrix.ndim < 2 or stored_matrix.shape[0] == 0:
-        return [DictBasedScoredIndexResult({}) for _ in range(n)]
-
-    if stored_matrix.shape[1] != query_matrix.shape[1]:
-        raise ValueError(
-            "Query vector dimension mismatch: expected %d, got %d"
-            % (stored_matrix.shape[1], query_matrix.shape[1]))
-
-    if score_candidates is not None:
-        candidate_set = set(score_candidates)
-        mask = np.array([rid in candidate_set for rid in row_id_array], dtype=bool)
-        null_mask = ~np.isnan(stored_matrix).any(axis=1)
-        mask = mask & null_mask
-        row_id_array = row_id_array[mask]
-        stored_matrix = stored_matrix[mask]
-    else:
-        null_mask = ~np.isnan(stored_matrix).any(axis=1)
-        if not null_mask.all():
-            row_id_array = row_id_array[null_mask]
-            stored_matrix = stored_matrix[null_mask]
-
-    if len(row_id_array) == 0:
-        return [DictBasedScoredIndexResult({}) for _ in range(n)]
-
-    return _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit)
-
-
-def _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit):
-    """Batch distance computation + per-query topK with row and query tiling."""
-    import numpy as np
-
-    ROW_TILE = 65536
-    n_queries = query_matrix.shape[0]
-    n_rows = stored_matrix.shape[0]
-
-    if n_rows <= ROW_TILE:
-        return _numpy_batch_topk_no_row_tile(
-            row_id_array, stored_matrix, query_matrix, metric, limit)
-
-    accum_ids = [np.empty(0, dtype=row_id_array.dtype) for _ in range(n_queries)]
-    accum_scores = [np.empty(0, dtype=np.float32) for _ in range(n_queries)]
-
-    for r_start in range(0, n_rows, ROW_TILE):
-        r_end = min(r_start + ROW_TILE, n_rows)
-
-        tile_results = _numpy_batch_topk_no_row_tile(
-            row_id_array[r_start:r_end], stored_matrix[r_start:r_end],
-            query_matrix, metric, limit)
-
-        for qi, res in enumerate(tile_results):
-            if res.results().cardinality() == 0:
-                continue
-            score_getter = res.score_getter()
-            rid_list = list(res.results())
-            ids = np.array(rid_list, dtype=row_id_array.dtype)
-            scores = np.array([score_getter(r) for r in rid_list], dtype=np.float32)
-            accum_ids[qi] = np.concatenate([accum_ids[qi], ids])
-            accum_scores[qi] = np.concatenate([accum_scores[qi], scores])
-
-    results = []
-    for qi in range(n_queries):
-        if len(accum_ids[qi]) == 0:
-            results.append(DictBasedScoredIndexResult({}))
-            continue
-        top = _topk_indices(accum_scores[qi], accum_ids[qi], limit)
-        results.append(DictBasedScoredIndexResult(
-            {int(accum_ids[qi][j]): float(accum_scores[qi][j]) for j in top}
-        ))
-    return results
-
-
-def _numpy_batch_topk_no_row_tile(row_id_array, stored_matrix, query_matrix, metric, limit):
-    """Batch topK for a single row tile."""
-    import numpy as np
-
-    QUERY_TILE = 8
-    n_queries = query_matrix.shape[0]
-
-    if metric == "cosine":
-        stored_norms = np.linalg.norm(stored_matrix, axis=1, keepdims=True)
-
-    results = []
-    for q_start in range(0, n_queries, QUERY_TILE):
-        q_chunk = query_matrix[q_start:q_start + QUERY_TILE]
-
-        if metric == "l2":
-            for i in range(q_chunk.shape[0]):
-                diffs = stored_matrix - q_chunk[i]
-                dists = np.sum(diffs * diffs, axis=1)
-                scores = 1.0 / (1.0 + dists)
-                top_indices = _topk_indices(scores, row_id_array, limit)
-                results.append(DictBasedScoredIndexResult(
-                    {int(row_id_array[j]): float(scores[j]) for j in top_indices}
-                ))
-            continue
-
-        if metric == "cosine":
-            query_norms = np.linalg.norm(q_chunk, axis=1, keepdims=True)
-            dots = stored_matrix @ q_chunk.T
-            denom = stored_norms @ query_norms.T
-            denom = np.where(denom == 0, 1.0, denom)
-            tile_scores = dots / denom
-        elif metric == "inner_product":
-            tile_scores = stored_matrix @ q_chunk.T
-        else:
-            raise ValueError("Unknown vector search metric: %s" % metric)
-
-        for i in range(tile_scores.shape[1]):
-            scores = tile_scores[:, i]
-            top_indices = _topk_indices(scores, row_id_array, limit)
-            results.append(DictBasedScoredIndexResult(
-                {int(row_id_array[j]): float(scores[j]) for j in top_indices}
-            ))
-    return results

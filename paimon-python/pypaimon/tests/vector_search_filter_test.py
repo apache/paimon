@@ -3641,109 +3641,55 @@ class VectorSearchReaderCleanupTest(unittest.TestCase):
                     self.assertTrue(stream.closed)
 
 
-class RawBatchSearchFromArrowTest(unittest.TestCase):
-    """Unit tests for _raw_batch_search_from_arrow SGEMM path."""
+class RawBatchStreamingBoundTest(unittest.TestCase):
+    """Batch raw scoring must stay bounded, releasing each batch as it reads."""
 
-    def test_batch_cosine_matches_single_query_results(self):
+    def test_batches_are_released_before_later_batches_are_read(self):
+        import weakref
+
         import numpy as np
         import pyarrow as pa
-        from pypaimon.table.source.vector_search_read import (
-            _raw_batch_search_from_arrow,
-            _raw_search_from_arrow,
-        )
 
-        np.random.seed(42)
-        n_rows, dim = 100, 16
-        row_ids = list(range(n_rows))
-        flat = np.random.randn(n_rows * dim).astype(np.float32)
-        table = pa.table({
-            "_ROW_ID": pa.array(row_ids, type=pa.int64()),
-            "vector": pa.FixedSizeListArray.from_arrays(pa.array(flat), dim),
-        })
+        from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
 
-        query_vectors = [np.random.randn(dim).astype(np.float32) for _ in range(5)]
-        limit = 10
+        column = _field(1, "embedding", "FLOAT")
+        reader = BatchVectorSearchReadImpl(
+            _StubTable([column], []), limit=2, vector_column=column,
+            query_vectors=[[1.0, 0.0], [0.0, 1.0]])
 
-        batch_results = _raw_batch_search_from_arrow(
-            table, "vector", query_vectors, "cosine", limit)
+        # One batch per read; the previous batch must be unreferenced before the
+        # next is produced, so peak memory tracks a single batch, not the tail.
+        live = []
+        n_batches = 4
 
-        for i, qv in enumerate(query_vectors):
-            single_result = _raw_search_from_arrow(
-                table, "vector", qv, "cosine", limit)
-            self.assertEqual(
-                sorted(batch_results[i].results()),
-                sorted(single_result.results()),
-                f"Query {i}: batch and single results differ")
+        def batches():
+            for i in range(n_batches):
+                for ref in live:
+                    self.assertIsNone(
+                        ref(), "a previous batch was still alive when the next "
+                        "batch was read")
+                base = i * 2
+                batch = pa.record_batch({
+                    "_ROW_ID": pa.array([base, base + 1], type=pa.int64()),
+                    "embedding": pa.array(
+                        [[float(base), 0.0], [0.0, float(base + 1)]],
+                        type=pa.list_(pa.float32())),
+                })
+                live.append(weakref.ref(batch))
+                yield batch
+                del batch
 
-    def test_batch_l2_matches_single_query_results(self):
-        import numpy as np
-        import pyarrow as pa
-        from pypaimon.table.source.vector_search_read import (
-            _raw_batch_search_from_arrow,
-            _raw_search_from_arrow,
-        )
-
-        np.random.seed(123)
-        n_rows, dim = 50, 8
-        row_ids = list(range(n_rows))
-        flat = np.random.randn(n_rows * dim).astype(np.float32)
-        table = pa.table({
-            "_ROW_ID": pa.array(row_ids, type=pa.int64()),
-            "vector": pa.FixedSizeListArray.from_arrays(pa.array(flat), dim),
-        })
-
-        query_vectors = [np.random.randn(dim).astype(np.float32) for _ in range(3)]
-        limit = 5
-
-        batch_results = _raw_batch_search_from_arrow(
-            table, "vector", query_vectors, "l2", limit)
-
-        for i, qv in enumerate(query_vectors):
-            single_result = _raw_search_from_arrow(
-                table, "vector", qv, "l2", limit)
-            self.assertEqual(
-                sorted(batch_results[i].results()),
-                sorted(single_result.results()))
-
-    def test_batch_empty_table_returns_empty_results(self):
-        import numpy as np
-        import pyarrow as pa
-        from pypaimon.table.source.vector_search_read import (
-            _raw_batch_search_from_arrow,
-        )
-
-        table = pa.table({
-            "_ROW_ID": pa.array([], type=pa.int64()),
-            "vector": pa.FixedSizeListArray.from_arrays(
-                pa.array([], type=pa.float32()), 4),
-        })
-
-        results = _raw_batch_search_from_arrow(
-            table, "vector", [np.zeros(4), np.ones(4)], "cosine", 10)
+        results = reader._score_raw_batch_queries(batches(), "l2")
         self.assertEqual(len(results), 2)
-        for r in results:
-            self.assertEqual(r.results().cardinality(), 0)
+        for result in results:
+            self.assertLessEqual(len(result.results()), 2)
+        # Every batch was observed released once the generator advanced past it.
+        for ref in live:
+            self.assertIsNone(ref())
 
-    def test_batch_with_null_vectors_filters_correctly(self):
-        import numpy as np
-        import pyarrow as pa
-        from pypaimon.table.source.vector_search_read import (
-            _raw_batch_search_from_arrow,
-        )
 
-        vectors = [[1.0, 0.0], [0.0, 1.0], None, [0.5, 0.5]]
-        table = pa.table({
-            "_ROW_ID": pa.array([0, 1, 2, 3], type=pa.int64()),
-            "vector": pa.array(vectors, type=pa.list_(pa.float32())),
-        })
-
-        results = _raw_batch_search_from_arrow(
-            table, "vector", [np.array([1.0, 0.0])], "cosine", 10)
-        self.assertEqual(len(results), 1)
-        # Row 2 (null vector) should be excluded
-        self.assertNotIn(2, list(results[0].results()))
-        # Row 0 should be top result (exact match)
-        self.assertIn(0, list(results[0].results()))
+class RawBatchSearchFromArrowTest(unittest.TestCase):
+    """Unit tests for the numpy top-K selection shared by raw search paths."""
 
     def test_all_null_list_array_returns_empty(self):
         """All-null ARRAY<FLOAT> column must return empty, not raise IndexError."""
@@ -3751,7 +3697,6 @@ class RawBatchSearchFromArrowTest(unittest.TestCase):
         import pyarrow as pa
         from pypaimon.table.source.vector_search_read import (
             _raw_search_from_arrow,
-            _raw_batch_search_from_arrow,
         )
 
         vectors = [None, None, None]
@@ -3763,11 +3708,6 @@ class RawBatchSearchFromArrowTest(unittest.TestCase):
         result = _raw_search_from_arrow(
             table, "vector", np.array([1.0, 0.0]), "cosine", 10)
         self.assertEqual(result.results().cardinality(), 0)
-
-        batch = _raw_batch_search_from_arrow(
-            table, "vector", [np.array([1.0, 0.0])], "cosine", 10)
-        self.assertEqual(len(batch), 1)
-        self.assertEqual(batch[0].results().cardinality(), 0)
 
     def test_topk_tie_break_prefers_smaller_row_id(self):
         """Equal-score rows must be selected by smallest row_id first."""
@@ -3799,21 +3739,6 @@ class RawBatchSearchFromArrowTest(unittest.TestCase):
         result = _numpy_topk(row_ids, stored, query, "cosine", 2)
         selected = sorted(result.results())
         self.assertEqual(selected, [10, 20])
-
-    def test_numpy_batch_topk_tie_break(self):
-        """_numpy_batch_topk tie-break must prefer smaller row_id."""
-        import numpy as np
-        from pypaimon.table.source.vector_search_read import _numpy_batch_topk
-
-        row_ids = np.array([4, 3, 2, 1], dtype=np.int64)
-        stored = np.tile(np.array([1.0, 0.0], dtype=np.float32), (4, 1))
-        queries = np.array([[1.0, 0.0]], dtype=np.float32)
-
-        for metric in ("cosine", "l2", "inner_product"):
-            results = _numpy_batch_topk(row_ids, stored, queries, metric, 2)
-            selected = sorted(results[0].results())
-            self.assertEqual(selected, [1, 2],
-                             "tie-break failed for metric=%s" % metric)
 
     def test_numpy_topk_row_tiling_matches_small(self):
         """_numpy_topk with rows > ROW_TILE must return the same results as a small array."""
@@ -3850,30 +3775,6 @@ class RawBatchSearchFromArrowTest(unittest.TestCase):
         selected = sorted(result.results())
         self.assertEqual(selected, sorted(best_row_ids))
 
-    def test_numpy_batch_topk_row_tiling_matches_single(self):
-        """Batch row-tiled path must match single-query results."""
-        import numpy as np
-        from pypaimon.table.source.vector_search_read import (
-            _numpy_topk, _numpy_batch_topk,
-        )
-
-        np.random.seed(77)
-        n_rows, dim, limit = 70000, 8, 10
-        row_ids = np.arange(n_rows, dtype=np.int64)
-        stored = np.random.randn(n_rows, dim).astype(np.float32)
-        queries = [np.random.randn(dim).astype(np.float32) for _ in range(3)]
-        query_matrix = np.array(queries, dtype=np.float32)
-
-        for metric in ("l2", "cosine", "inner_product"):
-            batch_results = _numpy_batch_topk(
-                row_ids, stored, query_matrix, metric, limit)
-            for i, qv in enumerate(queries):
-                single = _numpy_topk(row_ids, stored, qv, metric, limit)
-                self.assertEqual(
-                    sorted(batch_results[i].results()),
-                    sorted(single.results()),
-                    "query %d mismatch for metric=%s" % (i, metric))
-
     def test_topk_indices_row_tiling_tie_break(self):
         """Tie-break across row tile boundaries must prefer smaller row_id."""
         import numpy as np
@@ -3887,6 +3788,74 @@ class RawBatchSearchFromArrowTest(unittest.TestCase):
         result = _numpy_topk(row_ids, stored, query, "cosine", 5)
         selected = sorted(result.results())
         self.assertEqual(selected, [0, 1, 2, 3, 4])
+
+    def test_numpy_topk_cross_tile_scores_stay_float64(self):
+        """Row-tile merge must keep float64 scores, not collapse to inf/zero.
+
+        With more than ROW_TILE (65,536) rows, downcasting accumulated scores to
+        float32 turns finite legal FLOAT inputs into Infinity (inner_product) or
+        zero (L2), selecting the wrong row. The tiled path must match the
+        single-tile result on the same data.
+        """
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import _numpy_topk
+
+        n_rows = 65537
+        row_ids = np.arange(n_rows, dtype=np.int64)
+        # Callers hand _numpy_topk a float64 matrix (the Arrow path upcasts);
+        # the regression is the float32 merge accumulator, not the compute step.
+        stored = np.full((n_rows, 1), 1e23, dtype=np.float64)
+        stored[n_rows - 1] = 2e23
+
+        for metric, q in (("inner_product", 1e20), ("l2", 3e23)):
+            query = np.array([q], dtype=np.float64)
+            full = _numpy_topk(row_ids, stored, query, metric, 1)
+            self.assertEqual(
+                [n_rows - 1], list(full.results()),
+                "tiled %s selected the wrong row" % metric)
+            getter = full.score_getter()
+            score = getter(n_rows - 1)
+            self.assertTrue(np.isfinite(score) and score != 0.0,
+                            "tiled %s score collapsed to %r" % (metric, score))
+
+    def test_public_batch_matches_base_on_cross_tile_extremes(self):
+        """execute_batch_local must match the exact-base result past a tile edge.
+
+        Reproduces the P2 overflow/underflow case end to end: the streaming batch
+        path and the single-query base path must select the same row and finite
+        score on 65,537 one-dimensional ARRAY rows.
+        """
+        import numpy as np
+        import pyarrow as pa
+        from pypaimon.table.source.vector_search_read import (
+            BatchVectorSearchReadImpl,
+            _raw_search_from_arrow,
+        )
+
+        n_rows = 65537
+        vectors = [[1e23]] * (n_rows - 1) + [[2e23]]
+        table = pa.table({
+            "_ROW_ID": pa.array(list(range(n_rows)), type=pa.int64()),
+            "vector": pa.array(vectors, type=pa.list_(pa.float32())),
+        })
+        column = _field(1, "vector", "FLOAT")
+
+        for metric, q in (("inner_product", 1e20), ("l2", 3e23)):
+            query = [np.float32(q)]
+            base = _raw_search_from_arrow(table, "vector", np.float32(query),
+                                          metric, 1)
+            reader = BatchVectorSearchReadImpl(
+                _StubTable([column], []), limit=1, vector_column=column,
+                query_vectors=[query])
+            batch = reader._score_raw_batch_queries(
+                table.to_batches(max_chunksize=16384), metric)[0]
+            self.assertEqual(list(base.results()), list(batch.results()),
+                             "batch and base diverged for metric=%s" % metric)
+            base_getter = base.score_getter()
+            batch_getter = batch.score_getter()
+            for row_id in base.results():
+                self.assertTrue(np.isfinite(base_getter(row_id)))
+                self.assertAlmostEqual(base_getter(row_id), batch_getter(row_id))
 
 
 if __name__ == "__main__":
