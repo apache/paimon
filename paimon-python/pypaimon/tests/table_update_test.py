@@ -1037,7 +1037,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['city'].to_pylist(),
         )
 
-    def test_delete_by_partition_predicate_conflicts_when_partition_changes(self):
+    def test_delete_by_partition_predicate_preserves_concurrent_appends(self):
         table = self._create_seeded_table(partition_keys=['city'])
         wb = self._make_write_builder(table)
         tu = wb.new_update()
@@ -1053,10 +1053,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }, schema=self.pa_schema))
 
         tc = wb.new_commit()
-        with self.assertRaises(RuntimeError) as ctx:
-            self._apply_commit(tc, msgs, cid)
+        self._apply_commit(tc, msgs, cid)
         tc.close()
-        self.assertIn('Overwrite conflict', str(ctx.exception))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5, 6], result['id'].to_pylist())
 
     def test_delete_by_mixed_partition_predicate_still_requires_dv(self):
         table = self._create_seeded_table(partition_keys=['city'])
