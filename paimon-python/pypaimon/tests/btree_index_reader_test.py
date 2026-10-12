@@ -18,17 +18,24 @@
 """File-level tests for BTree reader versions and initialization cleanup."""
 
 import io
+import json
 import os
 import struct
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import patch
 
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
 from pypaimon.globalindex.btree.btree_index_writer import BTreeIndexWriter
+from pypaimon.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
+from pypaimon.globalindex.global_index_reader import FieldRef
 from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
 from pypaimon.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.schema.data_types import AtomicType
@@ -182,7 +189,7 @@ class BTreeIndexReaderTest(unittest.TestCase):
 
     def test_unsupported_versions_rejected_before_sst_read(self):
         for input_type in (_TrackingInput, _PreadInput):
-            for version in (0, 2, 3, 0x80000000, 0xffffffff):
+            for version in (0, 3, 0x80000000, 0xffffffff):
                 with self.subTest(input_type=input_type, version=version):
                     data = self.data[:-8] + struct.pack('<I', version) + self.data[-4:]
                     file_io = self._file_io(data, input_type)
@@ -249,6 +256,161 @@ class BTreeIndexReaderTest(unittest.TestCase):
     def _reader(self, file_io):
         return BTreeIndexReader(
             self.serializer, file_io, '/unused', self.io_meta)
+
+
+class JavaBTreeIndexReaderTest(unittest.TestCase):
+
+    def setUp(self):
+        self.directory = Path(__file__).parent / 'resources' / 'btree'
+        self.serializer = create_serializer(AtomicType('INT'))
+        self.rows = {int(k): v for k, v in json.loads(
+            (self.directory / 'expected.json').read_text()).items()}
+
+    def _meta(self, version, bloom=False, string=False):
+        name = 'java-v%d%s%s.btree' % (version, '-string' if string else '', '-bloom' if bloom else '')
+        data = (self.directory / name).read_bytes()
+        return data, GlobalIndexIOMeta(
+            name, len(data), (self.directory / (name + '.meta')).read_bytes())
+
+    def test_java_file_queries(self):
+        for version in (1, 2):
+            for bloom in (False, True):
+                for input_type in (_TrackingInput, _PreadInput):
+                    with self.subTest(version=version, bloom=bloom, input_type=input_type):
+                        data, meta = self._meta(version, bloom)
+                        file_io = _MemoryFileIO(data, input_type)
+                        reader = BTreeIndexReader(self.serializer, file_io, '/unused', meta)
+                        try:
+                            self.assertEqual(version, reader.footer.version)
+                            self.assertEqual(bloom, reader.footer.bloom_filter_handle is not None)
+                            for key, expected in self.rows.items():
+                                self.assertEqual(expected, reader.visit_equal(key).results().to_list())
+                            self.assertEqual([], reader.visit_equal(6).results().to_list())
+                            self.assertEqual([], reader.visit_between(6, 7).results().to_list())
+                            self.assertEqual(
+                                sorted(self.rows[2] + self.rows[3] + self.rows[4]),
+                                reader.visit_between(2, 4).results().to_list())
+                            self.assertEqual(
+                                self.rows[3], reader._range_query(2, 4, False, False).to_list())
+                            self.assertEqual(
+                                sorted(self.rows[1] + self.rows[3]),
+                                reader.visit_in([1, 3, 3, 6, None]).results().to_list())
+                            self.assertEqual(self.rows[1], reader.visit_less_than(2).results().to_list())
+                            self.assertEqual(self.rows[5], reader.visit_greater_than(4).results().to_list())
+                            self.assertEqual([999], reader.visit_is_null().results().to_list())
+                            self.assertEqual(
+                                sorted(sum(self.rows.values(), [])),
+                                reader.visit_is_not_null().results().to_list())
+                            if version == 2:
+                                iterator = reader.reader.create_iterator()
+                                iterator.seek_to(self.serializer.serialize(1))
+                                blocks = 0
+                                keys = []
+                                while True:
+                                    block = iterator.read_batch()
+                                    if block is None:
+                                        break
+                                    blocks += 1
+                                    while block.has_next():
+                                        entry = next(block)
+                                        key = self.serializer.deserialize(entry.key)
+                                        keys.append(key)
+                                        self.assertEqual(
+                                            (self.directory / ('posting-%d.bin' % key)).read_bytes(),
+                                            entry.value)
+                                self.assertEqual([1, 2, 3, 4, 5], keys)
+                                self.assertGreater(blocks, 1)
+                        finally:
+                            reader.close()
+                        self.assertTrue(file_io.input_stream.closed)
+
+    def test_java_string_prefix_queries(self):
+        serializer = create_serializer(AtomicType('STRING'))
+        keys = ['ke', 'keep', 'keeper', 'key', 'kf']
+        for version in (1, 2):
+            for bloom in (False, True):
+                for input_type in (_TrackingInput, _PreadInput):
+                    with self.subTest(version=version, bloom=bloom, input_type=input_type):
+                        data, meta = self._meta(version, bloom, string=True)
+                        file_io = _MemoryFileIO(data, input_type)
+                        reader = BTreeIndexReader(serializer, file_io, '/unused', meta)
+                        try:
+                            for prefix in ('', 'ke', 'keep', 'keeper', 'key', 'kf', 'absent', 'kg'):
+                                with self.subTest(prefix=prefix):
+                                    expected = sorted(
+                                        row_id for i, key in enumerate(keys, 1)
+                                        if key.startswith(prefix) for row_id in self.rows[i])
+                                    result = reader.visit_starts_with(prefix)
+                                    self.assertTrue(result.is_exact())
+                                    self.assertEqual(expected, result.results().to_list())
+                            iterator = reader.reader.create_iterator()
+                            iterator.seek_to(serializer.serialize(''))
+                            blocks = 0
+                            seen = []
+                            while True:
+                                block = iterator.read_batch()
+                                if block is None:
+                                    break
+                                blocks += 1
+                                while block.has_next():
+                                    entry = next(block)
+                                    key = serializer.deserialize(entry.key)
+                                    seen.append(key)
+                                    if version == 2:
+                                        self.assertEqual(
+                                            (self.directory / ('posting-%d.bin' % (keys.index(key) + 1))).read_bytes(),
+                                            entry.value)
+                            self.assertEqual(keys, seen)
+                            self.assertGreater(blocks, 1)
+                            self.assertEqual([999], reader.visit_is_null().results().to_list())
+                        finally:
+                            reader.close()
+                        self.assertTrue(file_io.input_stream.closed)
+
+    def test_v2_initialization_failure_preserves_error_and_closes_stream(self):
+        data, meta = self._meta(2)
+        footer = BTreeFileFooter.read_footer(data[-BTreeFileFooter.ENCODED_LENGTH:])
+        damaged = bytearray(data)
+        handle = footer.index_block_handle
+        damaged[handle.offset + handle.size + 1] ^= 1
+        for input_type in (_TrackingInput, _PreadInput):
+            for close_error in (None, OSError('Close failed')):
+                with self.subTest(input_type=input_type, close_error=close_error):
+                    file_io = _MemoryFileIO(bytes(damaged), input_type, close_error=close_error)
+                    with self.assertRaisesRegex(ValueError, 'CRC32 mismatch'):
+                        BTreeIndexReader(self.serializer, file_io, '/unused', meta)
+                    self.assertTrue(file_io.input_stream.closed)
+
+    def test_malformed_posting_fails_query(self):
+        data, meta = self._meta(2)
+        reader = BTreeIndexReader(self.serializer, _MemoryFileIO(data, _TrackingInput), '/unused', meta)
+        try:
+            with patch.object(reader.reader, 'lookup', return_value=b'\x01\x02\x0a'):
+                with self.assertRaises(IndexError):
+                    reader.visit_equal(1)
+        finally:
+            reader.close()
+
+    def test_mixed_versions_with_range_offset(self):
+        metas = [self._meta(version)[1] for version in (1, 2)]
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            reader = LazyFilteredBTreeReader(
+                self.serializer, LocalFileIO(), str(self.directory), metas, executor,
+                fallback_scan_max_size=1 << 20)
+            offset_reader = OffsetGlobalIndexReader(reader, 100, (1 << 63) - 1)
+            field = FieldRef(0, 'key', 'INT')
+            try:
+                result = offset_reader.visit_in(field, [1, 2, 3]).result(timeout=10)
+                expected = sorted(v + 100 for v in self.rows[1] + self.rows[2] + self.rows[3])
+                self.assertEqual(expected, result.results().to_list())
+                self.assertEqual(
+                    sorted(v + 100 for v in self.rows[2] + self.rows[3]),
+                    offset_reader.visit_between(field, 2, 3).result(timeout=10).results().to_list())
+                self.assertEqual(
+                    [1099], offset_reader.visit_is_null(field).result(timeout=10).results().to_list())
+                self.assertEqual({1, 2}, {r.footer.version for r in reader._reader_cache.values()})
+            finally:
+                offset_reader.close()
 
 
 if __name__ == '__main__':
