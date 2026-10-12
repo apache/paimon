@@ -66,6 +66,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
@@ -93,6 +94,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -128,6 +130,7 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
@@ -1747,6 +1750,289 @@ public class FileStoreCommitTest {
         assertThat(id).isEqualTo(2);
     }
 
+    @ParameterizedTest
+    @CsvSource({"1,checked", "1,runtime", "1,lease", "3,checked", "3,runtime", "3,lease"})
+    public void testLockAcquisitionFailuresAreRetried(int failures, String failureKind)
+            throws Exception {
+        TestFileStore store = createStore(false);
+        for (int i = 0; i < 2; i++) {
+            store.commitData(
+                    Collections.singletonList(gen.nextInsert("20211109", 6 + i, 1L, null, "old")),
+                    gen::getPartition,
+                    value -> 0);
+        }
+        store.snapshotManager().deleteSnapshot(1);
+        store.snapshotManager().commitEarliestHint(2);
+        ManifestCommittable prepared = prepareLockRetryCommittable(store);
+        AtomicInteger acquisitions = new AtomicInteger();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        if (acquisitions.incrementAndGet() <= failures) {
+                            if ("checked".equals(failureKind)) {
+                                throw new IOException("Transient acquisition failure");
+                            }
+                            if ("runtime".equals(failureKind)) {
+                                throw new IllegalStateException("Transient acquisition failure");
+                            }
+                            return action.call();
+                        }
+                        // Another writer advances the head while this attempt waits for its lock.
+                        store.commitData(
+                                Collections.singletonList(
+                                        gen.nextInsert("20211110", 9, 2L, null, "b")),
+                                gen::getPartition,
+                                value -> 0);
+                        return action.call();
+                    }
+
+                    @Override
+                    public void ensureValid() {
+                        if ("lease".equals(failureKind) && acquisitions.get() <= failures) {
+                            throw new IllegalStateException("Transient acquisition failure");
+                        }
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        SnapshotCommit publisher = new RenamingSnapshotCommit(store.snapshotManager(), lock);
+        Options options = Options.fromMap(store.options().toMap());
+        options.set(CoreOptions.COMMIT_MAX_RETRIES, 2);
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store, "writer", publisher, new CoreOptions(options), false)) {
+            if (failures == 1) {
+                assertThat(commit.commit(prepared, false)).isEqualTo(1);
+                assertThat(store.snapshotManager().latestSnapshot().id()).isEqualTo(4);
+                assertThat(store.readKvsFromSnapshot(4)).hasSize(4);
+                assertThat(acquisitions.get()).isEqualTo(2);
+            } else {
+                assertThatThrownBy(() -> commit.commit(prepared, false))
+                        .satisfies(
+                                anyCauseMatches(
+                                        "checked".equals(failureKind)
+                                                ? IOException.class
+                                                : IllegalStateException.class,
+                                        "Transient acquisition failure"));
+                assertThat(acquisitions.get()).isEqualTo(3);
+                assertThat(store.snapshotManager().latestSnapshot().id()).isEqualTo(2);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testInterruptedAcquisitionDoesNotRetryOrPublish(boolean wrapped) throws Exception {
+        TestFileStore store = createStore(false);
+        ManifestCommittable prepared = prepareLockRetryCommittable(store);
+        AtomicInteger acquisitions = new AtomicInteger();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        if (acquisitions.incrementAndGet() == 1) {
+                            // Interrupted blocking calls throw with the interrupt flag cleared.
+                            InterruptedException interrupted =
+                                    new InterruptedException("Interrupted while acquiring lock");
+                            if (wrapped) {
+                                throw new RuntimeException(interrupted);
+                            }
+                            throw interrupted;
+                        }
+                        return action.call();
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        assertThat(Thread.currentThread().isInterrupted()).isFalse();
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "writer",
+                        new RenamingSnapshotCommit(store.snapshotManager(), lock))) {
+            assertThatThrownBy(() -> commit.commit(prepared, false))
+                    .satisfies(
+                            anyCauseMatches(
+                                    InterruptedException.class,
+                                    "Interrupted while acquiring lock"));
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+        assertThat(acquisitions.get()).isEqualTo(1);
+        assertThat(store.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    public void testReleaseFailureKeepsSuccessfulPublicationAndCallbacks() throws Exception {
+        TestFileStore store = createStore(false);
+        ManifestCommittable prepared = prepareLockRetryCommittable(store);
+        AtomicInteger acquisitions = new AtomicInteger();
+        AtomicBoolean held = new AtomicBoolean();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        acquisitions.incrementAndGet();
+                        held.set(true);
+                        try {
+                            return action.call();
+                        } finally {
+                            held.set(false);
+                            throw new IOException("Release failed after publication");
+                        }
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        CommitCallback callback = mock(CommitCallback.class);
+        doAnswer(
+                        invocation -> {
+                            assertThat(held.get()).isFalse();
+                            return null;
+                        })
+                .when(callback)
+                .call(any());
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "writer",
+                        new RenamingSnapshotCommit(store.snapshotManager(), lock),
+                        store.options(),
+                        false,
+                        Collections.singletonList(callback))) {
+            assertThat(commit.commit(prepared, false)).isEqualTo(1);
+        }
+        assertThat(acquisitions.get()).isEqualTo(1);
+        assertThat(store.snapshotManager().latestSnapshot().id()).isEqualTo(1);
+        assertThat(store.readKvsFromSnapshot(1)).hasSize(1);
+        verify(callback, times(1)).call(any());
+    }
+
+    @Test
+    public void testUnknownPublicationSurvivesLockAcquisitionFailure() throws Exception {
+        TestFileStore store = createStore(false);
+        ManifestCommittable prepared = prepareLockRetryCommittable(store);
+        AtomicInteger acquisitions = new AtomicInteger();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        if (acquisitions.incrementAndGet() == 2) {
+                            throw new IOException("Transient acquisition failure");
+                        }
+                        return action.call();
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        TestingSnapshotCommit publisher =
+                mock(
+                        TestingSnapshotCommit.class,
+                        withSettings().useConstructor(lock).defaultAnswer(CALLS_REAL_METHODS));
+        SnapshotCommit delegate = new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty());
+        when(publisher.commitImpl(any(), any(), any(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            assertThat(
+                                            delegate.commit(
+                                                    invocation.getArgument(0),
+                                                    invocation.getArgument(1),
+                                                    invocation.getArgument(2),
+                                                    invocation.getArgument(3)))
+                                    .isTrue();
+                            throw new IOException("Publication response lost");
+                        });
+        try (FileStoreCommitImpl commit = newCommitWithSnapshotCommit(store, "writer", publisher)) {
+            assertThat(commit.commit(prepared, false)).isEqualTo(1);
+        }
+        assertThat(acquisitions.get()).isEqualTo(3);
+        verify(publisher, times(1)).commitImpl(any(), any(), any(), any());
+        assertThat(store.snapshotManager().latestSnapshot().id()).isEqualTo(1);
+        assertThat(store.readKvsFromSnapshot(1)).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPreCommitFailureIsNotRetriedOrMaskedByRelease(boolean fatalError)
+            throws Exception {
+        TestFileStore store = createStore(false);
+        ManifestCommittable prepared = prepareLockRetryCommittable(store);
+        AtomicInteger acquisitions = new AtomicInteger();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        acquisitions.incrementAndGet();
+                        try {
+                            return action.call();
+                        } finally {
+                            throw new IOException("Release failed after validation failure");
+                        }
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        Throwable failure =
+                fatalError
+                        ? new AssertionError("Fatal validation failure")
+                        : new IllegalStateException("Validation failure");
+        CommitPreCallback preCallback = mock(CommitPreCallback.class);
+        doAnswer(
+                        invocation -> {
+                            throw failure;
+                        })
+                .when(preCallback)
+                .call(any(), any(), any(), any());
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "writer",
+                        new RenamingSnapshotCommit(store.snapshotManager(), lock),
+                        store.options(),
+                        false,
+                        Collections.emptyList(),
+                        Collections.singletonList(preCallback))) {
+            assertThatThrownBy(() -> commit.commit(prepared, false))
+                    .isSameAs(failure)
+                    .satisfies(
+                            error ->
+                                    assertThat(error.getSuppressed())
+                                            .hasSize(1)
+                                            .allSatisfy(
+                                                    suppressed ->
+                                                            assertThat(suppressed)
+                                                                    .satisfies(
+                                                                            anyCauseMatches(
+                                                                                    IOException
+                                                                                            .class,
+                                                                                    "Release failed after validation failure"))));
+        }
+        assertThat(acquisitions.get()).isEqualTo(1);
+        verify(preCallback, times(1)).call(any(), any(), any(), any());
+        assertThat(store.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    private ManifestCommittable prepareLockRetryCommittable(TestFileStore store) throws Exception {
+        AtomicReference<ManifestCommittable> prepared = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> prepared.set(committable));
+        return checkNotNull(prepared.get());
+    }
+
     @Test
     public void testEveryAttemptLocksAndRefreshesHeadAfterAcquisition() throws Exception {
         TestFileStore store = createStore(false);
@@ -2139,9 +2425,10 @@ public class FileStoreCommitTest {
         assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(1);
     }
 
-    @Test
-    public void testCommitRetryReusePreviousManifestMergeResultWhenBeforeStillExists()
-            throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCommitRetryReusePreviousManifestMergeResultWhenBeforeStillExists(
+            boolean lockFailures) throws Exception {
         TestFileStore store =
                 createStore(
                         false,
@@ -2168,6 +2455,27 @@ public class FileStoreCommitTest {
                 Collections.emptyList(),
                 (commit, committable) -> committableRef.set(committable));
 
+        AtomicInteger acquisitions = new AtomicInteger();
+        Lock lock =
+                new Lock() {
+                    @Override
+                    public <T> T runWithLock(Callable<T> action) throws Exception {
+                        int attempt = acquisitions.incrementAndGet();
+                        if (lockFailures && attempt == 2) {
+                            throw new IOException("Acquisition failed between publication retries");
+                        }
+                        try {
+                            return action.call();
+                        } finally {
+                            if (lockFailures && attempt == 1) {
+                                throw new IOException("Release failed after publication conflict");
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void close() {}
+                };
         ConflictingSnapshotCommit snapshotCommit =
                 new ConflictingSnapshotCommit(
                         new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
@@ -2175,7 +2483,8 @@ public class FileStoreCommitTest {
                         store.manifestListFactory().create(),
                         store.manifestFileFactory().create(),
                         false,
-                        conflictAttempts(Collections.emptyList()));
+                        conflictAttempts(Collections.emptyList()),
+                        lock);
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(store, "retry-reuse-merge", snapshotCommit)) {
             commit.commit(checkNotNull(committableRef.get()), false);
@@ -2191,6 +2500,7 @@ public class FileStoreCommitTest {
         assertThat(finalBaseManifests)
                 .containsExactlyElementsOf(snapshotCommit.firstAttemptBaseManifests());
         assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(3);
+        assertThat(acquisitions.get()).isEqualTo(lockFailures ? 3 : 2);
     }
 
     @Test
@@ -2582,6 +2892,24 @@ public class FileStoreCommitTest {
             CoreOptions options,
             boolean dataEvolutionEnabled,
             List<CommitCallback> callbacks) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                options,
+                dataEvolutionEnabled,
+                callbacks,
+                Collections.emptyList());
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            CoreOptions options,
+            boolean dataEvolutionEnabled,
+            List<CommitCallback> callbacks,
+            List<CommitPreCallback> preCallbacks) {
         String tableName = store.options().path().getName();
         return new FileStoreCommitImpl(
                 snapshotCommit,
@@ -2599,7 +2927,7 @@ public class FileStoreCommitTest {
                 store::newScan,
                 store.newStatsFileHandler(),
                 store.bucketMode(),
-                Collections.emptyList(),
+                preCallbacks,
                 callbacks,
                 scanner ->
                         ConflictDetection.create(
@@ -2710,7 +3038,25 @@ public class FileStoreCommitTest {
                 ManifestFile manifestFile,
                 boolean mergeConflictManifests,
                 List<List<ManifestEntry>> conflictDeltaFilesByAttempt) {
-            super(Lock.empty());
+            this(
+                    delegate,
+                    snapshotManager,
+                    manifestList,
+                    manifestFile,
+                    mergeConflictManifests,
+                    conflictDeltaFilesByAttempt,
+                    Lock.empty());
+        }
+
+        private ConflictingSnapshotCommit(
+                SnapshotCommit delegate,
+                SnapshotManager snapshotManager,
+                ManifestList manifestList,
+                ManifestFile manifestFile,
+                boolean mergeConflictManifests,
+                List<List<ManifestEntry>> conflictDeltaFilesByAttempt,
+                Lock lock) {
+            super(lock);
             this.delegate = delegate;
             this.snapshotManager = snapshotManager;
             this.manifestList = manifestList;
