@@ -77,7 +77,9 @@ def test_batch_lookup_matches_individual_queries(docs, projection, with_row_id):
     assert len(actual) == len(expected)
     for left, right in zip(expected, actual):
         assert left.schema == right.schema
-        assert left.to_pylist() == right.to_pylist()
+        # Unordered lookups may visit partition files in different orders.
+        # Keep duplicates and compare all projected values, including Blobs.
+        assert sorted(map(repr, left.to_pylist())) == sorted(map(repr, right.to_pylist()))
         if projection == [] and not with_row_id:
             assert right.num_columns == 0
             assert right.num_rows == 3
@@ -158,9 +160,18 @@ def test_single_query_keeps_single_lookup(docs):
     assert result[0].equals(expected)
 
 
-def test_unsupported_nested_row_projection_still_raises(docs):
+@pytest.mark.python_plan
+@pytest.mark.python_read
+def test_python_nested_row_projection_still_raises(docs):
     with pytest.raises(NotImplementedError, match="ROW nested-field projection"):
         docs.search_vectors([[0.0, 0.0], [1.0, 0.0]]).select(["info.label"]).to_arrow()
+
+
+@pytest.mark.native_plan
+def test_native_nested_row_projection(docs):
+    docs.raw_table = docs.raw_table.copy({'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
+    results = docs.search_vectors([[0.0, 0.0], [1.0, 0.0]]).select(["info.label"]).limit(1).to_arrow()
+    assert [result.to_pylist() for result in results] == [[{'info_label': '0'}], [{'info_label': '1'}]]
 
 
 def test_native_index_batch_uses_shared_lookup(docs):
@@ -180,5 +191,5 @@ def test_native_index_batch_uses_shared_lookup(docs):
 
     with patch.object(ScanQuery, "_read_global_index_result", read):
         actual = query.to_list()
-    assert actual == expected
+    assert [sorted(map(repr, rows)) for rows in actual] == [sorted(map(repr, rows)) for rows in expected]
     assert calls == [6]

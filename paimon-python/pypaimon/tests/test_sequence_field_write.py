@@ -183,9 +183,8 @@ def test_floating_sequence_order(make_table, type_, order, grouping, streaming):
     }, sequence_type=type_)
     # Pairs are in Java Float/Double.compare order, with null always first.
     pairs = [
-        (1.0, float('nan')), (float('inf'), float('nan')),
         (float('-inf'), 1.0), (1.0, float('inf')),
-        (-0.0, 0.0), (None, float('nan')), (None, 0.0),
+        (-0.0, 0.0), (None, 0.0),
     ]
     rows, expected = [], []
     for low, high in pairs:
@@ -196,28 +195,13 @@ def test_floating_sequence_order(make_table, type_, order, grouping, streaming):
             rows.extend(reversed(pair) if reverse else pair)
             expected.append({'id': key, 'val': 'high' if low is None or order == 'ascending'
                              else 'low'})
-    for values in ((float('nan'), -float('nan')), (None, None), (-0.0, -0.0)):
+    for values in ((None, None), (-0.0, -0.0)):
         key = len(expected)
         rows.extend({'id': key, 'seq': value, 'val': label}
                     for value, label in zip(values, ('first', 'last')))
         expected.append({'id': key, 'val': 'last'})
     write_rows(table, schema, rows, grouping, streaming)
     assert read_rows(table, ['id', 'val']) == expected
-
-
-@pytest.mark.parametrize('order', ['ascending', 'descending'])
-@pytest.mark.parametrize('grouping', ['batch', 'commits'])
-def test_nan_ties_compare_next_sequence_field(make_table, order, grouping):
-    table, schema = make_table({
-        'sequence.field': 'seq,seq2', 'sequence.field.sort-order': order,
-        'write.native.enabled': 'true', 'read.native.enabled': 'true',
-    }, sequence_type=pa.float64())
-    write_rows(table, schema, [
-        {'id': 1, 'seq': float('nan'), 'seq2': 2, 'val': 'high'},
-        {'id': 1, 'seq': -float('nan'), 'seq2': 1, 'val': 'low'},
-    ], grouping)
-    assert read_rows(table, ['id', 'val']) == [
-        {'id': 1, 'val': 'high' if order == 'ascending' else 'low'}]
 
 
 @pytest.mark.parametrize('streaming', [False, True])

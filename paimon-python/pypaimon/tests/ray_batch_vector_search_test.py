@@ -252,7 +252,7 @@ def test_global_candidates_and_duplicate_precedence(table):
             return
         # First query must exclude exact nearest row 3; second query has its own candidates.
         # Duplicate row 0 must retain the earlier split's score for the second query.
-        assert args[-1] is True
+        assert args[2] is True
         yield 0, ("l2", [{0: 10., 1: 9.}, {0: 1., 1: 9.}])
         yield 1, ("l2", [{2: 8., 3: 7.}, {0: 100., 2: 8., 3: 7.}])
 
@@ -277,7 +277,7 @@ def test_metric_mismatch_in_empty_shard_closes_tasks(table):
 
     with patch.object(search_module, "_map_tasks", completed), \
             pytest.raises(ValueError, match="different metrics"):
-        list(distributed._search_index_splits([None, None], QUERIES, 1, [], batch=True))
+        list(distributed._search_index_splits([None, None], QUERIES, 1, None, batch=True))
     assert closed == [True]
 
 
@@ -297,13 +297,13 @@ def test_index_reader_is_reused_and_closed_between_query_blocks(table, fail_seco
 
     offset = SimpleNamespace(visit_batch_vector_search=search)
     split = IndexVectorSearchSplit(0, 1, [])
-    context = (reader._table, reader._vector_column, queries, 1, {})
+    context = (reader._table, reader._vector_column, queries, 1, {}, None, None, None)
     with patch.object(BatchVectorSearchReadImpl, "_open_offset_reader", return_value=(native, offset)) as opened:
         if fail_second_block:
             with pytest.raises(ValueError, match="failed query block"):
-                search_module._search_batch_index_split(context, (split, None))
+                search_module._search_batch_index_split(context, split)
         else:
-            _, results = search_module._search_batch_index_split(context, (split, None))
+            _, results = search_module._search_batch_index_split(context, split)
             assert results == [{0: 1.}] * 65
     assert sizes == [64, 1]
     opened.assert_called_once()

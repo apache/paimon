@@ -48,7 +48,8 @@ from pypaimon.filesystem import oss_user_agent
 
 
 _JINDO_CONFIG_PREFIXES = ("fs.", "logger.")
-_PYPAIMON_ONLY_JINDO_CONFIG_KEYS = {OssOptions.OSS_IMPL.key()}
+_PYPAIMON_ONLY_JINDO_CONFIG_KEYS = {
+    OssOptions.OSS_IMPL.key(), OssOptions.OSS_PYTHON_IMPL.key()}
 _CASE_SENSITIVE_JINDO_CONFIG_KEYS = {
     OssOptions.OSS_ACCESS_KEY_ID.key().lower(): OssOptions.OSS_ACCESS_KEY_ID.key(),
     OssOptions.OSS_ACCESS_KEY_SECRET.key().lower(): OssOptions.OSS_ACCESS_KEY_SECRET.key(),
@@ -79,7 +80,7 @@ def build_jindo_config(catalog_options: Options):
         if not supported_prefix or value is None:
             continue
         key = _CASE_SENSITIVE_JINDO_CONFIG_KEYS.get(raw_key.lower(), raw_key)
-        if key in _PYPAIMON_ONLY_JINDO_CONFIG_KEYS:
+        if key in _PYPAIMON_ONLY_JINDO_CONFIG_KEYS or key.startswith("fs.oss.cpp."):
             # This option is handled by PyPaimon.
             continue
         config.set(key, _jindo_config_value(value))
@@ -234,6 +235,14 @@ class JindoFileSystemHandler(FileSystemHandler):
 
         config = build_jindo_config(catalog_options)
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
+
+    def __getstate__(self):
+        # Native clients and thread locks belong to this process. Transport only
+        # connection configuration; immutable-file size hints can be refilled.
+        return {"root_path": self.root_path, "properties": self.properties}
+
+    def __setstate__(self, state):
+        self.__init__(state["root_path"], state["properties"])
 
     def register_file_size(self, path: str, file_size: int):
         """Register an immutable file's size supplied by Paimon metadata."""

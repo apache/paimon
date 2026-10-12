@@ -217,9 +217,18 @@ public class FormatReadBuilder implements ReadBuilder {
                         PredicateBuilder.splitAnd(filter), new HashSet<>(table.partitionKeys()));
         RowType dataRowType = getRowTypeWithoutPartition(table.rowType(), table.partitionKeys());
         RowType readRowType = getRowTypeWithoutPartition(readType, table.partitionKeys());
+        Options fileOptions = new Options(options.toConfiguration().toMap());
+        fileOptions.set(
+                CoreOptions.FILE_FORMAT,
+                FormatTablePartitionOptions.fileFormat(
+                        fileOptions.toMap(),
+                        dataSplit.fileFormat() == null
+                                ? null
+                                : Collections.singletonMap(
+                                        CoreOptions.FILE_FORMAT.key(), dataSplit.fileFormat())));
         FormatReaderFactory readerFactory =
-                FileFormatDiscover.of(options)
-                        .discover(options.formatType())
+                FileFormatDiscover.of(new CoreOptions(fileOptions))
+                        .discover(fileOptions.get(CoreOptions.FILE_FORMAT))
                         .createReaderFactory(dataRowType, readRowType, readFilters);
 
         Pair<int[], RowType> partitionMapping =

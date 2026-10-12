@@ -35,6 +35,7 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -135,7 +136,7 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 SortedIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
-                        indexColumns,
+                        Collections.singletonList(indexColumns),
                         indexType,
                         partitionPredicate,
                         userOptions);

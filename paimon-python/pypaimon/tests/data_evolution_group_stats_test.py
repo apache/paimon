@@ -32,6 +32,7 @@ from pypaimon.read.scanner.data_evolution_stats import \
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
 
 def _empty_stats():
@@ -398,6 +399,11 @@ class DataEvolutionGroupStatsPlanningTest(unittest.TestCase):
         class _Table:
             table_path = '/tmp/table'
             options = _Options()
+
+            def path_factory(self):
+                return FileStorePathFactory(
+                    self.table_path, [], '__DEFAULT_PARTITION__', 'parquet',
+                    'data-', 'changelog-', False, False, 'zstd')
 
         predicate = PredicateBuilder(fields).equal('id', 5)
         group_filter = DataEvolutionGroupStatsFilter(

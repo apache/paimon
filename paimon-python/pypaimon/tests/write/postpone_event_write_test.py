@@ -58,11 +58,15 @@ def test_postpone_preserves_unsorted_duplicate_rows(tmp_path, engine):
 
 
 @pytest.mark.parametrize('row_input', [False, True])
-@pytest.mark.parametrize('options,expected', [
-    ({}, [0, 1, 2, 3]),
-    ({'ignore-delete': 'true'}, [0, 2]),
-    ({'ignore-update-before': 'true'}, [0, 2, 3]),
-])
+@pytest.mark.parametrize(
+    'options,expected',
+    [
+        ({}, [0, 1, 2, 3]),
+        ({'ignore-delete': 'true'}, [0, 2]),
+        ({'ignore-update-before': 'true'}, [0, 2, 3]),
+        ({'ignore-delete': 'true', 'ignore-update-before': 'true'}, [0, 2]),
+    ],
+)
 def test_python_postpone_row_kinds_are_filtered_before_writing(tmp_path, row_input, options, expected):
     from pypaimon.table.row.generic_row import GenericRow
     table, schema = make_table(tmp_path, {'rowkind.field': 'op', **options})

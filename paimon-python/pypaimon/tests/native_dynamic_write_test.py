@@ -118,7 +118,7 @@ def test_dynamic_cross_backend_restart(tmp_path, bucket_local, first_native):
         assert len(indexes) == 1
         assert indexes[0].index_file.external_path is None
         path = table.path_factory().bucket_index_path(
-            tuple(indexes[0].partition.values), 0, indexes[0].index_file, table.file_io)
+            tuple(indexes[0].partition.values), 0, indexes[0].index_file)
         assert table.file_io.exists(path)
     assert _indexes(table)[0].index_file.row_count == 5
     expected = [{'id': i, 'p': 'a/b', 'v': v} for i, v in

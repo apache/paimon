@@ -390,6 +390,30 @@ class _AsOfJoinRight:
         self._row_ids = metadata[_ROW_ID].combine_chunks()
         self._index = {}
         group_columns = [metadata[name].combine_chunks() for name in self.by]
+        encode = getattr(pc, "run_end_encode", None)
+        if len(group_columns) == 1 and encode is not None:
+            column = group_columns[0]
+            data_type = column.type
+            # Only use types whose Arrow runs have Python key equality.
+            # In particular, run-end encoding distinguishes -0.0 from +0.0.
+            if (pa.types.is_integer(data_type)
+                    or pa.types.is_boolean(data_type)
+                    or pa.types.is_string(data_type)
+                    or pa.types.is_large_string(data_type)
+                    or pa.types.is_binary(data_type)
+                    or pa.types.is_large_binary(data_type)):
+                try:
+                    groups = encode(column, run_end_type=pa.int64())
+                except pa.ArrowNotImplementedError:
+                    pass
+                else:
+                    start = 0
+                    # Avoid Arrow scalar conversion per run for dense groups.
+                    ends = groups.run_ends.to_numpy().tolist()
+                    for key, end in zip(groups.values.to_pylist(), ends):
+                        self._index[(key,)] = (start, end)
+                        start = end
+                    return
         previous = None
         start = 0
         for position in range(len(metadata)):

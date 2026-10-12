@@ -254,6 +254,36 @@ def test_python_fallback_retains_specialized_writer_and_plan(tmp_path):
         writer.abort()
 
 
+@pytest.mark.parametrize('clear_factory', [False, True])
+def test_python_fallback_retains_uri_reader_factory_and_bucket_plan(tmp_path, clear_factory):
+    from pypaimon.common.uri_reader import UriReaderFactory
+    from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
+
+    table = _table(tmp_path)
+    factory = UriReaderFactory.from_file_io(table.file_io)
+    plan = PostponeBucketPlan({('a',): 7})
+    builder = table.new_postpone_fixed_bucket_write_builder().with_bucket_plan(plan)
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        assert isinstance(writer, NativePostponeFixedBucketTableWrite)
+        writer.with_blob_uri_reader_factory(factory)
+        if clear_factory:
+            writer.with_blob_uri_reader_factory(None)
+        # Coordinators select Python planning before receiving data.
+        writer.file_store_write
+        writer.write_row(GenericRow([1, 'a', 10], table.fields))
+        assert isinstance(writer._python_writer, PostponeFixedBucketBatchTableWrite)
+        assert writer._python_writer.file_store_write.blob_uri_reader_factory is (
+            None if clear_factory else factory)
+        messages = writer.prepare_commit()
+        assert {message.total_buckets for message in messages} == {7}
+        commit.commit(messages)
+        assert _rows(table) == [dict(id=1, p='a', v=10)]
+    finally:
+        writer.close()
+        commit.close()
+
+
 def test_cannot_fallback_after_native_data(tmp_path):
     table = _table(tmp_path)
     writer = table.new_postpone_fixed_bucket_write_builder().new_write()

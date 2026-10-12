@@ -43,6 +43,48 @@ class SimpleStatsEvolutionsTest(unittest.TestCase):
         evolution = evolutions.get_or_create(0)
         self.assertIsNone(evolution.index_mapping)
 
+    def test_unsafe_cast_filters_keep_safe_conjuncts_and_preserve_or(self):
+        source = self._make_fields([(0, 'old_name', 'BIGINT'), (1, 'id', 'INT')])
+        target = self._make_fields([(1, 'id', 'INT'), (0, 'new_name', 'TINYINT')])
+        schemas = {0: source, 1: target}
+        evolutions = SimpleStatsEvolutions(lambda sid: schemas[sid], 1)
+        narrowed = Predicate('equal', 1, 'new_name', [-128])
+        unchanged = Predicate('equal', 0, 'id', [1])
+        self.assertIsNone(evolutions.filter_unsafe_filter(0, narrowed))
+        conjunction = Predicate('and', None, None, [narrowed, unchanged])
+        self.assertEqual(evolutions.filter_unsafe_filter(0, conjunction), unchanged)
+        disjunction = Predicate('or', None, None, [narrowed, unchanged])
+        self.assertIsNone(evolutions.filter_unsafe_filter(0, disjunction))
+        self.assertIs(evolutions.filter_unsafe_filter(1, narrowed), narrowed)
+
+    def test_integer_widening_only_keeps_representable_literals(self):
+        source = self._make_fields([(0, 'v', 'TINYINT')])
+        target = self._make_fields([(0, 'v', 'BIGINT')])
+        schemas = {0: source, 1: target}
+        evolutions = SimpleStatsEvolutions(lambda sid: schemas[sid], 1)
+        for value in (-128, 127):
+            predicate = Predicate('equal', 0, 'v', [value])
+            self.assertEqual(evolutions.filter_unsafe_filter(0, predicate), predicate)
+        for value in (-129, 128):
+            self.assertIsNone(evolutions.filter_unsafe_filter(0, Predicate('equal', 0, 'v', [value])))
+        for method in ('in', 'notIn'):
+            self.assertIsNone(evolutions.filter_unsafe_filter(0, Predicate(method, 0, 'v', [1, None])))
+        predicate = Predicate('isNull', 0, 'v')
+        self.assertEqual(evolutions.filter_unsafe_filter(0, predicate), predicate)
+
+    def test_timestamp_precision_and_decimal_casts_disable_stats_filter(self):
+        for old_type, new_type in [('TIMESTAMP(3)', 'TIMESTAMP(1)'),
+                                   ('TIMESTAMP_LTZ(3)', 'TIMESTAMP_LTZ(1)'),
+                                   ('DECIMAL(10,2)', 'DECIMAL(10,1)'),
+                                   ('DOUBLE', 'INT')]:
+            source = self._make_fields([(0, 'v', old_type)])
+            target = self._make_fields([(0, 'v', new_type)])
+            schemas = {0: source, 1: target}
+            evolutions = SimpleStatsEvolutions(lambda sid: schemas[sid], 1)
+            for method in ('equal', 'notEqual', 'isNull', 'isNotNull'):
+                with self.subTest(old_type=old_type, new_type=new_type, method=method):
+                    self.assertIsNone(evolutions.filter_unsafe_filter(0, Predicate(method, 0, 'v', [1])))
+
     def test_predicate_with_incomplete_projected_stats(self):
         fields = self._make_fields([(0, 'a', 'INT'), (1, 'b', 'INT')])
         evolution = SimpleStatsEvolutions(lambda _: fields, 0).get_or_create(0)

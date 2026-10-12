@@ -81,6 +81,33 @@ class TestParseAddColumnComment(unittest.TestCase):
 
 class TestApplyAddColumnDirective(unittest.TestCase):
 
+    def test_video_frame_field(self):
+        for source in ("BYTES", "BINARY(8)", "BLOB"):
+            with self.subTest(source=source):
+                opts = {CoreOptions.VIDEO_FRAME_FIELD.key(): "existing"}
+                result = apply_add_column_directive(
+                    "__VIDEO_FRAME_FIELD; camera frame", "video", AtomicType(source), opts)
+                self.assertEqual(result.type.type, "BLOB")
+                self.assertTrue(result.type.nullable)
+                self.assertEqual(result.comment, "camera frame")
+                self.assertEqual(opts[CoreOptions.VIDEO_FRAME_FIELD.key()], "existing,video")
+                result = apply_add_column_directive(
+                    "__VIDEO_FRAME_FIELD", "second", AtomicType(source), opts)
+                self.assertIsNone(result.comment)
+                self.assertEqual(opts[CoreOptions.VIDEO_FRAME_FIELD.key()], "existing,video,second")
+
+    def test_invalid_video_frame_field(self):
+        opts = {}
+        for comment in ("__VIDEO_UNKNOWN", "__VIDEO_FRAME_FIELD_typo"):
+            with self.subTest(comment=comment), self.assertRaises(ValueError):
+                apply_add_column_directive(comment, "video", AtomicType("BYTES"), opts)
+            self.assertEqual(opts, {})
+        for source in (AtomicType("INT"), ArrayType(True, AtomicType("BYTES")),
+                       MapType(True, AtomicType("STRING"), AtomicType("BYTES"))):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                apply_add_column_directive("__VIDEO_FRAME_FIELD", "video", source, opts)
+            self.assertEqual(opts, {})
+
     def test_non_directive_returns_none(self):
         opts = {}
         result = apply_add_column_directive(
@@ -258,6 +285,15 @@ class TestRemoveDroppedDirectiveOptions(unittest.TestCase):
         self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "a")
         self.assertNotIn(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), opts)
         self.assertEqual(opts[CoreOptions.VECTOR_FIELD.key()], "v")
+
+    def test_drop_video(self):
+        opts = {CoreOptions.VIDEO_FRAME_FIELD.key(): "video,second",
+                CoreOptions.BLOB_FIELD.key(): "image"}
+        remove_dropped_directive_options("video", "BLOB", opts)
+        self.assertEqual(opts[CoreOptions.VIDEO_FRAME_FIELD.key()], "second")
+        remove_dropped_directive_options("second", "BLOB", opts)
+        self.assertNotIn(CoreOptions.VIDEO_FRAME_FIELD.key(), opts)
+        self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "image")
 
     def test_drop_vector(self):
         opts = {

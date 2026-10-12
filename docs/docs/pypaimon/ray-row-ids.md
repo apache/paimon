@@ -25,7 +25,7 @@ under the License.
 
 # Ray Row IDs and Backfills
 
-Read selected rows and write derived columns using target-table row IDs. These APIs require Ray 2.50 or newer and data-evolution tables with row tracking. The read/update paths on this page reject deletion-vectors-enabled tables; see [Multimodal Reads](./multimodal-reading) for high-level BLOB processing.
+Read selected rows and write derived columns using target-table row IDs. These APIs require Ray 2.50 or newer and data-evolution tables with row tracking. Row-ID reads and updates support deletion vectors; see [Multimodal Reads](./multimodal-reading) for high-level BLOB processing.
 
 Install a Ray version that supports these APIs in both the driver and workers:
 
@@ -88,8 +88,10 @@ print(metrics)   # {"num_updated": 50}
 - Multiple source rows mapping to the same `_ROW_ID` is rejected — deduplicate first.
 - Blob columns cannot be updated through this path.
 - Partition columns cannot be updated (in-place rewrite can't move a row across partitions).
-- Deletion-vectors-enabled tables are not supported yet: a DV-deleted row still lives
-  in its data file, so it can't be told apart from a live row without reading the target.
+- Updates validate the requested IDs against deletion vectors from the planning
+  snapshot and reject deleted IDs before writing that file group. Physical row
+  positions are preserved during partial-column rewrites. A concurrent delete
+  remains effective even if its row was live when this update was planned.
 
 ## Read By Row Id
 
@@ -148,8 +150,8 @@ ds = read_by_row_id(
   Each call captures the resolved snapshot for planning and worker reads; changing
   the tag before a lazy Dataset executes does not switch that Dataset to another
   snapshot.
-- Deletion-vectors-enabled tables are not supported yet, for the same reason as
-  `update_by_row_id`.
+- Deleted row IDs are omitted, using the deletion vectors of the resolved
+  snapshot. Reading an earlier retained snapshot can still return those rows.
 - For a non-empty target, the `row_ids` source is consumed lazily by the downstream
   action, not read here. A lazy source missing `row_id_col` raises when the read runs
   (a materialized source raises up front).
@@ -262,8 +264,8 @@ process_row_id_ranges(
 ```
 
 The target must enable `row-tracking.enabled` and
-`data-evolution.enabled`; `embedding` must be nullable and the table must not
-enable deletion vectors. If the source BLOB or embedding model can change,
+`data-evolution.enabled`; `embedding` must be nullable. With deletion vectors,
+a row deleted between reading and update planning causes the update to fail. If the source BLOB or embedding model can change,
 use an additional source/model-version column instead of treating every
 non-null embedding as permanently complete. `process_row_id_ranges` does not
 retry a failed processor itself—the resumability in this example comes from

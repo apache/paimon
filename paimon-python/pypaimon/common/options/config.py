@@ -21,7 +21,9 @@ from pypaimon.common.options.config_options import ConfigOptions
 
 class OssOptions:
     OSS_IMPL = ConfigOptions.key("fs.oss.impl").string_type().default_value("jindo").with_description(
-        "OSS filesystem implementation: legacy or jindo")
+        "OSS filesystem implementation: legacy, jindo, or cpp (native reads only)")
+    OSS_PYTHON_IMPL = ConfigOptions.key("fs.oss.python.impl").string_type().default_value("jindo").with_description(
+        "Python OSS implementation when fs.oss.impl=cpp: jindo or legacy")
     OSS_ACCESS_KEY_ID = ConfigOptions.key("fs.oss.accessKeyId").string_type().no_default_value().with_description(
         "OSS access key ID")
     OSS_ACCESS_KEY_SECRET = ConfigOptions.key(
@@ -50,6 +52,9 @@ class OssOptions:
 
 
 class S3Options:
+    CHECKSUM_COMPATIBILITY_AUTO_CONFIGURE = (
+        ConfigOptions.key("fs.s3.checksum-compatibility.auto-configure").boolean_type().default_value(True)
+        .with_description("Apply a process-wide optional-checksum default for PyArrow OSS/custom S3 clients."))
     S3_ACCESS_KEY_ID = ConfigOptions.key("fs.s3.accessKeyId").string_type().no_default_value().with_description(
         "S3 access key ID")
     S3_ACCESS_KEY_SECRET = ConfigOptions.key("fs.s3.accessKeySecret").string_type().no_default_value().with_description(

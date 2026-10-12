@@ -165,7 +165,8 @@ def extract_array(batch, path):
     parents = []
     for name in path[1:]:
         if pa.types.is_struct(array.type):
-            parents.append(pc.is_null(array))
+            if array.null_count:
+                parents.append(pc.is_null(array))
             array = array.field(name)
         elif pa.types.is_map(array.type):
             array = pc.map_lookup(array, name, 'first')

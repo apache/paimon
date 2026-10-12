@@ -139,6 +139,37 @@ class FormatTableMosaicReadTest {
     }
 
     @Test
+    void testMosaicSplitOverridesTableFormat() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("a", DataTypes.STRING())
+                        .field("dt", DataTypes.STRING())
+                        .build();
+        FormatTable table =
+                buildFormatTable(rowType, Collections.singletonList("dt"), new HashMap<>());
+        writeAll(
+                table,
+                Collections.singletonList(
+                        GenericRow.of(
+                                BinaryString.fromString("value"), BinaryString.fromString("p"))));
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        FormatTable readerTable = table.copy(Collections.singletonMap("file.format", "parquet"));
+        List<String> values = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader =
+                    readerTable.newReadBuilder().newRead().createReader(split)) {
+                reader.forEachRemaining(
+                        row ->
+                                values.add(
+                                        row.getString(0).toString()
+                                                + "/"
+                                                + row.getString(1).toString()));
+            }
+        }
+        assertThat(values).containsExactly("value/p");
+    }
+
+    @Test
     void testInvalidCompressionPropagatedFromWriter() {
         RowType rowType = RowType.builder().field("a", DataTypes.STRING()).build();
         Map<String, String> options = new HashMap<>();

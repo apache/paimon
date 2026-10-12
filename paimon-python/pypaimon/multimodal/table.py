@@ -102,6 +102,12 @@ class MultimodalTable:
         self.raw_table = raw_table
         self.table = raw_table
 
+    def copy(self, options: dict) -> 'MultimodalTable':
+        """Return a table view with dynamic Paimon options."""
+        raw_table = self.raw_table.copy(options)
+        return MultimodalTable(
+            self.catalog, raw_table.identifier.get_full_name(), raw_table)
+
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         write_builder = self.raw_table.new_batch_write_builder()
@@ -534,9 +540,11 @@ class MultimodalTable:
             pre_filter=pre_filter,
         )
 
-    def create_index(self, column, index_type, options=None):
+    def create_index(self, column, index_type, options=None, *, execution="local",
+                     concurrency=None, ray_remote_args=None):
         return self.raw_table.create_global_index(
-            column, index_type=_normalize_index_type(index_type), options=options)
+            column, index_type=_normalize_index_type(index_type), options=options,
+            execution=execution, concurrency=concurrency, ray_remote_args=ray_remote_args)
 
     def _merge(
             self,

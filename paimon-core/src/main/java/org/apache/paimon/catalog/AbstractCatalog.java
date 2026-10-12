@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
-import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -30,6 +29,7 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -80,8 +80,6 @@ import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -122,19 +120,28 @@ public abstract class AbstractCatalog implements Catalog {
         return fileIO;
     }
 
+    @Override
+    public Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        return lockFactory()
+                .map(
+                        factory ->
+                                factory.createLock(
+                                        lockContext().orElse(null),
+                                        identifier,
+                                        tableUuid,
+                                        commitUser,
+                                        tableOptions))
+                .map(Lock::reentrant)
+                .orElseGet(Lock::empty);
+    }
+
+    /** Lock factory selected by the catalog's own locking policy. */
     public Optional<CatalogLockFactory> lockFactory() {
-        if (!lockEnabled()) {
-            return Optional.empty();
-        }
-
-        String lock = context.options().get(LOCK_TYPE);
-        if (lock == null) {
-            return defaultLockFactory();
-        }
-
-        return Optional.of(
-                FactoryUtil.discoverFactory(
-                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
+        return Optional.empty();
     }
 
     public Optional<CatalogLockFactory> defaultLockFactory() {
@@ -146,7 +153,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean lockEnabled() {
-        return context.options().getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
+        return false;
     }
 
     protected boolean allowCustomTablePath() {

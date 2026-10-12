@@ -22,12 +22,14 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -66,6 +68,7 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 /** Test case for sorted global indexes. */
 public class SortedGlobalIndexITCase extends CatalogITCaseBase {
@@ -100,6 +103,78 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
 
         // assert select with filter
         assertThat(sql("SELECT * FROM T WHERE id = 100")).containsOnly(Row.of(100, "name_100"));
+    }
+
+    @Test
+    public void testGroupedBTreeIndexes() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_GROUPED (a INT, b INT, c INT, d INT, e INT) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true', "
+                        + "'sorted-index.records-per-file' = '3', 'sorted-index.build.max-parallelism' = '2')");
+        sql(
+                "INSERT INTO T_GROUPED VALUES "
+                        + IntStream.range(0, 12)
+                                .mapToObj(
+                                        i ->
+                                                String.format(
+                                                        "(%d, %d, %d, %d, %s)",
+                                                        i,
+                                                        i % 4,
+                                                        i % 3,
+                                                        i % 5,
+                                                        i == 7 ? "CAST(NULL AS INT)" : i))
+                                .collect(Collectors.joining(",")));
+        // Preserve composite key order and distinguish definitions sharing their first column.
+        List<List<String>> definitions =
+                Arrays.asList(
+                        Collections.singletonList("a"),
+                        Arrays.asList("d", "b", "c"),
+                        Collections.singletonList("e"),
+                        Collections.singletonList("d"));
+        FileStoreTable table = paimonTable("T_GROUPED");
+        Options userOptions = new Options(table.options());
+        long snapshot = table.snapshotManager().latestSnapshot().id();
+        SortedIndexTopoBuilder.buildIndexAndExecute(
+                streamExecutionEnvironmentBuilder().batchMode().parallelism(2).build(),
+                table,
+                definitions,
+                "btree",
+                null,
+                userOptions);
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshot + 1);
+        Map<List<Integer>, Long> rowCountsByFields =
+                indexEntries(table, "btree").stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        index ->
+                                                index.indexFile()
+                                                        .globalIndexMeta()
+                                                        .getIndexedFieldIds(),
+                                        Collectors.summingLong(
+                                                index -> index.indexFile().rowCount())));
+        assertThat(rowCountsByFields)
+                .containsOnly(
+                        entry(Collections.singletonList(0), 12L),
+                        entry(Arrays.asList(3, 1, 2), 12L),
+                        entry(Collections.singletonList(4), 12L),
+                        entry(Collections.singletonList(3), 12L));
+        assertThat(sql("SELECT a FROM T_GROUPED WHERE a = 7")).containsExactly(Row.of(7));
+        assertThat(sql("SELECT a FROM T_GROUPED WHERE d = 2 AND b = 3 AND c = 1"))
+                .containsExactly(Row.of(7));
+        assertThat(sql("SELECT a FROM T_GROUPED WHERE e IS NULL")).containsExactly(Row.of(7));
+
+        Set<String> indexedFiles = fileNames(indexEntries(table, "btree"));
+        SortedIndexTopoBuilder.buildIndexAndExecute(
+                streamExecutionEnvironmentBuilder().batchMode().parallelism(2).build(),
+                table,
+                definitions,
+                "btree",
+                null,
+                userOptions);
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshot + 1);
+        assertThat(fileNames(indexEntries(table, "btree"))).isEqualTo(indexedFiles);
     }
 
     @Test

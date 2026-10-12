@@ -23,6 +23,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
@@ -151,6 +152,45 @@ def test_cross_partition_rowkind_and_row_input(tmp_path):
         commit.close()
     for native in (False, True):
         assert _rows(table, native) == [('x', 'a', 1, 30)]
+
+
+def test_cross_partition_internal_row_kinds_and_migration_deletes(tmp_path):
+    table = _table(tmp_path, {'changelog-producer': 'input'})
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    assert isinstance(writer, NativeTableWrite)
+    try:
+        for values, kind in [
+            (['x', 'a', 1, 10], RowKind.INSERT),
+            (['x', 'b', 1, 20], RowKind.UPDATE_AFTER),
+            (['x', 'b', 1, 30], RowKind.UPDATE_BEFORE),
+            (['x', 'b', 1, 40], RowKind.DELETE),
+        ]:
+            writer.write_row(GenericRow(values, table.fields, kind))
+        assert writer._python_writer is None
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    for native in (False, True):
+        assert _rows(table, native) == []
+        builder = table.copy({
+            'scan.native-plan.enabled': str(native).lower(),
+            'read.native.enabled': str(native).lower(),
+            'scan.mode': 'incremental',
+            'incremental-between-timestamp': '0,9223372036854775807',
+        }).new_read_builder()
+        plan = builder.new_scan().plan()
+        read = builder.new_read()
+        read.include_row_kind = True
+        if native:
+            with patch.object(read, '_create_split_read', side_effect=AssertionError('fallback')):
+                rows = read.to_arrow(plan.splits(), parallelism=1).to_pylist()
+        else:
+            rows = read.to_arrow(plan.splits(), parallelism=1).to_pylist()
+        assert sorted((row['_row_kind'], row['p'], row['v']) for row in rows) == [
+            ('+I', 'a', 10), ('+U', 'b', 20), ('-D', 'a', 20),
+            ('-D', 'b', 40), ('-U', 'b', 30)]
 
 
 @pytest.mark.parametrize('committed', [False, True])

@@ -39,15 +39,12 @@ def native_commit_available() -> bool:
 
 
 def native_messages_supported(table, messages) -> bool:
-    path_factory = table.path_factory()
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
             return False
         partition = tuple(message.partition)
-        bucket_path = path_factory.bucket_path(
-            partition, message.bucket, canonical_partition=True)
         for file in message.new_files + message.changelog_files:
             if file.external_path:
                 continue
@@ -56,16 +53,19 @@ def native_messages_supported(table, messages) -> bool:
             if file.file_path:
                 if str(file.file_path) != expected:
                     return False
-            elif path_factory.bucket_path(partition, message.bucket) != bucket_path:
-                # The message does not say which of the two partition layouts
-                # contains the file. Use Python's path-aware commit and abort.
-                return False
     return True
 
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
     if not _rest_catalog_supported(table) or not native_commit_available():
+        return None
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.write.native_write import _native_partition_types_supported
+    if not _native_partition_types_supported(
+            PyarrowFieldParser.from_paimon_schema(table.table_schema.fields), table.partition_keys,
+            table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -184,3 +184,25 @@ def from_native_commit_messages(table, messages):
             file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
                 table, message.partition, message.bucket, file.file_name)
     return decoded
+
+
+def native_commit_callback(table, callbacks):
+    """Translate the native notification into the existing Python context."""
+    from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+    from pypaimon.snapshot.snapshot import Snapshot
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.write.commit_callback import CommitCallbackContext
+
+    def notify(native_context):
+        entries = []
+        for entry in native_context.commit_entries:
+            message = from_native_commit_messages(table, [entry._to_commit_message()])[0]
+            entries.append(ManifestEntry(
+                entry.kind, GenericRow(list(message.partition), table.partition_keys_fields),
+                entry.bucket, entry.total_buckets, message.new_files[0]))
+        context = CommitCallbackContext(
+            JSON.from_json(native_context._snapshot_json(), Snapshot), entries, native_context.identifier)
+        for callback in callbacks:
+            callback.call(context)
+
+    return notify

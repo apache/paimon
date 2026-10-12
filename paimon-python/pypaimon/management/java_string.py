@@ -25,3 +25,8 @@ def is_blank(value: Optional[str]) -> bool:
 def java_length(value: str) -> int:
     """Java ``String.length()``: UTF-16 code units, not code points."""
     return len(value.encode('utf-16-le', 'surrogatepass')) // 2
+
+
+def utf8_length(value: str) -> int:
+    """Java ``getBytes(UTF_8).length``: an unpaired surrogate counts as one byte."""
+    return len(value.encode('utf-8', 'replace'))

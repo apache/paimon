@@ -43,6 +43,7 @@ import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
 import org.apache.paimon.spark.procedure.GrantPermissionProcedure;
+import org.apache.paimon.spark.procedure.ImportFilesProcedure;
 import org.apache.paimon.spark.procedure.ListPermissionsProcedure;
 import org.apache.paimon.spark.procedure.ListPoliciesProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
@@ -124,6 +125,7 @@ public class SparkProcedures {
         procedureBuilders.put("rescale", RescaleProcedure::builder);
         procedureBuilders.put("migrate_database", MigrateDatabaseProcedure::builder);
         procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
+        procedureBuilders.put("import_files", ImportFilesProcedure::builder);
         procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
         procedureBuilders.put("remove_orphan_blobs", RemoveOrphanBlobsProcedure::builder);
         procedureBuilders.put("remove_unexisting_files", RemoveUnexistingFilesProcedure::builder);

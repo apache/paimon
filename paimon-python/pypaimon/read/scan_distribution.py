@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Row-position selection shared by the Python and native planning adapters."""
+"""Worker sharding and row-position selection for Python scan planning."""
 
 from typing import List, Tuple
 
@@ -41,6 +41,20 @@ def shard_range(total: int, index: int, count: int) -> Tuple[int, int]:
     base, remainder = divmod(total, count)
     start = index * base + min(index, remainder)
     return start, start + base + int(index < remainder)
+
+
+def java_file_name_shard(file_name: str, count: int) -> int:
+    """Java SnapshotReaderImpl: abs(String.hashCode(file_name) % count)."""
+    encoded = file_name.encode('utf-16-be', 'surrogatepass')
+    hash_code = 0
+    for offset in range(0, len(encoded), 2):
+        unit = (encoded[offset] << 8) | encoded[offset + 1]
+        hash_code = (31 * hash_code + unit) & 0xffffffff
+    if hash_code >= 0x80000000:
+        hash_code -= 0x100000000
+    # Python integers do not overflow for Integer.MIN_VALUE. abs(hash) % count
+    # therefore equals Java's abs(hash % count), including negative hashes.
+    return abs(hash_code) % count
 
 
 def slice_append_splits(splits: List[Split], start: int, end: int) -> List[Split]:

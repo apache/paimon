@@ -114,11 +114,7 @@ def read_by_row_id(
     if not table.options.row_tracking_enabled():
         raise ValueError(
             f"read_by_row_id requires 'row-tracking.enabled'='true' on '{target}'.")
-    if table.options.deletion_vectors_enabled():
-        # A DV-deleted row still lives in its file, so slicing would surface it.
-        raise ValueError(
-            f"read_by_row_id does not support deletion-vectors-enabled tables yet: "
-            f"'{target}'.")
+
     if dynamic_options:
         # Flipping these would bypass the checks above.
         bad = sorted({"data-evolution.enabled", "row-tracking.enabled",
@@ -176,8 +172,8 @@ def read_by_row_id(
         if not CoreOptions(Options(base_schema.options)).row_tracking_enabled():
             raise ValueError(
                 f"the resolved snapshot ({base.id}) predates row-tracking; read_by_row_id needs it.")
-    # No DV (rejected above) -> total_record_count is the live row count; 0 = empty.
-    if base is None or base.total_record_count == 0:
+    if base is None or (base.total_record_count == 0
+                        and not table.options.deletion_vectors_enabled()):
         # Force an action on the source only in this degenerate branch (like update_by_row_id).
         if rid_ds.limit(1).count() > 0:
             raise ValueError(

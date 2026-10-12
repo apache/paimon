@@ -610,7 +610,12 @@ class RayShuffleTest(unittest.TestCase):
 
         result = self._read_table(identifier)
         self.assertEqual(len(result), 1)
-        self.assertTrue(result.iloc[0]['value'].startswith('0799-'))
+        # Ray's group-by shuffle does not preserve source row order inside a
+        # group. Without a sequence field, any of the duplicate-key input
+        # rows may therefore win; this test only requires one group writer.
+        self.assertIn(
+            result.iloc[0]['value'], rows.column('value').to_pylist()
+        )
 
         # A subsequent writer must continue after the persisted sequence,
         # including when native buffering removed the earlier duplicate rows.

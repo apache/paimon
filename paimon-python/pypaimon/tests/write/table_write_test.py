@@ -225,9 +225,10 @@ class TableWriteTest(unittest.TestCase):
         return out
 
     @staticmethod
-    def _mock_table_write(partitions, buckets):
+    def _mock_table_write(partitions, buckets, schema):
         table_write = object.__new__(TableWrite)
         table_write.table = Mock(is_primary_key_table=False)
+        table_write.table_pyarrow_schema = schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
         table_write.file_store_write = Mock()
@@ -242,7 +243,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b'],
         })
         table_write = self._mock_table_write(
-            [('p1',), ('p1',)], [0, 0])
+            [('p1',), ('p1',)], [0, 0], data.schema)
 
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
@@ -258,7 +259,7 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = self._mock_table_write(
             [('p1',), ('p1',), ('p2',), ('p2',)],
-            [0, 0, 1, 1])
+            [0, 0, 1, 1], data.schema)
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
 
@@ -280,7 +281,7 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = self._mock_table_write(
             [('p1',), ('p2',), ('p1',), ('p2',)],
-            [0, 1, 0, 1])
+            [0, 1, 0, 1], data.schema)
 
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
             table_write.write_arrow_batch(data)
@@ -303,6 +304,7 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = object.__new__(TableWrite)
         table_write.table = Mock(is_primary_key_table=False)
+        table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
@@ -328,6 +330,7 @@ class TableWriteTest(unittest.TestCase):
         })
         table_write = object.__new__(TableWrite)
         table_write.table = Mock(is_primary_key_table=False)
+        table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()

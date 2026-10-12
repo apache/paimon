@@ -38,7 +38,6 @@ from pypaimon.read.native_plan import (
     _native_read_builder,
     _predicate_to_native,
     _resolved_schema_json,
-    _restore_python_partition_paths,
     native_family_search_modes_available,
     native_plan,
     native_version_at_least,
@@ -720,6 +719,26 @@ class NativePlanTest(unittest.TestCase):
             'metastore': 'filesystem',
         })
 
+    def test_native_cpp_options_survive_python_backend_selection(self):
+        from pypaimon.filesystem.oss_file_io import OssFileIO
+        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+
+        options = Options({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'legacy',
+                           'fs.oss.cpp.library.path': '/test/libbridge.so',
+                           'fs.oss.cpp.max.concurrent.requests': '4'})
+        for loader_class in (FileSystemCatalogLoader, RESTCatalogLoader):
+            table = Mock(table_path='oss://bucket/table')
+            table.catalog_environment.catalog_loader = loader_class(
+                CatalogContext.create_from_options(options))
+            with patch.object(OssFileIO, '_initialize_oss_fs'), patch(
+                    'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True):
+                table.file_io = OssFileIO(table.table_path, options)
+                native_options = _catalog_options(table)
+            for key, value in options.to_map().items():
+                self.assertEqual(native_options[key], value)
+            if loader_class is FileSystemCatalogLoader:
+                self.assertEqual(_resolved_schema_file_io_options(table), options.to_map())
+
     def test_catalog_options_reject_loader_subclass(self):
         class RoutedFileSystemLoader(FileSystemCatalogLoader):
             pass
@@ -812,87 +831,6 @@ class NativePlanTest(unittest.TestCase):
                 self.assertEqual(
                     native_family_search_modes_available(), expected)
 
-    def test_partition_path_prefers_existing_python_legacy_path(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = [Mock(base_name='data.parquet')]
-        data_file = Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
-        )
-        split = Mock(
-            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-        split._native_split = object()
-
-        _restore_python_partition_paths(table, [split])
-
-        self.assertEqual(
-            data_file.file_path,
-            '/warehouse/t/p=a/b/bucket-0/data.parquet',
-        )
-        self.assertIsNone(split._native_split)
-
-    def test_partition_path_keeps_existing_rust_path(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = []
-        rust_path = '/warehouse/t/p=a%2Fb/bucket-0/data.parquet'
-        data_file = Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path=rust_path,
-        )
-        split = Mock(
-            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-
-        _restore_python_partition_paths(table, [split])
-
-        self.assertEqual(data_file.file_path, rust_path)
-
-    def test_partition_path_lists_each_bucket_once(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.return_value = [
-            Mock(base_name='a.parquet'), Mock(base_name='b.parquet')]
-        splits = [
-            Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
-                external_path=None,
-                file_name=name,
-                file_path='/warehouse/t/p=a%%2Fb/bucket-0/%s' % name,
-            )])
-            for name in ('a.parquet', 'b.parquet')
-        ]
-
-        _restore_python_partition_paths(table, splits)
-
-        table.file_io.list_status.assert_called_once_with(
-            '/warehouse/t/p=a/b/bucket-0')
-        self.assertEqual(
-            [split.files[0].file_path for split in splits],
-            [
-                '/warehouse/t/p=a/b/bucket-0/a.parquet',
-                '/warehouse/t/p=a/b/bucket-0/b.parquet',
-            ],
-        )
-
-    def test_partition_path_listing_failure_is_not_hidden(self):
-        table = Mock(partition_keys=['p'])
-        table.path_factory.return_value.bucket_path.return_value = (
-            '/warehouse/t/p=a/b/bucket-0')
-        table.file_io.list_status.side_effect = PermissionError('denied')
-        split = Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
-            external_path=None,
-            file_name='data.parquet',
-            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
-        )])
-
-        with self.assertRaises(PermissionError):
-            _restore_python_partition_paths(table, [split])
-
     def test_rest_catalog_retains_response_for_native_reads(self):
         from pypaimon.api.api_response import GetTableResponse
         from pypaimon.catalog.rest.rest_catalog import RESTCatalog
@@ -957,13 +895,15 @@ class NativePlanTest(unittest.TestCase):
         from pypaimon.common.identifier import Identifier
         from pypaimon.read.native_plan import _native_read_builder
 
-        response = json.dumps({'name': 't$branch_dev', 'path': '/warehouse/t',
+        response = json.dumps({'name': 't$branch_dev', 'path': 'oss://bucket/t',
                                'id': 'uuid', 'isExternal': False})
         loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({
-            'uri': 'http://localhost:1', 'warehouse': 'test', 'data-token.enabled': 'true'})))
+            'uri': 'http://localhost:1', 'warehouse': 'test', 'data-token.enabled': 'true',
+            'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'legacy',
+            'fs.oss.cpp.library.path': '/test/libbridge.so'})))
         table = Mock()
         table.identifier = Identifier('db', 't', branch='dev')
-        table.table_path = '/warehouse/t'
+        table.table_path = 'oss://bucket/t'
         table.current_branch.return_value = 'dev'
         table.catalog_environment = CatalogEnvironment(
             identifier=table.identifier, uuid='uuid', catalog_loader=loader,
@@ -984,13 +924,24 @@ class NativePlanTest(unittest.TestCase):
                 patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved):
             for _ in range(3):
                 self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
+            native_table.copy_with_pinned_snapshot.assert_not_called()
+            # Capturing empty uses a read-view copy, keeping the cached base
+            # reusable when a later caller has no captured snapshot.
+            pinned_table = native_table.copy_with_pinned_snapshot.return_value
+            table._read_snapshot = None
+            self.assertIs(_native_read_builder(table), pinned_table.new_read_builder.return_value)
+            native_table.copy_with_pinned_snapshot.assert_called_once_with(None)
+            del table._read_snapshot
+            self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
         fake_df.PaimonCatalog.assert_not_called()
         fake_df.Table.from_rest_response.assert_called_once_with(
             response, database='db', table='t$branch_dev',
             rest_options=_catalog_options(table))
+        self.assertEqual(fake_df.Table.from_rest_response.call_args[1]['rest_options']['fs.oss.impl'], 'cpp')
         self.assertEqual(native_table.copy_with_resolved_schema.call_args_list,
-                         [call(resolved, branch='dev')] * 3)
-        self.assertEqual(native_table.new_read_builder.call_count, 3)
+                         [call(resolved, branch='dev')] * 5)
+        self.assertEqual(native_table.new_read_builder.call_count, 4)
+        pinned_table.new_read_builder.assert_called_once_with()
 
     def test_native_rest_cache_invalidation_and_serialization(self):
         import pickle
@@ -1115,6 +1066,104 @@ class NativePlanTest(unittest.TestCase):
                 release.set()
                 holder.join(5)
 
+    def test_native_rest_token_lookup_after_fork_avoids_inherited_lock(self):
+        import multiprocessing
+        from threading import Event, Thread
+
+        from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.read.native_plan import _NativeRestTableCache, _rest_data_token
+
+        if 'fork' not in multiprocessing.get_all_start_methods():
+            self.skipTest('fork required')
+        context = multiprocessing.get_context('fork')
+        identifier = Identifier('default', 't')
+        path = 'oss://bucket/table'
+        file_io = RESTTokenFileIO(identifier, path)
+        table = SimpleNamespace(file_io=file_io, identifier=identifier,
+                                table_path=path, current_branch=lambda: 'main')
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response.return_value = object()
+        cache = _NativeRestTableCache()
+        held, release = Event(), Event()
+
+        def hold_token_lock():
+            with RESTTokenFileIO._TOKEN_LOCKS_LOCK:
+                held.set()
+                release.wait()
+
+        def child(connection):
+            try:
+                native_table = cache.get(
+                    'response', 'default', 't', {},
+                    token_loader=lambda: _rest_data_token(table))
+                connection.send(('ok', native_table is not None))
+            except BaseException as exc:
+                connection.send(('error', repr(exc)))
+            finally:
+                connection.close()
+
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}), \
+                patch.object(file_io, '_build_cache_key', return_value='token-key'):
+            holder = Thread(target=hold_token_lock, daemon=True)
+            holder.start()
+            self.assertTrue(held.wait(5))
+            receiving, sending = context.Pipe(duplex=False)
+            process = context.Process(target=child, args=(sending,))
+            try:
+                process.start()
+                sending.close()
+                self.assertTrue(receiving.poll(3), 'child deadlocked on inherited token lock')
+                self.assertEqual(receiving.recv(), ('ok', True))
+                process.join(5)
+                self.assertEqual(process.exitcode, 0)
+            finally:
+                if process.is_alive():
+                    process.terminate()
+                    process.join(5)
+                receiving.close()
+                sending.close()
+                release.set()
+                holder.join(5)
+
+    def test_native_rest_cache_passes_only_existing_token(self):
+        import time
+
+        from pypaimon.catalog.rest.rest_token import RESTToken
+        from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.read.native_plan import _NativeRestTableCache, _rest_data_token
+
+        identifier = Identifier('default', 't')
+        path = 'oss://bucket/table'
+        file_io = RESTTokenFileIO(identifier, path)
+        token = RESTToken({'key': 'value'}, int(time.time() * 1000) + 7_200_000)
+        file_io.token = token
+        table = SimpleNamespace(file_io=file_io, identifier=identifier,
+                                table_path=path, current_branch=lambda: 'main')
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        fake_df.Table.from_rest_response_with_token.return_value = object()
+
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}), \
+                patch.object(file_io, 'valid_token',
+                             side_effect=AssertionError('must not refresh')):
+            cache = _NativeRestTableCache()
+            cache.get('response', 'default', 't', {},
+                      token_loader=lambda: _rest_data_token(table))
+            fake_df.Table.from_rest_response_with_token.assert_called_once_with(
+                'response', database='default', table='t', rest_options={},
+                data_token=token.token, expires_at_millis=token.expire_at_millis)
+            fake_df.Table.from_rest_response.assert_not_called()
+
+            file_io.token = None
+            cache = _NativeRestTableCache()
+            cache.get('response', 'default', 't', {},
+                      token_loader=lambda: _rest_data_token(table))
+            fake_df.Table.from_rest_response.assert_called_once_with(
+                'response', database='default', table='t', rest_options={})
+
     def test_native_rest_cache_retries_failed_construction(self):
         from pypaimon.read.native_plan import _NativeRestTableCache
 
@@ -1191,6 +1240,7 @@ class NativePlanTest(unittest.TestCase):
             plan = native_plan(table)
             self.assertEqual(plan.snapshot_id, 7)
             scan.plan.assert_called_once_with()
+            rt.copy_with_pinned_snapshot.assert_not_called()
             rt.branch.return_value = 'main'
             with self.assertRaisesRegex(RuntimeError, 'requested branch'):
                 native_plan(table)
@@ -1334,18 +1384,40 @@ class NativePlanTest(unittest.TestCase):
         native.assert_not_called()
         fs.scan.assert_not_called()
 
-    def test_primary_key_shard_defers_limit_until_after_bucket_selection(self):
+    def test_primary_key_shard_and_limit_are_planned_in_rust(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.is_primary_key_table = True
+        scan.table.options.global_index_enabled.return_value = False
         scan.limit = 1
         fs.idx_of_this_subtask, fs.number_of_para_subtasks = 1, 2
-        splits = [Mock(bucket=0), Mock(bucket=1)]
-        fs._apply_push_down_limit.side_effect = lambda selected: selected
+        # A file-name shard may own files from any bucket; never filter the
+        # already-selected Rust splits again using a Python bucket rule.
+        splits = [Mock(bucket=0)]
         with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits, 3)) as native:
-            self.assertEqual(scan.plan().splits(), [splits[1]])
-        self.assertIsNone(native.call_args[1]['limit'])
-        fs._apply_push_down_limit.assert_called_once_with([splits[1]])
+            self.assertEqual(scan.plan().splits(), splits)
+        self.assertEqual(native.call_args[1]['shard'], (1, 2))
+        self.assertEqual(native.call_args[1]['limit'], 1)
+        fs._apply_push_down_limit.assert_not_called()
+        fs.scan.assert_not_called()
+
+    def test_primary_key_shard_uses_native_index_refinement(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(True, fs)
+        scan.table.is_primary_key_table = True
+        scan.table.options.global_index_enabled.return_value = True
+        scan.limit = 1
+        fs.idx_of_this_subtask, fs.number_of_para_subtasks = 1, 2
+        scan.predicate = Mock()
+        splits = [Mock(bucket=0), Mock(bucket=0)]
+        # Rust receives the predicate and owns refinement before LIMIT.
+        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits[1:], 3)) as native:
+            self.assertEqual(scan.plan().splits(), splits[1:])
+        self.assertEqual(native.call_args[1]['shard'], (1, 2))
+        self.assertEqual(native.call_args[1]['limit'], 1)
+        self.assertIs(native.call_args[1]['predicate'], scan.predicate)
+        fs._apply_primary_key_sorted_indexes.assert_not_called()
+        fs._apply_push_down_limit.assert_not_called()
         fs.scan.assert_not_called()
 
     def test_native_plan_requires_split_api(self):

@@ -50,7 +50,7 @@ Choose a group, then use the page contents to jump to a procedure:
 | --- | --- |
 | [Compaction and cleanup](./procedures/maintenance) | Compact files and manifests, rescale buckets, expire history, and repair metadata. |
 | [Tags, branches, and rollback](./procedures/versions) | Create and manage versions, merge branches, or restore table state. |
-| [Migration and copy](./procedures/migration) | Migrate Hive tables or copy Paimon files. |
+| [Migration and copy](./procedures/migration) | Migrate Hive tables, import external files, or copy Paimon files. |
 | [Indexes and row IDs](./procedures/indexes) | Build or drop indexes and reassign row IDs. |
 | [Consumers, views, and functions](./procedures/metadata) | Manage reader progress, partition completion, and catalog objects. |
 
@@ -98,6 +98,7 @@ Choose a group, then use the page contents to jump to a procedure:
 
 [`migrate_database`](./procedures/migration#migrate_database),
 [`migrate_table`](./procedures/migration#migrate_table),
+[`import_files`](./procedures/migration#import_files),
 [`copy`](./procedures/migration#copy)
 
 ### Indexes and Row IDs

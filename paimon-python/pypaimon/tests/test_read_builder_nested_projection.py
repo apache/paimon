@@ -405,14 +405,39 @@ class StreamReadBuilderNestedProjectionTest(_ReadBuilderTestBase):
             batch._nested_name_paths(),
             stream._nested_name_paths(),
         )
-        self.assertEqual(
-            [field.name for field in batch.new_scan()._read_type],
-            [field.name for field in stream.new_streaming_scan()._read_type],
-        )
-
         table_read = stream.with_include_row_kind().new_read()
         self.assertEqual(batch._nested_name_paths(), table_read.nested_name_paths)
         self.assertTrue(table_read.include_row_kind)
+
+        # Exercise the configured scan through its public iterator. Native
+        # owns its read type in Rust and does not expose Python scanner fields.
+        write_builder = self.table.new_batch_write_builder()
+        writer, commit = write_builder.new_write(), write_builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pydict({
+                'pk': [1, 2],
+                'mv': [{'latest_version': 7, 'latest_value': 'unused'}, None],
+                'val': ['unused', 'unused'],
+                'attrs': [[('key.with.dots', 42), ('other', 99)], []],
+            }, schema=self.pa_schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
+        expected = {'mv_latest_version': [7, None],
+                    'attrs_key_with_dots': [42, None], 'pk': [1, 2]}
+        batch_plan = batch.new_scan().plan()
+        self.assertEqual(expected, batch.new_read().to_arrow(
+            batch_plan.splits(), parallelism=1).to_pydict())
+        iterator = stream.new_streaming_scan().stream_sync()
+        try:
+            stream_plan = next(iterator)
+            actual = table_read.to_arrow(stream_plan.splits(), parallelism=1).to_pydict()
+        finally:
+            iterator.close()
+        self.assertEqual(['+I', '+I'], actual.pop('_row_kind'))
+        self.assertEqual(expected, actual)
 
 
 if __name__ == '__main__':

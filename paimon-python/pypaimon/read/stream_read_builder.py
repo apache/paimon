@@ -22,12 +22,15 @@ This module provides a builder for configuring streaming reads from Paimon
 tables, similar to ReadBuilder but for continuous streaming use cases.
 """
 
+import logging
+
 from typing import Callable, Dict, List, Optional, Set, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.read.read_builder import ReadBuilder
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import DataField
 
@@ -122,10 +125,21 @@ class StreamReadBuilder:
         bucket_set: Set[int] = set(bucket_ids)
         return self.with_bucket_filter(lambda bucket: bucket in bucket_set)
 
-    def new_streaming_scan(self) -> AsyncStreamingTableScan:
-        """Create a new AsyncStreamingTableScan with this builder's settings."""
+    def new_streaming_scan(self) -> Union[AsyncStreamingTableScan, StreamTableScan]:
+        """Create a stateful streaming scan using the configured backend."""
         projection = self._projection_builder()
         projection._validate_map_key_filter()
+        if (self.table.options.native_plan_enabled()
+                and self.table.catalog_environment.table_query_auth(
+                    self.table.options, self.table.identifier) is None):
+            try:
+                return StreamTableScan(
+                    self.table, predicate=self._predicate, read_type=projection.read_type(),
+                    poll_interval_ms=self._poll_interval_ms, bucket_filter=self._bucket_filter,
+                    consumer_id=self._consumer_id)
+            except Exception as error:
+                _raise_if_native_fork_safety_error(error)
+                logging.warning("Cannot create Native stream scan, using Python: %s", error)
         scan = AsyncStreamingTableScan(
             table=self.table,
             predicate=self._predicate,

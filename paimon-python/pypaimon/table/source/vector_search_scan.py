@@ -20,7 +20,8 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-from pypaimon.common.options.core_options import GlobalIndexSearchMode
+from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
+from pypaimon.common.options.options import Options
 from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 from pypaimon.globalindex.data_evolution_global_index_scanner import (
     is_supported_scalar_index,
@@ -169,7 +170,12 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 )
             )
 
-        vector_search_mode = self._table.options.vector_index_search_mode()
+        # Java's DataEvolutionVectorScan overlays query options before resolving
+        # the family search modes, without changing the table's configuration.
+        effective_options = dict(self._table.options.options.to_map())
+        effective_options.update(self._options)
+        effective_core = CoreOptions(Options(effective_options))
+        vector_search_mode = effective_core.vector_index_search_mode()
         raw_row_ranges = DataEvolutionGlobalIndexCoverage(
             self._table,
             snapshot,
@@ -194,7 +200,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             ).unindexed_ranges(
                 self._table.fields,
                 self._filter,
-                search_mode=self._table.options.scalar_index_search_mode(),
+                search_mode=effective_core.scalar_index_search_mode(),
             )
             if vector_search_mode == GlobalIndexSearchMode.FAST:
                 scalar_unindexed_ranges = Range.and_(

@@ -19,19 +19,68 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.concurrent.Callable;
 
-/** Interface to commit snapshot atomically. */
-public interface SnapshotCommit extends AutoCloseable {
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-    boolean commit(
+/** A snapshot publisher bound to the lock protecting its preparation and publication. */
+public abstract class SnapshotCommit implements Lock {
+
+    private final Lock lock;
+
+    protected SnapshotCommit(Lock lock) {
+        this.lock =
+                Lock.reentrant(checkNotNull(lock, "Snapshot publication requires a bound lock."));
+    }
+
+    /** Publish with the bound lock, reusing an enclosing preparation scope when present. */
+    public final boolean commit(
+            @Nullable String baseSnapshotUuid,
+            Snapshot snapshot,
+            String branch,
+            List<PartitionStatistics> statistics)
+            throws Exception {
+        return runWithLock(() -> commitImpl(baseSnapshotUuid, snapshot, branch, statistics));
+    }
+
+    @Override
+    public final AutoCloseable acquire() throws Exception {
+        return lock.acquire();
+    }
+
+    @Override
+    public final <T> T runWithLock(Callable<T> callable) throws Exception {
+        return lock.runWithLock(callable);
+    }
+
+    @Override
+    public final void ensureValid() {
+        lock.ensureValid();
+    }
+
+    @Override
+    public final void close() throws Exception {
+        try {
+            lock.close();
+        } finally {
+            closeImpl();
+        }
+    }
+
+    /** Backend publication, invoked only after acquiring and validating the bound lock. */
+    protected abstract boolean commitImpl(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             String branch,
             List<PartitionStatistics> statistics)
             throws Exception;
+
+    /** Release backend resources after closing the lock, including when lock closure fails. */
+    protected void closeImpl() throws Exception {}
 }

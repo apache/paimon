@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import ErrorResponse, GetTableResponse, GetTagResponse, PagedList, Partition
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_permission_management import RESTPermissionManagement
+from pypaimon.api.rest_policy_management import RESTPolicyManagement
 from pypaimon.catalog.catalog_exception import IllegalArgumentError, IllegalStateError
 from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
                                          ForbiddenException, BadRequestException,
@@ -48,6 +49,7 @@ from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.management.permission_management import PermissionManagement
+from pypaimon.management.policy_management import PolicyManagement
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
@@ -96,6 +98,9 @@ class RESTCatalog(Catalog):
 
     def permission_management(self) -> PermissionManagement:
         return RESTPermissionManagement(self.rest_api)
+
+    def policy_management(self) -> PolicyManagement:
+        return RESTPolicyManagement(self.rest_api)
 
     def supports_version_management(self) -> bool:
         """
@@ -618,6 +623,24 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def rename_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                   target_tag_name: str) -> None:
+        # The REST API has create, get, list, and delete only. Renaming the
+        # tag file through FileStoreTable would leave the server registry
+        # pointing at a name whose file is gone.
+        raise NotImplementedError(
+            "REST catalog does not support rename_tag. "
+            "The REST API has no rename endpoint."
+        )
+
+    def replace_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                    snapshot_id: Optional[int] = None,
+                    time_retained: Optional[str] = None) -> None:
+        raise NotImplementedError(
+            "REST catalog does not support replace_tag. "
+            "The REST API has no replace endpoint."
+        )
 
     # Branch CRUD: mirrors Java RESTCatalog branch handlers.
     def create_branch(self, identifier: Union[str, Identifier], branch_name: str,

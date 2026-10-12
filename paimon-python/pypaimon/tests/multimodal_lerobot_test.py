@@ -42,6 +42,7 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 import pypaimon.multimodal as pmm
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.connection import MultimodalConnection
 from pypaimon.multimodal.lerobot import load_from_lerobot
@@ -56,6 +57,7 @@ from pypaimon.multimodal.lerobot.dataset import (
     _image_tensor,
     _index_names,
     _open_video_decoder,
+    _reader_metadata,
     _selected_episodes,
     _stack_visual_windows,
     _torch_row,
@@ -148,6 +150,17 @@ def _catalog_metadata(connection, name):
         row["key"]: json.loads(row["value"])
         for row in _catalog_rows(connection, name)
     }
+
+
+def _increment_image(value):
+    return value + 1
+
+
+def _configure_uint8_transform_worker(unused_worker_id):
+    from torch.utils.data import get_worker_info
+    dataset = get_worker_info().dataset
+    dataset.return_uint8 = True
+    dataset.image_transforms = _increment_image
 
 
 class LeRobotValidationTest(unittest.TestCase):
@@ -658,6 +671,69 @@ class LeRobotValidationTest(unittest.TestCase):
             self.assertIs(expected, decoder.get_frames_at(indices=[3]))
             stream.seek.assert_called_once_with(0)
 
+    def test_table_option_limits_video_decoders(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        info = {
+            "codebase_version": "v3.0", "fps": 10,
+            "total_frames": 1, "total_episodes": 1, "total_tasks": 1,
+            "features": {
+                "index": {"dtype": "int64", "shape": [1]},
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "task_index": {"dtype": "int64", "shape": [1]},
+                "camera": {"dtype": "video", "shape": [2, 2, 3],
+                           "names": ["height", "width", "channels"]},
+                "camera_b": {"dtype": "video", "shape": [2, 2, 3],
+                             "names": ["height", "width", "channels"]},
+            },
+        }
+        metadata = _reader_metadata({
+            "repo_id": "test/video-cache-option", "info": info,
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 1, "length": 1,
+                          "tasks": ["pick"]}],
+            "tasks": ["pick"],
+        })
+        module = "pypaimon.multimodal.lerobot.dataset."
+        option = "read.video.max-open-decoders"
+
+        for configured, expected in ((None, 16), ("2", 2)):
+            with self.subTest(configured=configured):
+                options = {} if configured is None else {option: configured}
+                frames = SimpleNamespace(
+                    options=CoreOptions(Options(options)))
+                rows = SimpleNamespace(
+                    _table=frames, num_rows=1, file_io=LocalFileIO(),
+                    close=lambda: None)
+                with patch(module + "_load_dataset", return_value=(frames, metadata)), \
+                        patch(module + "_target_schema",
+                              return_value=_schema_from_info(info)), \
+                        patch(module + "_PaimonTableFrameReader",
+                              return_value=rows):
+                    dataset = pmm.PaimonLeRobotDataset(Mock())
+                try:
+                    self.assertEqual([expected, expected], [
+                        c.max_open_videos for c in dataset.reader._video_collators])
+                finally:
+                    dataset.reader.close()
+
+        for configured in ("0", "bad", True, 1.5):
+            with self.subTest(configured=configured):
+                frames = SimpleNamespace(
+                    options=CoreOptions(Options({option: configured})))
+                rows = SimpleNamespace(
+                    _table=frames, num_rows=1, file_io=LocalFileIO(),
+                    close=lambda: None)
+                with patch(module + "_load_dataset", return_value=(frames, metadata)), \
+                        patch(module + "_target_schema",
+                              return_value=_schema_from_info(info)), \
+                        patch(module + "_PaimonTableFrameReader",
+                              return_value=rows):
+                    with self.assertRaisesRegex(ValueError, option):
+                        pmm.PaimonLeRobotDataset(Mock())
+
     def test_video_batches_include_delta_frames_and_preserve_backends(self):
         try:
             import torch
@@ -930,6 +1006,12 @@ class LeRobotValidationTest(unittest.TestCase):
             sample["action"], torch.tensor([0.0, 1.0, 2.0]))
         self.assertEqual([False, False, False],
                          sample["action_is_pad"].tolist())
+        batch = next(iter(dataset.to_dataloader(
+            batch_size=2, shuffle=False, num_workers=0)))
+        self.assertEqual([0, 1], batch["index"].tolist())
+        self.assertEqual([2, 3], list(batch["action"].shape))
+        with self.assertRaisesRegex(ValueError, "manages collate_fn"):
+            dataset.to_dataloader(batch_size=2, collate_fn=lambda rows: rows)
         dataset.return_uint8 = True
         self.assertTrue(reader.return_uint8)
         with self.assertRaisesRegex(TypeError, "return_uint8"):
@@ -1455,6 +1537,10 @@ class LeRobotValidationTest(unittest.TestCase):
                             item[key], expected.expand(3, 3, 2, 2).float()))
                 result[0][keys[0]].zero_()
                 self.assertEqual(1, result[0][keys[1]][-1, 0, 0, 0].item())
+                batch = reader._get_batch([0, 1], share_memory=False)
+                for key in keys:
+                    self.assertEqual(
+                        [2, 3, 3, 2, 2], list(batch[key].shape))
 
     def test_video_windows_decode_directly_and_fall_back(self):
         try:
@@ -1497,6 +1583,22 @@ class LeRobotValidationTest(unittest.TestCase):
                 self.assertTrue(torch.equal(batch, frames))
                 decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
 
+            decoder.get_frames_at.reset_mock()
+            decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
+            result = _decode_video_windows(
+                plans, rows, [collator], feature, False,
+                return_batch=True, share_memory=True)[key]
+            expected = torch.stack([
+                frames[[1, 0, 0]], frames[[1, 0, 0]]
+            ]).float().div(255)
+            self.assertTrue(result.is_shared())
+            self.assertTrue(torch.equal(result, expected))
+            result[0, 1].zero_()
+            self.assertTrue(torch.equal(result[0, 2], expected[0, 2]))
+            self.assertTrue(torch.equal(result[1], expected[1]))
+            self.assertTrue(torch.equal(frames, batch))
+            decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
+
             for indices in ([0, 1], [1, 0, 0]):
                 decoder.get_frames_at.reset_mock()
                 decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
@@ -1526,6 +1628,18 @@ class LeRobotValidationTest(unittest.TestCase):
             result[2].zero_()
             self.assertTrue(torch.equal(result[1], batch))
             self.assertTrue(torch.equal(batch, frames))
+
+            fixed = [{"windows": {key: window}}
+                     for window in ([1, 0], [2, 3], [0, 1], [3, 2])]
+            result = _decode_video_windows(
+                fixed, separate, [collator], feature, True,
+                return_batch=True, share_memory=True)[key]
+            expected = torch.stack([
+                batch[[1, 0]], batch[[0, 1]],
+                batch[[0, 1]], batch[[1, 0]],
+            ])
+            self.assertTrue(result.is_shared())
+            self.assertTrue(torch.equal(result, expected))
 
             open_decoder.reset_mock()
             mixed = dict(rows)
@@ -3096,6 +3210,16 @@ class LeRobotValidationTest(unittest.TestCase):
                         multiprocessing_context="spawn"):
                     worker_indices.extend(batch["index"].tolist())
                 self.assertEqual(list(range(5)), worker_indices)
+
+                worker_indices = []
+                for batch in dataset.to_dataloader(
+                        batch_size=2,
+                        shuffle=False,
+                        num_workers=2,
+                        multiprocessing_context="spawn"):
+                    worker_indices.extend(batch["index"].tolist())
+                    self.assertTrue(batch["camera"].is_shared())
+                self.assertEqual(list(range(5)), worker_indices)
             finally:
                 dataset.close()
 
@@ -3416,10 +3540,18 @@ class LeRobotImportTest(unittest.TestCase):
         import torch
 
         self.connection.load_from_lerobot("worker_pickle", self.image_source)
-        table = self.connection.get_table("worker_pickle")
-        dataset = pmm.PaimonLeRobotDataset(table, return_uint8=True)
+        snapshots = self.connection.create_lerobot_tag(
+            "worker_pickle", "training")
+        table = self.connection.get_table("worker_pickle").copy({
+            "read.video.max-open-decoders": "2"})
+        dataset = pmm.PaimonLeRobotDataset(
+            table, tag_name="training", return_uint8=True)
         restored = pickle.loads(pickle.dumps(dataset))
 
+        for reader in (dataset.reader, restored.reader):
+            self.assertEqual(snapshots["frames"], reader._snapshot_id)
+            self.assertEqual(
+                2, reader._read_table.options.read_video_max_open_decoders())
         self.assertEqual(dataset.meta.episodes[:], restored.meta.episodes[:])
         self.assertEqual(
             dataset.meta.episodes._fingerprint,
@@ -3925,6 +4057,24 @@ class LeRobotImportTest(unittest.TestCase):
                 multiprocessing_context="spawn"):
             worker_indices.extend(batch["index"].tolist())
         self.assertEqual(list(range(5)), worker_indices)
+
+        worker_batches = list(dataset.to_dataloader(
+            batch_size=2,
+            shuffle=False,
+            num_workers=1,
+            multiprocessing_context="spawn",
+            worker_init_fn=_configure_uint8_transform_worker,
+        ))
+        self.assertEqual("torch.uint8", str(
+            worker_batches[0]["observation.image"].dtype))
+        self.assertEqual(
+            1.0,
+            float(worker_batches[0]["observation.image"][0].float().mean()),
+        )
+        self.assertEqual(
+            101.0,
+            float(worker_batches[-1]["observation.image"][-1].float().mean()),
+        )
 
         uint8_dataset = pmm.PaimonLeRobotDataset(
             table,

@@ -33,8 +33,9 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
-from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import (
@@ -688,7 +689,7 @@ class FileStoreCommit:
             snapshot_data = Snapshot(
                 version=3,
                 id=new_snapshot_id,
-                schema_id=self.table.table_schema.id,
+                schema_id=self.table.schema_manager.latest().id,
                 base_manifest_list=base_manifest_list,
                 base_manifest_list_size=base_manifest_list_size,
                 delta_manifest_list=delta_manifest_list,
@@ -861,16 +862,10 @@ class FileStoreCommit:
                             entries.extend(self.manifest_file_manager.read(
                                 manifest.file_name, drop_stats=False,
                                 file_size=manifest.file_size))
-                        path_factory = self.table.path_factory()
                         for entry in entries:
                             file = entry.file
-                            file.file_path = file.physical_path() if file.external_path else "%s/%s" % (
-                                path_factory.bucket_path(
-                                    tuple(entry.partition.values),
-                                    entry.bucket,
-                                ).rstrip("/"),
-                                file.file_name,
-                            )
+                            file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
+                                self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
                         self._notify_commit_callbacks(
                             snapshot, entries, commit_identifier)
                     return True
@@ -1033,9 +1028,10 @@ class FileStoreCommit:
                          + list(message.compact_changelog_files)):
                 path = None
                 try:
-                    bucket_path = None if file.physical_path() else self.table.path_factory().bucket_path(
-                        tuple(message.partition), message.bucket)
-                    for path in file.collect_files(bucket_path):
+                    if not file.physical_path():
+                        file.file_path = canonical_data_file_path(
+                            self.table, tuple(message.partition), message.bucket, file.file_name)
+                    for path in file.collect_files():
                         self.table.file_io.delete_quietly(path)
                 except Exception as error:
                     logger.warning(
@@ -1050,7 +1046,7 @@ class FileStoreCommit:
                     file_name = index_file.file_name
                     if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
                         path = self.table.path_factory().bucket_index_path(
-                            tuple(entry.partition.values), entry.bucket, index_file, self.table.file_io)
+                            tuple(entry.partition.values), entry.bucket, index_file)
                     else:
                         path = (
                             index_file.external_path
@@ -1091,31 +1087,17 @@ class FileStoreCommit:
             List of PartitionStatistics for each unique partition
         """
         partition_stats = {}
+        path_factory = self.table.path_factory()
 
         for entry in commit_entries:
-            # Convert partition tuple to dictionary for PartitionStatistics
-            partition_value = tuple(entry.partition.values)  # Call the method to get partition value
-            if partition_value:
-                # Assuming partition is a tuple and we need to convert it to a dict
-                # This may need adjustment based on actual partition format
-                if isinstance(partition_value, tuple):
-                    # Create partition spec from partition tuple and table partition keys
-                    partition_spec = {}
-                    if len(partition_value) == len(self.table.partition_keys):
-                        for i, key in enumerate(self.table.partition_keys):
-                            partition_spec[key] = str(partition_value[i])
-                    else:
-                        # Fallback: use indices as keys
-                        for i, value in enumerate(partition_value):
-                            partition_spec[f"partition_{i}"] = str(value)
-                else:
-                    # If partition is already a dict or other format
-                    partition_spec = dict(partition_value) if partition_value else {}
-            else:
-                # Default partition for unpartitioned tables
-                partition_spec = {}
-
-            partition_key = tuple(sorted(partition_spec.items()))
+            partition_value = tuple(entry.partition.values)
+            if len(partition_value) != len(self.table.partition_keys):
+                raise ValueError('Partition row does not match the table partition keys')
+            # Java PartitionEntry.toPartitionStatistics reuses the path value
+            # computer, without path escaping. Group by serialized partition rows:
+            # NULL and whitespace remain distinct even if their names coincide.
+            partition_spec = dict(zip(self.table.partition_keys, path_factory._canonical_partition(partition_value)))
+            partition_key = GenericRowSerializer.to_bytes(entry.partition)
 
             if partition_key not in partition_stats:
                 partition_stats[partition_key] = {

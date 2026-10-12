@@ -98,6 +98,7 @@ def _read(table, native, predicate=None, projection=None):
 @pytest.mark.parametrize('engine', ['deduplicate', 'partial-update', 'aggregation'])
 @pytest.mark.parametrize('sequence_type,high,low', [
     (pa.int64(), 100, 50), (pa.string(), 'z', 'a'), (pa.binary(), b'z', b'a'),
+    (pa.float32(), 100.5, 50.25), (pa.float64(), 100.5, 50.25),
     (pa.decimal128(10, 2), Decimal('100.50'), Decimal('50.25')),
     (pa.timestamp('us'), datetime.datetime(2020, 1, 2), datetime.datetime(2020, 1, 1)),
     (pa.time32('ms'), datetime.time(12, 0), datetime.time(1, 0)),

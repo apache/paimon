@@ -62,6 +62,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -584,6 +585,34 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testSingleFileEmptySelectionSkipsBeforeReadingDeletionVector() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_empty_selection_before_dv", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 75);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit split = (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        Path deletionVectorPath =
+                split.deletionFiles().get().stream()
+                        .filter(Objects::nonNull)
+                        .map(file -> new Path(file.path()))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(latest.fileIO().delete(deletionVectorPath, false)).isTrue();
+
+        ReadBuilder readBuilder =
+                latest.newReadBuilder()
+                        .withFilter(equalF1(f1(50)))
+                        .withRowRanges(Collections.singletonList(new Range(0L, 49L)));
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(collect(readBuilder.newRead().executeFilter(), plan, latest.rowType()))
+                .isEmpty();
+    }
+
+    @Test
     public void testMergedGroupKeptWhenFilterColumnOverwritten() throws Exception {
         FileStoreTable table = createTable("overwritten", Collections.emptyMap());
         writeThenOverwriteF1(table, ROW_COUNT);
@@ -699,6 +728,34 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
         // The bitmap index already rejects this value, so the missing DV file must not be read.
         assertThat(readWithFilter(table, equalF1(MISSING_F1))).isEmpty();
+    }
+
+    @Test
+    public void testMergedGroupEmptySelectionSkipsBeforeReadingDeletionVector() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_empty_selection_before_dv", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(table, 75);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        DataSplit split = (DataSplit) latest.newReadBuilder().newScan().plan().splits().get(0);
+        Path deletionVectorPath =
+                split.deletionFiles().get().stream()
+                        .filter(Objects::nonNull)
+                        .map(file -> new Path(file.path()))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(latest.fileIO().delete(deletionVectorPath, false)).isTrue();
+
+        ReadBuilder readBuilder =
+                latest.newReadBuilder()
+                        .withFilter(equalF1(f1(50)))
+                        .withRowRanges(Collections.singletonList(new Range(0L, 49L)));
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(collect(readBuilder.newRead().executeFilter(), plan, latest.rowType()))
+                .isEmpty();
     }
 
     /** Commits a deletion vector for the anchor file of the only row id group of {@code table}. */

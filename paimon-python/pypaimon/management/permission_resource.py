@@ -59,6 +59,10 @@ class PermissionResource:
     def get_view(self) -> Optional[str]:
         return self._view
 
+    def validate_policy_attachment(self):
+        if self._type != ResourceType.TABLE:
+            raise ValueError("Policies can currently be attached only to TABLE resources.")
+
     def to_dict(self) -> Dict[str, Any]:
         result = {self.FIELD_TYPE: self._type.name}
         for name, value in ((self.FIELD_DATABASE, self._database),
