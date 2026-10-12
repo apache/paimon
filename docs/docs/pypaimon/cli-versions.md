@@ -32,7 +32,7 @@ Retain a dataset snapshot with a tag or work on a separate table history with a 
 Manage tags (named snapshots) on a table. Tags are useful for time travel and pinning a snapshot for later access.
 
 ```shell
-paimon tag <create|list|get|delete> mydb.users ...
+paimon tag <create|list|get|delete|rename|replace> mydb.users ...
 ```
 
 ### Tag Create
@@ -46,11 +46,15 @@ paimon tag create mydb.users v1 --snapshot-id 3
 
 # Do not error if the tag already exists
 paimon tag create mydb.users v1 --ignore-if-exists
+
+# Retain the tag for 12 hours
+paimon tag create mydb.users v1 --time-retained 12h
 ```
 
 Options:
 - `--snapshot-id, -s`: Snapshot id to tag (default: the latest snapshot)
 - `--ignore-if-exists, -i`: Do not raise an error if the tag already exists
+- `--time-retained, -r`: Retention for the new tag, for example `1d` or `12h`. Omit it to store a plain snapshot reference.
 
 ### Tag List
 
@@ -86,6 +90,30 @@ Options:
 ```shell
 paimon tag delete mydb.users v1
 ```
+
+### Tag Rename
+
+```shell
+paimon tag rename mydb.users v1 v2
+```
+
+Filesystem catalogs rename the tag file. A REST catalog has no rename endpoint and rejects the command.
+
+### Tag Replace
+
+Point an existing tag at another snapshot. Without `--snapshot-id`, the tag follows the latest snapshot. `--time-retained` stores a create time and TTL on the tag. Omit it and the tag is rewritten as a plain snapshot reference, which drops a retention that was already set. A REST catalog has no replace endpoint and rejects the command.
+
+```shell
+# Point v1 at the latest snapshot
+paimon tag replace mydb.users v1
+
+# Point v1 at snapshot 3 and retain it for 12 hours
+paimon tag replace mydb.users v1 --snapshot-id 3 --time-retained 12h
+```
+
+Options:
+- `--snapshot-id, -s`: Snapshot id to point at (default: the latest snapshot)
+- `--time-retained, -r`: Retention for the replaced tag, for example `1d` or `12h`
 
 ## Branch Commands
 

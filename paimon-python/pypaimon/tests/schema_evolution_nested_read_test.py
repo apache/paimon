@@ -764,6 +764,15 @@ class SupportsCastTest(unittest.TestCase):
             self.assertFalse(supports_cast(AtomicType(src), AtomicType(dst)),
                              '{} -> {}'.format(src, dst))
 
+    def test_can_execute_integer_to_timestamp(self):
+        for source in ('INT', 'BIGINT'):
+            for precision in (0, 1, 4, 7):
+                target = 'TIMESTAMP({})'.format(precision)
+                with self.subTest(source=source, target=target):
+                    self.assertTrue(can_execute_cast(AtomicType(source), AtomicType(target)))
+        for source in ('TINYINT', 'SMALLINT'):
+            self.assertFalse(can_execute_cast(AtomicType(source), AtomicType('TIMESTAMP(6)')))
+
     def test_can_execute_cast_decimal_precision(self):
         # A numeric -> decimal cast has a PyArrow kernel but is only executable
         # when the target precision can hold the source's range at the target

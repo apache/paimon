@@ -98,16 +98,18 @@ class TableDeleteByRowId:
         return commit_messages
 
     def _validate_delete(self):
+        # Java DataEvolutionDeleteSink.validateTable reports unsupported table
+        # capabilities; Native maps the same failure to NotImplementedError.
         if not self.table.options.data_evolution_enabled():
-            raise ValueError(
+            raise NotImplementedError(
                 "delete requires 'data-evolution.enabled' = 'true'."
             )
         if not self.table.options.row_tracking_enabled():
-            raise ValueError(
+            raise NotImplementedError(
                 "delete requires 'row-tracking.enabled' = 'true'."
             )
         if not self.table.options.deletion_vectors_enabled(False):
-            raise ValueError(
+            raise NotImplementedError(
                 "delete requires 'deletion-vectors.enabled' = 'true'."
             )
 

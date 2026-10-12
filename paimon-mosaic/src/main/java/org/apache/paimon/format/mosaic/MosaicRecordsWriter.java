@@ -47,6 +47,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Mosaic records writer. */
 public class MosaicRecordsWriter implements BundleFormatWriter {
 
@@ -54,6 +56,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     private final MosaicWriter nativeWriter;
     private final BufferAllocator allocator;
     private final List<String> statsColumnNames;
+    private boolean failed;
     @Nullable private MosaicWriterMetadata metadata;
 
     public MosaicRecordsWriter(
@@ -101,6 +104,10 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         ArrowFormatWriter createdArrowWriter = null;
         MosaicWriter createdNativeWriter = null;
         try {
+            checkArgument(
+                    writeBatchSize > 0,
+                    "'write.batch-size' must be greater than 0, but was %s.",
+                    writeBatchSize);
             createdArrowWriter =
                     ArrowFormatWriter.forBorrowedAllocator(
                             rowType, writeBatchSize, true, allocator, writeBatchMemory);
@@ -134,6 +141,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
 
     @Override
     public void addElement(InternalRow internalRow) {
+        checkNotFailed();
         if (!arrowFormatWriter.write(internalRow)) {
             flush();
             if (!arrowFormatWriter.write(internalRow)) {
@@ -144,22 +152,24 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
 
     @Override
     public void writeBundle(BundleRecords bundleRecords) {
+        checkNotFailed();
         if (bundleRecords instanceof ArrowBundleRecords) {
             ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
             VectorSchemaRoot root = arrowBundle.getVectorSchemaRoot();
-            // Mosaic exports the borrowed vectors through the writer allocator, so direct writes
-            // require every source vector to share its root; otherwise preserve semantics via rows.
             if (arrowFormatWriter.isArrowBundleSchemaCompatible(arrowBundle)
                     && ArrowUtils.hasSameRootAllocator(root, allocator)) {
-                flush();
-                nativeWriter.write(root);
+                writeArrowBatch(root);
                 return;
             }
         }
-
         for (InternalRow row : bundleRecords) {
             addElement(row);
         }
+    }
+
+    /** The conversion buffer owned and closed by this writer. */
+    protected final ArrowFormatWriter arrowWriter() {
+        return arrowFormatWriter;
     }
 
     @Override
@@ -174,10 +184,12 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     public void close() throws IOException {
         Throwable throwable = null;
 
-        try {
-            flush();
-        } catch (Throwable t) {
-            throwable = t;
+        if (!failed) {
+            try {
+                flush();
+            } catch (Throwable t) {
+                throwable = t;
+            }
         }
 
         try {
@@ -224,13 +236,42 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         this.metadata = new MosaicWriterMetadata(numRowGroups, allStats, statsColumnNames);
     }
 
-    private void flush() {
-        arrowFormatWriter.flush();
-        if (!arrowFormatWriter.empty()) {
-            VectorSchemaRoot vsr = arrowFormatWriter.getVectorSchemaRoot();
-            nativeWriter.write(vsr);
+    /**
+     * Write a borrowed batch synchronously after flushing buffered rows. The caller must validate
+     * schema and allocator compatibility for the native implementation it uses. Ownership remains
+     * with the caller, which must keep the batch alive until this method returns.
+     */
+    private void writeArrowBatch(VectorSchemaRoot root) {
+        checkNotFailed();
+        flush();
+        try {
+            nativeWriter.write(root);
+        } catch (RuntimeException | Error e) {
+            failed = true;
+            throw e;
         }
-        arrowFormatWriter.reset();
+    }
+
+    protected final void flush() {
+        if (arrowFormatWriter.empty()) {
+            return;
+        }
+        arrowFormatWriter.flush();
+        VectorSchemaRoot vsr = arrowFormatWriter.getVectorSchemaRoot();
+        try {
+            nativeWriter.write(vsr);
+        } catch (RuntimeException | Error e) {
+            failed = true;
+            throw e;
+        } finally {
+            arrowFormatWriter.reset();
+        }
+    }
+
+    protected final void checkNotFailed() {
+        if (failed) {
+            throw new IllegalStateException("Mosaic writer has failed");
+        }
     }
 
     private static Throwable addSuppressed(Throwable throwable, Throwable suppressed) {
@@ -292,6 +333,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         }
     }
 
+    /** Creates the native writer using the allocator owned by the records writer. */
     @FunctionalInterface
     interface NativeWriterFactory {
 

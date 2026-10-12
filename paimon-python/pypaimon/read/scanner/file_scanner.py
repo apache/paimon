@@ -890,6 +890,8 @@ class FileScanner:
             stats.buckets_after_pruning.add((partition_key, entry.bucket))
         # Get SimpleStatsEvolution for this schema
         evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
+        stats_predicate = self.simple_stats_evolutions.filter_unsafe_filter(
+            entry.file.schema_id, self.predicate_for_stats)
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
@@ -903,7 +905,7 @@ class FileScanner:
                     return False
             # Java enables value filtering only when batch scans exclude L0.
             # With L0 present, pruning an update can expose an older value.
-            if self.skip_level0 and self.predicate_for_stats:
+            if self.skip_level0 and stats_predicate:
                 if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                     stats_fields = entry.file.write_cols
                 else:
@@ -913,7 +915,7 @@ class FileScanner:
                     entry.file.row_count,
                     stats_fields
                 )
-                if not self.predicate_for_stats.test_by_simple_stats(
+                if not stats_predicate.test_by_simple_stats(
                     evolved_stats,
                     entry.file.row_count
                 ):
@@ -922,7 +924,7 @@ class FileScanner:
                 stats.entries_after_stats += 1
             return True
         else:
-            if not self.predicate or self.predicate_for_stats is None:
+            if not self.predicate or stats_predicate is None:
                 if stats is not None:
                     stats.entries_after_stats += 1
                 return True
@@ -938,7 +940,7 @@ class FileScanner:
                 entry.file.row_count,
                 stats_fields
             )
-            kept = self.predicate_for_stats.test_by_simple_stats(
+            kept = stats_predicate.test_by_simple_stats(
                 evolved_stats,
                 entry.file.row_count
             )

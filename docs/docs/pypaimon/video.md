@@ -123,6 +123,23 @@ file. Its video grouping policy coordinates normal, BLOB, and vector rolling
 at payload boundaries. A file may exceed its target before the next boundary.
 The normal `.blob` format is unchanged.
 
+### Add a Video Column
+
+Use `__VIDEO_FRAME_FIELD` to add and automatically register a nullable video
+column. Existing rows read NULL in the new column:
+
+```python
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
+
+conn.catalog.alter_table("default.images", [
+    SchemaChange.add_column("image_video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD"),
+])
+images = conn.get_table("images")
+```
+
+Existing video fields are preserved automatically.
+
 ### Update frame rows and replace a video
 
 Frame rows use the ordinary table update API for non-video columns. This writes

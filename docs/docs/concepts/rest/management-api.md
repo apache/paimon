@@ -662,6 +662,41 @@ CALL paimon.sys.drop_policy(
 );
 ```
 
+## Flink SQL procedures
+
+Flink 1.19 and later can call the same three permission procedures on a REST catalog. Arguments,
+identity rules, and output columns match the Spark procedures above. A filesystem catalog fails
+with `Catalog does not support permission management.`
+
+```sql
+CALL sys.grant_permission(
+  resource_type => 'TABLE',
+  `database` => 'sales',
+  `table` => 'orders',
+  access => 'SELECT',
+  principal => 'user:alice'
+);
+
+CALL sys.list_permissions(
+  resource_type => 'TABLE',
+  `database` => 'sales',
+  `table` => 'orders'
+);
+
+CALL sys.revoke_permission(
+  resource_type => 'TABLE',
+  `database` => 'sales',
+  `table` => 'orders',
+  access => 'SELECT',
+  principal => 'user:alice'
+);
+```
+
+Column ranges are a JSON array of exact column names, for example
+`column_names => '["order_id", "region"]'`. `list_permissions` returns those names as
+`ARRAY<STRING>`. Argument details and positional calls are in
+[Flink permission procedures](../../flink/procedures/permissions).
+
 Creating, dropping, or inspecting permissions and policies requires the server to
 authorize the caller for `GRANT` on the relevant resource. Authentication, principal
 membership, policy persistence, schema validation, and audit logging remain REST server concerns.

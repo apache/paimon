@@ -19,11 +19,30 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.factories.Factory;
+import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
+
+import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
-/** Factory to create {@link CatalogLock}. */
+/** Factory to create table-bound {@link Lock} instances. */
 public interface CatalogLockFactory extends Factory, Serializable {
 
-    CatalogLock createLock(CatalogLockContext context);
+    /**
+     * Create a lock bound to the table and its branch. The UUID and writer identity may be null for
+     * catalog operations; snapshot commits supply them along with the runtime table options.
+     */
+    Lock createLock(
+            CatalogLockContext context,
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions);
+
+    static CatalogLockFactory discover(String identifier) {
+        return FactoryUtil.discoverFactory(
+                CatalogLockFactory.class.getClassLoader(), CatalogLockFactory.class, identifier);
+    }
 }
