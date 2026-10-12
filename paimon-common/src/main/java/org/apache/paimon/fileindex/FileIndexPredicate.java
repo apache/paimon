@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -87,20 +88,24 @@ public class FileIndexPredicate implements Closeable {
     private static FileIndexFormat.Reader createReader(
             Path path, FileIO fileIO, RowType fileRowType) throws IOException {
         SeekableInputStream inputStream = fileIO.newInputStream(path);
-        boolean v2;
-        long length = -1;
+        int version;
         try {
-            v2 = FileIndexFormatUtils.isV2(inputStream);
-            if (v2) {
-                length = fileIO.getFileStatus(path).getLen();
-            }
+            version = FileIndexFormatUtils.readVersion(new DataInputStream(inputStream));
         } catch (IOException | RuntimeException e) {
             IOUtils.closeQuietly(inputStream);
-            throw e;
+            throw new RuntimeException("Exception happens while construct file index reader.", e);
         }
-        return v2
-                ? FileIndexFormat.createReader(inputStream, fileRowType, length)
-                : FileIndexFormat.createReader(inputStream, fileRowType);
+
+        long length = -1;
+        if (version == FileIndexFormatUtils.VERSION_2) {
+            try {
+                length = fileIO.getFileStatus(path).getLen();
+            } catch (IOException | RuntimeException e) {
+                IOUtils.closeQuietly(inputStream);
+                throw e;
+            }
+        }
+        return FileIndexFormat.createReaderAfterVersion(inputStream, fileRowType, length, version);
     }
 
     public FileIndexResult evaluate(@Nullable Predicate predicate) {

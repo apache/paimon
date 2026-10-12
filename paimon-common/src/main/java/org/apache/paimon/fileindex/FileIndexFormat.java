@@ -43,7 +43,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.fileindex.FileIndexFormatUtils.EMPTY_INDEX_FLAG;
-import static org.apache.paimon.fileindex.FileIndexFormatUtils.MAGIC;
 import static org.apache.paimon.fileindex.FileIndexFormatUtils.VERSION_1;
 import static org.apache.paimon.fileindex.FileIndexFormatUtils.VERSION_2;
 
@@ -90,6 +89,11 @@ public final class FileIndexFormat {
     public static Reader createReader(
             SeekableInputStream inputStream, RowType fileRowType, long length) {
         return new Reader(inputStream, fileRowType, length);
+    }
+
+    static Reader createReaderAfterVersion(
+            SeekableInputStream inputStream, RowType fileRowType, long length, int version) {
+        return new Reader(inputStream, fileRowType, length, version);
     }
 
     /** @deprecated Use {@link #createReader(SeekableInputStream, RowType, long)}. */
@@ -216,29 +220,35 @@ public final class FileIndexFormat {
         }
 
         private Reader(SeekableInputStream seekableInputStream, RowType fileRowType, long length) {
+            this(seekableInputStream, fileRowType, length, null);
+        }
+
+        private Reader(
+                SeekableInputStream seekableInputStream,
+                RowType fileRowType,
+                long length,
+                @Nullable Integer version) {
             this.seekableInputStream = seekableInputStream;
             DataInputStream dataInputStream = new DataInputStream(seekableInputStream);
             fileRowType.getFields().forEach(field -> this.fields.put(field.name(), field));
             try {
-                long magic = dataInputStream.readLong();
-                if (magic != MAGIC) {
-                    throw new RuntimeException("This file is not file index file.");
-                }
-
-                int version = dataInputStream.readInt();
-                if (version == Version.V_2.version()) {
+                int actualVersion =
+                        version == null
+                                ? FileIndexFormatUtils.readVersion(dataInputStream)
+                                : version;
+                if (actualVersion == Version.V_2.version()) {
                     if (length < 0) {
                         throw new RuntimeException(
-                                "File index length is required to read version " + version);
+                                "File index length is required to read version " + actualVersion);
                     }
                     indexEntries.putAll(
                             FileIndexFormatV2.readIndexEntries(seekableInputStream, length));
-                } else if (version == Version.V_1.version()) {
+                } else if (actualVersion == Version.V_1.version()) {
                     indexEntries.putAll(FileIndexFormatV1.readIndexEntries(dataInputStream));
                 } else {
                     throw new RuntimeException(
                             "This index file is version of "
-                                    + version
+                                    + actualVersion
                                     + ", not in supported version list ["
                                     + Version.V_1.version()
                                     + ", "
