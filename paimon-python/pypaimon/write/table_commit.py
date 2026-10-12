@@ -53,6 +53,7 @@ class TableCommit:
 
         self._commit_callbacks: List[CommitCallback] = []
         self._native_commit = None
+        self._native_callbacks_registered = False
         self.file_store_commit = FileStoreCommit(
             snapshot_commit, table, commit_user,
             commit_callbacks=self._commit_callbacks)
@@ -115,12 +116,11 @@ class TableCommit:
             self.file_store_commit.commit(**commit_kwargs)
 
     def _prepare_native_commit(self, messages):
-        if (not self.table.options.native_commit_enabled()
-                or self._commit_callbacks):
+        if not self.table.options.native_commit_enabled():
             return None
         try:
             from pypaimon.write.native_commit import (
-                create_native_commit, native_messages_supported,
+                create_native_commit, native_commit_callback, native_messages_supported,
                 to_native_commit_messages)
             if not native_messages_supported(self.table, messages):
                 return None
@@ -129,7 +129,13 @@ class TableCommit:
                     self.table, self.commit_user, self.overwrite_partition)
             if self._native_commit is None:
                 return None
-            return self._native_commit, to_native_commit_messages(self.table, messages)
+            native_messages = to_native_commit_messages(self.table, messages)
+            # Callbacks may be registered after the native committer is created.
+            # FileStoreCommit owns their close lifecycle in either execution path.
+            if self._commit_callbacks and not self._native_callbacks_registered:
+                self._native_commit._add_commit_callback(native_commit_callback(self.table, self._commit_callbacks))
+                self._native_callbacks_registered = True
+            return self._native_commit, native_messages
         except Exception as error:
             # No native mutation has started. Preserve the normal Python path
             # when the optional runtime, FileIO or wire bridge is unavailable.
