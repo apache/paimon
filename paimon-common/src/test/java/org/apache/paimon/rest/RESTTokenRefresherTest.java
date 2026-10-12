@@ -202,19 +202,11 @@ class RESTTokenRefresherTest {
 
         Map<String, String> reloaded = RESTTokenRefresher.fromOptions(options, api).token().token();
 
-        assertThat(reloaded)
-                .containsEntry("access-key", "a2")
-                .containsEntry("catalog-key", "c")
-                .doesNotContainKey("security-token");
+        assertThat(reloaded).isEqualTo(Collections.singletonMap("access-key", "a2"));
     }
 
     private RESTTokenRefresher refresher(RESTToken token) {
-        return new RESTTokenRefresher(new Options(), identifier, api, token) {
-            @Override
-            long currentTimeMillis() {
-                return now.get();
-            }
-        };
+        return new RESTTokenRefresher(new Options(), identifier, api, token, now::get);
     }
 
     private RESTToken token(String value, Duration lifetime) {

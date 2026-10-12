@@ -229,6 +229,75 @@ class RESTTokenFileIOTest {
     }
 
     @Test
+    void testTokenShorterThanAnHourIsNotReloadedOnEveryCall() throws IOException {
+        AtomicLong now = new AtomicLong(1700000000000L);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenAnswer(
+                        ignored -> tokenResponse(now.get() + Duration.ofMinutes(40).toMillis()));
+        RESTTokenFileIO fileIO = restTokenFileIO(loader(mock(FileIO.class)), api, identifier, now);
+
+        for (int i = 0; i < 5; i++) {
+            fileIO.exists(new Path("oss://bucket/table/data"));
+        }
+        verify(api, times(1)).loadTableToken(identifier);
+
+        // past half of its lifetime
+        now.addAndGet(Duration.ofMinutes(21).toMillis());
+        fileIO.exists(new Path("oss://bucket/table/data"));
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testFailedReloadKeepsTheValidToken() throws IOException {
+        AtomicLong now = new AtomicLong(1700000000000L);
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenReturn(true);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        GetTableTokenResponse first = tokenResponse(now.get() + Duration.ofHours(2).toMillis());
+        when(api.loadTableToken(identifier))
+                .thenReturn(first)
+                .thenThrow(new IllegalStateException("REST server unavailable"));
+        RESTTokenFileIO fileIO = restTokenFileIO(loader(delegate), api, identifier, now);
+        fileIO.exists(new Path("oss://bucket/table/data"));
+
+        // inside the refresh window, while the token is still valid
+        now.addAndGet(Duration.ofMinutes(90).toMillis());
+        assertThat(fileIO.exists(new Path("oss://bucket/table/data"))).isTrue();
+        assertThat(fileIO.validToken().token()).isEqualTo(first.getToken());
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    private static FileIOLoader loader(FileIO delegate) {
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        return loader;
+    }
+
+    private static GetTableTokenResponse tokenResponse(long expiresAtMillis) {
+        return new GetTableTokenResponse(
+                Collections.singletonMap("test.token", UUID.randomUUID().toString()),
+                expiresAtMillis);
+    }
+
+    private static RESTTokenFileIO restTokenFileIO(
+            FileIOLoader loader, RESTApi api, Identifier identifier, AtomicLong now) {
+        return new RESTTokenFileIO(
+                CatalogContext.create(new Options(), loader, null),
+                api,
+                identifier,
+                new Path("oss://bucket/table")) {
+            @Override
+            long currentTimeMillis() {
+                return now.get();
+            }
+        };
+    }
+
+    @Test
     void testDelegateOptionsNameTheTableAndTokenExpiry() throws IOException {
         Path root = new Path("oss://bucket/table");
         FileIO delegate = mock(FileIO.class);

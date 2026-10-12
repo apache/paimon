@@ -32,18 +32,12 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.ThreadUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Scheduler;
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -53,9 +47,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
-import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link FileIO} to support getting token from REST Server. */
@@ -81,8 +72,6 @@ public class RESTTokenFileIO implements FileIO {
                                             ThreadUtils.newDaemonThreadFactory(
                                                     "rest-token-file-io-scheduler"))))
                     .build();
-
-    private static final Logger LOG = LoggerFactory.getLogger(RESTTokenFileIO.class);
 
     /** Sets the maximum number of cached FileIO instances. */
     public static void setFileIOCacheMaximumSize(long maximumSize) {
@@ -119,6 +108,9 @@ public class RESTTokenFileIO implements FileIO {
     // the latest token from REST Server, serializable in order to avoid loading token from the REST
     // Server again after serialization
     private volatile RESTToken token;
+
+    // Loads and reloads the token, starting from the serialized one.
+    private transient volatile RESTTokenRefresher refresher;
 
     // The table and catalog options a delegate refreshes its token with, computed once.
     private transient volatile DelegateContext delegateContext;
@@ -247,8 +239,7 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     private FileIOWithToken fileIOWithToken(long minimumValidityMillis) throws IOException {
-        tryToRefreshToken(minimumValidityMillis);
-        RESTToken currentToken = token;
+        RESTToken currentToken = currentToken(minimumValidityMillis);
         if (minimumValidityMillis > 0
                 && !hasRemainingLifetime(currentToken, minimumValidityMillis)) {
             throw new IOException(
@@ -293,27 +284,37 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     long currentTimeMillis() {
-        return System.currentTimeMillis();
+        return RESTTokenRefresher.systemTimeMillis();
     }
 
-    private void tryToRefreshToken() {
-        tryToRefreshToken(0);
+    private RESTToken currentToken(long minimumValidityMillis) {
+        RESTTokenRefresher current = refresher();
+        RESTToken currentToken =
+                minimumValidityMillis > 0
+                        ? current.tokenValidFor(minimumValidityMillis)
+                        : current.token();
+        token = currentToken;
+        return currentToken;
     }
 
-    private void tryToRefreshToken(long minimumValidityMillis) {
-        if (shouldRefresh(minimumValidityMillis)) {
+    private RESTTokenRefresher refresher() {
+        RESTTokenRefresher current = refresher;
+        if (current == null) {
             synchronized (this) {
-                if (shouldRefresh(minimumValidityMillis)) {
-                    refreshToken();
+                current = refresher;
+                if (current == null) {
+                    current =
+                            new RESTTokenRefresher(
+                                    catalogContext.options(),
+                                    tokenIdentifier(),
+                                    apiInstance,
+                                    token,
+                                    this::currentTimeMillis);
+                    refresher = current;
                 }
             }
         }
-    }
-
-    private boolean shouldRefresh(long minimumValidityMillis) {
-        return token == null
-                || token.expireAtMillis() - currentTimeMillis()
-                        < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
+        return current;
     }
 
     /** The table and catalog options that a delegate reloads its token with. */
@@ -389,23 +390,6 @@ public class RESTTokenFileIO implements FileIO {
         }
     }
 
-    private void refreshToken() {
-        LOG.info("begin refresh data token for identifier [{}]", identifier);
-        if (apiInstance == null) {
-            apiInstance = new RESTApi(catalogContext.options(), false);
-        }
-        GetTableTokenResponse response = apiInstance.loadTableToken(tokenIdentifier());
-        LOG.info(
-                "end refresh data token for identifier [{}] expiresAtMillis [{}]",
-                identifier,
-                response.getExpiresAtMillis());
-
-        token =
-                new RESTToken(
-                        mergeTokenWithCatalogOptions(response.getToken()),
-                        response.getExpiresAtMillis());
-    }
-
     private DelegateContext delegateContext() {
         DelegateContext context = delegateContext;
         if (context == null) {
@@ -425,27 +409,11 @@ public class RESTTokenFileIO implements FileIO {
         return identifier;
     }
 
-    private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
-        Map<String, String> newToken = Maps.newLinkedHashMap(token);
-        Options catalogOptions = catalogContext.options();
-        // DLF OSS endpoint should override the standard OSS endpoint.
-        String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
-        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
-            newToken.put("fs.oss.endpoint", dlfOssEndpoint);
-        }
-        if (catalogOptions.contains(IO_CACHE_ENABLED)) {
-            newToken.put(
-                    IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
-        }
-        return ImmutableMap.copyOf(newToken);
-    }
-
     /**
      * Public interface to get valid token, this can be invoked by native engines to get the token
      * and use own File System.
      */
     public RESTToken validToken() {
-        tryToRefreshToken();
-        return token;
+        return currentToken(0);
     }
 }

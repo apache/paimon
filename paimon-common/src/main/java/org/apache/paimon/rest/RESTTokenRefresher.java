@@ -23,20 +23,25 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.LongSupplier;
 
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 
 /**
- * Loads the data token of a table from the REST server and refreshes it before it expires, so a
- * storage credentials provider can refresh by itself from the options it was created with.
+ * Loads the data token of a table from the REST server and reloads it before it expires, for {@link
+ * RESTTokenFileIO} and for storage credentials providers created from its options.
  */
 public class RESTTokenRefresher {
 
@@ -57,11 +62,12 @@ public class RESTTokenRefresher {
     // A reloaded token is kept at least this long, and a failed reload is retried after it.
     static final long RELOAD_INTERVAL_MILLIS = 10_000L;
 
-    // Shifts the clock of refreshers that providers create from options, for tests only.
+    // Shifts the clock of refreshers that use the system clock, for tests only.
     @VisibleForTesting static volatile long clockOffsetMillis;
 
     private final Options catalogOptions;
     private final Identifier identifier;
+    private final LongSupplier clock;
     private final ReentrantLock lock = new ReentrantLock();
 
     @Nullable private volatile CachedToken cached;
@@ -75,10 +81,12 @@ public class RESTTokenRefresher {
             Options catalogOptions,
             Identifier identifier,
             @Nullable RESTApi api,
-            @Nullable RESTToken token) {
+            @Nullable RESTToken token,
+            LongSupplier clock) {
         this.catalogOptions = catalogOptions;
         this.identifier = identifier;
         this.api = api;
+        this.clock = clock;
         this.cached = token == null ? null : new CachedToken(token, currentTimeMillis());
     }
 
@@ -107,19 +115,20 @@ public class RESTTokenRefresher {
     static RESTTokenRefresher fromOptions(Options options, @Nullable RESTApi api) {
         Identifier identifier = new Identifier(options.get(DATABASE), options.get(OBJECT));
         String expiresAt = options.get(EXPIRES_AT_MILLIS);
-        RESTToken token =
-                expiresAt == null
-                        ? null
-                        : new RESTToken(options.toMap(), Long.parseLong(expiresAt));
-        // Reloads start from the catalog options, so no key of the previous token survives.
-        Map<String, String> catalogOptions = new HashMap<>(options.toMap());
         String tokenKeys = options.get(TOKEN_KEYS);
-        if (tokenKeys != null) {
+        RESTToken token = null;
+        if (expiresAt != null && tokenKeys != null) {
+            Map<String, String> values = new LinkedHashMap<>();
             for (String key : tokenKeys.split(",")) {
-                catalogOptions.remove(key);
+                String value = options.get(key);
+                if (value != null) {
+                    values.put(key, value);
+                }
             }
+            token = new RESTToken(values, Long.parseLong(expiresAt));
         }
-        return new RESTTokenRefresher(new Options(catalogOptions), identifier, api, token);
+        return new RESTTokenRefresher(
+                options, identifier, api, token, RESTTokenRefresher::systemTimeMillis);
     }
 
     /** Returns the current token, reloading it from the catalog when it is about to expire. */
@@ -208,14 +217,36 @@ public class RESTTokenRefresher {
         if (api == null) {
             api = new RESTApi(catalogOptions, false);
         }
+        LOG.info("begin refresh data token for identifier [{}]", identifier);
         GetTableTokenResponse response = api.loadTableToken(identifier);
-        // Layered over the catalog options, the same way RESTTokenFileIO builds its delegate.
-        return new RESTToken(
-                RESTUtil.merge(catalogOptions.toMap(), response.getToken()),
+        LOG.info(
+                "end refresh data token for identifier [{}] expiresAtMillis [{}]",
+                identifier,
                 response.getExpiresAtMillis());
+        return new RESTToken(
+                withCatalogOverrides(response.getToken()), response.getExpiresAtMillis());
     }
 
-    long currentTimeMillis() {
+    private Map<String, String> withCatalogOverrides(Map<String, String> token) {
+        Map<String, String> newToken = new LinkedHashMap<>(token);
+        // DLF OSS endpoint should override the standard OSS endpoint.
+        String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
+        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
+            newToken.put("fs.oss.endpoint", dlfOssEndpoint);
+        }
+        if (catalogOptions.contains(IO_CACHE_ENABLED)) {
+            newToken.put(
+                    IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
+        }
+        return ImmutableMap.copyOf(newToken);
+    }
+
+    private long currentTimeMillis() {
+        return clock.getAsLong();
+    }
+
+    /** The system clock, shifted by {@link #clockOffsetMillis} in tests. */
+    static long systemTimeMillis() {
         return System.currentTimeMillis() + clockOffsetMillis;
     }
 
