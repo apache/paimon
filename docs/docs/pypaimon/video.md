@@ -269,3 +269,30 @@ Define the decoder class and function at module scope when DataLoader uses the
 `shuffle=False`; row-buffer shuffle can turn monotonic frame access into seeks
 and require more open decoder sessions. Paimon's worker sharding is split-level,
 so it does not duplicate a split across workers.
+
+### Read video training windows
+
+`ContiguousWindowDataset` decodes `video-frame-field` columns directly. It
+keeps descriptors through row selection, groups overlapping requests by
+physical video, and decodes each selected row once before assembling windows:
+
+```python
+video_windows = frames.scan().to_contiguous_window_dataset(
+    columns=["state", "video", "action"],
+    frame_offsets={"video": [-2, -1, 0], "action": list(range(16))},
+    group_key="episode_id",
+    order_key="frame_index",
+    boundary="pad",
+    column_transforms={"video": torch.stack},
+    video_backend="pyav",
+)
+
+loader = DataLoader(video_windows, batch_size=32, num_workers=4)
+for batch in loader:
+    # video is [N, T, C, H, W].
+    train(batch["video"], batch["state"], batch["action"])
+```
+
+Install `pypaimon[torch,video]` for the PyAV path, or install TorchCodec
+separately. Omit `video_backend` to select an available decoder. The decoder
+and range cache stay local to each DataLoader worker.

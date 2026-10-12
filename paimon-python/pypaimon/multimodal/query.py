@@ -183,7 +183,8 @@ class ScanQuery:
             delta_timestamps=None,
             fps=None,
             tolerance_s=None,
-            boundary=None):
+            boundary=None,
+            video_backend=None):
         """Build snapshot-pinned training windows from this single-table scan.
 
         The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
@@ -220,6 +221,8 @@ class ScanQuery:
                 defaulting to 1e-4. Only valid with delta_timestamps.
             boundary: Handling at both group ends: drop (default), pad, or error.
                 Drop retains only anchors valid for every requested offset.
+            video_backend: Decoder for video-frame-field columns: ``pyav``,
+                ``torchcodec``, or ``None`` to select the available backend.
 
         Returns:
             A snapshot-pinned ``ContiguousWindowDataset``. See that class for
@@ -244,6 +247,7 @@ class ScanQuery:
             fps=fps,
             tolerance_s=tolerance_s,
             boundary=boundary,
+            video_backend=video_backend,
         )
 
     def to_ray(

@@ -20,6 +20,7 @@
 import copy
 import math
 import operator
+from functools import partial
 
 import numpy as np
 import pyarrow as pa
@@ -30,6 +31,7 @@ from torch.utils.data import Dataset
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.multimodal.query import ScanQuery, _PreFilterQuery
+from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.read.datasource.torch_dataset import (
     SplitRangeIndex,
     row_ranges_for_split,
@@ -76,8 +78,8 @@ class ContiguousWindowDataset(Dataset):
     every column uses ``[0]``. ``stride`` schedules anchors from each group's
     first row; boundary handling never shifts that schedule.
     ``blob_parallelism`` controls concurrent BLOB reads for each item or batch.
-    Video frame columns are not supported yet, because a window read would drop
-    the frame metadata carried by their descriptors.
+    Video frame columns retain their descriptors until the requested rows are
+    grouped and decoded, so overlapping windows reuse each physical frame read.
     """
 
     _BOUNDARY_POLICIES = ("drop", "pad", "error")
@@ -101,7 +103,8 @@ class ContiguousWindowDataset(Dataset):
             delta_timestamps=None,
             fps=None,
             tolerance_s=None,
-            boundary=None):
+            boundary=None,
+            video_backend=None):
         if not isinstance(query, ScanQuery) or isinstance(query, _PreFilterQuery):
             raise TypeError(
                 "ContiguousWindowDataset is only supported on scan(), "
@@ -135,7 +138,14 @@ class ContiguousWindowDataset(Dataset):
             raise ValueError("group_key and order_key must not be is_pad.")
         self.columns = _columns(
             query, columns, self.group_key, self.order_key)
-        _reject_video_columns(query._table, self.columns)
+        self._video_columns = [
+            name for name in self.columns
+            if name in query._table.options.video_frame_fields()
+        ]
+        if video_backend not in (None, "torchcodec", "pyav"):
+            raise ValueError(
+                "video_backend must be None, 'torchcodec', or 'pyav'.")
+        self.video_backend = video_backend
         self.anchor_columns = _anchor_columns(anchor_columns, self.columns)
         self.frame_offsets = _frame_offsets(
             self.columns, frame_offsets, delta_timestamps, fps, tolerance_s,
@@ -170,6 +180,19 @@ class ContiguousWindowDataset(Dataset):
         self.snapshot_id = snapshot_id
         self._table = _pin_table(query._table, snapshot_id)
         self._plans = {}
+        self._video_collators = {
+            name: VideoFrameCollator(
+                self._table,
+                video_column=name,
+                decoder_factory=partial(
+                    _open_default_video_decoder, backend=video_backend),
+                decode_batch_fn=_decode_video_frames,
+                output_column=name,
+                collate_fn=list,
+                range_parallelism=self.blob_parallelism,
+            )
+            for name in self._video_columns
+        }
         self._build_index(index)
 
     @classmethod
@@ -222,6 +245,24 @@ class ContiguousWindowDataset(Dataset):
         state = self.__dict__.copy()
         state["_plans"] = {}
         return state
+
+    def close(self):
+        """Close video decoders opened by this Dataset process."""
+        first_error = None
+        for collator in self._video_collators.values():
+            try:
+                collator.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _resolve_window(self, index):
         index = operator.index(index)
@@ -402,11 +443,16 @@ class ContiguousWindowDataset(Dataset):
 
         Returns:
             A list of row dictionaries aligned one-for-one with ``row_ids``.
-            The internal ``_ROW_ID`` field is removed, and BLOB descriptors are
-            resolved to their bodies.
+            The internal ``_ROW_ID`` field is removed. Ordinary BLOB
+            descriptors are resolved to their bodies, while video descriptors
+            are decoded to frames.
         """
         columns = self.columns if columns is None else columns
         rows = self._plan_for(columns).read(row_ids)
+        for name in columns:
+            collator = self._video_collators.get(name)
+            if collator is not None:
+                rows = collator(rows)
         row_id_column = SpecialFields.ROW_ID.name
         by_row_id = {}
         for row in rows:
@@ -423,7 +469,12 @@ class ContiguousWindowDataset(Dataset):
         plan = self._plans.get(key)
         if plan is None:
             plan = _PinnedRowIdPlan(
-                self._table, columns, self.blob_parallelism, self.snapshot_id)
+                self._table,
+                columns,
+                self.blob_parallelism,
+                self.snapshot_id,
+                self._video_columns,
+            )
             self._plans[key] = plan
         return plan
 
@@ -436,7 +487,13 @@ class _PinnedRowIdPlan:
     and batch reads never revisit the snapshot's manifests.
     """
 
-    def __init__(self, table, columns, blob_parallelism, snapshot_id):
+    def __init__(
+            self,
+            table,
+            columns,
+            blob_parallelism,
+            snapshot_id,
+            video_columns=()):
         self._blob_parallelism = blob_parallelism
         self._snapshot_id = snapshot_id
         self._blob_columns = [
@@ -444,13 +501,18 @@ class _PinnedRowIdPlan:
             if field.name in columns
             and is_blob_file_type(field.type)
         ]
+        self._body_blob_columns = [
+            name for name in self._blob_columns if name not in video_columns
+        ]
         self._map_blob_columns = {
             field.name for field in table.fields
-            if field.name in self._blob_columns and is_map_blob_type(field.type)
+            if field.name in self._body_blob_columns
+            and is_map_blob_type(field.type)
         }
         self._array_blob_columns = {
             field.name for field in table.fields
-            if field.name in self._blob_columns and is_array_blob_type(field.type)
+            if field.name in self._body_blob_columns
+            and is_array_blob_type(field.type)
         }
         blob_column_set = set(self._blob_columns)
         self._projection = (
@@ -495,21 +557,21 @@ class _PinnedRowIdPlan:
         arrow = arrow.filter(pc.is_in(
             row_id_column,
             value_set=pa.array(requested, type=row_id_column.type)))
-        if not self._blob_columns:
+        if not self._body_blob_columns:
             return arrow.to_pylist()
 
         bodies = fetch_blob_bodies(
             self._table.file_io,
-            arrow.select(self._blob_columns).to_pydict(),
-            self._blob_columns,
+            arrow.select(self._body_blob_columns).to_pydict(),
+            self._body_blob_columns,
             self._blob_parallelism,
             self._map_blob_columns,
             self._array_blob_columns)
-        blob_column_set = set(self._blob_columns)
+        blob_column_set = set(self._body_blob_columns)
         rows = arrow.select([
             name for name in arrow.column_names if name not in blob_column_set
         ]).to_pylist()
-        for name in self._blob_columns:
+        for name in self._body_blob_columns:
             values = bodies[name]
             if len(values) != len(rows):
                 raise RuntimeError(
@@ -642,15 +704,18 @@ def _require_tag_snapshot(table, tag_name, snapshot_id):
             "built from snapshot %s." % (tag_name, resolved, snapshot_id))
 
 
-def _reject_video_columns(table, columns):
-    video_columns = [
-        name for name in columns if name in table.options.video_frame_fields()
-    ]
-    if video_columns:
-        raise ValueError(
-            "ContiguousWindowDataset does not support video frame columns %s "
-            "yet: a window read would drop their frame metadata, such as "
-            "frame_index." % video_columns)
+def _open_default_video_decoder(stream, backend=None):
+    # Keep the codec implementation shared with PaimonLeRobotDataset while the
+    # generic collator owns grouping, range reads, and process-local caching.
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+    return _open_video_decoder(stream, backend=backend)
+
+
+def _decode_video_frames(decoder, frame_indices, unused_rows):
+    get_frames_at = getattr(decoder, "get_frames_at", None)
+    if get_frames_at is not None:
+        return get_frames_at(indices=frame_indices).data
+    return [decoder[index] for index in frame_indices]
 
 
 def _frame_offsets(columns, offsets, timestamps, fps, tolerance_s,
