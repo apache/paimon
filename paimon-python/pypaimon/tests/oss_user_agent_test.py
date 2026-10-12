@@ -121,7 +121,7 @@ class OssUserAgentTest(unittest.TestCase):
 
 class LegacyOssUserAgentTest(unittest.TestCase):
 
-    def _new_legacy_file_io(self):
+    def _new_legacy_file_io(self, extra=None):
         options = Options({
             OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
@@ -129,10 +129,61 @@ class LegacyOssUserAgentTest(unittest.TestCase):
             OssOptions.OSS_REGION.key(): "cn-test",
             OssOptions.OSS_IMPL.key(): "legacy",
         })
+        options.to_map().update(extra or {})
         with mock.patch.object(pyarrow_file_io.pafs, "S3FileSystem") as s3_filesystem, \
                 mock.patch.object(oss_user_agent, "identity", return_value=IDENTITY):
             PyArrowFileIO("oss://test-bucket/", options)
         s3_filesystem.assert_called_once()
+        return s3_filesystem.call_args[1]
+
+    def test_custom_user_agent_is_per_filesystem(self):
+        with mock.patch.dict(os.environ, {"AWS_SDK_UA_APP_ID": "existing-app"}):
+            first = self._new_legacy_file_io({
+                "user-agent.module": "first/1.0", "user-agent.features": "training batch",
+                "user-agent.extended": "env=dev"})
+            second = self._new_legacy_file_io({
+                "user-agent.module": "second/2.0", "user-agent.features": "serving"})
+            default = self._new_legacy_file_io()
+            transport = "pyarrow/" + pyarrow_file_io.pyarrow.__version__
+            self.assertEqual("first/1.0({};{};training;batch) env=dev".format(transport, IDENTITY),
+                             first["user_agent"])
+            self.assertEqual("second/2.0({};{};serving)".format(transport, IDENTITY),
+                             second["user_agent"])
+            self.assertNotIn("user_agent", default)
+            self.assertEqual("existing-app", os.environ["AWS_SDK_UA_APP_ID"])
+
+    def test_oss_overrides_and_tracking_reach_pyarrow(self):
+        kwargs = self._new_legacy_file_io({
+            "user-agent.module": "common", "user-agent.features": "ignored",
+            "user-agent.extended": "env=dev", "fs.oss.user.agent.module": "oss-app",
+            "fs.oss.user.agent.features": "read", "dlf.access-tracking.extended-info": "uid/123"})
+        self.assertEqual("oss-app(pyarrow/{};{};read) env=dev uid/123".format(
+            pyarrow_file_io.pyarrow.__version__, IDENTITY), kwargs["user_agent"])
+
+    def test_default_module_is_not_duplicated(self):
+        kwargs = self._new_legacy_file_io({"user-agent.features": "training"})
+        self.assertEqual("{}(pyarrow/{};training)".format(
+            IDENTITY, pyarrow_file_io.pyarrow.__version__), kwargs["user_agent"])
+
+    def test_unsupported_pyarrow_warns_and_preserves_existing_behavior(self):
+        options = Options({"fs.oss.impl": "legacy", "user-agent.module": "app"})
+        error = TypeError("__init__() got an unexpected keyword argument 'user_agent'")
+        filesystem = mock.sentinel.filesystem
+        with mock.patch.object(pyarrow_file_io.pafs, "S3FileSystem",
+                               side_effect=[error, filesystem]) as create:
+            with self.assertLogs(level="WARNING") as logs:
+                file_io = PyArrowFileIO("oss://test-bucket/", options)
+        self.assertIs(file_io.filesystem, filesystem)
+        self.assertIn("custom OSS User-Agent options are ignored", " ".join(logs.output))
+        self.assertIn("user_agent", create.call_args_list[0][1])
+        self.assertNotIn("user_agent", create.call_args_list[1][1])
+
+    def test_other_constructor_errors_are_not_hidden(self):
+        options = Options({"fs.oss.impl": "legacy", "user-agent.module": "app"})
+        error = TypeError("invalid endpoint")
+        with mock.patch.object(pyarrow_file_io.pafs, "S3FileSystem", side_effect=error):
+            with self.assertRaisesRegex(TypeError, "invalid endpoint"):
+                PyArrowFileIO("oss://test-bucket/", options)
 
     def test_sets_aws_app_id_when_absent(self):
         with mock.patch.dict(os.environ):

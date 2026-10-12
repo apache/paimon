@@ -258,7 +258,7 @@ class PyArrowFileIO(FileIO):
             # Uses setdefault so that an explicit user setting is never overridden.
             # Note: this is process-wide and affects all AWS SDK clients.
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
-        # S3FileSystem takes no User-Agent; this adds app/pypaimon/<version> to it, process-wide.
+        # Keep the default SDK application marker for PyArrow builds without a User-Agent option.
         os.environ.setdefault("AWS_SDK_UA_APP_ID", oss_user_agent.identity())
 
         client_kwargs = {
@@ -278,7 +278,21 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return pafs.S3FileSystem(**client_kwargs)
+        user_agent = oss_user_agent.legacy_user_agent(
+            self.properties, "pyarrow/{}".format(pyarrow.__version__))
+        if user_agent is not None:
+            client_kwargs["user_agent"] = user_agent
+        try:
+            return pafs.S3FileSystem(**client_kwargs)
+        except TypeError as error:
+            if user_agent is not None and "unexpected keyword argument 'user_agent'" in str(error):
+                self.logger.warning(
+                    "This PyArrow build does not support S3FileSystem(user_agent=...); "
+                    "custom OSS User-Agent options are ignored. Use a PyArrow build "
+                    "with this option or fs.oss.impl=jindo to apply them.")
+                del client_kwargs["user_agent"]
+                return pafs.S3FileSystem(**client_kwargs)
+            raise
 
     def _initialize_s3_fs(self) -> FileSystem:
         self._configure_s3_checksums()

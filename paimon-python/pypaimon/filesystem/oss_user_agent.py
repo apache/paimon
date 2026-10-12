@@ -22,6 +22,7 @@ from typing import List, Optional
 
 from pypaimon import build_info
 from pypaimon.common.options import Options
+from pypaimon.common.user_agent import format_user_agent
 
 USER_AGENT_MODULE = "fs.oss.user.agent.module"
 USER_AGENT_FEATURES = "fs.oss.user.agent.features"
@@ -61,6 +62,17 @@ def extended(options: Options) -> Optional[str]:
              _effective(options, DLF_ACCESS_TRACKING_EXTENDED_INFO)]
     parts = [p for p in parts if p]
     return " ".join(parts) if parts else None
+
+
+def legacy_user_agent(options: Options, transport: str) -> Optional[str]:
+    """Build a per-client User-Agent only when the caller requests customization."""
+    if not any(_effective(options, key) for key in (
+            USER_AGENT_MODULE, USER_AGENT_FEATURES, USER_AGENT_EXTENDED,
+            COMMON_USER_AGENT_MODULE, COMMON_USER_AGENT_FEATURES, COMMON_USER_AGENT_EXTENDED)):
+        return None
+    name = module(options) or identity()
+    tags = [feature for feature in features(options).split() if feature != name]
+    return format_user_agent(name, transport, tags, extended(options))
 
 
 def _effective(options: Options, *keys: str) -> Optional[str]:
