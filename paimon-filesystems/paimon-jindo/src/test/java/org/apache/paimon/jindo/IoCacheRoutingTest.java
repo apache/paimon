@@ -361,9 +361,9 @@ public class IoCacheRoutingTest {
         options.set("io-cache.policy", policy);
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(CatalogContext.create(options));
-        assertThat(host(fileIO.hadoopOptions(DATA_FILE, "read").get("fs.oss.endpoint")))
+        assertThat(host(fileIO.routedHadoopOptions(DATA_FILE, "read").get("fs.oss.endpoint")))
                 .isEqualTo(readCache ? "cache:8080" : "oss-cn-hangzhou.aliyuncs.com");
-        assertThat(host(fileIO.hadoopOptions(DATA_FILE, "meta").get("fs.oss.endpoint")))
+        assertThat(host(fileIO.routedHadoopOptions(DATA_FILE, "meta").get("fs.oss.endpoint")))
                 .isEqualTo(
                         metaCache
                                 ? "cache:8080"
@@ -532,7 +532,7 @@ public class IoCacheRoutingTest {
         }
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(CatalogContext.create(copy));
-        assertThat(host(fileIO.hadoopOptions(path(path), op).get("fs.oss.endpoint")))
+        assertThat(host(fileIO.routedHadoopOptions(path(path), op).get("fs.oss.endpoint")))
                 .as("%s %s with %s", op, path, options.toMap())
                 .isEqualTo(host(expect));
     }

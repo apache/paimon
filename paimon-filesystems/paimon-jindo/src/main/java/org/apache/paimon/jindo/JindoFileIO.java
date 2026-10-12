@@ -218,6 +218,12 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
      */
     @Override
     public Options hadoopOptions(Path path, String opType) {
+        // Lance and Vortex build their own clients from these options; they only reach the origin.
+        return cacheRouting != null ? hadoopOptions : routedHadoopOptions(path, opType);
+    }
+
+    /** The options of the endpoint that a request of this type on this path uses. */
+    Options routedHadoopOptions(Path path, String opType) {
         boolean shouldCache = false;
         if (opType.equalsIgnoreCase("read")) {
             shouldCache = readCacheEnabled && shouldCache(path);

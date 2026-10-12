@@ -85,31 +85,45 @@ public class JindoIoCacheRoutingTest {
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(CatalogContext.create(cacheTargetOptions()));
 
-        Options cluster = fileIO.hadoopOptions(DATA, "read");
+        Options cluster = fileIO.routedHadoopOptions(DATA, "read");
         assertThat(cluster.get("fs.oss.endpoint")).isEqualTo(CLUSTER_HOST);
         assertThat(cluster.get("fs.oss.https.enable")).isEqualTo("false");
         assertThat(cluster.get("fs.oss.second.level.domain.enable")).isEqualTo("true");
         assertThat(cluster.get("fs.oss.region")).isEqualTo("cn-hangzhou");
         assertThat(cluster.get(DLF_CACHE_KEY)).isEqualTo("true");
         assertThat(cluster.containsKey("fs.xengine")).isFalse();
-        assertThat(fileIO.hadoopOptions(DATA, "meta")).isSameAs(cluster);
+        assertThat(fileIO.routedHadoopOptions(DATA, "meta")).isSameAs(cluster);
 
-        Options accel = fileIO.hadoopOptions(MANIFEST, "meta");
+        Options accel = fileIO.routedHadoopOptions(MANIFEST, "meta");
         assertThat(accel.get("fs.oss.endpoint")).isEqualTo(ACCEL_HOST);
         assertThat(accel.get("fs.oss.https.enable")).isEqualTo("true");
         assertThat(accel.get("fs.oss.second.level.domain.enable")).isEqualTo("false");
         assertThat(accel.get("fs.oss.region")).isEqualTo("cn-shanghai");
 
-        Options oss = fileIO.hadoopOptions(DATA, "write");
+        Options oss = fileIO.routedHadoopOptions(DATA, "write");
         assertThat(oss.get("fs.oss.endpoint")).isEqualTo(OSS_HOST);
         assertThat(oss.get("fs.oss.https.enable")).isEqualTo("true");
         assertThat(oss.get("fs.oss.region")).isEqualTo("cn-hangzhou");
         assertThat(oss.containsKey(DLF_CACHE_KEY)).isFalse();
         for (Path path :
                 new Path[] {SNAPSHOT, LATEST, new Path(TABLE + "/dt=1/bucket-0/000000_0")}) {
-            assertThat(fileIO.hadoopOptions(path, "read")).as(path.toString()).isSameAs(oss);
+            assertThat(fileIO.routedHadoopOptions(path, "read")).as(path.toString()).isSameAs(oss);
         }
-        assertThat(fileIO.hadoopOptions(DATA, "list")).isSameAs(oss);
+        assertThat(fileIO.routedHadoopOptions(DATA, "list")).isSameAs(oss);
+    }
+
+    @Test
+    public void testLanceAndVortexGetTheOssOptions() {
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(CatalogContext.create(cacheTargetOptions()));
+
+        // their converters build an https virtual-hosted address, which only the origin serves
+        Options oss = fileIO.routedHadoopOptions(DATA, "write");
+        for (String op : new String[] {"read", "write", "meta"}) {
+            for (Path path : new Path[] {DATA, MANIFEST, LATEST}) {
+                assertThat(fileIO.hadoopOptions(path, op)).as(path + " " + op).isSameAs(oss);
+            }
+        }
     }
 
     @Test
@@ -221,7 +235,7 @@ public class JindoIoCacheRoutingTest {
         fileIO.newOutputStream(MANIFEST, false);
         fileIO.newOutputStream(SNAPSHOT, false);
         fileIO.newTwoPhaseOutputStream(next, false);
-        assertThat(fileIO.hadoopOptions(DATA, "write").get("fs.oss.endpoint"))
+        assertThat(fileIO.routedHadoopOptions(DATA, "write").get("fs.oss.endpoint"))
                 .isEqualTo(CLUSTER_HOST);
         verify(clusterFs).create(any(), anyBoolean());
         verify(accelFs).create(any(), anyBoolean());
@@ -248,11 +262,12 @@ public class JindoIoCacheRoutingTest {
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(CatalogContext.create(options));
 
-        Options read = fileIO.hadoopOptions(DATA, "read");
+        Options read = fileIO.routedHadoopOptions(DATA, "read");
         assertThat(read.get("fs.oss.endpoint")).isEqualTo(CLUSTER_HOST);
         assertThat(read.get("fs.oss.second.level.domain.enable")).isEqualTo("true");
-        assertThat(fileIO.hadoopOptions(MANIFEST, "meta")).isSameAs(read);
-        assertThat(fileIO.hadoopOptions(DATA, "write").get("fs.oss.endpoint")).isEqualTo(OSS_HOST);
+        assertThat(fileIO.routedHadoopOptions(MANIFEST, "meta")).isSameAs(read);
+        assertThat(fileIO.routedHadoopOptions(DATA, "write").get("fs.oss.endpoint"))
+                .isEqualTo(OSS_HOST);
     }
 
     @Test
@@ -263,14 +278,14 @@ public class JindoIoCacheRoutingTest {
         fileIO.configure(CatalogContext.create(options));
 
         assertThat(fileIO.cacheRouting).isNull();
-        Options read = fileIO.hadoopOptions(DATA, "read");
+        Options read = fileIO.routedHadoopOptions(DATA, "read");
         assertThat(read.get("fs.xengine")).isEqualTo("jindocache");
         assertThat(read.get("fs.oss.endpoint")).isEqualTo("http://" + CLUSTER_HOST);
-        Options write = fileIO.hadoopOptions(DATA, "write");
+        Options write = fileIO.routedHadoopOptions(DATA, "write");
         assertThat(write.containsKey("fs.xengine")).isFalse();
         // legacy whitelist-path matching: "manifest" is in the default whitelist
-        assertThat(fileIO.hadoopOptions(MANIFEST, "meta")).isSameAs(read);
-        assertThat(fileIO.hadoopOptions(LATEST, "read")).isSameAs(write);
+        assertThat(fileIO.routedHadoopOptions(MANIFEST, "meta")).isSameAs(read);
+        assertThat(fileIO.routedHadoopOptions(LATEST, "read")).isSameAs(write);
     }
 
     @Test
@@ -288,7 +303,7 @@ public class JindoIoCacheRoutingTest {
             fileIO.configure(CatalogContext.create(options));
             assertThat(fileIO.cacheRouting).isNull();
             for (String op : new String[] {"read", "meta", "write"}) {
-                Options hadoopOptions = fileIO.hadoopOptions(DATA, op);
+                Options hadoopOptions = fileIO.routedHadoopOptions(DATA, op);
                 assertThat(hadoopOptions.get("fs.oss.endpoint"))
                         .isEqualTo(options.get("fs.oss.endpoint"));
                 assertThat(hadoopOptions.containsKey("fs.oss.https.enable")).isFalse();
