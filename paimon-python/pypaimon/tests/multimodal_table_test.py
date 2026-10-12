@@ -144,6 +144,113 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(["id", "content", "embedding", "payload"],
                          [field.name for field in table.raw_table.fields])
 
+    def test_add_video_column_to_existing_images(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        table = self.conn.create_table(
+            "evolved_video", schema=_schema({"id": pa.int32(), "image": pa.large_binary()}),
+            options=_PARQUET_OPTIONS)
+        table.add([{"id": 0, "image": b"image-0"}, {"id": 1, "image": b"image-1"}])
+        table.raw_table.create_tag("before_video")
+        old_table = table
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD"),
+        ])
+        table = self.conn.get_table("evolved_video")
+        self.assertEqual([None, None], [r["video"] for r in table.scan().to_list()])
+        old_table.add([{"id": 2, "image": b"image-2"}])
+        video_path = os.path.join(self.temp_dir, "backfill.mp4")
+        with open(video_path, "wb") as out:
+            out.write(b"complete-video-payload")
+        table.replace_video("id < 2", pmm.Blob.from_local(video_path), first_frame=7)
+        # A retained writer must not stamp its old schema onto a new snapshot.
+        old_table.add([{"id": 3, "image": b"image-3"}])
+        snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(table.raw_table.table_schema.id, snapshot.schema_id)
+        table.raw_table.create_tag("after_old_append")
+        rows = sorted(table.scan().select(["id", "image", "video", "_ROW_ID"]).to_list(),
+                      key=lambda row: row["id"])
+        self.assertEqual([0, 1, 2, 3], [row["_ROW_ID"] for row in rows])
+        self.assertEqual([7, 8], [pmm.VideoFrameDescriptor.deserialize(row["video"]).frame_index
+                                  for row in rows[:2]])
+        self.assertTrue(all(row["video"] is None for row in rows[2:]))
+        _, images = table.scan().read_blobs("image")
+        self.assertEqual([b"image-0", b"image-1", b"image-2", b"image-3"], images["image"])
+        _, videos = table.scan().where("id < 2").read_blobs("video")
+        self.assertEqual([b"complete-video-payload"] * 2, videos["video"])
+        for options in ({"scan.snapshot-id": str(snapshot.id)}, {"scan.tag-name": "after_old_append"}):
+            with self.subTest(options=options):
+                historical = table.raw_table.copy(options)
+                self.assertEqual(["id", "image", "video"], [field.name for field in historical.fields])
+                read = historical.new_read_builder()
+                restored = sorted(read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist(),
+                                  key=lambda row: row["id"])
+                self.assertEqual([0, 1, 2, 3], [row["id"] for row in restored])
+                self.assertEqual([row["video"] for row in rows], [row["video"] for row in restored])
+        historical = self.conn.catalog.get_table("default.evolved_video").copy({"scan.tag-name": "before_video"})
+        self.assertNotIn("video-frame-field", historical.table_schema.options)
+        # The retained old schema still reads the original rows after the backfill.
+        read = historical.new_read_builder()
+        historical_rows = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist()
+        self.assertEqual([0, 1], sorted(row["id"] for row in historical_rows))
+        self.assertTrue(all(row.get("video") is None for row in historical_rows))
+
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("second", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        for column, remaining in (("video", "second"), ("second", None)):
+            self.conn.catalog.alter_table("default.evolved_video", [SchemaChange.drop_column(column)])
+            current = self.conn.get_table("evolved_video")
+            self.assertEqual(remaining, current.raw_table.table_schema.options.get("video-frame-field"))
+            self.assertEqual(4, len(current.scan().to_list()))
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        current = self.conn.get_table("evolved_video")
+        self.assertEqual([None] * 4, [row["video"] for row in current.scan().to_list()])
+
+    def test_add_video_column_validation(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange as C
+
+        table = self.conn.create_table(
+            "video_evolution_validation",
+            schema=_schema({"id": pa.int32(), "image": pa.large_binary()}),
+            options=_PARQUET_OPTIONS)
+        table.add([{"id": 0, "image": b"original"}])
+        identifier = "default.video_evolution_validation"
+
+        with self.assertRaisesRegex(ValueError, "immutable option"):
+            table.raw_table.copy({"video-frame-field": "image"})
+
+        def alter(changes):
+            self.conn.catalog.alter_table(identifier, changes)
+
+        for changes in [
+            [C.set_option("video-frame-field", "image")],
+            [C.set_option("video-frame-field", "missing")],
+            [C.add_column("bad", AtomicType("INT"), "__VIDEO_FRAME_FIELD")],
+            [C.add_column("bad", AtomicType("BLOB", False), "__VIDEO_FRAME_FIELD")],
+            [C.add_column("bad", AtomicType("BLOB")), C.set_option("video-frame-field", "image,bad")],
+        ]:
+            with self.subTest(changes=changes):
+                with self.assertRaises(RuntimeError):
+                    alter(changes)
+                self.assertEqual(0, self.conn.catalog.get_table(identifier).table_schema.id)
+        alter([C.update_column_comment("image", "__VIDEO_FRAME_FIELD")])
+        self.assertNotIn("video-frame-field", self.conn.catalog.get_table(identifier).table_schema.options)
+        alter([C.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        alter([C.add_column("second", AtomicType("BLOB"), "__VIDEO_FRAME_FIELD")])
+        self.assertEqual(
+            "video,second", self.conn.catalog.get_table(identifier).table_schema.options["video-frame-field"])
+        for change in [C.set_option("video-frame-field", "second"),
+                       C.set_option("video-frame-field", ""), C.remove_option("video-frame-field")]:
+            with self.assertRaises(RuntimeError):
+                alter([change])
+        # A column added by a previous commit may already contain ordinary BLOB data.
+        alter([C.add_column("later", AtomicType("BLOB"))])
+        with self.assertRaisesRegex(RuntimeError, "not supported yet"):
+            alter([C.set_option("video-frame-field", "video,second,later")])
+
     def test_add_video_embeds_frame_ordinals_outside_normal_data(self):
         table = self.conn.create_table(
             "video_frames",

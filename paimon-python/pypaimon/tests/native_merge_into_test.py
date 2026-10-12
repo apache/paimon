@@ -195,8 +195,15 @@ def test_native_merge_keeps_video_inserts_on_python_path(tmp_path):
     from pypaimon.write.native_merge_into import create_native_merge_into
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 
-    table = _table(tmp_path).copy({'video-frame-field': 'name'})
-    source = pa.Table.from_pylist([dict(id=1, value=10, name='frame')], schema=_SCHEMA)
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', True)
+    schema = pa.schema([('id', pa.int32()), ('video', pa.large_binary())])
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(schema, options={
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        'video-frame-field': 'video', 'write.native.enabled': 'true',
+    }), False)
+    table = catalog.get_table('db.t')
+    source = pa.Table.from_pylist([dict(id=1, video=None)], schema=schema)
     assert create_native_merge_into(table, source, ['id'], [], [WhenNotMatched('*')],
                                     'merge', BATCH_COMMIT_IDENTIFIER) is None
 

@@ -584,7 +584,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     /** Prevents current column declarations from overriding a historical schema's field options. */
     private static Map<String, String> excludeCurrentSchemaFieldOptions(
             TableSchema historicalSchema, Options options, Set<String> dynamicOptionKeys) {
-        // Keep scan and runtime options. Only these directive-managed column declarations
+        // Keep scan and runtime options. These column storage declarations
         // must follow the historical schema, since columns may have been added or dropped.
         Map<String, String> historicalOptions = new HashMap<>(options.toMap());
         for (ConfigOption<String> option :
@@ -592,7 +592,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         CoreOptions.VECTOR_FIELD,
                         CoreOptions.BLOB_FIELD,
                         CoreOptions.BLOB_DESCRIPTOR_FIELD,
-                        CoreOptions.BLOB_VIEW_FIELD)) {
+                        CoreOptions.BLOB_VIEW_FIELD,
+                        CoreOptions.VIDEO_FRAME_FIELD)) {
             // Restore the canonical key and aliases together, or a stale alias may take effect
             // when the historical schema has no canonical value.
             List<String> keys = new ArrayList<>();
