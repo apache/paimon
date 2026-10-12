@@ -886,11 +886,12 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         CatalogEnvironment environment =
                 new CatalogEnvironment(null, null, null, null, null, null, false, false) {
                     @Override
-                    public SnapshotCommit snapshotCommit(SnapshotManager manager) {
+                    public SnapshotCommit snapshotCommit(
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
                         SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
-                        return new SnapshotCommit() {
+                        return new SnapshotCommit(Lock.empty()) {
                             @Override
-                            public boolean commit(
+                            protected boolean commitImpl(
                                     @Nullable String baseUuid,
                                     Snapshot snapshot,
                                     String branch,
@@ -906,7 +907,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                             }
 
                             @Override
-                            public void close() throws Exception {
+                            protected void closeImpl() throws Exception {
                                 delegate.close();
                             }
                         };

@@ -22,6 +22,8 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
@@ -49,6 +51,15 @@ public abstract class DelegateCatalog implements Catalog {
 
     public DelegateCatalog(Catalog wrapped) {
         this.wrapped = wrapped;
+    }
+
+    @Override
+    public Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        return wrapped.createLock(identifier, tableUuid, commitUser, tableOptions);
     }
 
     public Catalog wrapped() {

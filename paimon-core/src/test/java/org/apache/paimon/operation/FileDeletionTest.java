@@ -918,7 +918,8 @@ public class FileDeletionTest {
     }
 
     // clean given bucket and generate a new snapshot
-    private void cleanBucket(TestFileStore store, BinaryRow partition, int bucket) {
+    private void cleanBucket(TestFileStore store, BinaryRow partition, int bucket)
+            throws Exception {
         // manually make delete ManifestEntry
         List<ManifestEntry> bucketEntries =
                 store.newScan().withPartitionBucket(partition, bucket).plan().files();
