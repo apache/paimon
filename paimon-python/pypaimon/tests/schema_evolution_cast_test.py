@@ -54,3 +54,61 @@ def test_timestamp_floor_overflow_returns_null(zone, precision):
         source, source.type, AtomicType(name + '(9)'), AtomicType('%s(%d)' % (name, precision)))
     quantum = 10 ** (9 - precision)
     assert output.cast(pa.int64()).to_pylist() == [None, (-(2 ** 63) + 1000) // quantum * quantum, -quantum, None]
+
+
+@pytest.mark.parametrize('unit,ticks', [('s', 1), ('ms', 1000), ('us', 1000000), ('ns', 1000000000)])
+@pytest.mark.parametrize('zone', [None, 'UTC'])
+@pytest.mark.parametrize('chunked', [False, True])
+def test_timestamp_to_bigint_uses_epoch_seconds_flooring(unit, ticks, zone, chunked):
+    fraction = 0 if unit == 's' else 1
+    values = [ticks + fraction, -1, -ticks - fraction, 0,
+              (2 ** 31 + 2) * ticks, -(2 ** 31 + 2) * ticks, None]
+    expected = [1, -1, -1 if unit == 's' else -2, 0, 2 ** 31 + 2, -(2 ** 31 + 2), None]
+    source = pa.array([None] + values + [None], type=pa.timestamp(unit, zone)).slice(1, len(values))
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 2), source.slice(2, 0), source.slice(2)])
+    result = cast_array_for_schema_evolution(source, pa.int64())
+    assert result.type == pa.int64()
+    assert result.to_pylist() == expected
+
+
+@pytest.mark.parametrize('unit,ticks', [('s', 1), ('ms', 1000), ('us', 1000000), ('ns', 1000000000)])
+@pytest.mark.parametrize('chunked', [False, True])
+@pytest.mark.parametrize('source_type', [pa.int32(), pa.int64()])
+def test_integer_to_timestamp_uses_epoch_seconds_and_java_millis_wrapping(unit, ticks, chunked, source_type):
+    values = [42, -42, 1700000000, None]
+    expected = [42 * ticks, -42 * ticks, 1700000000 * ticks, None]
+    if source_type == pa.int64():
+        values.extend([2 ** 63 - 1, -(2 ** 63), 2 ** 63 - 2])
+        expected.extend([-ticks, 0, -2 * ticks])
+    else:
+        values.extend([2 ** 31 - 1, -(2 ** 31), 0])
+        expected.extend([(2 ** 31 - 1) * ticks, -(2 ** 31) * ticks, 0])
+    source = pa.array([None] + values + [None], type=source_type).slice(1, len(values))
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 1), source.slice(1)])
+    result = cast_array_for_schema_evolution(source, pa.timestamp(unit))
+    assert result.type == pa.timestamp(unit)
+    assert result.cast(pa.int64()).to_pylist() == expected
+
+
+@pytest.mark.parametrize('zone,expected', [
+    (None, [9223372036854775, -9223372036854776, None]),
+    ('UTC', [-53757322505225, 53757322505224, None]),
+])
+def test_timestamp_to_bigint_matches_java_extreme_millis_round_trip(zone, expected):
+    # Golden outputs from Java CastExecutors, including LTZ's int epoch day.
+    source = pa.array([2 ** 63 - 1, -(2 ** 63), None], type=pa.timestamp('ms', zone))
+    assert cast_array_for_schema_evolution(source, pa.int64()).to_pylist() == expected
+
+
+@pytest.mark.parametrize('unit,expected', [
+    ('s', [9223372036854775, -9223372036854775, None]),
+    ('ms', [9223372036854775000, -9223372036854775000, None]),
+    ('us', [None, None, None]),
+    ('ns', [None, None, None]),
+])
+def test_bigint_to_timestamp_keeps_lenient_arrow_storage_overflow(unit, expected):
+    source = pa.array([9223372036854775, -9223372036854775, None], type=pa.int64())
+    result = cast_array_for_schema_evolution(source, pa.timestamp(unit))
+    assert result.cast(pa.int64()).to_pylist() == expected

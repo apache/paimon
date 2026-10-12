@@ -214,3 +214,124 @@ def test_nested_narrowing_preserves_null_containers_and_leaf_projection(rest_cat
         leaves = _read(table, native, projection=['id', 'r.n', 'r.t'])
         assert leaves.column('r_n').to_pylist() == [-128, None, 127]
         assert leaves.column('r_t').cast(pa.int64()).to_pylist() == [100, None, -100]
+
+
+_TEMPORAL_CASES = [
+    (pa.timestamp('ms'), 'BIGINT', [42001, -1, -42001, 2147483650000, None],
+     [42, -1, -43, 2147483650, None]),
+    (pa.timestamp('us'), 'BIGINT', [42000001, -1, -42000001, 2147483650000000, None],
+     [42, -1, -43, 2147483650, None]),
+    (pa.timestamp('ns'), 'BIGINT', [42000000001, -1, -42000000001, 2147483650000000000, None],
+     [42, -1, -43, 2147483650, None]),
+    (pa.timestamp('ms', 'UTC'), 'BIGINT', [42001, -1, -42001, 2147483650000, None],
+     [42, -1, -43, 2147483650, None]),
+    (pa.timestamp('us', 'UTC'), 'BIGINT', [42000001, -1, -42000001, 2147483650000000, None],
+     [42, -1, -43, 2147483650, None]),
+    (pa.timestamp('ns', 'UTC'), 'BIGINT', [42000000001, -1, -42000000001, 2147483650000000000, None],
+     [42, -1, -43, 2147483650, None]),
+    (pa.int32(), 'TIMESTAMP(0)', [42, -42, 2147483647, -2147483648, None],
+     [42, -42, 2147483647, -2147483648, None]),
+    (pa.int32(), 'TIMESTAMP(1)', [42, -42, 2147483647, -2147483648, None],
+     [42000, -42000, 2147483647000, -2147483648000, None]),
+    (pa.int32(), 'TIMESTAMP(4)', [42, -42, 2147483647, -2147483648, None],
+     [42000000, -42000000, 2147483647000000, -2147483648000000, None]),
+    (pa.int32(), 'TIMESTAMP(7)', [42, -42, 2147483647, -2147483648, None],
+     [42000000000, -42000000000, 2147483647000000000, -2147483648000000000, None]),
+    (pa.int64(), 'TIMESTAMP(0)', [42, -42, 2147483650, 2 ** 63 - 1, -(2 ** 63), None],
+     [42, -42, 2147483650, -1, 0, None]),
+    (pa.int64(), 'TIMESTAMP(1)', [42, -42, 2147483650, 2 ** 63 - 1, -(2 ** 63), None],
+     [42000, -42000, 2147483650000, -1000, 0, None]),
+    (pa.int64(), 'TIMESTAMP(4)', [42, -42, 2147483650, 2 ** 63 - 1, -(2 ** 63), None],
+     [42000000, -42000000, 2147483650000000, -1000000, 0, None]),
+    (pa.int64(), 'TIMESTAMP(7)', [42, -42, 2147483650, 2 ** 63 - 1, -(2 ** 63), None],
+     [42000000000, -42000000000, 2147483650000000000, -1000000000, 0, None]),
+]
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+@pytest.mark.parametrize('source_type,target_name,values,expected', _TEMPORAL_CASES)
+def test_epoch_seconds_evolution_reads_old_and_new_rest_files(
+        rest_catalog, mode, source_type, target_name, values, expected):
+    catalog, _ = rest_catalog
+    _table(catalog, mode, source_type, values)
+    target = AtomicType(target_name)
+    catalog.alter_table('default.t', [SchemaChange.update_column_type('v', target)], False)
+    table = catalog.get_table('default.t')
+    target_type = PyarrowFieldParser.from_paimon_type(target)
+    for native in (False, True):
+        result = _read(table, native).column('v')
+        assert result.type == target_type
+        assert result.cast(pa.int64()).to_pylist() == expected
+    # Both schema versions must materialize the current type in one read.
+    _write(table, pa.table({'id': [len(values)], 'v': pa.array([expected[0]], type=target_type)}))
+    table = catalog.get_table('default.t')
+    first = pa.scalar(expected[0], type=target_type).as_py()
+    pb = table.new_read_builder().new_predicate_builder()
+    for native in (False, True):
+        assert _read(table, native).column('v').cast(pa.int64()).to_pylist() == expected + [expected[0]]
+        assert _read(table, native, pb.equal('v', first), ['id']).column('id').to_pylist() == [0, len(values)]
+        assert _read(table, native, pb.is_null('v'), ['id']).column('id').to_pylist() == [len(values) - 1]
+
+
+@pytest.mark.parametrize('source_type,target_name,values,expected', _TEMPORAL_CASES)
+def test_single_value_epoch_stats_do_not_prune_converted_match(
+        rest_catalog, source_type, target_name, values, expected):
+    catalog, _ = rest_catalog
+    _table(catalog, 'append', source_type, values[:1])
+    target = AtomicType(target_name)
+    catalog.alter_table('default.t', [SchemaChange.update_column_type('v', target)], False)
+    table = catalog.get_table('default.t')
+    literal = pa.scalar(expected[0], type=PyarrowFieldParser.from_paimon_type(target)).as_py()
+    predicate = table.new_read_builder().new_predicate_builder().equal('v', literal)
+    for native in (False, True):
+        assert _read(table, native, predicate, ['id']).column('id').to_pylist() == [0]
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+@pytest.mark.parametrize('integer_type', [pa.int32(), pa.int64()])
+def test_nested_epoch_seconds_evolution_and_projection(rest_catalog, mode, integer_type):
+    catalog, _ = rest_catalog
+    schema = pa.schema([
+        ('id', pa.int64()),
+        ('r', pa.struct([('t', pa.timestamp('us')), ('s', integer_type)])),
+        ('a', pa.list_(pa.timestamp('ns'))),
+        ('m', pa.map_(pa.string(), integer_type)),
+    ])
+    options = {'file.format': 'parquet', 'read.batch-size': '1'}
+    if mode == 'pk':
+        options['bucket'] = '1'
+    elif mode == 'de':
+        options.update({'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true'})
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, primary_keys=['id'] if mode == 'pk' else [], options=options), False)
+    boundary = 2 ** 63 - 1 if integer_type == pa.int64() else -(2 ** 31)
+    expected_boundary = -1000000 if integer_type == pa.int64() else -2147483648000000
+    _write(catalog.get_table('default.t'), pa.Table.from_pylist([
+        {'id': 0, 'r': {'t': 42000001, 's': 42}, 'a': [42000000001, None, -1],
+         'm': [('positive', 42), ('negative', -42)]},
+        {'id': 1, 'r': None, 'a': None, 'm': None},
+        {'id': 2, 'r': {'t': -1, 's': boundary}, 'a': [], 'm': []},
+    ], schema=schema))
+    catalog.alter_table('default.t', [
+        SchemaChange.update_column_type(['r', 't'], AtomicType('BIGINT')),
+        SchemaChange.update_column_type(['r', 's'], AtomicType('TIMESTAMP(6)')),
+        SchemaChange.update_column_type(['a', 'element'], AtomicType('BIGINT')),
+        SchemaChange.update_column_type(['m', 'value'], AtomicType('TIMESTAMP(3)')),
+    ], False)
+    table = catalog.get_table('default.t')
+    expected_map = pa.array([[('positive', 42000), ('negative', -42000)], None, []],
+                            type=pa.map_(pa.string(), pa.timestamp('ms'))).to_pylist()
+    for native in (False, True):
+        actual = _read(table, native)
+        assert actual.column('r').flatten()[0].to_pylist() == [42, None, -1]
+        assert actual.column('r').flatten()[1].cast(pa.int64()).to_pylist() == [42000000, None, expected_boundary]
+        assert actual.column('a').to_pylist() == [[42, None, -1], None, []]
+        assert actual.column('m').to_pylist() == expected_map
+        leaves = _read(table, native, projection=['id', 'r.t', 'r.s'])
+        assert leaves.column('r_t').to_pylist() == [42, None, -1]
+        assert leaves.column('r_s').cast(pa.int64()).to_pylist() == [42000000, None, expected_boundary]
+        selected = _read(table, native, projection=[
+            'id', "m['positive']", "m['negative']", "m['missing']"])
+        assert selected.column('m_positive').cast(pa.int64()).to_pylist() == [42000, None, None]
+        assert selected.column('m_negative').cast(pa.int64()).to_pylist() == [-42000, None, None]
+        assert selected.column('m_missing').null_count == 3
