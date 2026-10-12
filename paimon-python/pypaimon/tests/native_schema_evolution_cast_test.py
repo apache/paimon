@@ -429,3 +429,19 @@ def test_constructed_string_evolution_uses_temporal_child_casts(
     # children use STRING, retaining their own declared temporal precision.
     for native in (False, True):
         assert _read(table, native).column('v').to_pylist() == expected
+
+
+@pytest.mark.parametrize('mode', ['append', 'de'])
+@pytest.mark.parametrize('target_name', ['STRING', 'VARCHAR(12)', 'CHAR(35)'])
+def test_wide_ltz_string_does_not_fail_a_mixed_batch(rest_catalog, mode, target_name):
+    catalog, _ = rest_catalog
+    values = [0, 2 ** 63 - 1, None, -(2 ** 63), 2 ** 63 - 1 - 181 * 86400000]
+    _table(catalog, mode, pa.timestamp('ms', 'UTC'), values)
+    catalog.alter_table('default.t', [SchemaChange.update_column_type('v', AtomicType(target_name))], False)
+    table = catalog.get_table('default.t')
+    # The Python executor supports the complete signed millisecond range. Core
+    # unit tests check its matching Java strings for UTC, Shanghai and DST zones.
+    expected = _read(table, False).column('v').to_pylist()
+    assert expected[2] is None
+    assert all(value is not None for i, value in enumerate(expected) if i != 2)
+    assert _read(table, True).column('v').to_pylist() == expected
