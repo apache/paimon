@@ -144,6 +144,32 @@ public class RESTTokenRefresher {
         }
     }
 
+    /** Returns the current token, or reloads it when it has less than the given time left. */
+    public RESTToken tokenValidFor(long minimumValidityMillis) {
+        RESTToken token = token();
+        if (remainingMillis(token) >= minimumValidityMillis) {
+            return token;
+        }
+        lock.lock();
+        try {
+            CachedToken current = cached;
+            if (current != null && remainingMillis(current.token) >= minimumValidityMillis) {
+                return current.token;
+            }
+            RESTToken loaded = load();
+            cached = new CachedToken(loaded, currentTimeMillis());
+            lastFailure = null;
+            return loaded;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Milliseconds left until the token expires. */
+    public long remainingMillis(RESTToken token) {
+        return token.expireAtMillis() - currentTimeMillis();
+    }
+
     private RESTToken reload() {
         CachedToken current = cached;
         long now = currentTimeMillis();

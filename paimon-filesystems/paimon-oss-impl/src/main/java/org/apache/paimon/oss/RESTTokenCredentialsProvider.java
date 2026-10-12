@@ -27,9 +27,12 @@ import com.aliyun.oss.common.auth.CredentialsProvider;
 import com.aliyun.oss.common.auth.DefaultCredentials;
 import org.apache.hadoop.conf.Configuration;
 
+import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.Callable;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -48,6 +51,9 @@ public class RESTTokenCredentialsProvider implements CredentialsProvider {
     private static final String SECURITY_TOKEN = "fs.oss.securityToken";
 
     private final RESTTokenRefresher refresher;
+
+    // Credentials the calling thread signs with inside signValidFor.
+    private final ThreadLocal<Credentials> pinned = new ThreadLocal<>();
 
     // The last token and the credentials built from it, swapped together.
     private volatile Resolved last;
@@ -69,7 +75,31 @@ public class RESTTokenCredentialsProvider implements CredentialsProvider {
 
     @Override
     public Credentials getCredentials() {
-        RESTToken token = refresher.token();
+        Credentials credentials = pinned.get();
+        return credentials != null ? credentials : credentials(refresher.token());
+    }
+
+    /** Runs the signing with credentials of a token that stays valid for the given time. */
+    public <T> T signValidFor(Duration validity, Callable<T> signing) throws Exception {
+        long validityMillis = validity.toMillis();
+        RESTToken token = refresher.tokenValidFor(validityMillis);
+        T signed;
+        pinned.set(credentials(token));
+        try {
+            signed = signing.call();
+        } finally {
+            pinned.remove();
+        }
+        // Checked after signing, so the token also outlives the expiry the signing computed.
+        if (refresher.remainingMillis(token) < validityMillis) {
+            throw new IOException(
+                    "Requested presigned URL validity exceeds the remaining "
+                            + "REST credential lifetime after refresh.");
+        }
+        return signed;
+    }
+
+    private Credentials credentials(RESTToken token) {
         Resolved resolved = last;
         if (resolved != null && resolved.token == token) {
             return resolved.credentials;

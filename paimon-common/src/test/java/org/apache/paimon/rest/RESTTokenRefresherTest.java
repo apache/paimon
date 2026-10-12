@@ -130,6 +130,28 @@ class RESTTokenRefresherTest {
     }
 
     @Test
+    void testReloadsATokenWithLessThanTheRequiredTimeLeft() {
+        when(api.loadTableToken(identifier))
+                .thenReturn(response("second", Duration.ofMinutes(5)))
+                .thenReturn(response("third", hours(4)));
+        RESTTokenRefresher refresher = refresher(token("first", hours(2)));
+
+        assertThat(refresher.tokenValidFor(hours(1).toMillis()).token())
+                .containsEntry("k", "first");
+        verify(api, never()).loadTableToken(identifier);
+
+        // not due for a reload yet, but shorter than required
+        RESTToken shorter = refresher.tokenValidFor(hours(3).toMillis());
+        assertThat(shorter.token()).containsEntry("k", "second");
+        assertThat(refresher.remainingMillis(shorter)).isLessThan(hours(3).toMillis());
+
+        assertThat(refresher.tokenValidFor(Duration.ofMinutes(10).toMillis()).token())
+                .containsEntry("k", "third");
+        assertThat(refresher.token().token()).containsEntry("k", "third");
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
     void testExpiredTokenFailsFastWithinTheRetryInterval() {
         when(api.loadTableToken(identifier))
                 .thenThrow(new IllegalStateException("REST server unavailable"));
