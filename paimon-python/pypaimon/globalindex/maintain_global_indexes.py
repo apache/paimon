@@ -106,6 +106,9 @@ def maintain_global_indexes(table, indexes, *, rebuild=False, partitions=None):
         message.check_from_snapshot = snapshot.id
     commit = table.new_batch_write_builder().new_commit()
     try:
+        # Snapshot IDs can be reused after rollback. Retain the original
+        # metadata, including UUID and manifests, across all commit retries.
+        commit.file_store_commit.conflict_detection._global_index_check_snapshot = snapshot
         commit.commit(messages)
     finally:
         # A publication error can be ambiguous: never delete files here which a

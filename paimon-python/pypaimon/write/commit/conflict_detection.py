@@ -192,6 +192,7 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
+        self._global_index_check_snapshot = None
         self.fixed_bucket_commit_check = None
         self.commit_scanner = commit_scanner
 
@@ -225,6 +226,13 @@ class ConflictDetection:
             delta_entries,
             commit_kind,
             delta_index_entries=None):
+        # Snapshot equality includes UUID and manifest identities, protecting
+        # against reused IDs even for older snapshots without a UUID.
+        if (self._global_index_check_snapshot is not None
+                and latest_snapshot != self._global_index_check_snapshot):
+            return RuntimeError(
+                "Global index maintenance conflict: table snapshot changed after planning; rerun maintenance.")
+
         try:
             FileEntry.merge_entries(delta_entries)
         except Exception as e:

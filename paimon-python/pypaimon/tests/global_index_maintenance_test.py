@@ -102,6 +102,94 @@ def test_concurrent_commit_rejects_replacement(docs):
 
 
 @pytest.mark.parametrize("rebuild", [False, True])
+@pytest.mark.parametrize("during_retry", [False, True])
+@pytest.mark.parametrize("legacy_snapshot", [False, True])
+def test_rollback_and_reappend_rejects_reused_snapshot(tmp_path, rebuild, during_retry, legacy_snapshot):
+    from pypaimon.common.json_util import JSON
+    from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+    from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+    docs = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
+        "docs", schema=pa.schema([("id", pa.int64())]),
+        options={"file.format": "parquet", "write.native.enabled": "false",
+                 "commit.native.enabled": "false"})
+    docs.add([{"id": 0}])
+    spec = {"column": "id", "type": "btree"}
+    if rebuild:
+        docs.maintain_indexes([spec])
+    table = docs.raw_table
+
+    def latest_snapshot():
+        manager = table.snapshot_manager()
+        snapshot = manager.get_latest_snapshot()
+        if legacy_snapshot:
+            # Older snapshot files have no UUID. Preserve that representation
+            # for both versions of the reused snapshot ID.
+            snapshot.uuid = None
+            table.file_io.write_file(manager.get_snapshot_path(snapshot.id),
+                                     JSON.to_json(snapshot), overwrite=True)
+        return snapshot
+
+    rollback_snapshot = table.snapshot_manager().get_latest_snapshot()
+    old_indexes = names(docs)
+    docs.add([{"id": 10}])
+    planned = latest_snapshot()
+    replacements = []
+
+    def replace_snapshot():
+        table.rollback_to(rollback_snapshot.id)
+        docs.add([{"id": 20}])
+        replacement = latest_snapshot()
+        assert (replacement.id, replacement.schema_id, replacement.next_row_id) == (
+            planned.id, planned.schema_id, planned.next_row_id)
+        if legacy_snapshot:
+            assert replacement.uuid is planned.uuid is None
+        else:
+            assert replacement.uuid != planned.uuid
+        assert replacement.delta_manifest_list != planned.delta_manifest_list
+        replacements.append(replacement)
+
+    original_build = GlobalIndexBuilder.build
+    original_commit = RenamingSnapshotCommit.commit
+
+    def build(builder):
+        messages = original_build(builder)
+        if not during_retry:
+            replace_snapshot()
+        return messages
+
+    def commit(committer, previous_uuid, snapshot, statistics):
+        if during_retry and snapshot.index_manifest and not replacements:
+            # Simulate a failed CAS after the first check; the retry must
+            # still compare against the original plan, not the reused ID.
+            with patch.object(RenamingSnapshotCommit, "commit", original_commit):
+                replace_snapshot()
+            return False
+        return original_commit(committer, previous_uuid, snapshot, statistics)
+
+    with patch.object(GlobalIndexBuilder, "build", build), \
+            patch.object(RenamingSnapshotCommit, "commit", commit):
+        with pytest.raises(RuntimeError, match="Global index maintenance conflict"):
+            docs.maintain_indexes([spec], rebuild=rebuild)
+
+    assert len(replacements) == 1
+    assert table.snapshot_manager().get_latest_snapshot() == replacements[0]
+    assert names(docs) == old_indexes
+    assert docs.scan().to_arrow().sort_by("id").to_pylist() == [{"id": 0}, {"id": 20}]
+    assert docs.scan().where("id = 20").to_list() == [{"id": 20}]
+    assert docs.maintain_indexes([spec], rebuild=rebuild) > 0
+    predicate = table.new_read_builder().new_predicate_builder().equal("id", 20)
+    with DataEvolutionGlobalIndexScanner.create(
+            table, predicate=predicate,
+            snapshot=table.snapshot_manager().get_latest_snapshot()) as scanner:
+        result = scanner.scan(predicate)
+    assert result is not None
+    rb = table.new_read_builder().with_filter(predicate)
+    splits = rb.new_scan().with_global_index_result(result).plan().splits()
+    assert rb.new_read().to_arrow(splits).to_pylist() == [{"id": 20}]
+
+
+@pytest.mark.parametrize("rebuild", [False, True])
 def test_concurrent_compaction_is_not_rolled_back(tmp_path, rebuild):
     docs = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "docs", schema=pa.schema([("id", pa.int64())]),

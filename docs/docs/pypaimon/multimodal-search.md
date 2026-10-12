@@ -175,8 +175,10 @@ docs.maintain_indexes(indexes, rebuild=True, partitions={"date": "2026-10-08"})
 All requested indexes are built against one captured snapshot and published in
 one commit. Rebuild deletes the matching old entries and adds replacements in
 that same commit; old files remain available to retained snapshots. Any
-concurrent snapshot commit causes publication to fail. Schedule another pass
-from the latest snapshot rather than reusing its commit messages. A failed build
+concurrent snapshot commit causes publication to fail. Every publication attempt
+checks the captured snapshot metadata, including its UUID and manifests, so a
+rollback followed by reuse of the same snapshot ID also invalidates the plan.
+Schedule another pass from the latest snapshot rather than reusing its commit messages. A failed build
 leaves existing coverage intact; ambiguous commit failures leave output files
 for normal orphan-file maintenance rather than risking deletion of published
 files.
