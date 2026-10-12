@@ -17,6 +17,7 @@
 
 """FileIO that sends each request to an io-cache target or the origin endpoint."""
 
+import os
 import threading
 from typing import Callable, Dict, List, Optional
 
@@ -38,6 +39,7 @@ class IoCacheRoutingFileIO(FileIO):
         self._create_target = create_target
         self._targets: Dict[str, FileIO] = {}
         self._targets_lock = threading.Lock()
+        self._pid = os.getpid()
         self._filesystem = pafs.PyFileSystem(_IoCacheRoutingHandler(self))
 
     @property
@@ -56,6 +58,11 @@ class IoCacheRoutingFileIO(FileIO):
         """Origin, or the FileIO of a target, created on first use."""
         if name is None:
             return self._origin
+        if self._pid != os.getpid():
+            # A forked child inherits the lock in whatever state a parent thread left it.
+            self._targets = {}
+            self._targets_lock = threading.Lock()
+            self._pid = os.getpid()
         file_io = self._targets.get(name)
         if file_io is not None:
             return file_io

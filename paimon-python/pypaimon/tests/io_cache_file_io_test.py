@@ -21,9 +21,11 @@ import contextlib
 import gzip
 import inspect
 import io
+import multiprocessing
 import os
 import shutil
 import tempfile
+import threading
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -195,6 +197,36 @@ class IoCacheRoutingFileIOTest(unittest.TestCase):
         self.assertEqual(["cluster"], self.created)
         self.file_io.new_input_stream(MANIFEST)
         self.assertEqual(["cluster", "accel"], self.created)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs fork")
+    def test_forked_child_does_not_wait_on_the_parents_target_lock(self):
+        self._put_all(DATA)
+        parent_pid = os.getpid()
+        creating, release = threading.Event(), threading.Event()
+
+        def create_target(name):
+            # the parent stays inside the lock until released; a forked child must not wait for it
+            if os.getpid() == parent_pid:
+                creating.set()
+                release.wait(30)
+            return self.cluster
+
+        file_io = IoCacheRoutingFileIO(_routing(), self.origin, create_target)
+        parent = threading.Thread(target=lambda: file_io.new_input_stream(DATA).read())
+        parent.start()
+        try:
+            self.assertTrue(creating.wait(10))
+            child = multiprocessing.get_context("fork").Process(
+                target=lambda: os._exit(0 if file_io.new_input_stream(DATA).read() == b"cluster" else 1))
+            child.start()
+            child.join(10)
+            if child.exitcode is None:
+                child.kill()
+                child.join()
+            self.assertEqual(0, child.exitcode)
+        finally:
+            release.set()
+            parent.join(10)
 
     def test_reads_without_read_policy_use_origin(self):
         self._put_all(DATA)
