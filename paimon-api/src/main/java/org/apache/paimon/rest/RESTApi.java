@@ -745,15 +745,14 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    public boolean renewCommitLock(Identifier identifier, String tableUuid, String commitUser) {
+    public CommitLockResponse renewCommitLock(
+            Identifier identifier, String tableUuid, String commitUser) {
         return client.post(
-                        resourcePaths.commitLock(
-                                        identifier.getDatabaseName(), identifier.getObjectName())
-                                + "/renew",
-                        new CommitLockRequest(tableUuid, commitUser),
-                        CommitLockResponse.class,
-                        restAuthFunction)
-                .isAcquired();
+                resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName())
+                        + "/renew",
+                new CommitLockRequest(tableUuid, commitUser),
+                CommitLockResponse.class,
+                restAuthFunction);
     }
 
     /**

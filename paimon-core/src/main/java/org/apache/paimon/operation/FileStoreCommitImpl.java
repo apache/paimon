@@ -102,6 +102,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -129,8 +130,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *       user should first call {@link #filterCommitted}.
  *   <li>Before committing, it will first check for conflicts by checking if all files to be removed
  *       currently exists, and if modified files have overlapping key ranges with existing files.
- *   <li>After that it use the external {@link SnapshotCommit} (if provided) or the atomic rename of
- *       the file system to ensure atomicity.
+ *   <li>The bound {@link SnapshotCommit} protects validation and preparation with its lock, then
+ *       atomically publishes the snapshot through the catalog or file system.
  *   <li>If commit fails due to conflicts or exception it tries its best to clean up and aborts.
  *   <li>If atomic rename fails it tries again after reading the latest snapshot from step 2.
  * </ol>
@@ -238,6 +239,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
+    }
+
+    private <T> T runWithLock(Callable<T> callable) {
+        try {
+            return snapshotCommit.runWithLock(callable);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to run commit with table lock.", e);
+        }
     }
 
     @Override
@@ -894,25 +905,34 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         RetryCommitResult retryResult = null;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-            CommitResult result =
-                    tryCommitOnce(
-                            retryResult,
-                            changesProvider,
-                            identifier,
-                            watermark,
-                            properties,
-                            commitKind,
-                            allowRollback,
-                            latestSnapshot,
-                            detectConflicts,
-                            statsFileName);
+            Exception failure;
+            try {
+                CommitResult result =
+                        tryCommitOnce(
+                                retryResult,
+                                changesProvider,
+                                identifier,
+                                watermark,
+                                properties,
+                                commitKind,
+                                allowRollback,
+                                snapshotManager::latestSnapshot,
+                                detectConflicts,
+                                statsFileName);
+                notifyCommitSuccess(result);
 
-            if (result.isSuccess()) {
-                break;
+                if (result.isSuccess()) {
+                    break;
+                }
+
+                retryResult = (RetryCommitResult) result;
+                failure = retryResult.exception;
+            } catch (Lock.AcquisitionException e) {
+                // Nothing was prepared or published. Retain any previous publication retry
+                // state, including its head, conflict scan and merged manifests.
+                failure = e;
+                LOG.warn("Failed to acquire commit lock for table {}.", tableName, e);
             }
-
-            retryResult = (RetryCommitResult) result;
 
             if (System.currentTimeMillis() - startMillis > options.commitTimeout()
                     || retryCount >= options.commitMaxRetries()) {
@@ -920,7 +940,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         String.format(
                                 "Commit failed for table %s after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 tableName, options.commitTimeout(), retryCount);
-                throw new RuntimeException(message, retryResult.exception);
+                throw new RuntimeException(message, failure);
             }
 
             retryWaiter.retryWait(retryCount);
@@ -1027,21 +1047,58 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean allowRollback,
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
-            @Nullable String newStatsFileName) {
-        return tryCommitOnce(
-                retryResult,
-                CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
-                identifier,
-                watermark,
-                properties,
-                commitKind,
-                allowRollback,
-                latestSnapshot,
-                detectConflicts,
-                newStatsFileName);
+            @Nullable String newStatsFileName)
+            throws Lock.AcquisitionException {
+        CommitResult result =
+                tryCommitOnce(
+                        retryResult,
+                        CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
+                        identifier,
+                        watermark,
+                        properties,
+                        commitKind,
+                        allowRollback,
+                        () -> latestSnapshot,
+                        detectConflicts,
+                        newStatsFileName);
+        notifyCommitSuccess(result);
+        return result;
     }
 
     private CommitResult tryCommitOnce(
+            @Nullable RetryCommitResult retryResult,
+            CommitChangesProvider changesProvider,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKind commitKind,
+            boolean allowRollback,
+            Supplier<Snapshot> latestSnapshotSupplier,
+            boolean detectConflicts,
+            @Nullable String newStatsFileName)
+            throws Lock.AcquisitionException {
+        try {
+            return snapshotCommit.runWithLock(
+                    () ->
+                            tryCommitOnceWithoutLock(
+                                    retryResult,
+                                    changesProvider,
+                                    identifier,
+                                    watermark,
+                                    properties,
+                                    commitKind,
+                                    allowRollback,
+                                    latestSnapshotSupplier.get(),
+                                    detectConflicts,
+                                    newStatsFileName));
+        } catch (Lock.AcquisitionException | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to run commit with table lock.", e);
+        }
+    }
+
+    private CommitResult tryCommitOnceWithoutLock(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
             long identifier,
@@ -1171,6 +1228,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitKind);
             if (exception.isPresent()) {
                 if (allowRollback && rollback != null) {
+                    snapshotCommit.ensureValid();
                     if (rollback.tryToRollback(latestSnapshot)) {
                         return RetryCommitResult.forRollback(exception.get());
                     }
@@ -1402,8 +1460,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         CommitCallback.Context context =
                 new CommitCallback.Context(
                         finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);
-        commitCallbacks.forEach(callback -> callback.call(context));
-        return new SuccessCommitResult();
+        return new CompletedCommitResult(context);
     }
 
     @Nullable
@@ -1494,6 +1551,48 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String indexManifest,
             @Nullable Long nextRowId,
             @Nullable Map<String, String> properties) {
+        return replaceManifestListOnce(
+                latest,
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                indexManifest,
+                nextRowId,
+                properties);
+    }
+
+    private boolean replaceManifestListOnce(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
+        return runWithLock(
+                () ->
+                        replaceManifestListOnceWithoutLock(
+                                latest,
+                                totalRecordCount,
+                                baseManifestList,
+                                deltaManifestList,
+                                indexManifest,
+                                nextRowId,
+                                properties));
+    }
+
+    private boolean replaceManifestListOnceWithoutLock(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
+        Snapshot head = snapshotManager.latestSnapshot();
+        if (head == null || !head.equals(latest)) {
+            return false;
+        }
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1525,6 +1624,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public boolean rollbackToAsLatest(Snapshot targetSnapshot) {
+        Pair<Boolean, CommitCallback.Context> result = rollbackToAsLatestOnce(targetSnapshot);
+        if (result.getRight() != null) {
+            commitCallbacks.forEach(callback -> callback.call(result.getRight()));
+        }
+        return result.getLeft();
+    }
+
+    private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnce(Snapshot targetSnapshot) {
+        return runWithLock(() -> rollbackToAsLatestOnceWithoutLock(targetSnapshot));
+    }
+
+    private Pair<Boolean, CommitCallback.Context> rollbackToAsLatestOnceWithoutLock(
+            Snapshot targetSnapshot) {
         Snapshot latest =
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
@@ -1633,9 +1745,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             indexChanges,
                             newSnapshot,
                             newSnapshot.commitIdentifier());
-            commitCallbacks.forEach(callback -> callback.call(context));
+            return Pair.of(true, context);
         }
-        return success;
+        return Pair.of(false, null);
     }
 
     /**
@@ -1703,6 +1815,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private boolean compactManifestOnce() {
+        return runWithLock(this::compactManifestOnceWithoutLock);
+    }
+
+    private boolean compactManifestOnceWithoutLock() {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         if (latestSnapshot == null) {
@@ -1796,6 +1912,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             newSnapshot.commitIdentifier(),
                             newSnapshot.commitKind().name()),
                     e);
+        }
+    }
+
+    private void notifyCommitSuccess(CommitResult result) {
+        if (result instanceof CompletedCommitResult) {
+            CommitCallback.Context context = ((CompletedCommitResult) result).context;
+            commitCallbacks.forEach(callback -> callback.call(context));
+        }
+    }
+
+    private static class CompletedCommitResult extends SuccessCommitResult {
+        private final CommitCallback.Context context;
+
+        private CompletedCommitResult(CommitCallback.Context context) {
+            this.context = context;
         }
     }
 

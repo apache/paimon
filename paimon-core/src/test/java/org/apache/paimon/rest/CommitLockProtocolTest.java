@@ -22,7 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.factories.FactoryUtil;
@@ -84,7 +86,8 @@ class CommitLockProtocolTest {
             assertThat(request.getTableId()).isEqualTo("table-id");
             assertThat(request.getCommitUser()).isEqualTo("morax-job");
             server.enqueue(json(RESTApi.toJson(grant)));
-            assertThat(api.renewCommitLock(identifier, "table-id", "morax-job")).isTrue();
+            assertThat(api.renewCommitLock(identifier, "table-id", "morax-job").isAcquired())
+                    .isTrue();
             assertThat(server.takeRequest(10, TimeUnit.SECONDS).getPath())
                     .endsWith("/commit-lock/renew");
             server.enqueue(json("{\"success\":true}"));
@@ -119,7 +122,13 @@ class CommitLockProtocolTest {
             options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
             options.set(RESTCatalogOptions.TOKEN, "token");
             options.set(RESTCatalogInternalOptions.PREFIX, "catalog");
-            RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options), false);
+            Catalog catalog =
+                    new DelegateCatalog(new RESTCatalog(CatalogContext.create(options), false)) {
+                        @Override
+                        public CatalogLoader catalogLoader() {
+                            return wrapped.catalogLoader();
+                        }
+                    };
             Identifier identifier = new Identifier("db", "table", "dev");
             server.enqueue(json("{}"));
             catalog.rollbackTo(identifier, "table-id", Instant.snapshot(1L), 2L, "morax-job");
@@ -179,7 +188,9 @@ class CommitLockProtocolTest {
                 assertThat(environment.catalogLoader()).isNull();
                 assertThat(environment.lockFactory()).isNull();
                 assertThat(environment.lockContext()).isNull();
-                assertThat(environment.snapshotCommit(table.snapshotManager()))
+                assertThat(
+                                environment.snapshotCommit(
+                                        table.snapshotManager(), table.coreOptions(), "morax-job"))
                         .isInstanceOf(RenamingSnapshotCommit.class);
                 return;
             }

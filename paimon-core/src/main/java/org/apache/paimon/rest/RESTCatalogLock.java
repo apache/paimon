@@ -19,8 +19,8 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
@@ -29,89 +29,99 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
-/**
- * REST commit leases. General catalog operations are not protected by the commit lease protocol.
- */
-public class RESTCatalogLock implements CatalogLock {
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-    private static final ScheduledThreadPoolExecutor RENEWER = createRenewer();
+/** A renewable REST commit lease bound to a table, branch and writer. */
+public class RESTCatalogLock implements Lock {
 
     private final RESTApi api;
-    private final ScheduledExecutorService renewer;
+    private final Identifier identifier;
+    private final String tableUuid;
+    private final String commitUser;
+    private final Supplier<ScheduledExecutorService> renewerFactory;
     private final LongSupplier nanoTime;
     private final long acquireTimeoutMillis;
     private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
 
-    public RESTCatalogLock(RESTApi api) {
-        this(api, Long.MAX_VALUE);
-    }
-
-    public RESTCatalogLock(RESTApi api, long acquireTimeoutMillis) {
-        this(api, RENEWER, System::nanoTime, acquireTimeoutMillis);
-    }
-
-    RESTCatalogLock(RESTApi api, ScheduledExecutorService renewer) {
-        this(api, renewer, System::nanoTime);
-    }
-
-    RESTCatalogLock(RESTApi api, ScheduledExecutorService renewer, LongSupplier nanoTime) {
-        this(api, renewer, nanoTime, Long.MAX_VALUE);
+    public RESTCatalogLock(
+            RESTApi api,
+            Identifier identifier,
+            String tableUuid,
+            String commitUser,
+            long acquireTimeoutMillis) {
+        this(
+                api,
+                identifier,
+                tableUuid,
+                commitUser,
+                acquireTimeoutMillis,
+                RESTCatalogLock::createRenewer,
+                System::nanoTime);
     }
 
     RESTCatalogLock(
             RESTApi api,
-            ScheduledExecutorService renewer,
-            LongSupplier nanoTime,
-            long acquireTimeoutMillis) {
-        this.api = api;
-        this.renewer = renewer;
-        this.nanoTime = nanoTime;
+            Identifier identifier,
+            String tableUuid,
+            String commitUser,
+            long acquireTimeoutMillis,
+            Supplier<ScheduledExecutorService> renewerFactory,
+            LongSupplier nanoTime) {
+        checkArgument(
+                tableUuid != null && !tableUuid.isEmpty(), "A commit lease requires a table UUID.");
+        checkArgument(
+                commitUser != null && !commitUser.isEmpty(),
+                "A commit lease requires a commit user.");
+        checkArgument(
+                acquireTimeoutMillis >= 0, "The lock acquisition timeout cannot be negative.");
+        this.api = checkNotNull(api);
+        this.identifier = checkNotNull(identifier);
+        this.tableUuid = tableUuid;
+        this.commitUser = commitUser;
         this.acquireTimeoutMillis = acquireTimeoutMillis;
+        this.renewerFactory = renewerFactory;
+        this.nanoTime = nanoTime;
     }
 
-    private static ScheduledThreadPoolExecutor createRenewer() {
+    private static ScheduledExecutorService createRenewer() {
         ScheduledThreadPoolExecutor executor =
-                new ScheduledThreadPoolExecutor(2, new ExecutorThreadFactory("commit-lock-renew"));
+                new ScheduledThreadPoolExecutor(
+                        1, new ExecutorThreadFactory("rest-commit-lock-renew"));
         executor.setRemoveOnCancelPolicy(true);
         return executor;
     }
 
     @Override
-    public <T> T runWithLock(String database, String table, Callable<T> callable) {
-        throw new UnsupportedOperationException(
-                "REST commit leases require a table UUID, branch and commit user.");
-    }
-
-    @Override
-    public <T> T runWithLock(
-            Identifier identifier, String tableUuid, String commitUser, Callable<T> callable)
-            throws Exception {
-        if (tableUuid == null
-                || tableUuid.isEmpty()
-                || commitUser == null
-                || commitUser.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "A commit lease requires a table UUID and commit user.");
-        }
+    public AutoCloseable acquire() throws Exception {
+        checkArgument(currentLease.get() == null, "This thread already holds a commit lease.");
         long startedAt = nanoTime.getAsLong();
         while (true) {
-            Lease lease = acquire(identifier, tableUuid, commitUser);
-            if (lease != null) {
-                currentLease.set(lease);
+            long requestedAt = nanoTime.getAsLong();
+            CommitLockResponse response = acquireLease();
+            if (response.isAcquired()) {
+                validateGrant(response);
+                Lease lease = new Lease(response.getLeaseMillis(), requestedAt);
                 try {
                     lease.ensureValid();
-                    return callable.call();
-                } finally {
-                    currentLease.remove();
-                    lease.close();
+                    currentLease.set(lease);
+                    return () -> {
+                        if (currentLease.get() == lease) {
+                            currentLease.remove();
+                        }
+                        lease.close();
+                    };
+                } catch (Exception | Error e) {
+                    Lock.release(lease, e);
+                    throw e;
                 }
             }
             if (TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - startedAt)
@@ -123,25 +133,21 @@ public class RESTCatalogLock implements CatalogLock {
         }
     }
 
-    @Nullable
-    private Lease acquire(Identifier identifier, String tableUuid, String commitUser)
-            throws Catalog.TableNotExistException {
+    private CommitLockResponse acquireLease() throws Catalog.TableNotExistException {
         try {
-            long requestedAt = nanoTime.getAsLong();
-            CommitLockResponse response = api.acquireCommitLock(identifier, tableUuid, commitUser);
-            if (!response.isAcquired()) {
-                return null;
-            }
-            if (!commitUser.equals(response.getCommitUser()) || response.getLeaseMillis() <= 0) {
-                throw new IllegalStateException("The server returned an invalid commit lease.");
-            }
-            return new Lease(identifier, tableUuid, commitUser, response, requestedAt);
+            return api.acquireCommitLock(identifier, tableUuid, commitUser);
         } catch (NoSuchResourceException e) {
             throw new Catalog.TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
             throw new Catalog.TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    private void validateGrant(CommitLockResponse response) {
+        if (!commitUser.equals(response.getCommitUser()) || response.getLeaseMillis() <= 0) {
+            throw new IllegalStateException("The server returned an invalid commit lease.");
         }
     }
 
@@ -155,30 +161,26 @@ public class RESTCatalogLock implements CatalogLock {
     }
 
     private class Lease implements AutoCloseable {
-        private final Identifier identifier;
-        private final String tableUuid;
-        private final String commitUser;
+        private final ScheduledExecutorService executor;
         private final ScheduledFuture<?> renewal;
         private final AtomicBoolean closed = new AtomicBoolean();
-        private final long leaseNanos;
+        private final long leaseMillis;
         private volatile long renewedAt;
         @Nullable private volatile Exception renewalFailure;
 
-        private Lease(
-                Identifier identifier,
-                String tableUuid,
-                String commitUser,
-                CommitLockResponse response,
-                long requestedAt) {
-            this.identifier = identifier;
-            this.tableUuid = tableUuid;
-            this.commitUser = commitUser;
-            this.leaseNanos = TimeUnit.MILLISECONDS.toNanos(response.getLeaseMillis());
+        private Lease(long leaseMillis, long requestedAt) {
+            this.leaseMillis = leaseMillis;
             this.renewedAt = requestedAt;
-            long interval = Math.max(1, response.getLeaseMillis() / 3);
-            this.renewal =
-                    renewer.scheduleWithFixedDelay(
-                            this::renew, interval, interval, TimeUnit.MILLISECONDS);
+            this.executor = renewerFactory.get();
+            long interval = Math.max(1, leaseMillis / 3);
+            try {
+                this.renewal =
+                        executor.scheduleWithFixedDelay(
+                                this::renew, interval, interval, TimeUnit.MILLISECONDS);
+            } catch (RuntimeException | Error e) {
+                Lock.release(executor::shutdownNow, e);
+                throw e;
+            }
         }
 
         private void renew() {
@@ -188,19 +190,26 @@ public class RESTCatalogLock implements CatalogLock {
             try {
                 ensureValid();
                 long requestedAt = nanoTime.getAsLong();
-                if (!api.renewCommitLock(identifier, tableUuid, commitUser)) {
-                    renewalFailure = new IllegalStateException("The commit lease has expired.");
-                } else {
-                    renewedAt = requestedAt;
+                CommitLockResponse response =
+                        api.renewCommitLock(identifier, tableUuid, commitUser);
+                if (!response.isAcquired()) {
+                    throw new IllegalStateException("The commit lease has expired.");
                 }
+                validateGrant(response);
+                if (response.getLeaseMillis() != leaseMillis) {
+                    throw new IllegalStateException(
+                            "The commit lease duration changed during renewal.");
+                }
+                renewedAt = requestedAt;
             } catch (Exception e) {
                 renewalFailure = e;
             }
         }
 
         public void ensureValid() {
-            // Count response time conservatively and do not depend on the renewer being scheduled.
-            if (nanoTime.getAsLong() - renewedAt >= leaseNanos && renewalFailure == null) {
+            // Include response time conservatively without relying on the renewal worker running.
+            if (TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - renewedAt) >= leaseMillis
+                    && renewalFailure == null) {
                 renewalFailure = new IllegalStateException("The commit lease has expired locally.");
             }
             if (closed.get() || renewalFailure != null) {
@@ -212,13 +221,17 @@ public class RESTCatalogLock implements CatalogLock {
         @Override
         public void close() {
             if (closed.compareAndSet(false, true)) {
-                renewal.cancel(false);
+                try {
+                    renewal.cancel(true);
+                } finally {
+                    executor.shutdownNow();
+                }
             }
         }
     }
 
     @Override
     public void close() {
-        // RESTApi has no owned closeable resources; individual lease scopes stop renewal.
+        // Lease scopes own their renewal workers; the RESTApi has no owned closeable resources.
     }
 }

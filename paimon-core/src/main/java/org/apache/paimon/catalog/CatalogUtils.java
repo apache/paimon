@@ -391,8 +391,8 @@ public class CatalogUtils {
                         tableIdentifier,
                         metadata.uuid(),
                         isRestCatalog && metadata.isExternal() ? null : catalog.catalogLoader(),
-                        isRestCatalog && metadata.isExternal() ? null : lockFactory,
-                        isRestCatalog && metadata.isExternal() ? null : lockContext,
+                        isRestCatalog ? null : lockFactory,
+                        isRestCatalog ? null : lockContext,
                         catalogContext,
                         catalog.supportsVersionManagement(),
                         catalog.supportsPartitionModification());

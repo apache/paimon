@@ -3231,7 +3231,6 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
             CoreOptions.SCAN_TAG_NAME.key(): None,
             CoreOptions.SCAN_TIMESTAMP.key(): None,
-            CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(): "false",
         })
         self.assertIs(read_table._read_snapshot, snapshot)
 

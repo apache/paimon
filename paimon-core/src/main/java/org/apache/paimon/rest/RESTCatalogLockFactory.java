@@ -18,9 +18,14 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
+
+import javax.annotation.Nullable;
 
 /** Creates REST commit lease clients from serializable catalog options. */
 public class RESTCatalogLockFactory implements CatalogLockFactory {
@@ -33,7 +38,21 @@ public class RESTCatalogLockFactory implements CatalogLockFactory {
     }
 
     @Override
-    public CatalogLock createLock(CatalogLockContext context) {
-        return new RESTCatalogLock(new RESTApi(context.options(), false));
+    public Lock createLock(
+            CatalogLockContext context,
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        CoreOptions options = new CoreOptions(tableOptions);
+        if (!options.restCommitLockEnabled()) {
+            return Lock.empty();
+        }
+        return new RESTCatalogLock(
+                new RESTApi(context.options(), false),
+                identifier,
+                tableUuid,
+                commitUser,
+                options.commitTimeout());
     }
 }

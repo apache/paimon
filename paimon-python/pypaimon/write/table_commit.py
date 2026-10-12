@@ -74,6 +74,8 @@ class TableCommit:
         }
         if snapshot_properties is not None:
             commit_kwargs["snapshot_properties"] = snapshot_properties
+        native_kwargs = ({} if snapshot_properties is None else
+                         {"snapshot_properties": snapshot_properties})
 
         # Never abort files in response to a commit exception. Preserving
         # possible orphan files is safer than deleting files which another
@@ -86,13 +88,12 @@ class TableCommit:
                 "Committing overwrite to table %s, %d non-empty messages",
                 self.table.identifier, len(non_empty_messages)
             )
-            if snapshot_properties is None:
-                prepared = self._prepare_native_commit(non_empty_messages)
-                if prepared is not None:
-                    native, messages = prepared
-                    # Keep publication failures outside the preparation fallback.
-                    native.commit(messages)
-                    return
+            prepared = self._prepare_native_commit(non_empty_messages)
+            if prepared is not None:
+                native, messages = prepared
+                # Keep publication failures outside the preparation fallback.
+                native.commit(messages, **native_kwargs)
+                return
             self.file_store_commit.overwrite(
                 overwrite_partition=self.overwrite_partition,
                 **commit_kwargs)
@@ -104,14 +105,13 @@ class TableCommit:
                 "Committing table %s, %d non-empty messages",
                 self.table.identifier, len(non_empty_messages)
             )
-            if snapshot_properties is None:
-                prepared = self._prepare_native_commit(non_empty_messages)
-                if prepared is not None:
-                    native, messages = prepared
-                    # Mutation is deliberately outside the fallback boundary:
-                    # an exception can mean the snapshot was already published.
-                    native.commit(commit_identifier, messages)
-                    return
+            prepared = self._prepare_native_commit(non_empty_messages)
+            if prepared is not None:
+                native, messages = prepared
+                # Mutation is deliberately outside the fallback boundary:
+                # an exception can mean the snapshot was already published.
+                native.commit(commit_identifier, messages, **native_kwargs)
+                return
             self.file_store_commit.commit(**commit_kwargs)
 
     def _prepare_native_commit(self, messages):

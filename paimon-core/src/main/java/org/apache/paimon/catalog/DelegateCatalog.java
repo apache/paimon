@@ -57,7 +57,7 @@ public abstract class DelegateCatalog implements Catalog {
     public Lock createLock(
             Identifier identifier,
             @Nullable String tableUuid,
-            String commitUser,
+            @Nullable String commitUser,
             Options tableOptions) {
         return wrapped.createLock(identifier, tableUuid, commitUser, tableOptions);
     }
@@ -249,6 +249,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+            throws Catalog.TableNotExistException {
+        wrapped.rollbackTo(identifier, instant, fromSnapshot);
+    }
+
+    @Override
     public void rollbackTo(
             Identifier identifier,
             @Nullable String tableUuid,
@@ -257,12 +263,6 @@ public abstract class DelegateCatalog implements Catalog {
             String commitUser)
             throws Catalog.TableNotExistException {
         wrapped.rollbackTo(identifier, tableUuid, instant, fromSnapshot, commitUser);
-    }
-
-    @Override
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
-            throws Catalog.TableNotExistException {
-        wrapped.rollbackTo(identifier, instant, fromSnapshot);
     }
 
     @Override

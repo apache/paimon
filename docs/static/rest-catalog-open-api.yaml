@@ -595,6 +595,12 @@ paths:
           required: true
           schema:
             type: string
+      description: >-
+        Validate the table incarnation, branch and expected head atomically with publication.
+        Every writer must honor an active commit lease, including writers that do not request
+        one. The authenticated caller and snapshot.commitUser must match the active owner.
+        Clear the lease only when a new snapshot is successfully published; rejected requests
+        and idempotent replays of an existing snapshot must not clear a newer lease.
       requestBody:
         content:
           application/json:
@@ -642,7 +648,9 @@ paths:
         Ownership is the exact commitUser together with the authenticated caller. Contention
         returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
         Renewal never revives an expired lease. Publication retains snapshot CAS validation
-        and atomically releases the lease on a new successful commit. There is no unlock RPC.
+        and atomically releases the lease on a new successful commit. A rejected publication
+        does not release the lease. A replay of an already-published snapshot must not release
+        a newer lease. The lease duration is fixed for each scope. There is no unlock RPC.
       requestBody:
         required: true
         content:
@@ -660,6 +668,8 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -687,11 +697,11 @@ paths:
           schema:
             type: string
       description: >-
-        Requires rest.commit.lock-enabled=true and the same permission as committing snapshots.
-        Ownership is the exact commitUser together with the authenticated caller. Contention
-        returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
-        Renewal never revives an expired lease. Publication retains snapshot CAS validation
-        and atomically releases the lease on a new successful commit. There is no unlock RPC.
+        Requires the same permission as committing snapshots. Validate the table incarnation,
+        branch, authenticated caller and exact commitUser against the unexpired lease.
+        Return acquired=false when ownership is lost or the lease has expired; renewal must
+        never acquire a new lease or revive an expired one. Keep leaseMillis fixed within
+        the scope. Each successful new snapshot publication ends its lease.
       requestBody:
         required: true
         content:
@@ -709,6 +719,8 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -3624,7 +3636,7 @@ components:
         leaseMillis:
           type: integer
           format: int64
-          description: Renewal duration in milliseconds; zero when acquired is false.
+          description: Lease duration in milliseconds, fixed within a scope; zero when acquired is false.
         snapshot:
           anyOf:
             - $ref: '#/components/schemas/Snapshot'

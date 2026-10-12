@@ -21,6 +21,7 @@ import threading
 from concurrent.futures import Executor, Future
 from typing import Callable, Dict, List, Optional
 
+from pypaimon.common.like_optimization import try_optimize_like
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import FieldRef, GlobalIndexReader, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -225,7 +226,7 @@ class SortedFileGlobalIndexReader(GlobalIndexReader):
         if not self._is_string_type(field_ref) or literal is None:
             return _completed_future(None)
 
-        optimized = self._try_optimize_like(literal)
+        optimized = try_optimize_like(literal)
         if optimized is not None:
             method, optimized_literal = optimized
             if method == "equal":
@@ -281,24 +282,6 @@ class SortedFileGlobalIndexReader(GlobalIndexReader):
                 or data_type.startswith("CHAR(")
                 or data_type == "VARCHAR"
                 or data_type.startswith("VARCHAR("))
-
-    @staticmethod
-    def _try_optimize_like(literal):
-        pattern = str(literal)
-        if "_" in pattern:
-            return None
-        if "%" not in pattern and pattern:
-            return "equal", pattern
-        if (pattern.startswith("%")
-                and pattern.endswith("%")
-                and pattern.count("%") == 2
-                and pattern[1:-1]):
-            return "contains", pattern[1:-1]
-        if pattern.startswith("%") and pattern.count("%") == 1 and pattern[1:]:
-            return "ends_with", pattern[1:]
-        if pattern.endswith("%") and pattern.count("%") == 1 and pattern[:-1]:
-            return "starts_with", pattern[:-1]
-        return None
 
     def close(self) -> None:
         with self._cache_lock:

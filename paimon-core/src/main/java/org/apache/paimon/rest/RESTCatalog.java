@@ -26,6 +26,7 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -407,18 +408,15 @@ public class RESTCatalog implements Catalog {
     public Lock createLock(
             Identifier identifier,
             @Nullable String tableUuid,
-            String commitUser,
+            @Nullable String commitUser,
             Options tableOptions) {
-        if (!new CoreOptions(tableOptions).restCommitLockEnabled()) {
-            return Lock.empty();
-        }
-        return Lock.fromCatalog(
-                new RESTCatalogLock(
-                        new RESTApi(context.options(), false),
-                        new CoreOptions(tableOptions).commitTimeout()),
-                identifier,
-                tableUuid,
-                commitUser);
+        return new RESTCatalogLockFactory()
+                .createLock(
+                        CatalogLockContext.fromOptions(context.options()),
+                        identifier,
+                        tableUuid,
+                        commitUser,
+                        tableOptions);
     }
 
     @Override
