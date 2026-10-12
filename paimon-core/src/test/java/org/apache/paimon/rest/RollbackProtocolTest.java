@@ -42,8 +42,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests rollback routing and optional writer context through a delegated REST catalog. */
 class RollbackProtocolTest {
     @ParameterizedTest
-    @CsvSource({"true,snapshot", "false,snapshot", "true,tag", "false,tag"})
-    void testRollbackCarriesWriterContextAndPreservesUnownedPayload(boolean owned, String kind)
+    @CsvSource({
+        "owned,snapshot", "unowned,snapshot", "without-uuid,snapshot",
+        "owned,tag", "unowned,tag", "without-uuid,tag"
+    })
+    void testRollbackCarriesTableUuidIndependentlyOfWriterContext(String context, String kind)
             throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.start();
@@ -67,12 +70,9 @@ class RollbackProtocolTest {
                                 .setResponseCode(200)
                                 .setHeader("Content-Type", "application/json")
                                 .setBody("{}"));
-                catalog.rollbackTo(
-                        identifier,
-                        owned ? "table-id" : null,
-                        instant,
-                        2L,
-                        owned ? "Writer-1" : null);
+                String tableUuid = "without-uuid".equals(context) ? null : "table-id";
+                String commitUser = "owned".equals(context) ? "Writer-1" : null;
+                catalog.rollbackTo(identifier, tableUuid, instant, 2L, commitUser);
                 RecordedRequest recorded = server.takeRequest(10, TimeUnit.SECONDS);
                 assertThat(recorded.getMethod()).isEqualTo("POST");
                 assertThat(recorded.getPath())
@@ -89,15 +89,18 @@ class RollbackProtocolTest {
                     assertThat(((Instant.TagInstant) request.getInstant()).getTagName())
                             .isEqualTo("tag-1");
                 }
-                if (owned) {
-                    assertThat(request.getTableId()).isEqualTo("table-id");
-                    assertThat(request.getCommitUser()).isEqualTo("Writer-1");
-                    assertThat(payload.size()).isEqualTo(4);
+                if (tableUuid != null) {
+                    assertThat(request.getTableId()).isEqualTo(tableUuid);
                 } else {
                     assertThat(payload.has("tableId")).isFalse();
-                    assertThat(payload.has("commitUser")).isFalse();
-                    assertThat(payload.size()).isEqualTo(2);
                 }
+                if (commitUser != null) {
+                    assertThat(request.getCommitUser()).isEqualTo(commitUser);
+                } else {
+                    assertThat(payload.has("commitUser")).isFalse();
+                }
+                assertThat(payload.size())
+                        .isEqualTo(2 + (tableUuid == null ? 0 : 1) + (commitUser == null ? 0 : 1));
             }
         }
     }

@@ -42,6 +42,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -86,13 +87,14 @@ class CatalogEnvironmentTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"main", "dev"})
-    void testCatalogTableRollbackWithoutOwnerUsesEmptyLockContext(String branch) throws Exception {
+    @CsvSource({"main,table-id", "dev,table-id", "main,", "dev,"})
+    void testCatalogTableRollbackWithoutOwnerPreservesTableUuid(String branch, String tableUuid)
+            throws Exception {
         Catalog catalog = mock(Catalog.class);
         CatalogEnvironment environment =
                 new CatalogEnvironment(
                         new Identifier("db", "table", branch),
-                        "table-id",
+                        tableUuid,
                         () -> catalog,
                         null,
                         null,
@@ -102,7 +104,7 @@ class CatalogEnvironmentTest {
         Instant instant = Instant.tag("tag-1");
         environment.catalogTableRollback(null, null).rollbackTo(instant, null);
         verify(catalog)
-                .rollbackTo(new Identifier("db", "table", branch), null, instant, null, null);
+                .rollbackTo(new Identifier("db", "table", branch), tableUuid, instant, null, null);
     }
 
     @Test

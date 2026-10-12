@@ -738,7 +738,7 @@ public class RESTApi {
      * Rollback instant for table.
      *
      * @param identifier database name and table name.
-     * @param tableUuid expected table incarnation for a writer lock, or null without a writer lock
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant instant to rollback
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot.

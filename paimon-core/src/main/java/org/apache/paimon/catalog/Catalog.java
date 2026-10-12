@@ -843,8 +843,7 @@ public interface Catalog extends AutoCloseable {
      * Rollback table by the given {@link Identifier} and instant.
      *
      * @param identifier path of the table
-     * @param tableUuid expected table incarnation when rolling back within a writer's lock, or null
-     *     when no writer lock is used
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant like snapshotId or tagName
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot
