@@ -77,12 +77,49 @@ def _truncate_timestamp(array, target_type, source_paimon_type, target_paimon_ty
     return pa.array(values, type=pa.int64()).cast(target_type)
 
 
+def _timestamp_to_bigint(array):
+    ticks = {'s': 1, 'ms': 1000, 'us': 1000000, 'ns': 1000000000}[array.type.unit]
+    values = []
+    for value in array.cast(pa.int64()).to_pylist():
+        if value is None:
+            values.append(None)
+        elif array.type.tz is None:
+            values.append(value // ticks)
+        else:
+            # Java's LTZ rule round-trips Timestamp through LocalDateTime.
+            # Timestamp stores its epoch day as an int in that conversion.
+            millis = value * 1000 if array.type.unit == 's' else value // (ticks // 1000)
+            if not -(1 << 63) <= millis < (1 << 63):
+                values.append(None)
+                continue
+            day = _narrow_integer(millis // 86400000, 32)
+            values.append((day * 86400000 + millis % 86400000) // 1000)
+    return pa.array(values, type=pa.int64())
+
+
+def _bigint_to_timestamp(array, target_type):
+    ticks = {'s': 1, 'ms': 1000, 'us': 1000000, 'ns': 1000000000}[target_type.unit]
+    values = []
+    for value in array.to_pylist():
+        if value is None:
+            values.append(None)
+            continue
+        # NumericPrimitiveToTimestamp performs value.longValue() * 1000
+        # before conversion. Java's signed long multiplication wraps.
+        millis = _narrow_integer(value * 1000, 64)
+        value = millis // 1000 if target_type.unit == 's' else millis * (ticks // 1000)
+        values.append(value if -(1 << 63) <= value < (1 << 63) else None)
+    return pa.array(values, type=pa.int64()).cast(target_type)
+
+
 def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None, target_paimon_type=None):
     """Materialize existing type changes using Java numeric and timestamp casts.
 
     Declared Paimon types are needed for precision changes within one Arrow
-    timestamp unit. Numeric narrowing preserves low bits, while floating-point
-    values truncate and saturate to int/long before byte/short narrowing.
+    timestamp unit. BIGINT/timestamp conversions use epoch seconds, including
+    pre-epoch flooring and Java's millis multiplication. Numeric narrowing
+    preserves low bits, while floating-point values truncate and saturate to
+    int/long before byte/short narrowing.
     DECIMAL scale reduction uses HALF_UP and returns NULL on precision overflow.
     """
     timestamp = _truncate_timestamp(array, target_type, source_paimon_type, target_paimon_type)
@@ -90,6 +127,10 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
         return timestamp
     if array.type == target_type:
         return array
+    if pa.types.is_timestamp(array.type) and target_type == pa.int64():
+        return _timestamp_to_bigint(array)
+    if array.type == pa.int64() and pa.types.is_timestamp(target_type) and target_type.tz is None:
+        return _bigint_to_timestamp(array, target_type)
     if (pa.types.is_signed_integer(target_type)
             and (pa.types.is_floating(array.type) or pa.types.is_decimal(array.type))):
         return _numeric_to_integer(array, target_type)
