@@ -57,20 +57,19 @@ public class BaseVariantReaderTest {
 
         InternalRow shredded =
                 castShredded(GenericVariant.fromJson("{\"a\": 1, \"b\": \"hello\"}"), schema);
-        assertThat(reader.read(shredded, shredded.getBinary(schema.topLevelMetadataIdx)))
+        assertThat(readVariant(reader, shredded, schema))
                 .isEqualTo(GenericRow.of(1, BinaryString.fromString("hello")));
 
         // "b" absent from both the shredded object and the untyped value reads back as null.
         shredded = castShredded(GenericVariant.fromJson("{\"a\": 27}"), schema);
-        assertThat(reader.read(shredded, shredded.getBinary(schema.topLevelMetadataIdx)))
-                .isEqualTo(GenericRow.of(27, null));
+        assertThat(readVariant(reader, shredded, schema)).isEqualTo(GenericRow.of(27, null));
     }
 
     @Test
     void testRebuildReusesMetadataAcrossRowsWithoutStaleKeys() {
         VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
         // Shred only "a"; every other field lands in the untyped value and is decoded through the
-        // shared cachedMetadata dictionary.
+        // shared metadata dictionary.
         RowType shreddedType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"});
         VariantSchema schema = buildVariantSchema(variantShreddingSchema(shreddedType));
 
@@ -82,20 +81,10 @@ public class BaseVariantReaderTest {
         InternalRow row1 = castShredded(v1, schema);
         InternalRow row2 = castShredded(v2, schema);
 
-        Variant rebuilt1 =
-                (Variant)
-                        reader.read(
-                                row1,
-                                ByteBuffer.wrap(row1.getBinary(schema.topLevelMetadataIdx))
-                                        .order(ByteOrder.LITTLE_ENDIAN));
+        Variant rebuilt1 = (Variant) readVariant(reader, row1, schema);
         assertThat(rebuilt1.toJson()).isEqualTo(v1.toJson());
 
-        Variant rebuilt2 =
-                (Variant)
-                        reader.read(
-                                row2,
-                                ByteBuffer.wrap(row2.getBinary(schema.topLevelMetadataIdx))
-                                        .order(ByteOrder.LITTLE_ENDIAN));
+        Variant rebuilt2 = (Variant) readVariant(reader, row2, schema);
         assertThat(rebuilt2.toJson()).isEqualTo(v2.toJson());
 
         ByteBuffer directMeta2 =
@@ -103,7 +92,22 @@ public class BaseVariantReaderTest {
         directMeta2
                 .put(row2.getBinary(schema.topLevelMetadataIdx))
                 .position(0); // BIG_ENDIAN default
-        Variant rebuilt2Direct = (Variant) reader.read(row2, directMeta2);
+        Variant rebuilt2Direct = (Variant) readVariant(reader, row2, directMeta2);
         assertThat(rebuilt2Direct.toJson()).isEqualTo(v2.toJson());
+    }
+
+    private static Object readVariant(
+            BaseVariantReader reader, InternalRow row, VariantSchema schema) {
+        reader.metadata()
+                .adopt(
+                        ByteBuffer.wrap(row.getBinary(schema.topLevelMetadataIdx))
+                                .order(ByteOrder.LITTLE_ENDIAN));
+        return reader.read(row);
+    }
+
+    private static Object readVariant(
+            BaseVariantReader reader, InternalRow row, ByteBuffer metadata) {
+        reader.metadata().adopt(metadata);
+        return reader.read(row);
     }
 }

@@ -27,8 +27,8 @@ import static org.apache.paimon.utils.BinaryRowDataUtil.byteBufferEquals;
  * The string dictionary of a variant metadata buffer, with lazily decoded entries.
  *
  * <p>Rows of a batch usually share the same metadata bytes, so an instance can be shared across
- * rows: {@link #adopt()} reparses the dictionary only when the bytes change. A shared instance is a
- * mutable cache slot, not a stable dictionary; do not retain it across calls.
+ * rows: {@link #adopt(ByteBuffer)} reparses the dictionary only when the bytes change. A shared
+ * instance is a mutable cache slot, not a stable dictionary; do not retain it across calls.
  *
  * <p>This class is not thread safe.
  */
@@ -36,7 +36,6 @@ public class VariantMetadata {
     private static final int MAX_DICTIONARY_SIZE = 1 << 24;
 
     private ByteBuffer reuse;
-    private ByteBuffer current;
     private int dictSize;
     private String[] dict;
     private int offsetSize;
@@ -49,36 +48,30 @@ public class VariantMetadata {
 
     private VariantMetadata() {
         this.reuse = null;
-        this.current = null;
         this.dictSize = 0;
         this.dict = null;
         this.offsetSize = 0;
         this.stringStart = 0;
     }
 
-    public void setCurrent(ByteBuffer metadata) {
-        this.current = metadata;
-    }
-
-    public void adopt() {
-        if (current == null) {
-            throw GenericVariantUtil.malformedVariant();
-        }
-
+    public void adopt(ByteBuffer current) {
         if (reuse != null
                 && reuse.remaining() == current.remaining()
                 && byteBufferEquals(reuse, current)) {
             return;
         }
 
-        reuse = snapshot(current);
-
-        offsetSize = ((GenericVariantUtil.getByte(reuse, 0) >> 6) & 0x3) + 1;
-        dictSize = GenericVariantUtil.readUnsigned(reuse, 1, offsetSize);
+        // Validate into locals first; only publish after the checks pass.
+        int offsetSize = ((GenericVariantUtil.getByte(current, 0) >> 6) & 0x3) + 1;
+        int dictSize = GenericVariantUtil.readUnsigned(current, 1, offsetSize);
         long offsetTableEnd = 1L + offsetSize + (dictSize + 1L) * offsetSize;
-        if (dictSize > MAX_DICTIONARY_SIZE || offsetTableEnd > reuse.remaining()) {
+        if (dictSize > MAX_DICTIONARY_SIZE || offsetTableEnd > current.remaining()) {
             throw GenericVariantUtil.malformedVariant();
         }
+
+        reuse = snapshot(current);
+        this.offsetSize = offsetSize;
+        this.dictSize = dictSize;
         stringStart = 1 + (dictSize + 2) * offsetSize;
 
         if (dict == null || dict.length < dictSize) {
@@ -86,11 +79,6 @@ public class VariantMetadata {
         } else {
             Arrays.fill(dict, 0, dictSize, null);
         }
-    }
-
-    public void adopt(ByteBuffer metadata) {
-        setCurrent(metadata);
-        adopt();
     }
 
     public int length() {
@@ -124,7 +112,7 @@ public class VariantMetadata {
     }
 
     public ByteBuffer buffer() {
-        return current;
+        return reuse;
     }
 
     /** Snapshots the buffer's remaining bytes so later decodes do not observe reused memory. */

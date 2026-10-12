@@ -209,4 +209,29 @@ public class VariantMetadataTest {
         metadata.adopt(directFirst);
         assertThat(metadata.get(0)).isEqualTo("a");
     }
+
+    @Test
+    void testInvalidMetadataDoesNotPoisonCache() {
+        // Warm up the dictionary with a valid metadata.
+        GenericVariant valid = GenericVariant.fromJson("{\"a\":1}");
+        VariantMetadata metadata = VariantMetadata.empty();
+        metadata.adopt(valid.metadataBuffer());
+        assertThat(metadata.get(0)).isEqualTo("a");
+
+        // A truncated metadata buffer that claims one dictionary entry but has no offset table.
+        ByteBuffer corrupt = ByteBuffer.wrap(new byte[] {1, 1}).order(ByteOrder.LITTLE_ENDIAN);
+
+        // The first bad read must be rejected.
+        assertThatThrownBy(() -> metadata.adopt(corrupt)).hasMessageContaining("MALFORMED_VARIANT");
+
+        // Repeated reads of the same invalid buffer must also be rejected, not silently reuse the
+        // previously cached dictionary.
+        assertThatThrownBy(() -> metadata.adopt(corrupt)).hasMessageContaining("MALFORMED_VARIANT");
+
+        // After the invalid reads, a new valid metadata must still be adopted correctly.
+        GenericVariant another = GenericVariant.fromJson("{\"b\":2}");
+        metadata.adopt(another.metadataBuffer());
+        assertThat(metadata.length()).isEqualTo(1);
+        assertThat(metadata.get(0)).isEqualTo("b");
+    }
 }
