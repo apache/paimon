@@ -163,6 +163,23 @@ class PackagingTest(unittest.TestCase):
                                          self.active_requirements(
                                              metadata.get_all("Requires-Dist"), environment))
 
+    def test_readerwriterlock_python_compatibility(self):
+        _, metadata, _ = wheel_contents(self.wheel)
+        requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist")]
+        locks = [requirement for requirement in requirements
+                 if canonicalize_name(requirement.name) == "readerwriterlock"]
+        for python_version, supports_1_0_10 in (("3.6", False), ("3.7", False), ("3.8", True), ("3.13", True)):
+            with self.subTest(python=python_version):
+                environment = default_environment()
+                environment.update(python_version=python_version,
+                                   python_full_version=python_version + ".0", extra="")
+                active = [requirement for requirement in locks
+                          if requirement.marker is None or requirement.marker.evaluate(environment)]
+                self.assertEqual(1, len(active))
+                self.assertIn("1.0.9", active[0].specifier)
+                self.assertEqual(supports_1_0_10, "1.0.10" in active[0].specifier)
+                self.assertNotIn("2.0", active[0].specifier)
+
     def test_dev_group_reuses_product_extras(self):
         resolve = runpy.run_path(str(self.source / "dev/install.py"))["resolve_group"]
         requirements = [Requirement(value) for value in resolve(
