@@ -943,6 +943,31 @@ class TestStringTransforms(unittest.TestCase):
                 ["hello"]),
             ["hel"])
 
+    def test_integer_overflow_is_eager_even_with_null_string_inputs(self):
+        for rule in [
+            {"name": "PAD", "direction": "LEFT", "inputs": [None, 2147483648, "x"]},
+            {"name": "OVERLAY", "inputs": [None, "x", 2147483648, None]},
+            {"name": "OVERLAY", "inputs": [None, "x", None, 2147483648]},
+        ]:
+            with self.subTest(rule=rule), self.assertRaises(ValueError):
+                self._apply(rule, [None])
+
+    def test_field_types_are_checked_before_rebinding(self):
+        batch = pa.RecordBatch.from_pydict({"s": ["abc"], "n": [2]})
+        for name, inputs in [
+            ("PAD", [self._field(), {"name": "n", "type": "STRING"}, "x"]),
+            ("OVERLAY", [self._field(), "x", {"name": "n", "type": "STRING"}]),
+            ("TRANSLATE", [{"name": "s", "type": "INT"}, "a", "b"]),
+            ("LENGTH", [{"name": "s", "type": "INT"}]),
+            ("BIT_LENGTH", [{"name": "s", "type": "INT"}]),
+        ]:
+            rule = {"name": name, "inputs": inputs, "direction": "LEFT"}
+            with self.subTest(rule=rule), self.assertRaises(ValueError):
+                _apply_predicate_transform(rule, batch)
+        for value in ["2", True, 1.5]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self._apply({"name": "PAD", "inputs": [None, value, "x"], "direction": "LEFT"}, [None])
+
     def test_length_wired_through_a_leaf_filter(self):
         pred = json.dumps({
             "kind": "LEAF",

@@ -109,6 +109,8 @@ class _FakeTable:
 
 def _make_scan(auth_result, read_type, table):
     scan = TableScan.__new__(TableScan)
+    scan.predicate = None
+    scan.partition_predicate = None
     scan._query_auth_fn = lambda select: auth_result
     scan._read_type = read_type
     scan.table = table

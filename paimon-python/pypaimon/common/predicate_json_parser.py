@@ -172,14 +172,14 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     elif name in _DATE_EXTRACT:
         return _date_extract(name, transform["fieldRef"], batch)
     elif name == "LENGTH":
-        _check_string_input("LENGTH input", transform["inputs"][0], batch)
+        _check_string_input("LENGTH input", transform["inputs"][0], batch, stored=True)
         source = _resolve_transform_input(transform["inputs"][0], batch)
         return pa.array(
             [None if v is None else len(v) for v in source.to_pylist()],
             type=pa.int32())
 
     elif name == "BIT_LENGTH":
-        _check_string_input("BIT_LENGTH input", transform["inputs"][0], batch)
+        _check_string_input("BIT_LENGTH input", transform["inputs"][0], batch, stored=True)
         source = _resolve_transform_input(transform["inputs"][0], batch)
         return pa.array(
             [None if v is None else len(v.encode("utf-8")) * 8
@@ -320,6 +320,24 @@ def _check_string_input(slot: str, value, batch: pa.RecordBatch, stored: bool = 
         raise ValueError(f"{slot} field must be a string: {column.type}")
 
 
+_INTEGER_TYPE = re.compile(
+    r"\s*(?:TINYINT|SMALLINT|INT|INTEGER|BIGINT)(?=\s|\Z)"
+    r"(?:\s*(?:NOT\s+)?NULL)?\s*\Z", re.IGNORECASE)
+
+
+def _check_integer_input(slot, value, batch):
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return
+    if not isinstance(value, dict):
+        raise ValueError(f"{slot} must be an integer or a field: {value!r}")
+    stored = value.get("type")
+    if not isinstance(stored, str) or _INTEGER_TYPE.match(stored) is None:
+        raise ValueError(f"{slot} field must be an integer: {stored!r}")
+    column = _field_column(value, batch)
+    if not pa.types.is_integer(column.type):
+        raise ValueError(f"{slot} field must be an integer: {column.type}")
+
+
 class _Positions:
     """A position slot resolved lazily, as Java reads one only when a row reaches it."""
 
@@ -432,8 +450,9 @@ def _pad(inputs, direction, batch: pa.RecordBatch) -> pa.Array:
         raise ValueError(f"PAD takes 3 inputs, got {inputs!r}")
     if direction not in ("LEFT", "RIGHT"):
         raise ValueError(f"PAD direction must be LEFT or RIGHT: {direction!r}")
-    _check_string_input("PAD input", inputs[0], batch)
-    _check_string_input("PAD string", inputs[2], batch)
+    _check_string_input("PAD input", inputs[0], batch, stored=True)
+    _check_string_input("PAD string", inputs[2], batch, stored=True)
+    _check_integer_input("PAD length", inputs[1], batch)
     source = _resolve_transform_input(inputs[0], batch)
     pad = _resolve_transform_input(inputs[2], batch)
     lengths = _Positions(inputs[1], batch)
@@ -444,10 +463,11 @@ def _pad(inputs, direction, batch: pa.RecordBatch) -> pa.Array:
         value = src_list[i]
         pad_str = pad_list[i]
         raw_len = lengths.value(i)
-        if value is None or raw_len is None or pad_str is None:
+        length = _int_position(raw_len) if raw_len is not None else None
+        if value is None or length is None or pad_str is None:
             result.append(None)
             continue
-        result.append(_pad_one(value, _int_position(raw_len), pad_str, direction))
+        result.append(_pad_one(value, length, pad_str, direction))
     return pa.array(result, type=pa.string())
 
 
@@ -464,9 +484,9 @@ def _pad_one(source, length, pad, direction):
 def _translate(inputs, batch: pa.RecordBatch) -> pa.Array:
     if not isinstance(inputs, list) or len(inputs) != 3:
         raise ValueError(f"TRANSLATE takes 3 inputs, got {inputs!r}")
-    _check_string_input("TRANSLATE source", inputs[0], batch)
-    _check_string_input("TRANSLATE matching", inputs[1], batch)
-    _check_string_input("TRANSLATE replacement", inputs[2], batch)
+    _check_string_input("TRANSLATE source", inputs[0], batch, stored=True)
+    _check_string_input("TRANSLATE matching", inputs[1], batch, stored=True)
+    _check_string_input("TRANSLATE replacement", inputs[2], batch, stored=True)
     source = _resolve_transform_input(inputs[0], batch)
     matching = _resolve_transform_input(inputs[1], batch)
     replacement = _resolve_transform_input(inputs[2], batch)
@@ -499,8 +519,11 @@ def _translate_one(source, matching, replacement):
 def _overlay(inputs, batch: pa.RecordBatch) -> pa.Array:
     if not isinstance(inputs, list) or len(inputs) not in (3, 4):
         raise ValueError(f"OVERLAY takes 3 or 4 inputs, got {inputs!r}")
-    _check_string_input("OVERLAY input", inputs[0], batch)
-    _check_string_input("OVERLAY replacement", inputs[1], batch)
+    _check_string_input("OVERLAY input", inputs[0], batch, stored=True)
+    _check_string_input("OVERLAY replacement", inputs[1], batch, stored=True)
+    _check_integer_input("OVERLAY position", inputs[2], batch)
+    if len(inputs) == 4:
+        _check_integer_input("OVERLAY length", inputs[3], batch)
     source = _resolve_transform_input(inputs[0], batch)
     replacement = _resolve_transform_input(inputs[1], batch)
     positions = _Positions(inputs[2], batch)
@@ -513,15 +536,13 @@ def _overlay(inputs, batch: pa.RecordBatch) -> pa.Array:
         value = src_list[i]
         repl = repl_list[i]
         raw_pos = positions.value(i)
-        # SQL null propagation: any null argument yields a null result
-        if value is None or repl is None or raw_pos is None:
+        # Java evaluates both integer arguments before propagating string NULLs.
+        pos = _int_position(raw_pos) if raw_pos is not None else None
+        raw_length = lengths.value(i) if has_length else None
+        length = _int_position(raw_length) if raw_length is not None else None
+        if value is None or repl is None or pos is None or (has_length and length is None):
             result.append(None)
             continue
-        if has_length and lengths.value(i) is None:
-            result.append(None)
-            continue
-        pos = _int_position(raw_pos)
-        length = _int_position(lengths.value(i)) if has_length else None
         replaced = len(repl) if (length is None or length < 0) else length
         # pos - 1 and pos + replaced are 32-bit int expressions in Java's
         # OverlayTransform; wrap them so a boundary position overflows exactly
