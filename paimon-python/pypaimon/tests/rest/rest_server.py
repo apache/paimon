@@ -70,6 +70,7 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
                                                 TagAlreadyExistException)
+from pypaimon.casting import data_type_casts as casts
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
@@ -82,6 +83,7 @@ from pypaimon.management.permission_columns import PermissionColumns
 from pypaimon.management.permission_resource import PermissionResource
 from pypaimon.management.resource_type import ResourceType
 from pypaimon import Schema
+from pypaimon.schema.data_types import AtomicType, DataType, DataTypeParser
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -249,17 +251,102 @@ def _transform_columns(transform: Dict[str, Any]) -> set:
     return {ref["name"] for ref in refs if isinstance(ref, dict)}
 
 
-def _predicate_columns(predicate: Dict[str, Any]) -> set:
+def _leaf_transforms(predicate: Dict[str, Any]) -> List[Dict[str, Any]]:
     if predicate["kind"] == "COMPOUND":
-        return set().union(*(_predicate_columns(child) for child in predicate["children"]))
-    return _transform_columns(predicate["transform"])
+        children = predicate.get("children")
+        if not predicate.get("function") or not children or None in children:
+            raise ValueError("Compound predicate needs a function and at least one predicate.")
+        return [transform for child in children for transform in _leaf_transforms(child)]
+    return [predicate["transform"]]
 
 
 def _policy_columns(policy: DataPolicy) -> set:
     mask = policy.get_column_mask()
     if mask is None:
-        return _predicate_columns(json.loads(policy.get_row_filter().get_predicate()))
+        predicate = json.loads(policy.get_row_filter().get_predicate())
+        return set().union(*map(_transform_columns, _leaf_transforms(predicate)))
     return {mask.get_on_column()} | _transform_columns(json.loads(mask.get_transform()))
+
+
+_DATE_PARTS = ("YEAR", "QUARTER", "MONTH", "WEEK", "YEAR_OF_WEEK", "DAY", "DAY_OF_WEEK", "ISO_DAY_OF_WEEK",
+               "WEEKDAY", "DAY_OF_YEAR", "HOUR", "MINUTE", "SECOND")
+_TRANSFORM_INPUTS = {
+    "CONCAT": ("s", 0, None, "STRING"), "CONCAT_WS": ("s", 2, None, "STRING"),
+    "UPPER": ("s", 1, 1, "STRING"), "LOWER": ("s", 1, 1, "STRING"), "TRIM": ("s", 1, 2, "STRING"),
+    "TRANSLATE": ("s", 3, 3, "STRING"), "SUBSTRING": ("a", 2, 3, "STRING"),
+    "OVERLAY": ("ssii", 3, 4, "STRING"), "PAD": ("sis", 3, 3, "STRING"),
+    "LENGTH": ("s", 1, 1, "INT"), "BIT_LENGTH": ("s", 1, 1, "INT"),
+    "DATE_ADD": ("di", 2, 2, "DATE"), "DATE_DIFF": ("dd", 2, 2, "INT"), "DATE_TRUNC": ("ds", 2, 2, "DATE"),
+}
+_TRANSFORM_FLAGS = {"TRIM": ("trimFlag", ("LEADING", "TRAILING", "BOTH")), "PAD": ("direction", ("LEFT", "RIGHT"))}
+_INPUT_ROOTS = {"s": casts.CHARACTER_STRING, "i": casts.INTEGER_NUMERIC, "d": {casts.DATE}}
+_TYPE_DEFAULTS = {casts.CHAR: (1,), casts.VARCHAR: (1,), casts.BINARY: (1,), casts.VARBINARY: (1,),
+                  casts.DECIMAL: (10, 0), casts.TIME: (0,), casts.TIMESTAMP: (6,), casts.TIMESTAMP_LTZ: (6,)}
+
+
+def _logical_type(data_type: Optional[DataType]) -> Any:
+    if not isinstance(data_type, AtomicType):
+        return data_type
+    spelling = data_type.type.upper()
+    root = casts.TIMESTAMP_LTZ if "LOCAL TIME ZONE" in spelling else casts._root(data_type)
+    found = (2147483647,) if spelling in ("STRING", "BYTES") else tuple(map(int, re.findall(r"\d+", spelling)))
+    return root, found + _TYPE_DEFAULTS.get(root, ())[len(found):], data_type.nullable
+
+
+def _input_fits(kind: str, value: Any, columns: Dict[str, DataType]) -> bool:
+    if value is None or kind == "a":
+        return True
+    if isinstance(value, dict):
+        return casts._root(columns[value["name"]]) in _INPUT_ROOTS[kind]
+    if kind == "s":
+        return isinstance(value, str)
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _transform_type(transform: Dict[str, Any], columns: Dict[str, DataType]) -> Optional[DataType]:
+    name = transform["name"]
+    if "fieldRef" in transform:
+        source = columns[transform["fieldRef"]["name"]]
+        if name == "CAST":
+            target = DataTypeParser.parse_data_type(transform["type"])
+            return target if casts.supports_cast(source, target) else None
+        if name in _DATE_PARTS:
+            return AtomicType("INT") if casts._root(source) in (casts.DATE, casts.TIMESTAMP) else None
+        for part in transform.get("path") or []:
+            source = next((field.type for field in getattr(source, "fields", ()) if field.name == part), None)
+        nested = name == "NESTED_FIELD_REF" and transform.get("path")
+        return source if name == "FIELD_REF" or nested else None
+    if name == "NULL":
+        return AtomicType("BOOLEAN")
+    if name in _TRANSFORM_FLAGS:
+        flag, values = _TRANSFORM_FLAGS[name]
+        if transform.get(flag) not in values:
+            return None
+    kinds, low, high, output = _TRANSFORM_INPUTS.get(name, ("", 1, 0, None))
+    inputs = transform.get("inputs") or []
+    if not low <= len(inputs) <= (len(inputs) if high is None else high):
+        return None
+    fits = all(_input_fits(kinds[min(position, len(kinds) - 1)], value, columns)
+               for position, value in enumerate(inputs))
+    return AtomicType(output) if fits else None
+
+
+def _policy_type_error(policy: DataPolicy, schema: TableSchema) -> Optional[str]:
+    columns = {field.name: field.type for field in schema.fields}
+    mask = policy.get_column_mask()
+    if mask is None:
+        predicate = json.loads(policy.get_row_filter().get_predicate())
+        invalid = [transform["name"] for transform in _leaf_transforms(predicate)
+                   if _transform_type(transform, columns) is None]
+        return "Row filter transform {} does not fit the table schema.".format(invalid[0]) if invalid else None
+    transform = json.loads(mask.get_transform())
+    output = _transform_type(transform, columns)
+    if output is None:
+        return "Column mask transform {} does not fit the table schema.".format(transform["name"])
+    if _logical_type(output) != _logical_type(columns[mask.get_on_column()]):
+        return "Column mask output type {} does not match target column {} type {}.".format(
+            output, mask.get_on_column(), columns[mask.get_on_column()])
+    return None
 
 
 def _granted_columns(assignment: PermissionAssignment) -> List[str]:
@@ -732,8 +819,8 @@ class RESTCatalogServer:
                        if assignment.get_resource() == target
                        and _matches(parameters, "principal", assignment.get_principal())
                        and _matches(parameters, "access", assignment.get_access())]
-            return self._mock_response(
-                ListPermissionsResponse(sorted(matched, key=_assignment_key)), 200)
+            return self._mock_response(ListPermissionsResponse(
+                *self._management_page({_assignment_key(grant): grant for grant in matched}, parameters)), 200)
         if method == "POST" and resource_path == self.resource_paths.grant_permission():
             assignment = JSON.from_json(data, GrantPermissionRequest).assignment()
             missing = self._missing_permission_resource(assignment.get_resource())
@@ -810,7 +897,8 @@ class RESTCatalogServer:
             matched = [DataPolicy(resource, policy.get_row_filter(), policy.get_column_mask(),
                                   policy.get_principal())
                        for policy in policies.values() if _matches_policy(policy, parameters)]
-            return self._mock_response(ListPoliciesResponse(sorted(matched, key=_policy_key)), 200)
+            return self._mock_response(ListPoliciesResponse(
+                *self._management_page({_policy_key(policy): policy for policy in matched}, parameters)), 200)
         if method == "POST" and not drop:
             policy = JSON.from_json(data, PolicyRequest).policy(resource)
             if not _query_auth_enabled(metadata.schema):
@@ -819,12 +907,12 @@ class RESTCatalogServer:
                     "Data policies require the target table option query-auth.enabled=true.",
                     409), 409)
             identity = _policy_identity(policy)
-            missing = _policy_columns(policy) - {field.name for field in metadata.schema.fields}
-            if missing:
+            missing = sorted(_policy_columns(policy) - {field.name for field in metadata.schema.fields})
+            error = "Policy column {} does not exist in table {}.".format(
+                missing[0], identifier.get_full_name()) if missing else _policy_type_error(policy, metadata.schema)
+            if error:
                 return self._mock_response(ErrorResponse(
-                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity),
-                    "Policy column {} does not exist in table {}.".format(
-                        sorted(missing)[0], identifier.get_full_name()), 400), 400)
+                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity), error, 400), 400)
             if _cursor_key(*identity) in policies:
                 return self._mock_response(ErrorResponse(
                     ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity),
@@ -1745,6 +1833,13 @@ class RESTCatalogServer:
                 raise ValueError(f"Invalid maxResults value: {max_results_str}")
         return DEFAULT_MAX_RESULTS
 
+    def _management_page(self, entities: Dict[str, Any],
+                         parameters: Dict[str, str]) -> Tuple[List[Any], Optional[str]]:
+        token = parameters.get(PAGE_TOKEN)
+        keys = sorted(key for key in entities if not token or key > token)
+        page = keys[:self._get_max_results(parameters)]
+        return [entities[key] for key in page], page[-1] if len(keys) > len(page) else None
+
     def _build_paged_entities(self, entities: List[Any], max_results: int,
                               page_token: Optional[str], desc: bool = False) -> PagedList:
         """Build paged entities"""
@@ -1873,6 +1968,9 @@ class RESTCatalogServer:
             if missing:
                 raise ValueError("Cannot remove or rename policy column {} from table {}.".format(
                     sorted(missing)[0], name))
+            mismatch = _policy_type_error(policy, schema)
+            if mismatch:
+                raise ValueError(mismatch)
         grants = self._column_grants(identifier)
         if grants and not _query_auth_enabled(schema):
             raise ValueError(
