@@ -38,9 +38,11 @@ def maintain_global_indexes(table, indexes, *, rebuild=False, partitions=None):
     Run another pass after appends or DROP_PARTITION_INDEX updates. IGNORE does
     not mark stale coverage; use ``rebuild=True`` after such updates.
 
-    All definitions use one snapshot and one commit. A concurrent commit aborts
-    publication rather than exposing obsolete replacements. The caller owns
-    scheduling/retry; this function does not install a background service.
+    All definitions use one snapshot and one commit. Each publication attempt
+    rejects a changed snapshot during conflict checking. Filesystem catalogs
+    without an atomic snapshot-identity check require pausing maintenance and
+    other writers and draining in-flight commits before rollback. The caller
+    owns scheduling/retry; this function does not install a background service.
     Returns the number of newly published index files.
     """
     from pypaimon.snapshot.time_travel_util import SCAN_KEYS

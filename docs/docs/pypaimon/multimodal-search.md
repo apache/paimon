@@ -174,14 +174,22 @@ docs.maintain_indexes(indexes, rebuild=True, partitions={"date": "2026-10-08"})
 
 All requested indexes are built against one captured snapshot and published in
 one commit. Rebuild deletes the matching old entries and adds replacements in
-that same commit; old files remain available to retained snapshots. Any
-concurrent snapshot commit causes publication to fail. Every publication attempt
-checks the captured snapshot metadata, including its UUID and manifests, so a
-rollback followed by reuse of the same snapshot ID also invalidates the plan.
-Schedule another pass from the latest snapshot rather than reusing its commit messages. A failed build
+that same commit; old files remain available to retained snapshots. Every
+publication attempt checks the captured snapshot metadata, including its UUID
+and manifests. A change observed by this check rejects the plan, including a
+rollback followed by reuse of the same snapshot ID. Schedule another pass from
+the latest snapshot rather than reusing its commit messages. A failed build
 leaves existing coverage intact; ambiguous commit failures leave output files
-for normal orphan-file maintenance rather than risking deletion of published
-files.
+for normal orphan-file maintenance rather than risking deletion of published files.
+
+On filesystem catalogs using `RenamingSnapshotCommit`, the check and final
+publication are separate operations: publication does not compare the base
+snapshot UUID and does not share a lock with rollback. A rollback after the
+check can therefore race with publication. Before rolling back such a table,
+pause maintenance and other writers, and wait for all in-flight publications
+to finish. After rollback, start new maintenance passes from the resulting
+snapshot. Atomic protection against concurrent rollback requires a committer
+that enforces the captured snapshot identity during publication.
 
 The API requires data evolution and a latest-table handle. It uses Python index
 planning and the Python committer to preserve rebuild ranges and the strict

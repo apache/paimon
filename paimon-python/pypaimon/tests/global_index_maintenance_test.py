@@ -29,15 +29,22 @@ SPEC = {"column": "embedding", "type": "ivf-flat", "options": {
 
 
 @pytest.fixture
-def docs(tmp_path):
+def docs(tmp_path, request):
     pytest.importorskip("paimon_vindex")
     table = pm.connect(options={"warehouse": str(tmp_path)}).create_table(
         "docs", schema=pa.schema([("id", pa.int64()), ("pt", pa.string()),
                                   ("embedding", pa.list_(pa.float32(), 2))]), partitioned=["pt"],
         options={"file.format": "parquet", "vector.file.format": "parquet",
                  "vector-index.search-mode": "full", "global-index.column-update-action": "DROP_PARTITION_INDEX"})
-    table.add([{"id": i, "pt": "a" if i < 2 else "b", "embedding": [float(i), 1.]}
-               for i in range(4)])
+    rows = [{"id": i, "pt": "a" if i < 2 else "b", "embedding": [float(i), 1.]}
+            for i in range(4)]
+    if hasattr(request, "param"):
+        # Separate commits deterministically exercise both possible partition
+        # row-ID orders, including when native writers use a HashMap.
+        for partition in request.param:
+            table.add([row for row in rows if row["pt"] == partition])
+    else:
+        table.add(rows)
     return table
 
 
@@ -297,7 +304,11 @@ def test_multiple_definitions_publish_once(docs):
 
 
 @pytest.mark.parametrize("rebuild", [False, True])
+@pytest.mark.parametrize("docs", [("a", "b"), ("b", "a")], indirect=True,
+                         ids=["a-first", "b-first"])
 def test_maintenance_keeps_python_planning_with_native_writes(docs, rebuild):
+    from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+
     spec = {"column": "id", "type": "btree"}
     docs.maintain_indexes([spec])
     old = names(docs)
@@ -309,13 +320,29 @@ def test_maintenance_keeps_python_planning_with_native_writes(docs, rebuild):
     # when the table is eligible for the new native index-build entry point.
     with patch("pypaimon.globalindex.native_index_build.native_method_available",
                side_effect=AssertionError("maintenance delegated to native index planning")):
-        assert docs.maintain_indexes([spec], rebuild=rebuild) == (3 if rebuild else 1)
-    assert docs.raw_table.snapshot_manager().get_latest_snapshot().id == before + 1
+        added = docs.maintain_indexes([spec], rebuild=rebuild)
+    table = docs.raw_table
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    assert snapshot.id == before + 1
+    current = names(docs)
+    assert added == len(current - old) > 0
     if rebuild:
-        assert names(docs).isdisjoint(old)
+        assert current.isdisjoint(old)
     else:
-        assert names(docs).issuperset(old)
-    assert docs.raw_table.options.native_write_enabled()
+        assert added == 1
+        assert current.issuperset(old)
+    assert table.options.native_write_enabled()
+    # Contiguous row-ID ranges may coalesce into fewer BTree files. Verify
+    # actual indexed coverage for every row instead of a fixed file count.
+    for value in range(5):
+        rb = table.new_read_builder().with_projection(["id"])
+        predicate = rb.new_predicate_builder().equal("id", value)
+        with DataEvolutionGlobalIndexScanner.create(table, predicate=predicate, snapshot=snapshot) as scanner:
+            result = scanner.scan(predicate)
+        assert result is not None
+        rb.with_filter(predicate)
+        splits = rb.new_scan().with_global_index_result(result).plan().splits()
+        assert rb.new_read().to_arrow(splits).to_pylist() == [{"id": value}]
 
 
 def test_rebuild_repairs_ignored_updates(docs):
