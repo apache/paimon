@@ -47,7 +47,10 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.ZoneId;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -614,8 +617,13 @@ public class PaimonShreddingUtils {
             return resultRow;
         }
 
-        VariantMetadata metadata = fields[0].reader.metadata();
-        metadata.adopt(topLevelMetadata);
+        Set<VariantMetadata> adopted = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (FieldToExtract field : fields) {
+            VariantMetadata metadata = field.reader().metadata();
+            if (adopted.add(metadata)) {
+                metadata.adopt(topLevelMetadata);
+            }
+        }
 
         int fieldIdx = 0;
         while (fieldIdx < numFields) {

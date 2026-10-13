@@ -237,7 +237,6 @@ public class PaimonShreddingUtilsTest {
         shreddedType = new RowType(allTypes.getFields());
         RowType shreddingSchema = variantShreddingSchema(shreddedType);
         VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
-        VariantMetadata metadata = VariantMetadata.empty();
         FieldToExtract[] fields = new FieldToExtract[allTypes.getFieldCount()];
         for (int i = 0; i < allTypes.getFields().size(); i++) {
             fields[i] =
@@ -245,8 +244,7 @@ public class PaimonShreddingUtilsTest {
                             DataTypes.STRING(),
                             "$." + allTypes.getFields().get(i).name(),
                             castArgs,
-                            variantSchema,
-                            metadata);
+                            variantSchema);
         }
         assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
                 .isEqualTo(expected);
@@ -262,8 +260,7 @@ public class PaimonShreddingUtilsTest {
                             DataTypes.STRING(),
                             "$." + allTypes.getFields().get(i).name(),
                             castArgs,
-                            variantSchema,
-                            metadata);
+                            variantSchema);
         }
 
         assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
@@ -319,22 +316,14 @@ public class PaimonShreddingUtilsTest {
 
         for (RowType shape : new RowType[] {shredded, unshredded}) {
             VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(shape));
-            VariantMetadata metadata = VariantMetadata.empty();
             FieldToExtract[] fieldsToExtract = {
-                buildFieldsToExtract(
-                        DataTypes.STRING(), "$.price", castArgs, variantSchema, metadata),
-                buildFieldsToExtract(
-                        DataTypes.STRING(), "$.amount", castArgs, variantSchema, metadata),
-                buildFieldsToExtract(
-                        DataTypes.STRING(), "$.tiny", castArgs, variantSchema, metadata),
-                buildFieldsToExtract(
-                        DataTypes.STRING(), "$.zero", castArgs, variantSchema, metadata),
-                buildFieldsToExtract(
-                        DataTypes.DECIMAL(10, 2), "$.price", castArgs, variantSchema, metadata),
-                buildFieldsToExtract(
-                        DataTypes.DOUBLE(), "$.amount", castArgs, variantSchema, metadata),
-                buildFieldsToExtract(
-                        DataTypes.BIGINT(), "$.price", castArgs, variantSchema, metadata)
+                buildFieldsToExtract(DataTypes.STRING(), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.tiny", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.zero", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DECIMAL(10, 2), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DOUBLE(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.BIGINT(), "$.price", castArgs, variantSchema)
             };
 
             assertThat(
@@ -371,14 +360,10 @@ public class PaimonShreddingUtilsTest {
             TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
             for (RowType shape : new RowType[] {valueType, RowType.of()}) {
                 VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(shape));
-                VariantMetadata metadata = VariantMetadata.empty();
                 FieldToExtract[] fieldsToExtract = {
-                    buildFieldsToExtract(
-                            DataTypes.STRING(), "$.ts", shanghai, variantSchema, metadata),
-                    buildFieldsToExtract(
-                            DataTypes.TIMESTAMP(), "$.ts", shanghai, variantSchema, metadata),
-                    buildFieldsToExtract(
-                            DataTypes.DATE(), "$.ts", shanghai, variantSchema, metadata)
+                    buildFieldsToExtract(DataTypes.STRING(), "$.ts", shanghai, variantSchema),
+                    buildFieldsToExtract(DataTypes.TIMESTAMP(), "$.ts", shanghai, variantSchema),
+                    buildFieldsToExtract(DataTypes.DATE(), "$.ts", shanghai, variantSchema)
                 };
                 assertThat(
                                 assembleVariantStruct(
@@ -405,10 +390,9 @@ public class PaimonShreddingUtilsTest {
         VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
 
         VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(RowType.of()));
-        VariantMetadata metadata = VariantMetadata.empty();
         FieldToExtract[] fieldsToExtract = {
-            buildFieldsToExtract(DataTypes.STRING(), "$.round", castArgs, variantSchema, metadata),
-            buildFieldsToExtract(DataTypes.STRING(), "$.small", castArgs, variantSchema, metadata)
+            buildFieldsToExtract(DataTypes.STRING(), "$.round", castArgs, variantSchema),
+            buildFieldsToExtract(DataTypes.STRING(), "$.small", castArgs, variantSchema)
         };
 
         assertThat(
@@ -425,7 +409,6 @@ public class PaimonShreddingUtilsTest {
 
         RowType shreddingSchema = variantShreddingSchema(shreddedType);
         VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
-        VariantMetadata metadata = VariantMetadata.empty();
 
         FieldToExtract[] fieldsToExtract = new FieldToExtract[allTypes.getFieldCount()];
         for (int i = 0; i < allTypes.getFields().size(); i++) {
@@ -434,8 +417,7 @@ public class PaimonShreddingUtilsTest {
                             allTypes.getFields().get(i).type(),
                             "$." + allTypes.getFields().get(i).name(),
                             castArgs,
-                            variantSchema,
-                            metadata);
+                            variantSchema);
         }
 
         InternalRow inputRow = castShredded(v, variantSchema);
@@ -457,13 +439,11 @@ public class PaimonShreddingUtilsTest {
                         new String[] {"a", "b"});
         RowType shreddingSchema = variantShreddingSchema(shreddedType);
         VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
-        VariantMetadata metadata = VariantMetadata.empty();
 
         // fieldsToExtract: $.a : int, $.b : string
-        FieldToExtract f1 =
-                buildFieldsToExtract(DataTypes.INT(), "$.a", castArgs, variantSchema, metadata);
+        FieldToExtract f1 = buildFieldsToExtract(DataTypes.INT(), "$.a", castArgs, variantSchema);
         FieldToExtract f2 =
-                buildFieldsToExtract(DataTypes.STRING(), "$.b", castArgs, variantSchema, metadata);
+                buildFieldsToExtract(DataTypes.STRING(), "$.b", castArgs, variantSchema);
         FieldToExtract[] fields = new FieldToExtract[] {f1, f2};
 
         GenericVariant v = GenericVariant.fromJson("{\"a\": 1, \"b\": \"hello\"}");
@@ -492,7 +472,7 @@ public class PaimonShreddingUtilsTest {
 
         // fieldsToExtract: $.a : int, $.b : string, $.c : string and c is not in shreddedType
         FieldToExtract f3 =
-                buildFieldsToExtract(DataTypes.STRING(), "$.c", castArgs, variantSchema, metadata);
+                buildFieldsToExtract(DataTypes.STRING(), "$.c", castArgs, variantSchema);
         fields = new FieldToExtract[] {f1, f2, f3};
         v = GenericVariant.fromJson("{\"c\": \"hi\", \"a\": 27}");
         assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
