@@ -18,6 +18,7 @@
 from decimal import Decimal
 import os
 import time
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
@@ -301,3 +302,44 @@ def test_local_wall_time_can_cross_date_library_bounds(local_zone, zone, values,
     source = pa.array(values, type=pa.timestamp('ms'))
     result = cast_array_for_schema_evolution(source, pa.timestamp('ms', 'UTC'))
     assert result.cast(pa.int64()).to_pylist() == expected
+
+
+@pytest.mark.parametrize('platform', ['standard_offset', 'range_error'])
+@pytest.mark.parametrize('target,expected', [
+    (pa.timestamp('ms'), [
+        -18000000, 9223372036840375807, 9223372021198375807, 9223372036830600000,
+        9223372036837013808, 253402282800000, None]),
+    (pa.time32('ms'), [68400000, 11575807, 7975807, 1800000, 42662192, 68400000, None]),
+    (pa.date32(), [-1, -622191233, -622191414, -622191233, 622191233, 2932896, None]),
+    (pa.string(), [
+        '1969-12-31 19:00:00.000', '/+-.-04-06 03:12:55.807', '/+---10-08 02:12:55.807',
+        '/+-.-04-06 00:30:00.000', '/+-.-04-06 02:16:53.808', '9999-12-31 19:00:00.000', None]),
+])
+def test_wide_ltz_casts_keep_java_dst_when_platform_localtime_cannot(
+        local_zone, monkeypatch, platform, target, expected):
+    local_zone('America/New_York')
+    libc_localtime = time.localtime
+
+    def limited_localtime(seconds=None):
+        if seconds is None:
+            return libc_localtime()
+        if seconds > 253402207200:
+            if platform == 'standard_offset':
+                # Some libc implementations lose the far-future DST rule.
+                return SimpleNamespace(tm_gmtoff=-18000, tm_isdst=0)
+            raise OverflowError('Platform cannot convert this future year')
+        if seconds < -377705023201 and platform == 'range_error':
+            raise OverflowError('Platform cannot convert this ancient year')
+        return libc_localtime(seconds)
+
+    monkeypatch.setattr(time, 'localtime', limited_localtime)
+    values = [0, 9223372036854775807, 9223372021216375807, 9223372036845000000,
+              -9223372036854775808, 253402300800000, None]
+    source = pa.array([None] + values + [None], type=pa.timestamp('ms', 'UTC')).slice(1, len(values))
+    source = pa.chunked_array([source.slice(0, 3), source.slice(3)])
+    result = cast_array_for_schema_evolution(source, target)
+    if not pa.types.is_string(target):
+        result = result.cast(pa.int64() if pa.types.is_timestamp(target) else pa.int32())
+    # Golden values from real Java CastExecutors, including a local midnight
+    # whose DATE changes if a standard offset replaces the correct DST offset.
+    assert result.to_pylist() == expected

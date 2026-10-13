@@ -20,6 +20,12 @@
 import time
 
 
+_GREGORIAN_CYCLE_SECONDS = 146097 * 86400
+# Match the finite zone lookup window used by the Native temporal helpers.
+_MIN_ZONE_SECONDS = -377705023201
+_MAX_ZONE_SECONDS = 253402207200
+
+
 def _epoch_day_to_date(days):
     # March-based Gregorian eras, with floor division also for pre-epoch days.
     days += 719468
@@ -34,7 +40,14 @@ def _epoch_day_to_date(days):
 
 
 def _local_offset(seconds):
-    # Avoid converting the date itself through datetime's 1..9999 year range.
+    # libc can lose DST in very large years. Java's final transition rules
+    # repeat every Gregorian 400-year cycle, including month/day/weekday/time.
+    # Query an equivalent date in 2370..2770, after recorded transitions.
+    if seconds > _MAX_ZONE_SECONDS:
+        seconds = seconds % _GREGORIAN_CYCLE_SECONDS + _GREGORIAN_CYCLE_SECONDS
+    elif seconds < _MIN_ZONE_SECONDS:
+        # Before recorded history Java uses its first wall offset.
+        seconds = _MIN_ZONE_SECONDS
     local = time.localtime(seconds)
     offset = getattr(local, 'tm_gmtoff', None)
     if offset is not None:
