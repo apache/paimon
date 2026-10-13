@@ -308,7 +308,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 scanner);
         CommitRollback rollback = null;
         TableRollback tableRollback =
-                options.restCommitLockEnabled()
+                options.restCommitAcquireLock()
                         ? catalogEnvironment.catalogTableRollback(options.branch(), commitUser)
                         : catalogEnvironment.catalogTableRollback(null, null);
         if (tableRollback != null) {

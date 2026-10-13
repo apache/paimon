@@ -206,6 +206,7 @@ class CommitLockProtocolTest {
                                             true, "morax-job", 100000, 60000, snapshot(1)))));
             Options tableOptions = Options.fromMap(table.options());
             tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, true);
+            tableOptions.set(CoreOptions.REST_COMMIT_ACQUIRE_LOCK, true);
             try (Catalog writerCatalog = environment.catalogLoader().load();
                     Lock lock =
                             writerCatalog.createLock(

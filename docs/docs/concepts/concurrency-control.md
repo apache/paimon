@@ -105,8 +105,12 @@ provide a storage fencing token.
 
 Catalog-managed Paimon tables in the REST catalog expose table-bound commit leases through
 `Catalog.createLock` and the unified
-`Lock.acquire` / `Lock.runWithLock` contract. Set `rest.commit.lock-enabled = true` on the table to
-allow acquisition; it defaults to `false`. External tables keep filesystem publication.
+`Lock.acquire` / `Lock.runWithLock` contract. Set the persisted table property
+`rest.commit.lock-enabled = true` to enable server-side lease enforcement. Independently, set
+`rest.commit.acquire-lock = true` in a writer's dynamic options to acquire a lease for each
+publication attempt. Both options default to `false`. Enabling the table capability alone does
+not make clients acquire leases. Requesting acquisition without the table capability fails.
+External tables keep filesystem publication.
 Callers supply their exact `commitUser` and table UUID.
 Leases require the target branch's catalog-resolved UUID. Reload a view switched to another branch
 from the catalog before using leases.
@@ -121,6 +125,12 @@ owner, and atomically publish the snapshot and clear the lease. All snapshot wri
 active leases, including writers that do not request one. Each successful snapshot publication
 ends its lease; a later publication must acquire another scope. Snapshot comparison and file
 conflict validation remain necessary.
+
+For a table with lease enforcement disabled, the server can skip lease storage access entirely.
+For a table with enforcement enabled, even writers with `rest.commit.acquire-lock = false` must
+respect another writer's active lease. The server uses its own persisted table property for this
+decision, rather than client options. Capability changes must be serialized with publication and
+lease acquisition; disabling enforcement must not bypass an active lease.
 
 Rollback inside a lease supplies `tableId` and `commitUser` in addition to the expected
 `fromSnapshot`. The server must validate the lease and expected head, roll back and clear the lease

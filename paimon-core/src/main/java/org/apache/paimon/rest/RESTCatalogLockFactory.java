@@ -27,6 +27,8 @@ import org.apache.paimon.options.Options;
 
 import javax.annotation.Nullable;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Creates REST commit lease clients from serializable catalog options. */
 public class RESTCatalogLockFactory implements CatalogLockFactory {
 
@@ -45,9 +47,12 @@ public class RESTCatalogLockFactory implements CatalogLockFactory {
             @Nullable String commitUser,
             Options tableOptions) {
         CoreOptions options = new CoreOptions(tableOptions);
-        if (!options.restCommitLockEnabled()) {
+        if (!options.restCommitAcquireLock()) {
             return Lock.empty();
         }
+        checkArgument(
+                options.restCommitLockEnabled(),
+                "rest.commit.acquire-lock requires rest.commit.lock-enabled on the table.");
         return new RESTCatalogLock(
                 new RESTApi(context.options(), false),
                 identifier,

@@ -644,7 +644,9 @@ paths:
           schema:
             type: string
       description: >-
-        Requires rest.commit.lock-enabled=true and the same permission as committing snapshots.
+        Requires the server-side table property rest.commit.lock-enabled=true and the same
+        permission as committing snapshots. Clients opt into acquisition separately using
+        rest.commit.acquire-lock=true; that client option does not enable the table capability.
         Ownership is the exact commitUser together with the authenticated caller. Contention
         returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
         Renewal never revives an expired lease. Publication retains snapshot CAS validation

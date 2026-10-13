@@ -81,6 +81,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Exercises REST leases through the real file-store commit path. */
 class RESTCommitLockIntegrationTest {
@@ -99,12 +100,52 @@ class RESTCommitLockIntegrationTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    @ValueSource(booleans = {false, true})
+    void tableCapabilityDoesNotMakeAClientAcquireByDefault(boolean capability) {
+        Options options = new Options();
+        options.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, capability);
+        Lock lock =
+                new RESTCatalogLockFactory()
+                        .createLock(
+                                CatalogLockContext.fromOptions(new Options()),
+                                null,
+                                null,
+                                null,
+                                options);
+        assertThat(lock).isInstanceOf(Lock.EmptyLock.class);
+    }
+
+    @Test
+    void acquisitionRequiresTheTableCapabilityBeforeRestRequests() {
+        Options options = new Options();
+        options.set("rest.commit.acquire-lock", "true");
+        assertThatThrownBy(
+                        () ->
+                                new RESTCatalogLockFactory()
+                                        .createLock(
+                                                CatalogLockContext.fromOptions(new Options()),
+                                                null,
+                                                null,
+                                                null,
+                                                options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("rest.commit.lock-enabled");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false,false,false", "false,false,true", "true,false,false",
+        "true,false,true", "true,true,false", "true,true,true"
+    })
     void commitsAcquireBeforeHeadAndReacquireAfterConflict(
-            boolean locking, boolean firstPublicationConflicts, @TempDir Path directory)
+            boolean capability,
+            boolean locking,
+            boolean firstPublicationConflicts,
+            @TempDir Path directory)
             throws Exception {
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, locking);
+        tableOptions.set(CoreOptions.REST_COMMIT_LOCK_ENABLED, capability);
+        tableOptions.set(CoreOptions.REST_COMMIT_ACQUIRE_LOCK, locking);
         tableOptions.set(CoreOptions.COMMIT_MAX_RETRIES, 2);
         tableOptions.set(CoreOptions.COMMIT_MIN_RETRY_WAIT, Duration.ofMillis(1));
         tableOptions.set(CoreOptions.COMMIT_MAX_RETRY_WAIT, Duration.ofMillis(1));
@@ -226,7 +267,8 @@ class RESTCommitLockIntegrationTest {
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
-                        .option(CoreOptions.REST_COMMIT_LOCK_ENABLED.key(), String.valueOf(locking))
+                        .option(CoreOptions.REST_COMMIT_LOCK_ENABLED.key(), "true")
+                        .option(CoreOptions.REST_COMMIT_ACQUIRE_LOCK.key(), String.valueOf(locking))
                         .option(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "1 ms")
                         .option(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "1 ms")
                         .build();
