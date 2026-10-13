@@ -255,6 +255,12 @@ public class IoCacheRoutingTest {
                         "dt=1/part-00000-1a2b.snappy.parquet",
                         "dt=1/bucket-0/data-1.parquet",
                         "dt=1/bucket-0/custom-{uuid}-0.orc",
+                        "bucket-postpone/data--u-user-s-x-w-{uuid}-0.parquet",
+                        "bucket-postpone/data--u--s-1-w-{uuid}-0.parquet",
+                        "bucket-postpone/custom--u-user-s-1-w-{uuid}-0.parquet",
+                        "dt=1/bucket-0/data-{uuid}.blob",
+                        "dt=1/bucket-0/data-{uuid}.managed.blob.{uuid}.tmp",
+                        "dt=1/bucket-0/data-old.managed.blob",
                         "README")) {
             assertType(path, null);
         }
@@ -290,6 +296,19 @@ public class IoCacheRoutingTest {
         assertType("dt=1/bucket-0/data-{uuid}-0.blob", DATA);
         assertType("dt=1/8b1f7c2e/data-{uuid}-0.parquet", DATA);
         assertType("dt=1/bucket-0/data-{uuid}-0.parquet.index", FILE_INDEX);
+        assertType("dt=1/bucket-0/data-{uuid}-0.parquet.blobref", DATA);
+        assertType("dt=1/bucket-0/data-{uuid}-0.managed.blob", DATA);
+        assertType("dt=1/bucket-0/data-{uuid}.managed.blob", DATA);
+        // the postpone writer puts its commit user and write id before {uuid}-{count}
+        for (String postpone :
+                Arrays.asList(
+                        "bucket-postpone/data--u-io-cache-user-s-7-w-{uuid}-0.parquet",
+                        "dt=1/bucket-postpone/data--u-{uuid}-s-2147483647-w-{uuid}-12.orc",
+                        "bucket-postpone/changelog--u-user-s-0-w-{uuid}-0.parquet")) {
+            assertType(postpone, DATA);
+            assertType(postpone + ".index", FILE_INDEX);
+            assertType(postpone + ".blobref", DATA);
+        }
         assertType("index/index-{uuid}-0", BUCKET_INDEX);
         assertType("index/btree-global-index-{uuid}.index", GLOBAL_INDEX);
         assertType("index/lumina-global-index-{uuid}.index", GLOBAL_INDEX);
@@ -298,6 +317,10 @@ public class IoCacheRoutingTest {
     @Test
     public void testCacheableTypeWithFilePrefixes() {
         assertType("dt=1/bucket-0/custom-{uuid}-0.orc", DATA, "data-file.prefix=custom-");
+        assertType(
+                "bucket-postpone/custom--u-user-s-1-w-{uuid}-0.orc",
+                DATA,
+                "data-file.prefix=custom-");
         assertType("dt=1/bucket-0/data-{uuid}-0.orc", DATA, "data-file.prefix=custom-");
         assertType("dt=1/bucket-0/cl-{uuid}-0.orc", DATA, "changelog-file.prefix=cl-");
         assertType("dt=1/bucket-0/  unknown.parquet", null, "data-file.prefix=  ");
