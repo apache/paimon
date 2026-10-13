@@ -405,7 +405,7 @@ class RESTApi:
         )
         return response.is_success()
 
-    def rollback_to(self, identifier, instant, from_snapshot=None):
+    def rollback_to(self, identifier, instant, from_snapshot=None, *, table_uuid=None):
         """Rollback table to the given instant.
 
         Args:
@@ -413,13 +413,15 @@ class RESTApi:
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
+            table_uuid: Expected table or branch UUID from the loaded table view.
 
         Raises:
             NoSuchResourceException: If the table, snapshot or tag does not exist.
             ForbiddenException: If no permission to access this table.
         """
         database_name, table_name = self.__validate_identifier(identifier)
-        request = RollbackTableRequest(instant=instant, from_snapshot=from_snapshot)
+        request = RollbackTableRequest(
+            instant=instant, from_snapshot=from_snapshot, table_id=table_uuid)
         self.client.post(
             self.resource_paths.rollback_table(database_name, table_name),
             request,
