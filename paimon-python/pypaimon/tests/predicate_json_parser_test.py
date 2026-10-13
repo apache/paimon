@@ -19,6 +19,7 @@
 import datetime
 import json
 import unittest
+from pathlib import Path
 
 import pyarrow as pa
 
@@ -860,6 +861,70 @@ class TestDateExtractTransforms(unittest.TestCase):
         self.assertEqual(self._apply("YEAR", batch, "d", "DATE"), [2024, None])
         self.assertEqual(self._apply("MONTH", batch, "d", "DATE"), [1, None])
         self.assertEqual(self._apply("HOUR", batch, "d", "DATE"), [0, None])
+
+    def test_calendar_parts_match_java_golden_for_every_storage_unit(self):
+        parts = ['YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND', 'QUARTER', 'DAY_OF_YEAR',
+                 'WEEKDAY', 'ISO_DAY_OF_WEEK', 'DAY_OF_WEEK', 'WEEK', 'YEAR_OF_WEEK']
+        golden = Path(__file__).parent / 'resources' / 'calendar_extract_java.jsonl'
+        for line in golden.read_text().splitlines():
+            case = json.loads(line)
+            unit = case['unit']
+            type_ = pa.date32() if unit == 'date' else pa.timestamp(unit)
+            wire = 'DATE' if unit == 'date' else 'TIMESTAMP(9)'
+            batch = pa.RecordBatch.from_pydict({'t': pa.array([case['value'], None], type=type_)})
+            for part, expected in zip(parts, case['parts']):
+                with self.subTest(unit=unit, value=case['value'], part=part):
+                    self.assertEqual(self._apply(part, batch, 't', wire), [expected, None])
+
+    def test_empty_and_all_null_calendar_batches(self):
+        for unit in ['date', 's', 'ms', 'us', 'ns']:
+            type_ = pa.date32() if unit == 'date' else pa.timestamp(unit)
+            wire = 'DATE' if unit == 'date' else 'TIMESTAMP(9)'
+            for values in [[], [None, None]]:
+                batch = pa.RecordBatch.from_pydict({'t': pa.array(values, type=type_)})
+                for part in ['YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND', 'QUARTER', 'DAY_OF_YEAR',
+                             'WEEKDAY', 'ISO_DAY_OF_WEEK', 'DAY_OF_WEEK', 'WEEK', 'YEAR_OF_WEEK']:
+                    with self.subTest(unit=unit, values=values, part=part):
+                        self.assertEqual(self._apply(part, batch, 't', wire), values)
+
+    def test_calendar_operand_is_a_dependency_even_if_hidden(self):
+        for part in ['YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND', 'QUARTER', 'DAY_OF_YEAR',
+                     'WEEKDAY', 'ISO_DAY_OF_WEEK', 'DAY_OF_WEEK', 'WEEK', 'YEAR_OF_WEEK']:
+            rule = {'name': part, 'fieldRef': {'name': 'hidden', 'index': 99, 'type': 'DATE'}}
+            predicate = {'kind': 'LEAF', 'function': 'IS_NULL', 'transform': rule}
+            self.assertEqual(extract_referenced_fields(json.dumps(predicate)), {'hidden'})
+
+    def test_stored_and_rebound_calendar_types_are_validated(self):
+        for stored in ['INT', 'BIGINT', 'TIME(3)', 'TIMESTAMP_LTZ(3)', 'TIMESTAMP(10)', 'DATENULL',
+                       'TIMESTAMP(٣)', 'TIMESTAMP(３)',
+                       'TIMESTAMP(3) WITHOUT TIME ZONENULL',
+                       'TIMESTAMP(3) WITHOUT TIME ZONENOT NULL',
+                       {'type': 'DATE'}, {'type': 'TIMESTAMP(6)'}, None]:
+            with self.subTest(stored=stored), self.assertRaises(ValueError):
+                self._apply('YEAR', self._ts_batch(), 't', stored)
+        for type_, value in [(pa.int32(), 1), (pa.time32('ms'), 1), (pa.timestamp('ms', tz='UTC'), 1)]:
+            batch = pa.RecordBatch.from_pydict({'t': pa.array([value], type=type_)})
+            with self.subTest(type=type_), self.assertRaises(ValueError):
+                self._apply('YEAR', batch, 't', 'DATE')
+        # As in Java copyWithNewInputs, DATE and local TIMESTAMP may rebind to
+        # one another; the actual column decides the executed calendar value.
+        for stored in ['DATE', 'DATE NULL', 'TIMESTAMP(3)NOT NULL', 'TIMESTAMP WITHOUT TIME ZONE',
+                       'TIMESTAMP(3) WITHOUT TIME ZONE',
+                       'TIMESTAMP(3)WITHOUT TIME ZONE']:
+            with self.subTest(stored=stored):
+                self.assertEqual(self._apply('YEAR', self._ts_batch(), 't', stored), [2024, 2024, None])
+
+    def test_full_date32_domain_does_not_require_a_timestamp_cast(self):
+        batch = pa.RecordBatch.from_pydict({"d": pa.array([2147483647, -2147483648, None], type=pa.date32())})
+        self.assertEqual(self._apply("HOUR", batch, "d", "DATE"), [0, 0, None])
+
+    def test_timestamp_epoch_day_narrows_as_java_int_before_calendar_extraction(self):
+        # Java Timestamp narrows its millisecond epoch day to a signed int.
+        ticks = (2147483648 * 86400000)
+        batch = pa.RecordBatch.from_pydict({"t": pa.array([ticks, -1, None], type=pa.timestamp("ms"))})
+        days = pa.RecordBatch.from_pydict({"d": pa.array([-2147483648, -1, None], type=pa.date32())})
+        self.assertEqual(self._apply("YEAR", batch, "t", "TIMESTAMP(3)"),
+                         self._apply("YEAR", days, "d", "DATE"))
 
     def test_wired_through_a_leaf_filter(self):
         pred = json.dumps({
