@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import gc
 import io
 import os
 import pickle
@@ -22,6 +23,7 @@ import threading
 import types
 import unittest
 import uuid
+import weakref
 from unittest import mock
 
 import pyarrow.fs as pafs
@@ -85,6 +87,100 @@ class JindoInputFileTest(unittest.TestCase):
 
         self.assertEqual(b"x" * 60, input_file.read())
         self.assertEqual([60], stream.reads)
+
+
+class JindoStreamLifetimeTest(unittest.TestCase):
+
+    class Client:
+        def open(self, path, mode):
+            return JindoStreamLifetimeTest.Stream(self)
+
+    class Stream(io.BytesIO):
+        def __init__(self, client):
+            super().__init__(b"video")
+            self.client = weakref.ref(client)
+
+        def check_client(self):
+            if self.client() is None:
+                raise RuntimeError("native filesystem was released before its stream")
+
+        def read(self, size=-1):
+            self.check_client()
+            return super().read(size)
+
+        def write(self, data):
+            self.check_client()
+            return super().write(data)
+
+        def close(self):
+            if not self.closed:
+                self.check_client()
+            super().close()
+
+    def handler(self):
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(
+                 connect=lambda *args: self.Client())), \
+             mock.patch.object(jindo_module, "jutil", types.SimpleNamespace(Config=_RecordingConfig)):
+            return JindoFileSystemHandler("oss://bucket/", Options({}))
+
+    def test_stream_retains_client_after_filesystem_is_released(self):
+        for method in ("open_input_file", "open_input_stream", "open_output_stream"):
+            with self.subTest(method=method):
+                handler = self.handler()
+                client = weakref.ref(handler._jindo_fs)
+                filesystem = PyFileSystem(handler)
+                stream = getattr(filesystem, method)("object")
+                del handler, filesystem
+                gc.collect()
+                self.assertIsNotNone(client())
+                if method == "open_output_stream":
+                    self.assertEqual(5, stream.write(b"frame"))
+                else:
+                    self.assertEqual(b"video", stream.read(5))
+                stream.close()
+                stream.close()
+                del stream
+                gc.collect()
+                self.assertIsNone(client())
+
+    def test_token_cache_replacement_keeps_open_stream_alive(self):
+        from pypaimon.catalog.rest.rest_token import RESTToken
+        from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.identifier import Identifier
+
+        class Delegate:
+            def __init__(self, handler):
+                self.filesystem = PyFileSystem(handler)
+
+            def new_input_stream(self, path):
+                return self.filesystem.open_input_file(path)
+
+        clients = []
+
+        def create_delegate(*args):
+            handler = self.handler()
+            clients.append(weakref.ref(handler._jindo_fs))
+            return Delegate(handler)
+
+        file_io = RESTTokenFileIO(Identifier.create("db", "table"), "oss://bucket/")
+        file_io.token = RESTToken({}, 100)
+        with mock.patch.object(file_io, "try_to_refresh_token"), \
+             mock.patch.object(FileIO, "get", side_effect=create_delegate):
+            stream = file_io.new_input_stream("object")
+            self.assertEqual(b"vi", stream.read(2))
+            file_io.token = RESTToken({}, 200)
+            file_io.file_io()
+            gc.collect()
+            self.assertEqual(2, len(clients))
+            self.assertIsNotNone(clients[0]())
+            self.assertEqual(b"deo", stream.read(3))
+            stream.close()
+            del stream
+            gc.collect()
+            self.assertIsNone(clients[0]())
+            self.assertIsNotNone(clients[1]())
 
 
 class JindoConfigTest(unittest.TestCase):
