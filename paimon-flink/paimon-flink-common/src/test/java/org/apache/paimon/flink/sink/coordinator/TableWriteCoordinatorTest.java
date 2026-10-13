@@ -381,6 +381,50 @@ class TableWriteCoordinatorTest extends TableTestBase {
         assertThat(responseBucket1.extractDataFiles()).isEmpty();
     }
 
+    @Test
+    public void testEmptyBucketUsesDefaultBucketCountForExistingPartition() throws Exception {
+        int tableBuckets = 4;
+
+        Identifier identifier = new Identifier("db3", "table");
+        catalog.createDatabase("db3", false);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .primaryKey("pt", "k")
+                        .partitionKeys("pt")
+                        .option(CoreOptions.BUCKET.key(), String.valueOf(tableBuckets))
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        String commitUser = UUID.randomUUID().toString();
+        List<CommitMessage> messages;
+        try (StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(commitUser).newWrite()) {
+            write.write(GenericRow.of(1, 1, 100), 0);
+            messages = write.prepareCommit(false, 0);
+        }
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            commit.commit(0, messages);
+        }
+
+        FileStoreTable freshTable = getTable(identifier);
+        Options options = new Options(freshTable.options());
+        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, true);
+        freshTable = freshTable.copy(freshTable.schema().copy(options.toMap()));
+        TableWriteCoordinator coordinator = new TableWriteCoordinator(freshTable);
+
+        ScanCoordinationResponse response =
+                coordinator.scan(
+                        new ScanCoordinationRequest(
+                                serializeBinaryRow(partitionRow(1)), 1, false, false, false));
+
+        assertThat(response.totalBuckets()).isEqualTo(tableBuckets);
+        assertThat(response.extractDataFiles()).isEmpty();
+    }
+
     private BinaryRow partitionRow(int partitionValue) {
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(row);

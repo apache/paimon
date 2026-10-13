@@ -229,7 +229,7 @@ public class TableWriteCoordinator {
                         .withSnapshot(snapshot)
                         .withPartitionFilter(Collections.singletonList(partition));
 
-        return PartitionBucketMapping.loadFromScan(partitionScan, defaultBuckets);
+        return PartitionBucketMapping.loadFromScan(partitionScan, defaultBuckets, true);
     }
 
     private FileStoreScan newScan() {

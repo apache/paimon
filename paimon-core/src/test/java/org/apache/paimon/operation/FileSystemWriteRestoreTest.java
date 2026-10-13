@@ -59,6 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -152,6 +153,42 @@ public class FileSystemWriteRestoreTest {
         RestoreFiles restored = restore.restoreFiles(EMPTY_ROW, 0, false, false, true);
 
         assertThat(restored.sourceIndexPayloads()).containsExactly(ann);
+    }
+
+    @Test
+    void testRebuildMappingClearsPreviousPartitionAndBucketFilters() {
+        Snapshot firstSnapshot = mock(Snapshot.class);
+        Snapshot secondSnapshot = mock(Snapshot.class);
+        when(firstSnapshot.id()).thenReturn(1L);
+        when(secondSnapshot.id()).thenReturn(2L);
+
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        when(snapshotManager.latestSnapshotFromFileSystem())
+                .thenReturn(firstSnapshot, secondSnapshot);
+
+        FileStoreScan scan = mock(FileStoreScan.class);
+        FileStoreScan.Plan plan = mock(FileStoreScan.Plan.class);
+        when(scan.clearPartitionAndBucketFilters()).thenReturn(scan);
+        when(scan.withSnapshot(firstSnapshot)).thenReturn(scan);
+        when(scan.withSnapshot(secondSnapshot)).thenReturn(scan);
+        when(scan.withPartitionBucket(EMPTY_ROW, 0)).thenReturn(scan);
+        when(scan.plan()).thenReturn(plan);
+        when(plan.files()).thenReturn(Collections.emptyList());
+        when(scan.readPartitionEntries()).thenReturn(Collections.emptyList());
+
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, true);
+        FileSystemWriteRestore restore =
+                new FileSystemWriteRestore(
+                        new CoreOptions(options),
+                        snapshotManager,
+                        scan,
+                        mock(IndexFileHandler.class));
+
+        restore.restoreFiles(EMPTY_ROW, 0, false, false, false);
+        restore.restoreFiles(EMPTY_ROW, 0, false, false, false);
+
+        verify(scan, times(2)).clearPartitionAndBucketFilters();
     }
 
     @Test

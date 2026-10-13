@@ -90,7 +90,9 @@ public class FileSystemWriteRestore implements WriteRestore {
                 || partitionBucketMappingSnapshotId != snapshot.id()) {
             partitionBucketMapping =
                     PartitionBucketMapping.loadFromScan(
-                            scan.withSnapshot(snapshot), options.bucket(), true);
+                            scan.clearPartitionAndBucketFilters().withSnapshot(snapshot),
+                            options.bucket(),
+                            true);
             partitionBucketMappingSnapshotId = snapshot.id();
         }
         return partitionBucketMapping;
