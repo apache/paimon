@@ -131,10 +131,30 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 
 
 class JindoInputFile:
-    def __init__(self, jindo_stream, file_size=None):
+    def __init__(self, jindo_stream, file_size=None, *, owner):
         self._stream = jindo_stream
         self._file_size = file_size
+        # Keep-alive back-reference to the owning jindo filesystem: the
+        # stream is a non-owning reference into memory owned by it. Without
+        # it, dropping the FileIO that holds the handler (e.g.
+        # RESTTokenFileIO's TTLCache maxsize=1 eviction on token refresh)
+        # frees the native connection while other threads still read from
+        # this stream. Keyword-only and required so a new open_* path cannot
+        # silently skip it; it pins only the filesystem, not the handler, so
+        # the evicted FileIO's properties do not stay retained.
+        self._owner = owner
         self._closed = False
+
+    def __del__(self):
+        # CPython releases instance attributes in dict layout order, which is
+        # an implementation detail, not a contract. Close the native stream
+        # while ``_owner`` still pins the store so the stream's own release
+        # cannot race the store's teardown (pyjindo's JindoOssFile relies on
+        # the same guarantee via io.IOBase's finalizer).
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def closed(self):
@@ -174,6 +194,9 @@ class JindoInputFile:
         if not self._closed:
             self._stream.close()
             self._closed = True
+            # The native stream is closed: a file object that stays
+            # referenced no longer needs to pin the native store.
+            self._owner = None
 
     def __enter__(self):
         return self
@@ -184,9 +207,20 @@ class JindoInputFile:
 
 
 class JindoOutputFile:
-    def __init__(self, jindo_stream):
+    def __init__(self, jindo_stream, *, owner):
         self._stream = jindo_stream
+        # See JindoInputFile._owner: keep the native store alive while this
+        # stream is open.
+        self._owner = owner
         self._closed = False
+
+    def __del__(self):
+        # See JindoInputFile.__del__: close while ``_owner`` still pins the
+        # store. For output streams this also flushes pending writes.
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def closed(self):
@@ -213,6 +247,9 @@ class JindoOutputFile:
         if not self._closed:
             self._stream.close()
             self._closed = True
+            # The native stream is closed: a file object that stays
+            # referenced no longer needs to pin the native store.
+            self._owner = None
 
     def __enter__(self):
         return self
@@ -373,20 +410,22 @@ class JindoFileSystemHandler(FileSystemHandler):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
-            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            JindoInputFile(jindo_stream, self._known_file_size(normalized),
+                           owner=self._jindo_fs),
             mode="r")
 
     def open_input_file(self, path: str):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
-            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            JindoInputFile(jindo_stream, self._known_file_size(normalized),
+                           owner=self._jindo_fs),
             mode="r")
 
     def open_output_stream(self, path: str, metadata):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "wb")
-        return PythonFile(JindoOutputFile(jindo_stream), mode="w")
+        return PythonFile(JindoOutputFile(jindo_stream, owner=self._jindo_fs), mode="w")
 
     def open_append_stream(self, path: str, metadata):
         raise IOError("append mode is not supported")

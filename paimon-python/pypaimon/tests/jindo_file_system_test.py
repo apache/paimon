@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import gc
 import io
 import os
 import pickle
@@ -22,6 +23,7 @@ import threading
 import types
 import unittest
 import uuid
+import weakref
 from unittest import mock
 
 import pyarrow.fs as pafs
@@ -34,6 +36,7 @@ from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import (
     JindoFileSystemHandler,
     JindoInputFile,
+    JindoOutputFile,
     JINDO_AVAILABLE,
 )
 
@@ -74,14 +77,14 @@ class JindoInputFileTest(unittest.TestCase):
 
     def test_known_size_avoids_backend_seek_from_end(self):
         stream = _RecordingInputStream()
-        input_file = JindoInputFile(stream, file_size=100)
+        input_file = JindoInputFile(stream, file_size=100, owner=object())
 
         self.assertEqual(95, input_file.seek(-5, os.SEEK_END))
         self.assertEqual([(95, os.SEEK_SET)], stream.seeks)
 
     def test_known_size_bounds_unlimited_read(self):
         stream = _RecordingInputStream(position=40)
-        input_file = JindoInputFile(stream, file_size=100)
+        input_file = JindoInputFile(stream, file_size=100, owner=object())
 
         self.assertEqual(b"x" * 60, input_file.read())
         self.assertEqual([60], stream.reads)
@@ -101,7 +104,7 @@ class JindoConfigTest(unittest.TestCase):
             def tell(self):
                 return self._stream.tell()
 
-        stream = JindoInputFile(JindoStream())
+        stream = JindoInputFile(JindoStream(), owner=object())
         self.assertEqual(5, stream.seek(0, io.SEEK_END))
 
     def test_pickle_reconnects_without_native_client_lock_or_cache(self):
@@ -324,6 +327,165 @@ class JindoConfigTest(unittest.TestCase):
             created_config.values["fs.oss.dlf-cache.server.address"],
             "http://cache-server:18101")
         self.assertEqual(created_config.values["logger.verbose"], "3")
+
+
+class _EvictionRecordingFileSystem:
+    """Fake ``jfs.connect`` result: owns the native store, records teardown."""
+
+    def __init__(self, events):
+        self.events = events
+
+    def open(self, path, mode):
+        return _EvictionRecordingNativeStream(self, self.events)
+
+    def __del__(self):
+        self.events.append('fs-destroyed')
+
+
+class _EvictionRecordingNativeStream:
+    """Fake pyjindo stream: non-owning reference to the native store."""
+
+    def __init__(self, fake_fs, events):
+        # Weak on purpose: the native stream must not keep the store alive.
+        self._fs = weakref.ref(fake_fs)
+        self._events = events
+        self.closed = False
+
+    def read(self, size=None):
+        if self._fs() is None:
+            raise RuntimeError('use-after-free: read after store teardown')
+        return b'x' * (size or 1)
+
+    def pread(self, size, offset):
+        return self.read(size)
+
+    def write(self, data):
+        if self._fs() is None:
+            raise RuntimeError('use-after-free: write after store teardown')
+        return len(data)
+
+    def seek(self, position, whence=0):
+        return position
+
+    def tell(self):
+        return 0
+
+    def close(self):
+        if self.closed:
+            return
+        if self._fs() is None:
+            # Emulates the native use-after-free the keep-alive prevents.
+            self._events.append('stream-closed-after-store-destroyed')
+            return
+        self.closed = True
+        self._events.append('stream-closed')
+
+    def __del__(self):
+        # pyjindo closes its native streams when they are released.
+        if not self.closed:
+            self.close()
+
+
+class JindoKeepAliveTest(unittest.TestCase):
+    """Streams must keep the native store alive across FileIO eviction
+    (RESTTokenFileIO token refresh) and must close before the store is
+    released, without relying on attribute dealloc order."""
+
+    @staticmethod
+    def _handler_with_recording_fs(events):
+        options = Options({
+            "fs.oss.impl": "jindo",
+            "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.accessKeyId": "test-ak",
+            "fs.oss.accessKeySecret": "test-sk",
+        })
+        fake_fs = _EvictionRecordingFileSystem(events)
+        fake_jfs = types.SimpleNamespace(connect=lambda *a, **kw: fake_fs)
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", fake_jfs), \
+                mock.patch.object(jindo_module, "jutil",
+                                   types.SimpleNamespace(Config=_RecordingConfig)):
+            handler = JindoFileSystemHandler("oss://bucket/", options)
+        return handler, weakref.ref(fake_fs), weakref.ref(handler)
+
+    def test_evicted_filesystem_outlives_open_stream(self):
+        events = []
+        handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
+        input_file = handler.open_input_file('object')
+
+        # TTLCache eviction on token refresh drops the handler chain: the
+        # handler (and its credentials) must die, the native store must not.
+        del handler
+        gc.collect()
+        self.assertIsNone(
+            handler_ref(), 'eviction must not pin the handler')
+        self.assertIsNotNone(
+            fs_ref(), 'eviction freed the native store while the stream was open')
+
+        # The stream keeps reading after eviction.
+        self.assertEqual(b'x', input_file.read(1))
+
+        # Closing releases the keep-alive: the still-referenced closed file
+        # no longer pins the store, and the stream closes before teardown.
+        input_file.close()
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+        self.assertIsNone(fs_ref())
+        del input_file
+        gc.collect()
+        # No double close on finalization.
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+
+    def test_evicted_filesystem_outlives_open_output_stream(self):
+        events = []
+        handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
+        output_file = handler.open_output_stream('object', None)
+
+        del handler
+        gc.collect()
+        self.assertIsNone(handler_ref())
+        self.assertIsNotNone(fs_ref())
+
+        self.assertEqual(4, output_file.write(b'data'))
+        output_file.close()
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+        self.assertIsNone(fs_ref())
+
+    def test_finalizer_closes_stream_before_store_teardown(self):
+        # Attribute release order is a CPython implementation detail: if a
+        # future refactor assigns _owner before _stream in __init__, the
+        # owner would be released first on dealloc. The finalizer must still
+        # close the stream while the owner pins the store.
+        events = []
+        fs = _EvictionRecordingFileSystem(events)
+        fs_ref = weakref.ref(fs)
+        stream = _EvictionRecordingNativeStream(fs, events)
+
+        class _ReversedInitInputFile(JindoInputFile):
+            def __init__(self, jindo_stream, owner):
+                self._owner = owner
+                self._stream = jindo_stream
+                self._file_size = None
+                self._closed = False
+
+        input_file = _ReversedInitInputFile(stream, owner=fs)
+        del fs, stream
+        gc.collect()
+        self.assertIsNotNone(fs_ref())
+
+        # Drop without closing: the finalizer must close the stream first...
+        del input_file
+        gc.collect()
+        self.assertIsNone(fs_ref())
+        # ...and the store must be destroyed only afterwards.
+        self.assertEqual(
+            ['stream-closed', 'fs-destroyed'], events,
+            'native stream must be closed before the store is destroyed')
+
+    def test_owner_argument_is_required(self):
+        with self.assertRaises(TypeError):
+            JindoInputFile(_RecordingInputStream())
+        with self.assertRaises(TypeError):
+            JindoOutputFile(_RecordingInputStream())
 
 
 class JindoFileSystemTest(unittest.TestCase):
