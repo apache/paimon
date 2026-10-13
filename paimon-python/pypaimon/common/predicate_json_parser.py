@@ -54,13 +54,8 @@ _TRIM_OPS = {
     "TRAILING": (pc.utf8_rtrim, str.rstrip),
 }
 
-# Calendar-field extractions on a DATE / TIMESTAMP field, mirroring Java's
-# DateExtractTransform subclasses (name -> the Arrow kernel over a timestamp).
-# QUARTER matches (month - 1) / 3 + 1; the day-of-week variants match Java's
-# java.time numbering: WEEKDAY is Monday=0..Sunday=6, ISO_DAY_OF_WEEK is
-# Monday=1..Sunday=7, DAY_OF_WEEK is Sunday=1..Saturday=7. WEEK / YEAR_OF_WEEK
-# are the ISO week-of-week-based-year and the ISO week-based year. The rest map
-# one to one.
+# Java DateExtractTransform names. LTZ is excluded because a calendar field
+# would depend on a session time zone, which authorization rules do not carry.
 _DATE_EXTRACT = {
     "YEAR": pc.year,
     "MONTH": pc.month,
@@ -199,16 +194,93 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
 
 
 def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array:
-    """Extract a calendar field from a DATE / TIMESTAMP column, as INT.
+    """Java calendar extraction on DATE days or Timestamp milliseconds.
 
-    A DATE is read at the start of its day (Java's LocalDate.atStartOfDay),
-    so it is cast to a timestamp first and HOUR/MINUTE/SECOND come out as 0.
-    Nulls propagate. Mirrors Java DateExtractTransform.
+    Timestamp.toLocalDateTime narrows the epoch day to a signed int. Work on
+    that representation directly, including DATE32 values which cannot be
+    cast to an Arrow microsecond timestamp or a Python datetime.
     """
+    from pypaimon.casting.temporal_utils import _signed
+    stored = field_ref.get('type')
+    if not isinstance(stored, str):
+        raise ValueError("Calendar transform field needs a DATE or TIMESTAMP type")
+    # Validate the complete stored SQL spelling before schema-name rebinding.
+    match = re.fullmatch(r"\s*(DATE(?=\s|\Z)|TIMESTAMP(?=\s|\(|\Z)(?:\s*\(\s*([0-9]+)\s*\))?"
+                         r"(?:\s*WITHOUT\s+TIME\s+ZONE(?=\s|\Z))?)"
+                         r"(?:\s*(?:NOT\s+)?NULL)?\s*", stored, flags=re.IGNORECASE)
+    if match is None or (match.group(2) is not None and int(match.group(2)) > 9):
+        raise ValueError("Calendar transforms require DATE or TIMESTAMP without time zone")
     column = _field_column(field_ref, batch)
-    if pa.types.is_date(column.type):
-        column = pc.cast(column, pa.timestamp("us"))
-    return pc.cast(_DATE_EXTRACT[name](column), pa.int32())
+    date = pa.types.is_date32(column.type)
+    timestamp = pa.types.is_timestamp(column.type) and column.type.tz is None
+    if not date and not timestamp:
+        raise ValueError("Calendar transforms require DATE or TIMESTAMP without time zone")
+    raw = column.cast(pa.int32() if date else pa.int64())
+    unit = column.type.unit if timestamp else None
+    # Arrow calendar kernels agree with Java within years 1..9999. Keep their
+    # vectorized execution for ordinary batches; outside this range use Java's
+    # epoch-day arithmetic, avoiding Arrow's bounded calendar representation.
+    bounds = pc.min_max(raw).as_py()
+    ticks_per_day = 1 if date else 86400 * {'s': 1, 'ms': 1000, 'us': 1000000, 'ns': 1000000000}[unit]
+    if (bounds['min'] is None or
+            (-719162 * ticks_per_day <= bounds['min'] and
+             bounds['max'] < 2932897 * ticks_per_day)):
+        source = column.cast(pa.timestamp('us')) if date else column
+        return _DATE_EXTRACT[name](source).cast(pa.int32())
+    values = raw.to_pylist()
+    results = []
+    for value in values:
+        if value is None:
+            results.append(None)
+            continue
+        if date:
+            day, millis = value, 0
+        else:
+            if unit == 's':
+                millis = _signed(value * 1000, 64)
+            elif unit == 'ms':
+                millis = value
+            else:
+                millis = value // (1000 if unit == 'us' else 1000000)
+            day, millis = _signed(millis // 86400000, 32), millis % 86400000
+        results.append(_calendar_field(name, day, millis))
+    return pa.array(results, type=pa.int32())
+
+
+def _calendar_field(name, day, millis):
+    from pypaimon.casting.temporal_utils import _epoch_day_to_date
+    year, month, date = _epoch_day_to_date(day)
+    weekday = (day + 3) % 7
+    if name == 'YEAR':
+        return year
+    if name == 'MONTH':
+        return month
+    if name == 'DAY':
+        return date
+    if name == 'HOUR':
+        return millis // 3600000
+    if name == 'MINUTE':
+        return millis // 60000 % 60
+    if name == 'SECOND':
+        return millis // 1000 % 60
+    if name == 'QUARTER':
+        return (month - 1) // 3 + 1
+    if name == 'DAY_OF_YEAR':
+        return day - _january_first(year) + 1
+    if name == 'WEEKDAY':
+        return weekday
+    if name == 'ISO_DAY_OF_WEEK':
+        return weekday + 1
+    if name == 'DAY_OF_WEEK':
+        return (weekday + 1) % 7 + 1
+    thursday = day + 3 - weekday
+    week_year = _epoch_day_to_date(thursday)[0]
+    return week_year if name == 'YEAR_OF_WEEK' else (thursday - _january_first(week_year)) // 7 + 1
+
+
+def _january_first(year):
+    era, yoe = divmod(year - 1, 400)
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + 306 - 719468
 
 
 def _substring(inputs, batch: pa.RecordBatch) -> pa.Array:
@@ -799,9 +871,7 @@ def _collect_all_field_refs_from_transform(transform: dict, fields: set = None) 
     if fields is None:
         fields = set()
     name = transform.get("name")
-    if name == "FIELD_REF" and "fieldRef" in transform:
-        fields.add(transform["fieldRef"]["name"])
-    elif name == "CAST" and "fieldRef" in transform:
+    if (name in ("FIELD_REF", "CAST") or name in _DATE_EXTRACT) and "fieldRef" in transform:
         fields.add(transform["fieldRef"]["name"])
     else:
         for inp in transform.get("inputs", []):
