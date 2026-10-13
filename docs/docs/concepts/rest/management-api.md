@@ -55,10 +55,10 @@ All management endpoints use the opaque `prefix` returned by the REST Catalog co
 is not a catalog name in a payload and is independent of local engine catalog aliases.
 
 ```
-GET    /v1/{prefix}/labels/{entityType}/{entityName}
-GET    /v1/{prefix}/labels/{entityType}/{entityName}/{key}
-POST   /v1/{prefix}/labels/{entityType}/{entityName}/{key}
-DELETE /v1/{prefix}/labels/{entityType}/{entityName}/{key}
+GET  /v1/{prefix}/labels?entityType=...&entityName=...
+POST /v1/{prefix}/labels/get
+POST /v1/{prefix}/labels/upsert
+POST /v1/{prefix}/labels/delete
 
 GET  /v1/{prefix}/permissions
 POST /v1/{prefix}/permissions/grant
@@ -87,8 +87,14 @@ Paimon's table snapshot `tags`; a label does not itself grant access or enforce 
 `entityName` is the server's canonical name within the configured catalog prefix. For example, a
 server may identify a table as `sales.orders` and a column as `sales.orders.order_id`. The server
 must define unambiguous names, including how to quote or escape identifier components. The client
-passes names unchanged and never splits them on dots. Path parameters use REST Catalog URL
-encoding as individual UTF-8 segments; JSON responses contain the original unencoded strings.
+passes names unchanged and never splits them on dots.
+
+Entity names and label keys never appear in the URL path. Canonical names routinely contain
+characters such as backticks, dots, percent signs, slashes, or non-ASCII text, and API gateways in
+front of a REST server may reject or rewrite such characters in a path before the request is
+signed or routed. Listing therefore names the entity in query parameters, and the operations on a
+single binding carry the entity type, entity name, and key in the JSON body. Query parameters use
+standard URL query encoding; JSON carries the original strings.
 
 ### Java catalog access
 
@@ -111,21 +117,23 @@ The standalone `RESTApi` client also exposes these operations; see
 
 ### Set a label
 
-`POST /v1/{prefix}/labels/{entityType}/{entityName}/{key}` atomically creates or replaces
-the binding identified by the path. For example, set the `domain` label on `sales.orders`:
+`POST /v1/{prefix}/labels/upsert` atomically creates or replaces the binding identified by the
+body. For example, set the `domain` label on `sales.orders`:
 
 ```http
-POST /v1/{prefix}/labels/TABLE/sales.orders/domain
+POST /v1/{prefix}/labels/upsert
 Content-Type: application/json
 ```
 
 ```json
 {
+  "entityType": "TABLE",
+  "entityName": "sales.orders",
+  "key": "domain",
   "value": "sales"
 }
 ```
 
-The request body contains only the value; it does not repeat the identity from the path.
 The entity must already exist. Repeating the same request leaves the same label value, and
 updating one key leaves other keys unchanged. Identity fields must be non-blank; keys are case
 sensitive. The value must be a string; an empty string is allowed and null is rejected.
@@ -134,12 +142,12 @@ operation.
 
 ### Read and delete labels
 
-`GET .../labels/{entityType}/{entityName}/{key}` returns the complete binding with
-`entityType`, `entityName`, `key`, and `value`. A missing entity or key returns 404.
-For a missing key, the error identifies
+`POST .../labels/get` with `{"entityType", "entityName", "key"}` returns the complete binding with
+`entityType`, `entityName`, `key`, and `value`. It does not change state and is safe to retry.
+A missing entity or key returns 404. For a missing key, the error identifies
 `resourceType=LABEL` and `resourceName={key}`.
 
-`GET .../labels/{entityType}/{entityName}` lists direct bindings:
+`GET .../labels?entityType={entityType}&entityName={entityName}` lists direct bindings:
 
 ```json
 {
@@ -155,9 +163,9 @@ to request subsequent pages. The last page omits `nextPageToken`. As with other 
 listings, an empty page terminates pagination and must not carry a continuation token. An existing
 entity with no labels returns `{"labels":[]}`; a missing entity returns 404.
 
-`DELETE .../labels/{entityType}/{entityName}/{key}` removes only that binding. It returns HTTP 200
-with no body even if the key is already absent, provided the entity exists. A missing entity
-still returns 404.
+`POST .../labels/delete` with `{"entityType", "entityName", "key"}` removes only that binding.
+It returns HTTP 200 with no body even if the key is already absent, provided the entity exists.
+A missing entity still returns 404.
 
 ## Privileges and policies are independent
 
