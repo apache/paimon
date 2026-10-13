@@ -16,12 +16,45 @@
 # under the License.
 
 from decimal import Decimal
+import os
+import time
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
 
 from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
 from pypaimon.schema.data_types import AtomicType
+
+
+@pytest.fixture
+def local_zone():
+    if not hasattr(time, 'tzset'):
+        pytest.skip('Changing the process local zone requires tzset')
+    original = os.environ.get('TZ')
+
+    def set_zone(name):
+        os.environ['TZ'] = name
+        time.tzset()
+
+    yield set_zone
+    if original is None:
+        os.environ.pop('TZ', None)
+    else:
+        os.environ['TZ'] = original
+    time.tzset()
+
+
+@pytest.mark.parametrize('source_type,target_type,expected', [
+    (pa.timestamp('ms', 'UTC'), pa.timestamp('ms'), [28800000, 28799999, None]),
+    (pa.timestamp('ms'), pa.timestamp('ms', 'UTC'), [-28800000, -28800001, None]),
+    (pa.date32(), pa.timestamp('ms', 'UTC'), [-28800000, -115200000, None]),
+])
+def test_temporal_cast_uses_java_process_local_zone(local_zone, source_type, target_type, expected):
+    local_zone('Asia/Shanghai')
+    source = pa.array([0, -1, None], type=source_type)
+    result = cast_array_for_schema_evolution(source, target_type)
+    assert result.cast(pa.int64()).to_pylist() == expected
 
 
 @pytest.mark.parametrize('source_type,values,target_type,expected', [
@@ -163,3 +196,150 @@ def test_timestamp_seconds_wrapping_keeps_wrapped_millisecond_fraction():
     assert cast_array_for_schema_evolution(
         source, pa.string(), AtomicType('TIMESTAMP(3)'), AtomicType('STRING')).to_pylist() == [
         '5471-09-26 16:47:04.384', None]
+
+
+_JAVA_ZONE_CASTS = [
+    ('America/New_York', [
+        [18000000, 17999900, 1710055800100, 1730611800100, 1710070200100, 1730633400100,
+         -53757322487462200, 53757322519624100],
+        [-18000000, -18000100, 1710019800100, 1730583000100, 1710041400100, 1730597400100,
+         9223372036840375800, 9223372036837013800],
+        [-1, -1, 19791, 20029, 19792, 20030,
+         -622191233, 622191233],
+        [68400000, 68399999, 77400123, 77400123, 12600123, 5400123,
+         11575807, 42662192],
+    ]),
+    ('Asia/Shanghai', [
+        [-28800000, -28800100, 1710009000100, 1730568600100, 1710027000100, 1730586600100,
+         -53757322534367200, 53757322476424100],
+        [28800000, 28799900, 1710066600100, 1730626200100, 1710084600100, 1730644200100,
+         -9223372036825975900, -9223372036825632900],
+        [0, 0, 19792, 20030, 19792, 20030,
+         -622191233, 622191234],
+        [28800000, 28799999, 37800123, 34200123, 55800123, 52200123,
+         54775807, 3167192],
+    ]),
+]
+
+
+@pytest.mark.parametrize('zone,expected', _JAVA_ZONE_CASTS)
+@pytest.mark.parametrize('operation', range(4))
+@pytest.mark.parametrize('chunked', [False, True])
+def test_temporal_zone_casts_match_java_boundaries(local_zone, zone, expected, operation, chunked):
+    local_zone(zone)
+    from_type, target, from_name, target_name = [
+        (pa.timestamp('ms'), pa.timestamp('ms', 'UTC'), 'TIMESTAMP(9)', 'TIMESTAMP_LTZ(1)'),
+        (pa.timestamp('ms', 'UTC'), pa.timestamp('ms'), 'TIMESTAMP_LTZ(9)', 'TIMESTAMP(1)'),
+        (pa.timestamp('ms', 'UTC'), pa.date32(), 'TIMESTAMP_LTZ(9)', 'DATE'),
+        (pa.timestamp('ms', 'UTC'), pa.time32('ms'), 'TIMESTAMP_LTZ(9)', 'TIME(1)'),
+    ][operation]
+    values = [0, -1, 1710037800123, 1730597400123, 1710055800123, 1730615400123,
+              9223372036854775807, -9223372036854775808]
+    source = pa.array([None] + values + [None, None], type=from_type).slice(1, 9)
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 1), source.slice(1, 3), source.slice(4)])
+    result = cast_array_for_schema_evolution(source, target, AtomicType(from_name), AtomicType(target_name))
+    if operation in (2, 3):
+        result = result.cast(pa.int32())
+    else:
+        result = result.cast(pa.int64())
+    assert result.to_pylist() == expected[operation] + [None]
+
+
+@pytest.mark.parametrize('zone,expected', [
+    ('Asia/Shanghai', [-28800000, -115200000, 1717171200000, 1325174400000, None]),
+    ('America/New_York', [18000000, -68400000, 1717214400000, 1325221200000, None]),
+    ('Pacific/Apia', [39600000, -46800000, 1717153200000, 1325239200000, None]),
+])
+def test_date_to_ltz_resolves_java_midnight(local_zone, zone, expected):
+    local_zone(zone)
+    source = pa.array([0, -1, 19875, 15338, None], type=pa.date32())
+    assert cast_array_for_schema_evolution(source, pa.timestamp('ms', 'UTC')).cast(pa.int64()).to_pylist() == expected
+
+
+@pytest.mark.parametrize('value', [-(2 ** 31), 2 ** 31 - 1])
+def test_date_to_ltz_rejects_invalid_java_julian_date(local_zone, value):
+    local_zone('UTC')
+    with pytest.raises(ValueError, match='Invalid Java DATE'):
+        cast_array_for_schema_evolution(pa.array([value], type=pa.date32()), pa.timestamp('ms', 'UTC'))
+
+
+@pytest.mark.parametrize('precision,target,expected', [
+    (6, pa.timestamp('us', 'UTC'), [1710055800123456, 17999999999, None]),
+    (1, pa.timestamp('ms', 'UTC'), [1710055800100, 17999900, None]),
+])
+def test_cross_zone_cast_preserves_nanos_and_declared_precision(local_zone, precision, target, expected):
+    local_zone('America/New_York')
+    source = pa.array([1710037800123456789, -1, None], type=pa.timestamp('ns'))
+    result = cast_array_for_schema_evolution(
+        source, target, AtomicType('TIMESTAMP(9)'), AtomicType('TIMESTAMP_LTZ(%d)' % precision))
+    assert result.cast(pa.int64()).to_pylist() == expected
+
+
+def test_bigint_to_ltz_keeps_java_epoch_seconds_and_long_wrapping(local_zone):
+    local_zone('Asia/Shanghai')
+    source = pa.array([0, -1, 2 ** 63 - 1, -(2 ** 63), None], type=pa.int64())
+    assert cast_array_for_schema_evolution(source, pa.timestamp('ms', 'UTC')).cast(pa.int64()).to_pylist() == [
+        28800000, 28799000, 28799000, 28800000, None]
+
+
+def test_ltz_semantics_follow_declared_paimon_type(local_zone):
+    local_zone('Asia/Shanghai')
+    source = pa.array([0, -1, None], type=pa.timestamp('ms'))
+    result = cast_array_for_schema_evolution(
+        source, pa.timestamp('ms'), AtomicType('TIMESTAMP_LTZ(3)'), AtomicType('TIMESTAMP(3)'))
+    assert result.cast(pa.int64()).to_pylist() == [28800000, 28799999, None]
+
+
+@pytest.mark.parametrize('zone,values,expected', [
+    ('Asia/Shanghai', [-377705023201000, -377705023200000, None],
+     [-377705052344000, -377705052343000, None]),
+    ('America/New_York', [253402207199000, 253402207200000, None],
+     [253402225199000, 253402225200000, None]),
+])
+def test_local_wall_time_can_cross_date_library_bounds(local_zone, zone, values, expected):
+    local_zone(zone)
+    source = pa.array(values, type=pa.timestamp('ms'))
+    result = cast_array_for_schema_evolution(source, pa.timestamp('ms', 'UTC'))
+    assert result.cast(pa.int64()).to_pylist() == expected
+
+
+@pytest.mark.parametrize('platform', ['standard_offset', 'range_error'])
+@pytest.mark.parametrize('target,expected', [
+    (pa.timestamp('ms'), [
+        -18000000, 9223372036840375807, 9223372021198375807, 9223372036830600000,
+        9223372036837013808, 253402282800000, None]),
+    (pa.time32('ms'), [68400000, 11575807, 7975807, 1800000, 42662192, 68400000, None]),
+    (pa.date32(), [-1, -622191233, -622191414, -622191233, 622191233, 2932896, None]),
+    (pa.string(), [
+        '1969-12-31 19:00:00.000', '/+-.-04-06 03:12:55.807', '/+---10-08 02:12:55.807',
+        '/+-.-04-06 00:30:00.000', '/+-.-04-06 02:16:53.808', '9999-12-31 19:00:00.000', None]),
+])
+def test_wide_ltz_casts_keep_java_dst_when_platform_localtime_cannot(
+        local_zone, monkeypatch, platform, target, expected):
+    local_zone('America/New_York')
+    libc_localtime = time.localtime
+
+    def limited_localtime(seconds=None):
+        if seconds is None:
+            return libc_localtime()
+        if seconds > 253402207200:
+            if platform == 'standard_offset':
+                # Some libc implementations lose the far-future DST rule.
+                return SimpleNamespace(tm_gmtoff=-18000, tm_isdst=0)
+            raise OverflowError('Platform cannot convert this future year')
+        if seconds < -377705023201 and platform == 'range_error':
+            raise OverflowError('Platform cannot convert this ancient year')
+        return libc_localtime(seconds)
+
+    monkeypatch.setattr(time, 'localtime', limited_localtime)
+    values = [0, 9223372036854775807, 9223372021216375807, 9223372036845000000,
+              -9223372036854775808, 253402300800000, None]
+    source = pa.array([None] + values + [None], type=pa.timestamp('ms', 'UTC')).slice(1, len(values))
+    source = pa.chunked_array([source.slice(0, 3), source.slice(3)])
+    result = cast_array_for_schema_evolution(source, target)
+    if not pa.types.is_string(target):
+        result = result.cast(pa.int64() if pa.types.is_timestamp(target) else pa.int32())
+    # Golden values from real Java CastExecutors, including a local midnight
+    # whose DATE changes if a standard offset replaces the correct DST offset.
+    assert result.to_pylist() == expected
