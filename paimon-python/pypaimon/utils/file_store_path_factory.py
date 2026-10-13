@@ -15,12 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import math
-import struct
 from datetime import date, timezone
-from decimal import Decimal
 from typing import List, Optional, Tuple
 
+from pypaimon.casting.numeric_utils import java_floating_string
 from pypaimon.casting.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.utils.path import resolve_path, to_file_io_path
@@ -80,41 +78,6 @@ def canonical_data_file_path(table, partition, bucket, file_name):
         # the literal escaped component, so use its physical local path.
         return str(LocalFileIO()._to_file(root) / path[len(root) + 1:])
     return path
-
-
-def _floating_partition_string(value, single_precision: bool) -> str:
-    # Java's JDK 19+ contract selects a shortest round-tripping form with at
-    # least two significant digits before applying its notation thresholds.
-    encoding = '>f' if single_precision else '>d'
-    bits = struct.pack(encoding, value)
-    value = struct.unpack(encoding, bits)[0]
-    if math.isnan(value):
-        return 'NaN'
-    if math.isinf(value):
-        return '-Infinity' if value < 0 else 'Infinity'
-    for precision in range(2, 10 if single_precision else 18):
-        text = format(value, '.{}g'.format(precision))
-        try:
-            rounded = struct.pack(encoding, float(text))
-        except OverflowError:
-            continue
-        if rounded != bits:
-            continue
-        decimal = Decimal(text)
-        if decimal.is_zero() or Decimal('0.001') <= abs(decimal) < Decimal('1e7'):
-            text = format(decimal, 'f')
-            if '.' in text:
-                text = text.rstrip('0').rstrip('.')
-            if '.' not in text:
-                text += '.0'
-        else:
-            mantissa, exponent = format(decimal, 'e').split('e')
-            mantissa = mantissa.rstrip('0').rstrip('.') if '.' in mantissa else mantissa
-            if '.' not in mantissa:
-                mantissa += '.0'
-            text = '{}E{}'.format(mantissa, int(exponent))
-        return text
-    return str(value)
 
 
 class FileStorePathFactory:
@@ -211,7 +174,7 @@ class FileStorePathFactory:
             if _is_null_or_whitespace_only(value):
                 text = self.default_part_value
             elif type_name in ('FLOAT', 'REAL', 'DOUBLE'):
-                text = _floating_partition_string(value, type_name != 'DOUBLE')
+                text = java_floating_string(value, type_name != 'DOUBLE')
             elif self.legacy_partition_name and type_name == 'DATE':
                 text = str((value - date(1970, 1, 1)).days)
             elif self.legacy_partition_name and type_name.startswith('TIMESTAMP'):
