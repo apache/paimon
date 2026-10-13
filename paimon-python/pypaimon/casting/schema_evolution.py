@@ -17,11 +17,11 @@
 
 """Java cast rules shared by old-file readers."""
 
-from decimal import Decimal, localcontext, ROUND_HALF_UP
 import math
 
 import pyarrow as pa
 
+from pypaimon.casting.decimal_cast import cast_decimal
 from pypaimon.casting.temporal_cast import cast_temporal
 from pypaimon.casting.temporal_string import temporal_to_string
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
@@ -122,7 +122,8 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
     epoch seconds, including pre-epoch flooring and Java's millis multiplication.
     Numeric narrowing preserves low bits, while floating-point values truncate
     and saturate to int/long before byte/short narrowing.
-    DECIMAL scale reduction uses HALF_UP and returns NULL on precision overflow.
+    DECIMAL conversion uses Java decimal text and HALF_UP, returning NULL on
+    precision overflow after rounding.
     LTZ conversions use the process local zone, including Java gap/overlap rules.
     """
     if pa.types.is_string(target_type):
@@ -137,6 +138,9 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
         return timestamp
     if array.type == target_type:
         return array
+    decimals = cast_decimal(array, target_type)
+    if decimals is not None:
+        return decimals
     if pa.types.is_timestamp(array.type) and target_type == pa.int64():
         return _timestamp_to_bigint(array)
     if (array.type in (pa.int32(), pa.int64())
@@ -145,17 +149,4 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
     if (pa.types.is_signed_integer(target_type)
             and (pa.types.is_floating(array.type) or pa.types.is_decimal(array.type))):
         return _numeric_to_integer(array, target_type)
-    if (pa.types.is_decimal(array.type) and pa.types.is_decimal(target_type)
-            and array.type.scale > target_type.scale):
-        values = []
-        with localcontext() as context:
-            context.prec = max(array.type.precision, target_type.precision) + 1
-            quantum = Decimal(1).scaleb(-target_type.scale)
-            for value in array.to_pylist():
-                if value is None:
-                    values.append(None)
-                    continue
-                rounded = value.quantize(quantum, rounding=ROUND_HALF_UP)
-                values.append(rounded if len(rounded.as_tuple().digits) <= target_type.precision else None)
-        return pa.array(values, type=target_type)
     return array.cast(target_type, safe=False)

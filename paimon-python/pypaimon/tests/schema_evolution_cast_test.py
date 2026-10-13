@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from decimal import Decimal
+from decimal import Decimal, DefaultContext, Inexact, localcontext, Rounded
 import os
 import time
 from types import SimpleNamespace
@@ -25,6 +25,78 @@ import pytest
 
 from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
 from pypaimon.schema.data_types import AtomicType
+
+
+@pytest.mark.parametrize('chunked', [False, True])
+@pytest.mark.parametrize('source_type,values,precision,scale,expected', [
+    (pa.float64(), [1.005, -1.005, 2.675, -2.675, 0.145, 999.995, 1e30, None], 5, 2,
+     ['1.01', '-1.01', '2.68', '-2.68', '0.15', None, None, None]),
+    (pa.float32(), [1.005, -1.005, 2.675, 0.145, 999.995, 1e30, None], 5, 2,
+     ['1.00', '-1.00', '2.67', '0.14', '999.99', None, None]),
+    (pa.float64(), [1.005, 1.2345678901234567, 2.2250738585072014e-308, None], 38, 20,
+     ['1.00500000000000000000', '1.23456789012345670000', '0.00000000000000000000', None]),
+    (pa.float32(), [1.005, 1.2345679, None], 38, 20,
+     ['1.00499999523162840000', '1.23456788063049320000', None]),
+    (pa.string(), ['1.005', '-1.005', '+.005', '2.675', '1e-2', '999.995', '1e100', None], 5, 2,
+     ['1.01', '-1.01', '0.01', '2.68', '0.01', None, None, None]),
+    (pa.decimal128(10, 2), [Decimal('9.99'), Decimal('10.00'), Decimal('-10.00'), None], 3, 2,
+     ['9.99', None, None, None]),
+    (pa.decimal128(10, 2), [Decimal('9.99'), Decimal('10.00'), Decimal('-10.00'), None], 4, 3,
+     ['9.990', None, None, None]),
+    (pa.decimal128(6, 3), [Decimal('9.994'), Decimal('9.995'), Decimal('-9.995'), None], 3, 2,
+     ['9.99', None, None, None]),
+])
+def test_decimal_evolution_matches_java_rounding_and_precision(
+        chunked, source_type, values, precision, scale, expected):
+    # Golden values from CastExecutors: FLOAT is promoted to double before
+    # BigDecimal.valueOf; overflow is NULL after HALF_UP, never wrapping.
+    source = pa.array([None] + values + [None], type=source_type).slice(1, len(values))
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 2), source.slice(2, 0), source.slice(2)])
+    target = pa.decimal128(precision, scale)
+    actual = cast_array_for_schema_evolution(source, target)
+    assert actual.type == target
+    assert actual.to_pylist() == [None if value is None else Decimal(value) for value in expected]
+
+
+@pytest.mark.parametrize('text', [
+    '', ' 1.2 ', '1_2', '1.2.3', '1e', 'Infinity', '0e-2147483648',
+    '0.1e-2147483647', '1e2147483647', '1e-2147483647', '1e9999999999999999999',
+])
+def test_decimal_evolution_rejects_invalid_text(text):
+    with pytest.raises(pa.ArrowInvalid):
+        cast_array_for_schema_evolution(pa.array([None, text]), pa.decimal128(5, 2))
+
+
+def test_decimal_evolution_handles_long_mantissas_and_java_zero_exponents():
+    values = ['1.005' + '0' * 200, '0.' + '0' * 200 + '1',
+              '0e2147483648', '0.0e2147483648', '0e2147483647']
+    result = cast_array_for_schema_evolution(pa.array(values), pa.decimal128(5, 2))
+    assert result.to_pylist() == [Decimal('1.01')] + [Decimal('0.00')] * 4
+
+
+@pytest.mark.parametrize('source_type,values', [
+    (pa.float64(), [1.005, 10000, None]),
+    (pa.string(), ['1.005', '10000', None]),
+    (pa.decimal128(10, 3), [Decimal('1.005'), Decimal('10000'), None]),
+])
+def test_decimal_evolution_is_independent_of_caller_decimal_context(source_type, values):
+    source = pa.array(values, type=source_type)
+    with localcontext() as context:
+        context.prec = 2
+        context.Emax = 2
+        context.traps[Inexact] = True
+        context.traps[Rounded] = True
+        result = cast_array_for_schema_evolution(source, pa.decimal128(10, 2))
+    assert result.to_pylist() == [Decimal('1.01'), Decimal('10000.00'), None]
+
+
+def test_decimal_evolution_is_independent_of_default_decimal_context(monkeypatch):
+    monkeypatch.setattr(DefaultContext, 'Emax', 2)
+    monkeypatch.setattr(DefaultContext, 'Emin', -2)
+    monkeypatch.setattr(DefaultContext, 'clamp', 1)
+    result = cast_array_for_schema_evolution(pa.array(['1.005', '10000', None]), pa.decimal128(10, 2))
+    assert result.to_pylist() == [Decimal('1.01'), Decimal('10000.00'), None]
 
 
 @pytest.fixture
