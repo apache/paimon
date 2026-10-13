@@ -804,52 +804,6 @@ class CoreOptions:
         .with_description("Maximum wait time between commit retries (e.g., '1s', '10s').")
     )
 
-    COMMIT_DEDUP_ON_FIRST_ATTEMPT: ConfigOption[bool] = (
-        ConfigOptions.key("commit.dedup-on-first-attempt")
-        .boolean_type()
-        .default_value(False)
-        .with_description(
-            "Also run the duplicate-commit scan on the first commit attempt, not "
-            "only on optimistic-lock retries. Enable when the same logical commit "
-            "may be re-issued with a stable commit_user (e.g. a Ray committer-actor "
-            "task retried after the actor died mid-commit), so an already-landed "
-            "duplicate is skipped. Off by default: per-worker/two-phase commits use "
-            "a fresh commit_user per builder, so a first-attempt scan would never "
-            "match and would only add a snapshot scan per commit."
-        )
-    )
-
-    COMMIT_DEDUP_BASE_SNAPSHOT: ConfigOption[int] = (
-        ConfigOptions.key("commit.dedup-base-snapshot")
-        .int_type()
-        .no_default_value()
-        .with_description(
-            "Lower bound for the first-attempt duplicate-commit scan: only snapshots "
-            "after this id are checked. Should be the latest snapshot id the writer "
-            "observed before issuing its first commit, so the scan is bounded to "
-            "snapshots produced by this job rather than the table's whole history. "
-            "Only used when commit.dedup-on-first-attempt is enabled; unset means "
-            "scan from the first snapshot."
-        )
-    )
-
-    COMMIT_DEDUP_BASE_FILE_MILLIS: ConfigOption[int] = (
-        ConfigOptions.key("commit.dedup-base-file-millis")
-        .int_type()
-        .no_default_value()
-        .with_description(
-            "Filesystem mtime, in epoch millis, of the snapshot file named by "
-            "commit.dedup-base-snapshot when that bound was taken. Validates the "
-            "bound: snapshot ids are re-used after a rollback, so a bare id can "
-            "point at a different snapshot by the time the scan runs, and the "
-            "scan would then start above this write's own commit and miss the "
-            "duplicate. When the mtime no longer matches, the scan walks back "
-            "from the current latest instead of trusting the id. Only used when "
-            "commit.dedup-on-first-attempt is enabled; unset means the bound "
-            "cannot be validated, so the whole history is scanned."
-        )
-    )
-
     # Keys under this prefix are copied into the committed snapshot's properties
     # (re-prefixed with SNAPSHOT_COMMIT_PREFIX), letting a caller tag one commit
     # with its own metadata without the table schema having to know about it.
@@ -1781,15 +1735,6 @@ class CoreOptions:
     def commit_max_retry_wait(self) -> int:
         wait = self.options.get(CoreOptions.COMMIT_MAX_RETRY_WAIT)
         return int(wait.total_seconds() * 1000)
-
-    def commit_dedup_on_first_attempt(self) -> bool:
-        return self.options.get(CoreOptions.COMMIT_DEDUP_ON_FIRST_ATTEMPT)
-
-    def commit_dedup_base_snapshot(self, default=None) -> Optional[int]:
-        return self.options.get(CoreOptions.COMMIT_DEDUP_BASE_SNAPSHOT, default)
-
-    def commit_dedup_base_file_millis(self, default=None) -> Optional[int]:
-        return self.options.get(CoreOptions.COMMIT_DEDUP_BASE_FILE_MILLIS, default)
 
     def global_index_enabled(self, default=None):
         return self.options.get(CoreOptions.GLOBAL_INDEX_ENABLED, default)

@@ -20,6 +20,7 @@ import uuid
 from abc import ABC
 from typing import Optional
 
+from pypaimon.write.file_store_commit import CommitDedup
 from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
                                          TableCommit)
 from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
@@ -75,8 +76,15 @@ class WriteBuilder(ABC):
     def new_update(self) -> TableUpdate:
         """Returns a table update."""
 
-    def new_commit(self) -> TableCommit:
-        """Returns a table commit."""
+    def new_commit(self, dedup: Optional[CommitDedup] = None) -> TableCommit:
+        """Returns a table commit.
+
+        Args:
+            dedup: Duplicate-commit scan parameters for this committer. A
+                runtime argument rather than a table option: the bound it
+                carries describes one writer at one instant, so it must not be
+                inherited by other writers through the table's options.
+        """
 
     def with_restore_snapshot(self, snapshot_id: int):
         """Restore dynamic-bucket data and HASH state from a snapshot; 0 is empty."""
@@ -141,8 +149,9 @@ class BatchWriteBuilder(WriteBuilder):
     def new_update(self) -> BatchTableUpdate:
         return BatchTableUpdate(self.table, self.commit_user)
 
-    def new_commit(self) -> BatchTableCommit:
-        commit = BatchTableCommit(self.table, self.commit_user, self.static_partition)
+    def new_commit(self, dedup: Optional[CommitDedup] = None) -> BatchTableCommit:
+        commit = BatchTableCommit(self.table, self.commit_user, self.static_partition,
+                                  dedup=dedup)
         return commit
 
 
@@ -156,8 +165,8 @@ class StreamWriteBuilder(WriteBuilder):
     def new_update(self) -> StreamTableUpdate:
         return StreamTableUpdate(self.table, self.commit_user)
 
-    def new_commit(self) -> StreamTableCommit:
-        commit = StreamTableCommit(self.table, self.commit_user)
+    def new_commit(self, dedup: Optional[CommitDedup] = None) -> StreamTableCommit:
+        commit = StreamTableCommit(self.table, self.commit_user, dedup=dedup)
         return commit
 
 

@@ -69,6 +69,38 @@ class DedupEvidenceMissing(RuntimeError):
     """
 
 
+class CommitDedup:
+    """Duplicate-commit scan parameters for one committer.
+
+    Passed to :class:`FileStoreCommit` (via ``WriteBuilder.new_commit``) rather
+    than read from table options: the bound describes *this* writer at *this*
+    moment -- the branch's latest snapshot when the write started -- and would be
+    wrong for any other writer inheriting it from the table schema.
+
+    ``base_snapshot_id`` and ``base_file_millis`` are only meaningful together:
+    the id bounds the scan and the mtime proves the id still names the snapshot
+    it named when the bound was taken. A caller with no bound leaves both None.
+
+    Plain class rather than a dataclass, which pypaimon still supports Python
+    3.6 without.
+    """
+
+    __slots__ = ("on_first_attempt", "base_snapshot_id", "base_file_millis")
+
+    def __init__(self, on_first_attempt: bool = False,
+                 base_snapshot_id: Optional[int] = None,
+                 base_file_millis: Optional[int] = None):
+        self.on_first_attempt = on_first_attempt
+        self.base_snapshot_id = base_snapshot_id
+        self.base_file_millis = base_file_millis
+
+    def __repr__(self) -> str:
+        return ("CommitDedup(on_first_attempt=%r, base_snapshot_id=%r, "
+                "base_file_millis=%r)" % (
+                    self.on_first_attempt, self.base_snapshot_id,
+                    self.base_file_millis))
+
+
 def _row_id_check_from_messages(messages: List[CommitMessage]) -> Optional[int]:
     """Check conflicts from the earliest baseline, matching the native committer."""
     check_from_snapshot = None
@@ -161,13 +193,15 @@ class FileStoreCommit:
     """
 
     def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
-                 commit_callbacks: Optional[List[CommitCallback]] = None):
+                 commit_callbacks: Optional[List[CommitCallback]] = None,
+                 dedup: Optional[CommitDedup] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.snapshot_commit = snapshot_commit
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
+        self.dedup = dedup if dedup is not None else CommitDedup()
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
@@ -179,9 +213,6 @@ class FileStoreCommit:
         self.commit_timeout = table.options.commit_timeout()
         self.commit_min_retry_wait = table.options.commit_min_retry_wait()
         self.commit_max_retry_wait = table.options.commit_max_retry_wait()
-        self.commit_dedup_on_first_attempt = table.options.commit_dedup_on_first_attempt()
-        self.commit_dedup_base_snapshot = table.options.commit_dedup_base_snapshot()
-        self.commit_dedup_base_file_millis = table.options.commit_dedup_base_file_millis()
 
         self.row_id_conflict_rewrite_max_size = (
             table.options.data_evolution_row_id_conflict_rewrite_max_size()
@@ -874,7 +905,7 @@ class FileStoreCommit:
         older than the write's start therefore finds the lowest id this write
         could have reached.
         """
-        base_millis = self.commit_dedup_base_file_millis
+        base_millis = self.dedup.base_file_millis
         for snapshot_id in range(end_id, 0, -1):
             file_millis = self.snapshot_manager.snapshot_file_millis(snapshot_id)
             if file_millis is None:
@@ -904,20 +935,20 @@ class FileStoreCommit:
                 return retry_result.latest_snapshot.id + 1, True
             return 1, True  # Snapshot.FIRST_SNAPSHOT_ID
 
-        base_id = self.commit_dedup_base_snapshot
+        base_id = self.dedup.base_snapshot_id
         if base_id is None:
             return 1, True
         if base_id == 0:
             # The branch had no snapshot when this write started, so every
             # snapshot on it is a candidate and none is missing from below.
             return 1, True
-        if self.commit_dedup_base_file_millis is None:
+        if self.dedup.base_file_millis is None:
             # Bound without the mtime that validates it: cannot tell a normal id
             # line from a rolled-back one, so scan everything.
             return 1, base_id <= end_id
 
         base_millis = self.snapshot_manager.snapshot_file_millis(base_id)
-        if base_millis == self.commit_dedup_base_file_millis:
+        if base_millis == self.dedup.base_file_millis:
             # The bound still names the same file, so ids above it were handed
             # out normally and our commit, if any, is among them. Expiry trims
             # the oldest snapshots first, so a surviving base also proves the
@@ -1018,7 +1049,7 @@ class FileStoreCommit:
             commit_kind,
             notify_callbacks=False) -> bool:
         if (not isinstance(retry_result, CommitFailRetryResult)
-                and not self.commit_dedup_on_first_attempt):
+                and not self.dedup.on_first_attempt):
             # First attempt of a fresh commit_user commit: it cannot be a
             # duplicate, so skip the scan entirely (per-worker/two-phase
             # default).

@@ -35,6 +35,7 @@ from ray.data._internal.execution.interfaces import TaskContext
 import pyarrow as pa
 
 from pypaimon.write.commit_callback import CommitCallback
+from pypaimon.write.file_store_commit import CommitDedup
 
 if TYPE_CHECKING:
     from pypaimon.table.table import Table
@@ -725,9 +726,9 @@ class PaimonCommitterActor:
     (``{job_id}-{write_uuid}-{task_idx}``) and sends it, with the
     driver-pinned ``base_snapshot_id``, in the RPC args. If the actor dies
     mid-commit, Ray re-issues the *same* actor task with the *same* args, so
-    the replayed commit carries the same ``commit_user``; the injected
-    ``commit.dedup-on-first-attempt`` scan then finds the already-landed
-    snapshot (same ``commit_user`` + ``commit_identifier`` + ``commit_kind``)
+    the replayed commit carries the same ``commit_user``; the first-attempt
+    dedup scan then finds the already-landed snapshot (same ``commit_user`` +
+    ``commit_identifier`` + ``commit_kind``)
     and skips it instead of committing the same files twice. Without this the
     fresh builder's random commit_user would make every replay a duplicate.
     This does not extend across jobs -- see :class:`PaimonActorDatasink`.
@@ -864,18 +865,21 @@ class PaimonCommitterActor:
             and commit_user is not None
             and commit_user not in self._attempted_users
         )
-        options['commit.dedup-on-first-attempt'] = 'false' if can_vouch else 'true'
-        if dedup_base is not None:
-            base_id = dedup_base.get("snapshot_id")
-            if base_id is not None:
-                options['commit.dedup-base-snapshot'] = str(base_id)
-            file_millis = dedup_base.get("file_millis")
-            if file_millis is not None:
-                options['commit.dedup-base-file-millis'] = str(file_millis)
+        # A runtime argument to new_commit, not an option: it describes this one
+        # commit attempt, whereas options reach the committer through
+        # table.copy() and would be inherited by every other writer built from
+        # that table.
+        dedup = CommitDedup(
+            on_first_attempt=not can_vouch,
+            base_snapshot_id=(
+                dedup_base.get("snapshot_id") if dedup_base else None),
+            base_file_millis=(
+                dedup_base.get("file_millis") if dedup_base else None),
+        )
 
         builder = self._table.new_batch_write_builder()
         # with_options returns a new builder; discarding it silently drops the
-        # options (commit.metadata.* and the dedup options would never land).
+        # options (commit.metadata.* would never land).
         builder = builder.with_options(options)
         if commit_user is not None:
             # with_options rebuilt the builder (regenerating a random
@@ -884,7 +888,7 @@ class PaimonCommitterActor:
             builder.commit_user = commit_user
 
         # Create commit and pass message via snapshot_properties if provided
-        table_commit = builder.new_commit()
+        table_commit = builder.new_commit(dedup=dedup)
         snapshot_properties = {}
         if message:
             snapshot_properties['commit.message'] = message

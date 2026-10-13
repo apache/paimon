@@ -252,3 +252,45 @@ class TestTableCommit(unittest.TestCase):
             commit_identifier=42,
             snapshot_properties={"checkpoint": "42"},
         )
+
+    def test_native_commit_warns_when_first_attempt_dedup_requested(self):
+        """The native committer has no dedup scan, so a replayed commit would
+        publish the same files twice. The commit still goes ahead -- the scan
+        is not implemented on that path -- but the caller is told."""
+        from pypaimon.write.file_store_commit import CommitDedup
+
+        table = Mock()
+        table.identifier = 'default.test_table'
+        table.new_snapshot_commit.return_value = Mock()
+        table.options.native_commit_enabled.return_value = True
+
+        with self.assertLogs(
+                'pypaimon.write.table_commit', level='WARNING') as logs:
+            commit = BatchTableCommit(
+                table, 'stable-user', None,
+                dedup=CommitDedup(on_first_attempt=True))
+
+        self.assertEqual(commit.file_store_commit.table, table)
+        self.assertTrue(any(
+            'commit.native.enabled' in line and 'stable-user' in line
+            for line in logs.output), logs.output)
+
+    def test_native_commit_does_not_warn_without_first_attempt_dedup(self):
+        import logging as _logging
+        from unittest.mock import patch
+        from pypaimon.write.file_store_commit import CommitDedup
+
+        table = Mock()
+        table.identifier = 'default.test_table'
+        table.new_snapshot_commit.return_value = Mock()
+        table.options.native_commit_enabled.return_value = True
+
+        # assertNoLogs is 3.10+; patch warning explicitly so older
+        # interpreters keep working too.
+        logger = _logging.getLogger('pypaimon.write.table_commit')
+        with patch.object(logger, 'warning') as warn:
+            BatchTableCommit(
+                table, 'stable-user', None,
+                dedup=CommitDedup(on_first_attempt=False))
+            BatchTableCommit(table, 'stable-user', None, dedup=None)
+            warn.assert_not_called()

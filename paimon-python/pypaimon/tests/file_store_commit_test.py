@@ -142,9 +142,6 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
-        self.mock_table.options.commit_dedup_on_first_attempt.return_value = False
-        self.mock_table.options.commit_dedup_base_snapshot.return_value = None
-        self.mock_table.options.commit_dedup_base_file_millis.return_value = None
         self.mock_table.options.options.to_map.return_value = {}
         self.mock_snapshot_commit = Mock()
 
@@ -372,9 +369,6 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
-        self.mock_table.options.commit_dedup_on_first_attempt.return_value = False
-        self.mock_table.options.commit_dedup_base_snapshot.return_value = None
-        self.mock_table.options.commit_dedup_base_file_millis.return_value = None
         self.mock_table.options.options.to_map.return_value = {}
 
         # Mock snapshot commit
