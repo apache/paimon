@@ -35,8 +35,9 @@ IO_CACHE_TARGET_PREFIX = "io-cache.target."
 
 _TARGET_NAME = re.compile(r"[a-z][a-z0-9-]*")
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-# Data files are named {prefix}{uuid}-{count}.{extension}; this matches what follows the prefix.
-_DATA_FILE_SUFFIX = re.compile(_UUID + r"-[0-9]+\..+")
+# What follows a data file prefix: {uuid}-{count}.{extension}, also after the postpone writer's
+# -u-{commit user}-s-{write id}-w-, or a paimon-rust BLOB pack {uuid}.managed.blob.
+_DATA_FILE_SUFFIX = re.compile(r"(?:-u-.+-s-[0-9]+-w-)?" + _UUID + r"-[0-9]+\..+|" + _UUID + r"\.managed\.blob")
 # Other types are routed only under the names Paimon writes (paimon-rust adds -changelog to changelog
 # manifests); Format Table files may be replaced in place.
 _PAIMON_FILE_NAMES = {

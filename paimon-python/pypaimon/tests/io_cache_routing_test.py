@@ -280,6 +280,12 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
                      "dt=1/part-00000-1a2b.snappy.parquet",
                      "dt=1/bucket-0/data-1.parquet",
                      "dt=1/bucket-0/custom-{uuid}-0.orc",
+                     "bucket-postpone/data--u-user-s-x-w-{uuid}-0.parquet",
+                     "bucket-postpone/data--u--s-1-w-{uuid}-0.parquet",
+                     "bucket-postpone/custom--u-user-s-1-w-{uuid}-0.parquet",
+                     "dt=1/bucket-0/data-{uuid}.blob",
+                     "dt=1/bucket-0/data-{uuid}.managed.blob.{uuid}.tmp",
+                     "dt=1/bucket-0/data-old.managed.blob",
                      "README"):
             self.assert_type(path, None)
         # Format Table files named like metadata or indexes, which may be replaced in place
@@ -311,12 +317,24 @@ class IoCacheRoutingEndpointTest(unittest.TestCase):
         self.assert_type("dt=1/bucket-0/data-{uuid}-0.blob", FileType.DATA)
         self.assert_type("dt=1/8b1f7c2e/data-{uuid}-0.parquet", FileType.DATA)
         self.assert_type("dt=1/bucket-0/data-{uuid}-0.parquet.index", FileType.FILE_INDEX)
+        self.assert_type("dt=1/bucket-0/data-{uuid}-0.parquet.blobref", FileType.DATA)
+        self.assert_type("dt=1/bucket-0/data-{uuid}-0.managed.blob", FileType.DATA)
+        self.assert_type("dt=1/bucket-0/data-{uuid}.managed.blob", FileType.DATA)
+        # the postpone writer puts its commit user and write id before {uuid}-{count}
+        for postpone in ("bucket-postpone/data--u-io-cache-user-s-7-w-{uuid}-0.parquet",
+                         "dt=1/bucket-postpone/data--u-{uuid}-s-2147483647-w-{uuid}-12.orc",
+                         "bucket-postpone/changelog--u-user-s-0-w-{uuid}-0.parquet"):
+            self.assert_type(postpone, FileType.DATA)
+            self.assert_type(postpone + ".index", FileType.FILE_INDEX)
+            self.assert_type(postpone + ".blobref", FileType.DATA)
         self.assert_type("index/index-{uuid}-0", FileType.BUCKET_INDEX)
         self.assert_type("index/btree-global-index-{uuid}.index", FileType.GLOBAL_INDEX)
         self.assert_type("index/lumina-global-index-{uuid}.index", FileType.GLOBAL_INDEX)
 
     def test_routable_type_with_file_prefixes(self):
         self.assert_type("dt=1/bucket-0/custom-{uuid}-0.orc", FileType.DATA, "data-file.prefix=custom-")
+        self.assert_type("bucket-postpone/custom--u-user-s-1-w-{uuid}-0.orc", FileType.DATA,
+                         "data-file.prefix=custom-")
         self.assert_type("dt=1/bucket-0/data-{uuid}-0.orc", FileType.DATA, "data-file.prefix=custom-")
         self.assert_type("dt=1/bucket-0/cl-{uuid}-0.orc", FileType.DATA, "changelog-file.prefix=cl-")
         self.assert_type("dt=1/bucket-0/  unknown.parquet", None, "data-file.prefix=  ")
@@ -421,6 +439,11 @@ class IoCacheRoutingTest(unittest.TestCase):
         self.assertIsNone(routing.route(Op.READ, self.MANIFEST))
         self.assertIsNone(IoCacheRouting.create(self._options(**{"io-cache.whitelist": ""})).route(
             Op.READ, self.DATA))
+        # Only the contract's types count; local-cache selectors such as structured-data are ignored.
+        for whitelist, routed in (("structured-data", ()), ("structured-data,meta", (self.MANIFEST,))):
+            routing = IoCacheRouting.create(self._options(**{"io-cache.whitelist": whitelist}))
+            for path in (self.DATA, self.MANIFEST):
+                self.assertEqual("default" if path in routed else None, routing.route(Op.READ, path), whitelist)
 
     def test_targets_and_routes(self):
         routing = IoCacheRouting.create(self._multi(**{
