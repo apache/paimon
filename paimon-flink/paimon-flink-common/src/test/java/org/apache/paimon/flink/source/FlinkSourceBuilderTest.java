@@ -38,6 +38,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -304,7 +305,7 @@ public class FlinkSourceBuilderTest {
     }
 
     @Test
-    public void testPostponeMergeOnReadRejectsContinuousSource() throws Exception {
+    public void testPostponeMergeOnReadIgnoresContinuousSource() throws Exception {
         Identifier identifier = Identifier.create("default", "postpone_merge_on_read");
         catalog.createTable(
                 identifier,
@@ -318,10 +319,15 @@ public class FlinkSourceBuilderTest {
         Table table = catalog.getTable(identifier);
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        assertThatThrownBy(
-                        () -> new FlinkSourceBuilder(table).env(env).sourceBounded(false).build())
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("only supported for batch reads");
+        DataStream<RowData> dataStream =
+                new FlinkSourceBuilder(table).env(env).sourceBounded(false).build();
+
+        assertThat(dataStream.getTransformation()).isInstanceOf(SourceTransformation.class);
+        SourceTransformation<?, ?, ?> transformation =
+                (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
+        assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+        assertThat(transformation.getSource().getBoundedness())
+                .isEqualTo(Boundedness.CONTINUOUS_UNBOUNDED);
     }
 
     @Test

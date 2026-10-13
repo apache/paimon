@@ -60,7 +60,7 @@ def _to_string_values(array, data_type) -> list:
     """Render *array* as a list of per-row strings (None for NULL rows)."""
     if isinstance(data_type, (RowType, ArrayType, MapType)):
         return _constructed_to_string_array(array, data_type).to_pylist()
-    return array.cast(pa.string(), safe=False).to_pylist()
+    return cast_array_for_schema_evolution(array, pa.string(), data_type, AtomicType('STRING')).to_pylist()
 
 
 def _constructed_to_string_array(array, file_type):

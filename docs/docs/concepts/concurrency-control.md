@@ -108,6 +108,8 @@ Catalog-managed Paimon tables in the REST catalog expose table-bound commit leas
 `Lock.acquire` / `Lock.runWithLock` contract. Set `rest.commit.lock-enabled = true` on the table to
 allow acquisition; it defaults to `false`. External tables keep filesystem publication.
 Callers supply their exact `commitUser` and table UUID.
+Leases require the target branch's catalog-resolved UUID. Reload a view switched to another branch
+from the catalog before using leases.
 Lock contention waits until `commit.timeout` when configured, independently of publication retries.
 Each scope owns a renewal worker, which is stopped when the scope ends. The client validates
 the lease's monotonic deadline before publishing. A failed operation stops renewal and its lease
@@ -120,9 +122,10 @@ active leases, including writers that do not request one. Each successful snapsh
 ends its lease; a later publication must acquire another scope. Snapshot comparison and file
 conflict validation remain necessary.
 
-Rollback inside a lease supplies optional `tableId` and `commitUser` fields in addition to the
-expected `fromSnapshot`. The server must validate the lease and expected head, roll back and clear
-the lease atomically. Legacy rollback requests omit these fields and cannot change a leased head.
+Rollback inside a lease supplies `tableId` and `commitUser` in addition to the expected
+`fromSnapshot`. The server must validate the lease and expected head, roll back and clear the lease
+atomically. Ordinary rollback still supplies a known table UUID but omits `commitUser`; it cannot
+change a leased head. The UUID is omitted only when the target table or branch identity is unknown.
 
 This is a commit admission lease, not a generation or fencing token. Requests with the same
 commit user and authenticated caller share ownership. Use a unique commit user per logical writer

@@ -56,10 +56,6 @@ public class RollbackTableRequest implements RESTRequest {
     @Nullable
     private final String commitUser;
 
-    public RollbackTableRequest(Instant instant, @Nullable Long fromSnapshot) {
-        this(instant, fromSnapshot, null, null);
-    }
-
     @JsonCreator
     @ConstructorProperties({"instant", "fromSnapshot", "tableId", "commitUser"})
     public RollbackTableRequest(

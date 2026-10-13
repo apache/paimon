@@ -180,28 +180,19 @@ public class CatalogEnvironment implements Serializable {
                         lockContext, lockIdentifier, uuid, commitUser, tableOptions);
     }
 
+    /** Create rollback with the table incarnation and optional writer lock context. */
     @Nullable
-    public TableRollback catalogTableRollback() {
-        if (catalogLoader != null && supportsVersionManagement) {
-            Catalog catalog = catalogLoader.load();
-            return (instant, fromSnapshot) -> {
-                try {
-                    catalog.rollbackTo(identifier, instant, fromSnapshot);
-                } catch (Catalog.TableNotExistException e) {
-                    throw new RuntimeException(e);
-                }
-            };
-        }
-        return null;
-    }
-
-    /** Create owner-aware rollback for a commit lease on the writer's runtime branch. */
-    @Nullable
-    public TableRollback catalogTableRollback(String branch, String commitUser) {
+    public TableRollback catalogTableRollback(
+            @Nullable String branch, @Nullable String commitUser) {
         if (catalogLoader != null && supportsVersionManagement) {
             Catalog catalog = catalogLoader.load();
             Identifier rollbackIdentifier =
-                    new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
+                    branch == null
+                            ? identifier
+                            : new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    branch);
             return (instant, fromSnapshot) -> {
                 try {
                     catalog.rollbackTo(rollbackIdentifier, uuid, instant, fromSnapshot, commitUser);
@@ -233,7 +224,7 @@ public class CatalogEnvironment implements Serializable {
         if (catalogLoader == null) {
             return null;
         }
-        return new SnapshotLoaderImpl(catalogLoader, identifier);
+        return new SnapshotLoaderImpl(catalogLoader, identifier, uuid);
     }
 
     @Nullable
@@ -298,7 +289,7 @@ public class CatalogEnvironment implements Serializable {
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
-                uuid,
+                identifier.equals(this.identifier) ? uuid : null,
                 catalogLoader,
                 lockFactory,
                 lockContext,

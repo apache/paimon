@@ -140,7 +140,7 @@ class CommitLockProtocolTest {
             assertThat(request.getCommitUser()).isEqualTo("morax-job");
             assertThat(request.getFromSnapshot()).isEqualTo(2L);
             server.enqueue(json("{}"));
-            catalog.rollbackTo(identifier, Instant.snapshot(1L), 2L);
+            catalog.rollbackTo(identifier, null, Instant.snapshot(1L), 2L, null);
             ObjectNode legacy =
                     RESTApi.fromJson(
                             server.takeRequest(10, TimeUnit.SECONDS).getBody().readUtf8(),

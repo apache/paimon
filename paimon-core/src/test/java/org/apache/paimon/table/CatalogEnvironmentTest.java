@@ -42,6 +42,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -64,20 +65,94 @@ class CatalogEnvironmentTest {
 
     private static final String READ_VIA_OPTION = RESTApi.HEADER_PREFIX + RESTApi.READ_VIA_HEADER;
 
-    @Test
-    void testOwnerAwareRollbackUsesRuntimeBranchAndPreservesLegacyEntry() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"main", "dev"})
+    void testCatalogTableRollbackUsesRuntimeBranchAndOwner(String branch) throws Exception {
         Catalog catalog = mock(Catalog.class);
-        Identifier original = Identifier.create("db", "table");
         CatalogEnvironment environment =
                 new CatalogEnvironment(
-                        original, "table-id", () -> catalog, null, null, null, true, false);
+                        new Identifier("db", "table", "original"),
+                        "table-id",
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        true,
+                        false);
         Instant instant = Instant.snapshot(1L);
-        environment.catalogTableRollback("dev", "writer").rollbackTo(instant, 2L);
+        environment.catalogTableRollback(branch, "writer").rollbackTo(instant, 2L);
         verify(catalog)
                 .rollbackTo(
-                        new Identifier("db", "table", "dev"), "table-id", instant, 2L, "writer");
-        environment.catalogTableRollback().rollbackTo(instant, 2L);
-        verify(catalog).rollbackTo(original, instant, 2L);
+                        new Identifier("db", "table", branch), "table-id", instant, 2L, "writer");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"main,table-id", "dev,table-id", "main,", "dev,"})
+    void testCatalogTableRollbackWithoutOwnerPreservesTableUuid(String branch, String tableUuid)
+            throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        new Identifier("db", "table", branch),
+                        tableUuid,
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        true,
+                        false);
+        Instant instant = Instant.tag("tag-1");
+        environment.catalogTableRollback(null, null).rollbackTo(instant, null);
+        verify(catalog)
+                .rollbackTo(new Identifier("db", "table", branch), tableUuid, instant, null, null);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "main,main,table-id,table-id",
+        "dev,dev,branch-id,branch-id",
+        "main,dev,table-id,",
+        "dev,main,branch-id,",
+        "main,main,,",
+        "main,dev,,"
+    })
+    void testCopiedEnvironmentRollbackUsesTargetIdentity(
+            String sourceBranch, String targetBranch, String sourceUuid, String expectedUuid)
+            throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Identifier sourceIdentifier =
+                "main".equals(sourceBranch)
+                        ? Identifier.create("db", "table")
+                        : new Identifier("db", "table", sourceBranch);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        sourceIdentifier, sourceUuid, () -> catalog, null, null, null, true, false);
+        Identifier targetIdentifier = new Identifier("db", "table", targetBranch);
+        CatalogEnvironment copied = environment.copy(targetIdentifier);
+
+        Instant snapshot = Instant.snapshot(1L);
+        copied.catalogTableRollback(null, null).rollbackTo(snapshot, 2L);
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, snapshot, 2L, null);
+
+        Instant tag = Instant.tag("checkpoint");
+        copied.snapshotLoader().rollback(tag);
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, tag, null, null);
+        assertThat(environment.uuid()).isEqualTo(sourceUuid);
+    }
+
+    @Test
+    void testCatalogTableRollbackWithoutCatalogReturnsNull() {
+        assertThat(CatalogEnvironment.empty().catalogTableRollback(null, null)).isNull();
+    }
+
+    @Test
+    void testCatalogTableRollbackWithoutVersionManagementReturnsNull() {
+        Catalog catalog = mock(Catalog.class);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, () -> catalog, null, null, null, false, false);
+        assertThat(environment.catalogTableRollback(null, null)).isNull();
+        assertThat(environment.catalogTableRollback("dev", "writer")).isNull();
+        verifyNoInteractions(catalog);
     }
 
     @Test

@@ -759,32 +759,16 @@ public class RESTApi {
      * Rollback instant for table.
      *
      * @param identifier database name and table name.
-     * @param instant instant to rollback
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
-     *     or the tag not exists
-     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
-     *     this table
-     */
-    public void rollbackTo(Identifier identifier, Instant instant) {
-        rollbackTo(identifier, instant, null);
-    }
-
-    /**
-     * Rollback instant for table.
-     *
-     * @param identifier database name and table name.
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant instant to rollback
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot.
+     * @param commitUser owner of the writer lock, or null without a writer lock
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
      *     or the tag not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
-        rollbackTo(identifier, null, instant, fromSnapshot, null);
-    }
-
     public void rollbackTo(
             Identifier identifier,
             @Nullable String tableUuid,

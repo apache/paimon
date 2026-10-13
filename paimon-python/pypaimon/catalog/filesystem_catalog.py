@@ -445,6 +445,40 @@ class FileSystemCatalog(Catalog):
             next_token = None
         return PagedList(elements=page, next_page_token=next_token)
 
+    def rename_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            target_tag_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.rename_tag(tag_name, target_tag_name)
+        except ValueError as e:
+            _reraise_tag_value_error(
+                e, missing_tag=tag_name, conflict_tag=target_tag_name)
+
+    def replace_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.replace_tag(
+                tag_name,
+                snapshot_id=snapshot_id,
+                time_retained=time_retained,
+            )
+        except ValueError as e:
+            _reraise_tag_value_error(e, missing_tag=tag_name)
+
     # ===================== Branch CRUD =====================
     # Thin wrappers that delegate to FileSystemBranchManager (returned by
     # FileStoreTable.branch_manager() in the local-catalog case). Mirrors
@@ -536,3 +570,18 @@ class FileSystemCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         table = self.get_table(identifier)
         return table.branch_manager().branches()
+
+
+def _reraise_tag_value_error(exc, missing_tag, conflict_tag=None):
+    """Map TagManager ValueError text onto catalog exceptions.
+
+    Snapshot-missing and blank-name errors stay ValueError. Only a missing
+    or conflicting tag name is translated. The ``Tag `` prefix keeps a
+    snapshot error such as ``Snapshot id '999' doesn't exist.`` as ValueError.
+    """
+    message = str(exc)
+    if message.startswith("Tag ") and "doesn't exist" in message:
+        raise TagNotExistException(missing_tag) from exc
+    if conflict_tag is not None and "already exists" in message:
+        raise TagAlreadyExistException(conflict_tag) from exc
+    raise

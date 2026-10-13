@@ -456,8 +456,9 @@ def test_non_rest_snapshot_properties_keep_python_commit(tmp_path, properties, o
     commit.close()
 
 
-@pytest.mark.parametrize('warmup', [False, pytest.param(True, marks=pytest.mark.native_plan)])
-def test_callbacks_added_after_construction_select_python(
+@requires_native
+@pytest.mark.parametrize('warmup', [False, True])
+def test_callbacks_added_after_construction_use_native(
         tmp_path, native_rest_catalog, warmup):
     if warmup and not native_commit_available():
         pytest.skip('native warmup requires the commit bindings')
@@ -469,10 +470,13 @@ def test_callbacks_added_after_construction_select_python(
             commit.commit(_prepare(builder, [{'id': 6, 'pt': None}], 6), 6)
     callback = Mock()
     commit.add_commit_callback(callback)
-    with patch('pypaimon.write.native_commit.create_native_commit') as create:
+    with _must_not_fallback(commit):
         commit.commit(_prepare(builder, [{'id': 1, 'pt': None}], 7), 7)
-        create.assert_not_called()
     callback.call.assert_called_once()
+    context = callback.call.call_args[0][0]
+    assert context.identifier == 7
+    assert context.snapshot.id == (2 if warmup else 1)
+    assert sum(entry.file.row_count for entry in context.commit_entries) == 1
     commit.close()
     callback.close.assert_called_once()
 
@@ -517,9 +521,10 @@ def test_overwrite_callbacks_select_python(tmp_path):
     commit = builder.new_commit()
     callback = Mock()
     commit.add_commit_callback(callback)
-    with patch('pypaimon.write.native_commit.create_native_commit') as create:
+    with patch('pypaimon.write.native_commit.create_native_commit', wraps=create_native_commit) as create:
         commit.commit(_prepare(builder, [{'id': 1, 'pt': 'a'}]))
-        create.assert_not_called()
+        create.assert_called_once()
+        assert commit._native_commit is None
     assert _rows(table) == [{'id': 1, 'pt': 'a'}]
     callback.call.assert_called_once()
     commit.close()
@@ -604,3 +609,207 @@ def test_close_releases_python_resources_even_if_native_close_fails(tmp_path):
         with pytest.raises(OSError, match='close failure'):
             commit.close()
         close.assert_called_once()
+
+
+@requires_native
+@pytest.mark.parametrize('mode', ['append', 'pk', 'de'])
+@pytest.mark.parametrize('overwrite', [False, True])
+def test_native_callbacks_keep_python_context_and_allow_native_read(
+        tmp_path, native_rest_catalog, mode, overwrite):
+    from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
+
+    table = _table(tmp_path, mode, catalog=native_rest_catalog)
+    table = table.copy({
+        'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true',
+        'dynamic-partition-overwrite': 'false'})
+    builder = table.new_batch_write_builder()
+    if overwrite:
+        _seed(table)
+        builder.overwrite()
+    calls = []
+
+    class ReadingCallback(CommitCallback):
+        def call(self, context):
+            assert isinstance(context, CommitCallbackContext)
+            assert all(isinstance(entry, ManifestEntry) for entry in context.commit_entries)
+            assert all(isinstance(entry.partition, GenericRow) for entry in context.commit_entries)
+            # Re-enter Rust's runtime from the Python callback after publication.
+            with patch('pypaimon.read.table_read.TableRead._create_split_read',
+                       side_effect=AssertionError('callback read fell back')):
+                calls.append((context, _rows(table)))
+
+    commit = builder.new_commit()
+    callback = ReadingCallback()
+    follower = Mock()
+    commit.add_commit_callback(callback)
+    commit.add_commit_callback(follower)
+    rows = [{'id': 9, 'pt': 'a/b%'}]
+    messages = _prepare(builder, rows)
+    paths = [file.file_path for message in messages for file in message.new_files]
+    try:
+        with _must_not_fallback(commit, 'overwrite' if overwrite else 'commit'):
+            commit.commit(messages, snapshot_properties={'source': 'callback-test'})
+        assert len(calls) == 1
+        context, actual_rows = calls[0]
+        assert actual_rows == rows
+        assert context.identifier == BATCH_COMMIT_IDENTIFIER
+        assert context.snapshot.properties == {'source': 'callback-test'}
+        assert context.snapshot == table.snapshot_manager().get_latest_snapshot()
+        adds = [entry for entry in context.commit_entries if entry.kind == 0]
+        assert [entry.file.file_path for entry in adds] == paths
+        assert all(table.file_io.exists(file_path) for file_path in paths)
+        if mode == 'de':
+            assert all(entry.file.first_row_id is not None for entry in adds)
+            assert all(entry.file.min_sequence_number == context.snapshot.id for entry in adds)
+        if overwrite:
+            deletes = [entry for entry in context.commit_entries if entry.kind == 1]
+            assert deletes
+            assert all(entry.file.file_path for entry in deletes)
+        follower.call.assert_called_once_with(context)
+    finally:
+        commit.close()
+    follower.close.assert_called_once()
+
+
+@requires_native
+@pytest.mark.parametrize('lose_response', [False, True])
+@pytest.mark.parametrize('callback_fails', [False, True])
+def test_native_callback_recovery_and_error_preserve_files(
+        tmp_path, native_rest_catalog, lose_response, callback_fails):
+    from pypaimon.tests.rest.rest_server import RESTCatalogServer
+
+    table = _table(tmp_path, 'de', catalog=native_rest_catalog)
+    table = table.copy({'commit.min-retry-wait': '0 ms', 'commit.max-retry-wait': '0 ms'})
+    builder = table.new_batch_write_builder()
+    messages = _prepare(builder, [{'id': 1, 'pt': 'a/b%'}])
+    paths = [file.file_path for message in messages for file in message.new_files]
+    commit = builder.new_commit()
+    callback = Mock()
+    if callback_fails:
+        callback.call.side_effect = LookupError('notification failed')
+    commit.add_commit_callback(callback)
+    follower = Mock()
+    commit.add_commit_callback(follower)
+    publish = RESTCatalogServer._table_commit_handle
+    attempts = []
+
+    def publish_then_lose_response(server, *args, **kwargs):
+        result = publish(server, *args, **kwargs)
+        attempts.append(result[1])
+        assert result[1] == 200
+        # A malformed successful response leaves publication outcome uncertain.
+        return ('not-json', 200) if lose_response else result
+
+    try:
+        with patch.object(RESTCatalogServer, '_table_commit_handle', publish_then_lose_response), \
+                _must_not_fallback(commit), \
+                patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('abort')):
+            if callback_fails:
+                with pytest.raises(LookupError, match='notification failed'):
+                    commit.commit(messages)
+            else:
+                commit.commit(messages)
+        assert attempts == [200], 'notification failure must not republish the snapshot'
+        context = callback.call.call_args[0][0]
+        assert context.snapshot.id == 1
+        assert context.snapshot.next_row_id == 1
+        assert context.commit_entries[0].file.first_row_id == 0
+        assert context.commit_entries[0].file.file_path == paths[0]
+        assert tuple(context.commit_entries[0].partition.values) == ('a/b%',)
+        assert _rows(table) == [{'id': 1, 'pt': 'a/b%'}]
+        assert all(table.file_io.exists(file_path) for file_path in paths)
+        callback.call.assert_called_once()
+        if callback_fails:
+            follower.call.assert_not_called()
+        else:
+            follower.call.assert_called_once_with(context)
+    finally:
+        commit.close()
+    callback.close.assert_called_once()
+    follower.close.assert_called_once()
+
+
+@requires_native
+def test_native_callback_empty_commit_and_prepublication_failure(tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog).copy({'snapshot.ignore-empty-commit': 'false'})
+    builder = table.new_stream_write_builder()
+    commit = builder.new_commit()
+    callback = Mock()
+    commit.add_commit_callback(callback)
+    try:
+        with _must_not_fallback(commit):
+            commit.commit([], 1)
+        context = callback.call.call_args[0][0]
+        assert context.snapshot.id == 1
+        assert context.identifier == 1
+        assert context.commit_entries == []
+        bad = _prepare(builder, [{'id': 1, 'pt': None}], 2)
+        # A repeated file entry must fail before publication and notification.
+        with _must_not_fallback(commit), pytest.raises(ValueError, match='Duplicate'):
+            commit.commit(bad + bad, 2)
+        callback.call.assert_called_once()
+        assert table.snapshot_manager().get_latest_snapshot().id == 1
+    finally:
+        commit.close()
+
+
+@requires_native
+def test_native_callbacks_added_between_commits_share_context_and_close_once(
+        tmp_path, native_rest_catalog):
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    builder = table.new_stream_write_builder()
+    commit = builder.new_commit()
+    first, second = Mock(), Mock()
+    events = []
+
+    def first_call(context):
+        events.append(('first', context.identifier, context))
+        # Preserve Python's shared Context contract between registered callbacks.
+        context.observed = True
+
+    def second_call(context):
+        assert context.observed
+        events.append(('second', context.identifier, context))
+
+    first.call.side_effect = first_call
+    second.call.side_effect = second_call
+    first.close.side_effect = OSError('close failed')
+    commit.add_commit_callback(first)
+    try:
+        with _must_not_fallback(commit):
+            commit.commit(_prepare(builder, [{'id': 1, 'pt': None}], 1), 1)
+            commit.add_commit_callback(second)
+            commit.commit(_prepare(builder, [{'id': 2, 'pt': None}], 2), 2)
+            commit.commit(_prepare(builder, [{'id': 3, 'pt': None}], 3), 3)
+        assert [(name, identifier) for name, identifier, _ in events] == [
+            ('first', 1), ('first', 2), ('second', 2), ('first', 3), ('second', 3)]
+        assert events[1][2] is events[2][2]
+        assert events[3][2] is events[4][2]
+    finally:
+        commit.close()
+    first.close.assert_called_once()
+    second.close.assert_called_once()
+
+
+@requires_native
+@pytest.mark.parametrize('close', [False, True])
+def test_native_commit_callback_cycle_is_collected(tmp_path, native_rest_catalog, close):
+    import gc
+    import weakref
+
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    builder = table.new_stream_write_builder()
+    commit = builder.new_commit()
+    callback = Mock()
+    callback.owner = commit
+    reference = weakref.ref(callback)
+    commit.add_commit_callback(callback)
+    with _must_not_fallback(commit):
+        commit.commit(_prepare(builder, [{'id': 1, 'pt': None}], 1), 1)
+    if close:
+        commit.close()
+    del callback, commit
+    gc.collect()
+    assert reference() is None
