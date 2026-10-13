@@ -108,6 +108,70 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
     }
   }
 
+  test("Paimon V1 Function: Hive UDTF in scalar subquery") {
+    withUserDefinedFunction("udtf_pos_explode" -> false) {
+      sql(s"CREATE FUNCTION udtf_pos_explode AS '$hivePosExplode'")
+      Seq("posexplode", "udtf_pos_explode").foreach {
+        name =>
+          checkAnswer(
+            sql(s"""SELECT (
+                   |  SELECT count(*) FROM VALUES (array(10, 20)) AS t(items)
+                   |  LATERAL VIEW $name(items) u AS position, item
+                   |) AS n
+                   |""".stripMargin),
+            Seq(Row(2L))
+          )
+      }
+    }
+  }
+
+  test("Paimon V1 Function: Hive UDTF in EXISTS subquery") {
+    withUserDefinedFunction("udtf_pos_explode" -> false) {
+      sql(s"CREATE FUNCTION udtf_pos_explode AS '$hivePosExplode'")
+      Seq(10 -> true, 30 -> false).foreach {
+        case (item, expected) =>
+          checkAnswer(
+            sql(s"""SELECT EXISTS (
+                   |  SELECT 1 FROM VALUES (array(10, 20)) AS t(items)
+                   |  LATERAL VIEW test.udtf_pos_explode(items) u AS position, item
+                   |  WHERE u.item = $item
+                   |)
+                   |""".stripMargin),
+            Seq(Row(expected))
+          )
+      }
+      checkAnswer(
+        sql("""SELECT id FROM VALUES (10), (30) AS outer_t(id)
+              |WHERE EXISTS (
+              |  SELECT 1 FROM VALUES (array(10, 20)) AS t(items)
+              |  LATERAL VIEW udtf_pos_explode(items) u AS position, item
+              |  WHERE u.item = outer_t.id
+              |)
+              |""".stripMargin),
+        Seq(Row(10))
+      )
+    }
+  }
+
+  test("Paimon V1 Function: Hive UDTF in nested expression subqueries and CTEs") {
+    withUserDefinedFunction("udtf_pos_explode" -> false) {
+      sql(s"CREATE FUNCTION udtf_pos_explode AS '$hivePosExplode'")
+      checkAnswer(
+        sql("""SELECT (
+              |  WITH expanded AS (
+              |    SELECT (
+              |      SELECT count(*) FROM VALUES (array(10, 20)) AS t(items)
+              |      LATERAL VIEW udtf_pos_explode(items) u AS position, item
+              |    ) AS n
+              |  )
+              |  SELECT n FROM expanded
+              |) AS n
+              |""".stripMargin),
+        Seq(Row(2L))
+      )
+    }
+  }
+
   test("Paimon V1 Function: lateral view preserves built-in and temporary function lookup") {
     withUserDefinedFunction("udtf_pos_explode" -> false) {
       sql(s"CREATE FUNCTION udtf_pos_explode AS '$hivePosExplode'")

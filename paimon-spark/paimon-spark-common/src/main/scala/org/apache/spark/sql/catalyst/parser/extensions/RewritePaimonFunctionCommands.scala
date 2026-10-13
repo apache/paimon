@@ -28,11 +28,11 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow}
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedException, UnresolvedFunction, UnresolvedGenerator}
 import org.apache.spark.sql.catalyst.catalog.CatalogFunction
-import org.apache.spark.sql.catalyst.expressions.{Expression, Generator, Unevaluable}
+import org.apache.spark.sql.catalyst.expressions.{Expression, Generator, SubqueryExpression, Unevaluable}
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateFunction, DescribeFunction, DropFunction, LogicalPlan, SubqueryAlias, UnresolvedWith}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.trees.TreePattern.{GENERATOR, TreePattern, UNRESOLVED_FUNCTION}
+import org.apache.spark.sql.catalyst.trees.TreePattern.{GENERATOR, PLAN_EXPRESSION, TreePattern, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.CatalogManager
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
@@ -125,7 +125,11 @@ case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[Logic
           u,
           alias => transformPaimonV1Function(alias).asInstanceOf[SubqueryAlias])
       case l: LogicalPlan =>
-        l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION, GENERATOR)) {
+        l.transformExpressionsWithPruning(
+          _.containsAnyPattern(UNRESOLVED_FUNCTION, GENERATOR, PLAN_EXPRESSION)) {
+          case subquery: SubqueryExpression =>
+            // Spark's recursive subquery analyzer does not rerun this parser rewrite.
+            subquery.withNewPlan(transformPaimonV1Function(subquery.plan))
           case u: UnresolvedFunction =>
             lookupFunction(u.nameParts)
               .map {
