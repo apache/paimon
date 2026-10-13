@@ -192,6 +192,30 @@ public class FileSystemWriteRestoreTest {
     }
 
     @Test
+    void testRebuildMappingClearsManifestBucketSelectors() throws Exception {
+        // Keep P1 in bucket 0 and P2 in bucket 3, so the manifest bounds for P2 are excluded by
+        // a stale bucket-0 selector. Reusing the restore instance across snapshots must rebuild
+        // the layout from all manifests, including P2.
+        FileStoreTable table = createPartitionedPkTable(4, false);
+        commitRowToBucket(table, 1, 1, 0, 4);
+        commitRowToBucket(table, 2, 3, 3, 4);
+        table = withBucket(table, 4, true);
+
+        WriteRestore restore = newWriteRestore(table);
+        restore.restoreFiles(binaryRow(1), 0, false, false, false);
+
+        // Advance the snapshot after the first restore has narrowed the shared scan to P1/bucket
+        // 0. This forces a layout rebuild for the second restore.
+        commitRowToBucket(table, 1, 2, 0, 4);
+
+        RestoreFiles restored =
+                restore.restoreFiles(binaryRow(2), /* empty bucket */ 1, false, false, false);
+
+        assertThat(restored.totalBuckets()).isEqualTo(4);
+        assertThat(restored.dataFiles()).isNullOrEmpty();
+    }
+
+    @Test
     public void testEmptyBucketUsesPartitionBucketMapping() throws Exception {
         // Build a table with default bucket=4 and write data into partition 1.
         // Some buckets within partition 1 will end up with files (bucket 0 OR
@@ -439,6 +463,18 @@ public class FileSystemWriteRestoreTest {
         try (StreamTableWrite write = table.newWrite(user);
                 StreamTableCommit commit = table.newCommit(user)) {
             write.write(GenericRow.of(pt, k, (long) k));
+            commit.commit(id, write.prepareCommit(true, id));
+        }
+    }
+
+    private void commitRowToBucket(
+            FileStoreTable table, int pt, int k, int bucket, int totalBuckets) throws Exception {
+        String user = UUID.randomUUID().toString();
+        Long latest = table.snapshotManager().latestSnapshotId();
+        long id = latest == null ? 0L : latest;
+        try (TableWriteImpl<?> write = table.newWrite(user);
+                StreamTableCommit commit = table.newCommit(user)) {
+            write.writeAndReturn(GenericRow.of(pt, k, (long) k), bucket, totalBuckets);
             commit.commit(id, write.prepareCommit(true, id));
         }
     }

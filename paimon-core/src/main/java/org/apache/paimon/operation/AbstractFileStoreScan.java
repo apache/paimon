@@ -181,8 +181,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan clearPartitionAndBucketFilters() {
-        manifestsReader.withPartitionFilter((Predicate) null);
-        manifestsReader.withBucketFilter(null);
+        manifestsReader.clearPartitionAndBucketFilters();
         specifiedBucket = null;
         bucketFilter = null;
         totalAwareBucketFilter = null;
