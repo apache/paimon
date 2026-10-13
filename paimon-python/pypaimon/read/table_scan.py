@@ -27,7 +27,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
-from pypaimon.read.query_auth_split import resolve_auth_result, wrap_plan_with_auth
+from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
 
@@ -65,10 +65,18 @@ class TableScan:
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
+        native_auth = (self.table.options.query_auth_enabled
+                       and self._native_requested() and self._native_plan_supported())
+        if native_auth:
+            # Rust asks the REST server and carries its complete response in
+            # QueryAuthSplit. Both readers then enforce that captured policy.
+            native = self._try_native_plan()
+            if native is not None:
+                return native
         auth_result = self.__auth_query()
         # The native planner bypasses the auth-aware file scanner. Resolve auth
         # before selecting a planning backend.
-        if (auth_result is None and self._native_requested()
+        if (not native_auth and auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:
@@ -135,7 +143,16 @@ class TableScan:
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
         if self.table.options.query_auth_enabled:
-            return False
+            # The binding currently carries explicit partition selectors as
+            # ordinary filters. Keep them on Python, where masked scan-only
+            # selectors can be rejected as Java requires.
+            if self.partition_predicate is not None:
+                return False
+            # The filesystem path has no catalog-issued authorization session.
+            loader = getattr(getattr(self.table, 'catalog_environment', None), 'catalog_loader', None)
+            from pypaimon.read.native_plan import _catalog_metastore
+            if loader is None or _catalog_metastore(loader) != 'rest':
+                return False
         # Rust rejects schemas whose primary keys are all partition keys.
         if getattr(self.table, 'is_primary_key_table', False) \
                 and not self.table.trimmed_primary_keys:
@@ -234,7 +251,9 @@ class TableScan:
                 # physical order need not match the PK merge comparator.
                 return None
             partition_predicate = self.file_scanner.partition_key_predicate
-            if partition_predicate is not None:
+            if partition_predicate is not None and not any(isinstance(split, QueryAuthSplit) for split in splits):
+                # Authorized user predicates observe masked partition values;
+                # Rust has already applied only the safe raw partition tests.
                 splits = [s for s in splits
                           if getattr(s, 'partition', None) is None
                           or partition_predicate.test(s.partition)]
@@ -274,7 +293,8 @@ class TableScan:
             self.file_scanner.skip_level0 = skip_level0
 
     def __auth_query(self):
-        return authorize(self.table, self._query_auth_fn, self._read_type)
+        return authorize(self.table, self._query_auth_fn, self._read_type,
+                         self.predicate, self.partition_predicate)
 
     def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
         """Run :meth:`plan` while recording manifest / pruning counters.
@@ -283,8 +303,14 @@ class TableScan:
         keeps going through :meth:`plan`. Native plans return stats=None;
         explain reports their split metadata without pruning counters.
         """
+        native_auth = (self.table.options.query_auth_enabled
+                       and self._native_requested() and self._native_plan_supported())
+        if native_auth:
+            native = self._try_native_plan()
+            if native is not None:
+                return native, None
         auth_result = self.__auth_query()
-        if (auth_result is None and self._native_requested()
+        if (not native_auth and auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:
@@ -581,14 +607,43 @@ def validate_auth_rules(table, auth_result, latest_fields=None):
     return latest_fields
 
 
-def authorize(table, query_auth_fn, read_type):
-    auth_result = resolve_auth_result(query_auth_fn, read_type)
+def authorize(table, query_auth_fn, read_type, predicate=None, partition_predicate=None):
+    if query_auth_fn is None:
+        return None
+    requested_type = read_type
+    if read_type:
+        from pypaimon.read.push_down_utils import predicate_field_names
+        selected = {field.name for field in read_type}
+        names = set(selected)
+        for query_filter in (predicate, partition_predicate):
+            if query_filter is not None:
+                names.update(predicate_field_names(query_filter))
+        requested_type = list(read_type) + [
+            field for field in table.fields if field.name in names and field.name not in selected]
+    auth_result = resolve_auth_result(query_auth_fn, requested_type)
     if auth_result is not None:
         validate_auth_rules(table, auth_result)
+        if partition_predicate is not None and auth_result.column_masking:
+            from pypaimon.read.push_down_utils import predicate_field_names
+            if predicate_field_names(partition_predicate) & set(auth_result.column_masking):
+                raise ValueError("Explicit partition filters cannot reference masked columns")
     return auth_result
 
 
 def prune_scanner_by_auth(table, scanner, auth_result):
+    # Java excludes masked columns from all raw-data pruning. The complete
+    # query predicate is executed after masks have produced visible values.
+    if auth_result.column_masking:
+        from pypaimon.read.push_down_utils import exclude_predicate_with_fields
+        masked = set(auth_result.column_masking)
+        query_predicate = getattr(scanner, 'predicate', None)
+        for name in ('predicate', 'predicate_for_stats', 'primary_key_predicate', 'partition_key_predicate'):
+            setattr(scanner, name, exclude_predicate_with_fields(getattr(scanner, name, None), masked))
+        init_selector = getattr(scanner, '_init_bucket_selector', None)
+        if init_selector is not None:
+            scanner._bucket_selector = init_selector()
+        if query_predicate is not None:
+            scanner.auth_has_non_partition_filter = True
     if not auth_result.filter:
         return
     partition_preds, has_non_partition = __split_auth_filter(table, auth_result)
