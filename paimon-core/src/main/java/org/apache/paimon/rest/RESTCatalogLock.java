@@ -123,7 +123,7 @@ public class RESTCatalogLock implements Lock {
                 validateGrant(response);
                 Lease lease = new Lease(response.getLeaseMillis(), requestedAt);
                 try {
-                    lease.ensureValid();
+                    lease.checkValid();
                     currentLease.set(lease);
                     return () -> {
                         if (currentLease.get() == lease) {
@@ -169,7 +169,7 @@ public class RESTCatalogLock implements Lock {
         if (lease == null) {
             throw new IllegalStateException("No commit lease is held by this thread.");
         }
-        lease.ensureValid();
+        lease.checkValid();
     }
 
     private class Lease implements AutoCloseable {
@@ -226,7 +226,8 @@ public class RESTCatalogLock implements Lock {
                 return;
             }
             try {
-                ensureValid();
+                // Renewal workers validate this lease without the acquiring thread's context.
+                checkValid();
                 long requestedAt = nanoTime.getAsLong();
                 CommitLockResponse response =
                         api.renewCommitLock(identifier, tableUuid, commitUser);
@@ -244,7 +245,7 @@ public class RESTCatalogLock implements Lock {
             }
         }
 
-        public void ensureValid() {
+        private void checkValid() {
             // Include response time conservatively without relying on the renewal worker running.
             if (TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - renewedAt) >= leaseMillis
                     && renewalFailure == null) {

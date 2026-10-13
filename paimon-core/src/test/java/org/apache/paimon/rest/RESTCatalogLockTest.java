@@ -199,6 +199,50 @@ class RESTCatalogLockTest {
     }
 
     @Test
+    void renewalOnAnotherThreadExtendsTheAcquiringThreadsLease() throws Exception {
+        grant("morax-job", 60000);
+        ExecutorService renewalWorker = Executors.newSingleThreadExecutor();
+        RESTCatalogLock realLock =
+                new RESTCatalogLock(
+                        api,
+                        identifier,
+                        "table-id",
+                        "morax-job",
+                        0,
+                        renewer,
+                        renewalWorker,
+                        clock::get);
+        Thread acquiringThread = Thread.currentThread();
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
+                .thenAnswer(
+                        invocation -> {
+                            assertThat(Thread.currentThread()).isNotSameAs(acquiringThread);
+                            assertThatThrownBy(realLock::ensureValid)
+                                    .hasMessageContaining("No commit lease");
+                            return new CommitLockResponse(true, "morax-job", 140000, 60000, null);
+                        });
+        try {
+            try (AutoCloseable ignored = realLock.acquire()) {
+                clock.set(TimeUnit.MILLISECONDS.toNanos(40000));
+                renewal().run();
+                // A FIFO barrier waits until the renewal and its deadline update have completed.
+                renewalWorker.submit(() -> {}).get(10, TimeUnit.SECONDS);
+                verify(api).renewCommitLock(identifier, "table-id", "morax-job");
+
+                clock.set(TimeUnit.MILLISECONDS.toNanos(70000));
+                realLock.ensureValid();
+                clock.set(TimeUnit.MILLISECONDS.toNanos(100000));
+                assertThatThrownBy(realLock::ensureValid)
+                        .hasRootCauseMessage("The commit lease has expired locally.");
+            }
+            verify(future).cancel(false);
+        } finally {
+            renewalWorker.shutdownNow();
+            assertThat(renewalWorker.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
     void renewalUsesExactOwnerAndStopsAfterClose() throws Exception {
         grant("morax-job", 60000);
         when(api.renewCommitLock(identifier, "table-id", "morax-job"))
