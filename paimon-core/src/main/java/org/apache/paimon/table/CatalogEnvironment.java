@@ -289,7 +289,7 @@ public class CatalogEnvironment implements Serializable {
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
-                uuid,
+                identifier.equals(this.identifier) ? uuid : null,
                 catalogLoader,
                 lockFactory,
                 lockContext,

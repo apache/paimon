@@ -107,6 +107,39 @@ class CatalogEnvironmentTest {
                 .rollbackTo(new Identifier("db", "table", branch), tableUuid, instant, null, null);
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "main,main,table-id,table-id",
+        "dev,dev,branch-id,branch-id",
+        "main,dev,table-id,",
+        "dev,main,branch-id,",
+        "main,main,,",
+        "main,dev,,"
+    })
+    void testCopiedEnvironmentRollbackUsesTargetIdentity(
+            String sourceBranch, String targetBranch, String sourceUuid, String expectedUuid)
+            throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Identifier sourceIdentifier =
+                "main".equals(sourceBranch)
+                        ? Identifier.create("db", "table")
+                        : new Identifier("db", "table", sourceBranch);
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        sourceIdentifier, sourceUuid, () -> catalog, null, null, null, true, false);
+        Identifier targetIdentifier = new Identifier("db", "table", targetBranch);
+        CatalogEnvironment copied = environment.copy(targetIdentifier);
+
+        Instant snapshot = Instant.snapshot(1L);
+        copied.catalogTableRollback(null, null).rollbackTo(snapshot, 2L);
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, snapshot, 2L, null);
+
+        Instant tag = Instant.tag("checkpoint");
+        copied.snapshotLoader().rollback(tag);
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, tag, null, null);
+        assertThat(environment.uuid()).isEqualTo(sourceUuid);
+    }
+
     @Test
     void testCatalogTableRollbackWithoutCatalogReturnsNull() {
         assertThat(CatalogEnvironment.empty().catalogTableRollback(null, null)).isNull();
