@@ -238,6 +238,36 @@ public class DeletionVectorTest {
     }
 
     @Test
+    public void testEqualDeletionVectorsHaveEqualHashCodes() {
+        long[] positions = {1, 7, 42, 100_000};
+        BitmapDeletionVector bitmap1 = new BitmapDeletionVector();
+        BitmapDeletionVector bitmap2 = new BitmapDeletionVector();
+        Bitmap64DeletionVector bitmap64a = new Bitmap64DeletionVector();
+        Bitmap64DeletionVector bitmap64b = new Bitmap64DeletionVector();
+        for (long position : positions) {
+            bitmap1.delete(position);
+            bitmap2.delete(position);
+            bitmap64a.delete(position);
+            bitmap64b.delete(position);
+        }
+
+        assertThat(bitmap1).isEqualTo(bitmap2);
+        assertThat(bitmap1.hashCode()).isEqualTo(bitmap2.hashCode());
+        assertThat(new HashSet<>(Arrays.asList(bitmap1, bitmap2))).hasSize(1);
+
+        assertThat(bitmap64a).isEqualTo(bitmap64b);
+        assertThat(bitmap64a.hashCode()).isEqualTo(bitmap64b.hashCode());
+        assertThat(new HashSet<>(Arrays.asList(bitmap64a, bitmap64b))).hasSize(1);
+
+        // a deletion vector read back from its bytes is equal to the one written, so it must
+        // also hash the same
+        DeletionVector read =
+                DeletionVector.deserializeFromBytes(DeletionVector.serializeToBytes(bitmap1));
+        assertThat(read).isEqualTo(bitmap1);
+        assertThat(read.hashCode()).isEqualTo(bitmap1.hashCode());
+    }
+
+    @Test
     public void testBitmapDeletionVectorTo64() {
         HashSet<Integer> toDelete = new HashSet<>();
         for (int i = 0; i < 10000; i++) {

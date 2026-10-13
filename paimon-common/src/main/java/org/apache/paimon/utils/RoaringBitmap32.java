@@ -149,6 +149,11 @@ public class RoaringBitmap32 {
         return Objects.equals(this.roaringBitmap, that.roaringBitmap);
     }
 
+    @Override
+    public int hashCode() {
+        return roaringBitmap.hashCode();
+    }
+
     public void clear() {
         roaringBitmap.clear();
     }

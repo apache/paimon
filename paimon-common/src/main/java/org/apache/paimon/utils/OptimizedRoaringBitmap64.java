@@ -327,4 +327,9 @@ public class OptimizedRoaringBitmap64 {
         OptimizedRoaringBitmap64 that = (OptimizedRoaringBitmap64) o;
         return Arrays.equals(this.bitmaps, that.bitmaps);
     }
+
+    @Override
+    public int hashCode() {
+        return Arrays.hashCode(bitmaps);
+    }
 }
