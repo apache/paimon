@@ -30,19 +30,26 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -56,12 +63,13 @@ import static org.mockito.Mockito.when;
 class RESTCatalogLockTest {
     private final RESTApi api = mock(RESTApi.class);
     private final ScheduledExecutorService renewer = mock(ScheduledExecutorService.class);
+    private final ExecutorService workers = mock(ExecutorService.class);
     private final ScheduledFuture<?> future = mock(ScheduledFuture.class);
     private final Identifier identifier = new Identifier("db", "table", "dev");
     private final AtomicLong clock = new AtomicLong();
     private final RESTCatalogLock lock =
             new RESTCatalogLock(
-                    api, identifier, "table-id", "morax-job", 0, () -> renewer, clock::get);
+                    api, identifier, "table-id", "morax-job", 0, renewer, workers, clock::get);
 
     @Test
     void callbackIsProtectedAndLeaseEndsOnReturn() throws Exception {
@@ -73,7 +81,7 @@ class RESTCatalogLockTest {
                                     return "published";
                                 }))
                 .isEqualTo("published");
-        verify(future).cancel(true);
+        verify(future).cancel(false);
         assertThatThrownBy(lock::ensureValid).hasMessageContaining("No commit lease");
     }
 
@@ -88,7 +96,7 @@ class RESTCatalogLockTest {
                                             throw failure;
                                         }))
                 .isSameAs(failure);
-        verify(future).cancel(true);
+        verify(future).cancel(false);
     }
 
     @Test
@@ -106,7 +114,7 @@ class RESTCatalogLockTest {
                         });
         callback.run();
         verify(api).renewCommitLock(identifier, "table-id", "morax-job");
-        verify(future).cancel(true);
+        verify(future).cancel(false);
     }
 
     @Test
@@ -239,13 +247,13 @@ class RESTCatalogLockTest {
                                         }))
                 .isInstanceOf(Lock.AcquisitionException.class)
                 .hasRootCauseMessage("The commit lease has expired locally.");
-        verify(future).cancel(true);
-        verify(renewer).shutdownNow();
+        verify(future).cancel(false);
+        verify(renewer, never()).shutdownNow();
         assertThatThrownBy(lock::ensureValid).hasMessageContaining("No commit lease");
     }
 
     @Test
-    void schedulerFailureStopsWorkerAndAllowsFreshAcquisition() throws Exception {
+    void schedulerFailureKeepsSharedExecutorsUsableForFreshAcquisition() throws Exception {
         grant("morax-job", 60000);
         RejectedExecutionException failure = new RejectedExecutionException("Stopped worker");
         when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
@@ -258,22 +266,22 @@ class RESTCatalogLockTest {
                                         }))
                 .isInstanceOf(Lock.AcquisitionException.class)
                 .hasCause(failure);
-        verify(renewer).shutdownNow();
+        verify(renewer, never()).shutdownNow();
         assertThatThrownBy(lock::ensureValid).hasMessageContaining("No commit lease");
         doReturn(future)
                 .when(renewer)
                 .scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any());
         assertThat(run(() -> "published")).isEqualTo("published");
-        verify(renewer, times(2)).shutdownNow();
+        verify(renewer, never()).shutdownNow();
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void workerShutdownFailurePreservesOperationOutcome(boolean failOperation) throws Exception {
+    void taskCancellationFailurePreservesOperationOutcome(boolean failOperation) throws Exception {
         grant("morax-job", 60000);
-        RuntimeException releaseFailure = new RuntimeException("Worker shutdown failed");
+        RuntimeException releaseFailure = new RuntimeException("Task cancellation failed");
         RuntimeException operationFailure = new RuntimeException("Preparation failed");
-        doThrow(releaseFailure).when(renewer).shutdownNow();
+        doThrow(releaseFailure).when(future).cancel(false);
         Callable<String> operation =
                 () -> {
                     if (failOperation) {
@@ -288,7 +296,7 @@ class RESTCatalogLockTest {
         } else {
             assertThat(run(operation)).isEqualTo("published");
         }
-        verify(future).cancel(true);
+        verify(future).cancel(false);
         assertThatThrownBy(lock::ensureValid).hasMessageContaining("No commit lease");
     }
 
@@ -318,30 +326,258 @@ class RESTCatalogLockTest {
     }
 
     @Test
-    void eachScopeOwnsAndStopsItsRenewalWorker() throws Exception {
+    void closingAScopeKeepsSharedRenewalExecutorsUsable() throws Exception {
         grant("morax-job", 60000);
-        ScheduledExecutorService secondWorker = mock(ScheduledExecutorService.class);
         ScheduledFuture<?> secondRenewal = mock(ScheduledFuture.class);
-        doReturn(secondRenewal)
-                .when(secondWorker)
-                .scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any());
-        AtomicInteger workers = new AtomicInteger();
-        RESTCatalogLock scopes =
+        when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> future)
+                .thenAnswer(invocation -> secondRenewal);
+        assertThat(run(() -> "first")).isEqualTo("first");
+        assertThat(run(() -> "second")).isEqualTo("second");
+        verify(future).cancel(false);
+        verify(secondRenewal).cancel(false);
+        verify(renewer, never()).shutdownNow();
+        verify(workers, never()).shutdownNow();
+    }
+
+    @Test
+    void queuedRenewalIsCancelledAndCannotAffectANewScope() throws Exception {
+        grant("morax-job", 60000);
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
+                .thenReturn(new CommitLockResponse(true, "morax-job", 100000, 60000, null));
+        List<Runnable> requests = queueRenewals();
+        AutoCloseable first = lock.acquire();
+        Runnable oldTick = renewal();
+        oldTick.run();
+        oldTick.run();
+        assertThat(requests).hasSize(1);
+        first.close();
+        requests.get(0).run();
+        verify(api, never()).renewCommitLock(identifier, "table-id", "morax-job");
+        try (AutoCloseable second = lock.acquire()) {
+            first.close();
+            oldTick.run();
+            assertThat(requests).hasSize(1);
+            renewal(2).run();
+            assertThat(requests).hasSize(2);
+            requests.get(1).run();
+            lock.ensureValid();
+        }
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
+        verify(workers, never()).shutdownNow();
+    }
+
+    @Test
+    void queuedRenewalCannotReviveALocallyExpiredLease() throws Exception {
+        grant("morax-job", 60000);
+        List<Runnable> requests = queueRenewals();
+        run(
+                () -> {
+                    renewal().run();
+                    clock.set(TimeUnit.MILLISECONDS.toNanos(60000));
+                    requests.get(0).run();
+                    assertThatThrownBy(lock::ensureValid)
+                            .hasRootCauseMessage("The commit lease has expired locally.");
+                    return null;
+                });
+        verify(api, never()).renewCommitLock(identifier, "table-id", "morax-job");
+    }
+
+    @Test
+    void workerDispatchFailureInvalidatesOnlyItsScope() throws Exception {
+        grant("morax-job", 60000);
+        RejectedExecutionException failure = new RejectedExecutionException("Dispatch rejected");
+        doThrow(failure).when(workers).execute(any(Runnable.class));
+        run(
+                () -> {
+                    renewal().run();
+                    assertThatThrownBy(lock::ensureValid).hasCause(failure);
+                    return null;
+                });
+        grant("morax-job", 60000);
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
+                .thenReturn(new CommitLockResponse(true, "morax-job", 100000, 60000, null));
+        run(
+                () -> {
+                    renewal(2).run();
+                    lock.ensureValid();
+                    return null;
+                });
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
+        verify(workers, never()).shutdownNow();
+    }
+
+    @Test
+    void renewalErrorInvalidatesLeaseAndStopsFurtherDispatch() throws Exception {
+        grant("morax-job", 60000);
+        AssertionError failure = new AssertionError("RPC failed");
+        when(api.renewCommitLock(identifier, "table-id", "morax-job")).thenThrow(failure);
+        run(
+                () -> {
+                    Runnable tick = renewal();
+                    tick.run();
+                    tick.run();
+                    assertThatThrownBy(lock::ensureValid).hasCause(failure);
+                    return null;
+                });
+        verify(api).renewCommitLock(identifier, "table-id", "morax-job");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void lateOldRenewalCannotChangeANewScope(boolean failOldRenewal) throws Exception {
+        grant("morax-job", 60000);
+        List<Runnable> requests = queueRenewals();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        CommitLockResponse renewed = new CommitLockResponse(true, "morax-job", 100000, 60000, null);
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
+                .thenAnswer(
+                        invocation -> {
+                            started.countDown();
+                            awaitIgnoringInterrupts(resume);
+                            if (failOldRenewal) {
+                                throw new IllegalStateException("Old renewal failed");
+                            }
+                            return renewed;
+                        })
+                .thenReturn(renewed);
+        ExecutorService runner = Executors.newSingleThreadExecutor();
+        try (AutoCloseable first = lock.acquire()) {
+            clock.set(TimeUnit.MILLISECONDS.toNanos(20000));
+            renewal().run();
+            Future<?> oldResponse = runner.submit(requests.get(0));
+            assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+            first.close();
+            try (AutoCloseable second = lock.acquire()) {
+                clock.set(TimeUnit.MILLISECONDS.toNanos(30000));
+                renewal(2).run();
+                requests.get(1).run();
+                resume.countDown();
+                oldResponse.get(10, TimeUnit.SECONDS);
+                // Only the new scope's renewal at 30s keeps it valid beyond 80s.
+                clock.set(TimeUnit.MILLISECONDS.toNanos(85000));
+                lock.ensureValid();
+            }
+        } finally {
+            resume.countDown();
+            runner.shutdownNow();
+            assertThat(runner.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+        verify(api, times(2)).renewCommitLock(identifier, "table-id", "morax-job");
+    }
+
+    @Test
+    void lateSuccessfulRenewalCannotReviveAnExpiredScope() throws Exception {
+        grant("morax-job", 60000);
+        List<Runnable> requests = queueRenewals();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
+                .thenAnswer(
+                        invocation -> {
+                            started.countDown();
+                            assertThat(resume.await(10, TimeUnit.SECONDS)).isTrue();
+                            return new CommitLockResponse(true, "morax-job", 100000, 60000, null);
+                        });
+        ExecutorService runner = Executors.newSingleThreadExecutor();
+        try (AutoCloseable scope = lock.acquire()) {
+            clock.set(TimeUnit.MILLISECONDS.toNanos(20000));
+            renewal().run();
+            Future<?> response = runner.submit(requests.get(0));
+            assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+            clock.set(TimeUnit.MILLISECONDS.toNanos(60000));
+            assertThatThrownBy(lock::ensureValid)
+                    .hasRootCauseMessage("The commit lease has expired locally.");
+            resume.countDown();
+            response.get(10, TimeUnit.SECONDS);
+            assertThatThrownBy(lock::ensureValid)
+                    .hasRootCauseMessage("The commit lease has expired locally.");
+        } finally {
+            resume.countDown();
+            runner.shutdownNow();
+            assertThat(runner.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void blockedRenewalDoesNotBlockAnotherLeaseAndCloseInterruptsOnlyItsRequest() throws Exception {
+        grant("morax-job", 60000);
+        ScheduledFuture<?> secondRenewal = mock(ScheduledFuture.class);
+        when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> future)
+                .thenAnswer(invocation -> secondRenewal);
+        when(api.acquireCommitLock(identifier, "table-id", "other-job"))
+                .thenReturn(new CommitLockResponse(true, "other-job", 100000, 60000, null));
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch resumeFirst = new CountDownLatch(1);
+        CountDownLatch firstInterrupted = new CountDownLatch(1);
+        CountDownLatch secondRenewed = new CountDownLatch(1);
+        when(api.renewCommitLock(identifier, "table-id", "morax-job"))
+                .thenAnswer(
+                        invocation -> {
+                            firstStarted.countDown();
+                            try {
+                                assertThat(resumeFirst.await(10, TimeUnit.SECONDS)).isTrue();
+                            } catch (InterruptedException e) {
+                                firstInterrupted.countDown();
+                                throw e;
+                            }
+                            return new CommitLockResponse(true, "morax-job", 100000, 60000, null);
+                        });
+        when(api.renewCommitLock(identifier, "table-id", "other-job"))
+                .thenAnswer(
+                        invocation -> {
+                            secondRenewed.countDown();
+                            return new CommitLockResponse(true, "other-job", 100000, 60000, null);
+                        });
+        ExecutorService sharedWorkers = Executors.newCachedThreadPool();
+        RESTCatalogLock firstLock =
                 new RESTCatalogLock(
                         api,
                         identifier,
                         "table-id",
                         "morax-job",
                         0,
-                        () -> workers.getAndIncrement() == 0 ? renewer : secondWorker,
+                        renewer,
+                        sharedWorkers,
                         clock::get);
-        assertThat(scopes.runWithLock(() -> "first")).isEqualTo("first");
-        assertThat(scopes.runWithLock(() -> "second")).isEqualTo("second");
-        assertThat(workers.get()).isEqualTo(2);
-        verify(future).cancel(true);
-        verify(secondRenewal).cancel(true);
-        verify(renewer).shutdownNow();
-        verify(secondWorker).shutdownNow();
+        RESTCatalogLock secondLock =
+                new RESTCatalogLock(
+                        api,
+                        identifier,
+                        "table-id",
+                        "other-job",
+                        0,
+                        renewer,
+                        sharedWorkers,
+                        clock::get);
+        try (AutoCloseable first = firstLock.acquire();
+                AutoCloseable second = secondLock.acquire()) {
+            ArgumentCaptor<Runnable> ticks = ArgumentCaptor.forClass(Runnable.class);
+            verify(renewer, times(2))
+                    .scheduleWithFixedDelay(
+                            ticks.capture(), eq(20000L), eq(20000L), eq(TimeUnit.MILLISECONDS));
+            Runnable firstTick = ticks.getAllValues().get(0);
+            firstTick.run();
+            assertThat(firstStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            firstTick.run();
+            firstTick.run();
+            ticks.getAllValues().get(1).run();
+            assertThat(secondRenewed.await(10, TimeUnit.SECONDS)).isTrue();
+            first.close();
+            assertThat(firstInterrupted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(sharedWorkers.isShutdown()).isFalse();
+            secondLock.ensureValid();
+            firstTick.run();
+            verify(api).renewCommitLock(identifier, "table-id", "morax-job");
+            verify(api).renewCommitLock(identifier, "table-id", "other-job");
+            verify(secondRenewal, never()).cancel(anyBoolean());
+        } finally {
+            resumeFirst.countDown();
+            sharedWorkers.shutdownNow();
+            assertThat(sharedWorkers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     @Test
@@ -351,7 +587,7 @@ class RESTCatalogLockTest {
         assertThat(publication.runWithLock(() -> publication.runWithLock(() -> "published")))
                 .isEqualTo("published");
         verify(api).acquireCommitLock(identifier, "table-id", "morax-job");
-        verify(future).cancel(true);
+        verify(future).cancel(false);
         publication.runWithLock(
                 () -> {
                     clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(60000));
@@ -377,7 +613,7 @@ class RESTCatalogLockTest {
             lock.ensureValid();
         }
         verify(api, times(2)).acquireCommitLock(identifier, "table-id", "morax-job");
-        verify(future, times(2)).cancel(true);
+        verify(future, times(2)).cancel(false);
     }
 
     @Test
@@ -387,7 +623,14 @@ class RESTCatalogLockTest {
                 .thenReturn(CommitLockResponse.unavailable());
         RESTCatalogLock waiting =
                 new RESTCatalogLock(
-                        api, identifier, "table-id", "morax-job", 1000, () -> renewer, clock::get);
+                        api,
+                        identifier,
+                        "table-id",
+                        "morax-job",
+                        1000,
+                        renewer,
+                        workers,
+                        clock::get);
         Thread.currentThread().interrupt();
         try {
             assertThatThrownBy(
@@ -409,6 +652,13 @@ class RESTCatalogLockTest {
     }
 
     private void grant(String owner, long leaseMillis) {
+        doAnswer(
+                        invocation -> {
+                            ((Runnable) invocation.getArgument(0)).run();
+                            return null;
+                        })
+                .when(workers)
+                .execute(any(Runnable.class));
         when(api.acquireCommitLock(identifier, "table-id", "morax-job"))
                 .thenReturn(new CommitLockResponse(true, owner, 100000, leaseMillis, null));
         when(renewer.scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any()))
@@ -416,10 +666,37 @@ class RESTCatalogLockTest {
     }
 
     private Runnable renewal() {
+        return renewal(1);
+    }
+
+    private Runnable renewal(int scopes) {
         ArgumentCaptor<Runnable> callback = ArgumentCaptor.forClass(Runnable.class);
-        verify(renewer)
+        verify(renewer, times(scopes))
                 .scheduleWithFixedDelay(
                         callback.capture(), eq(20000L), eq(20000L), eq(TimeUnit.MILLISECONDS));
         return callback.getValue();
+    }
+
+    private List<Runnable> queueRenewals() {
+        List<Runnable> requests = new ArrayList<>();
+        doAnswer(
+                        invocation -> {
+                            requests.add(invocation.getArgument(0));
+                            return null;
+                        })
+                .when(workers)
+                .execute(any(Runnable.class));
+        return requests;
+    }
+
+    private static void awaitIgnoringInterrupts(CountDownLatch latch) {
+        while (true) {
+            try {
+                assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
+                return;
+            } catch (InterruptedException ignored) {
+                // Emulate a transport that completes its RPC despite scope cancellation.
+            }
+        }
     }
 }

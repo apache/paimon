@@ -115,10 +115,12 @@ Callers supply their exact `commitUser` and table UUID.
 Leases require the target branch's catalog-resolved UUID. Reload a view switched to another branch
 from the catalog before using leases.
 Lock contention waits until `commit.timeout` when configured, independently of publication retries.
-Each scope owns a renewal worker, which is stopped when the scope ends. The client validates
-the lease's monotonic deadline before publishing. A failed operation stops renewal and its lease
-expires automatically. The server keeps the lease duration fixed for each scope; duration changes
-take effect on the next acquisition.
+Scopes share a timer and a cached worker pool. The timer dispatches RPCs to workers so a blocked
+renewal cannot block other scopes' scheduling. Each scope permits only one in-flight renewal and
+cancels its own scheduled and in-flight renewal tasks when it ends, without stopping the shared
+executors. The client validates the lease's monotonic deadline before publishing. A failed operation
+stops renewal and its lease expires automatically. The server keeps the lease duration fixed for each
+scope; duration changes take effect on the next acquisition.
 
 The server must validate the current table incarnation, branch, authenticated caller and exact
 owner, and atomically publish the snapshot and clear the lease. All snapshot writers must honor

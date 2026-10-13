@@ -29,13 +29,15 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
-import java.util.function.Supplier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -43,11 +45,16 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** A renewable REST commit lease bound to a table, branch and writer. */
 public class RESTCatalogLock implements Lock {
 
+    private static final ScheduledExecutorService RENEWAL_SCHEDULER = createRenewalScheduler();
+    private static final ExecutorService RENEWAL_WORKERS =
+            Executors.newCachedThreadPool(new ExecutorThreadFactory("rest-commit-lock-renew"));
+
     private final RESTApi api;
     private final Identifier identifier;
     private final String tableUuid;
     private final String commitUser;
-    private final Supplier<ScheduledExecutorService> renewerFactory;
+    private final ScheduledExecutorService scheduler;
+    private final ExecutorService workers;
     private final LongSupplier nanoTime;
     private final long acquireTimeoutMillis;
     private final ThreadLocal<Lease> currentLease = new ThreadLocal<>();
@@ -64,7 +71,8 @@ public class RESTCatalogLock implements Lock {
                 tableUuid,
                 commitUser,
                 acquireTimeoutMillis,
-                RESTCatalogLock::createRenewer,
+                RENEWAL_SCHEDULER,
+                RENEWAL_WORKERS,
                 System::nanoTime);
     }
 
@@ -74,7 +82,8 @@ public class RESTCatalogLock implements Lock {
             String tableUuid,
             String commitUser,
             long acquireTimeoutMillis,
-            Supplier<ScheduledExecutorService> renewerFactory,
+            ScheduledExecutorService scheduler,
+            ExecutorService workers,
             LongSupplier nanoTime) {
         checkArgument(
                 tableUuid != null && !tableUuid.isEmpty(), "A commit lease requires a table UUID.");
@@ -88,14 +97,15 @@ public class RESTCatalogLock implements Lock {
         this.tableUuid = tableUuid;
         this.commitUser = commitUser;
         this.acquireTimeoutMillis = acquireTimeoutMillis;
-        this.renewerFactory = renewerFactory;
+        this.scheduler = checkNotNull(scheduler);
+        this.workers = checkNotNull(workers);
         this.nanoTime = nanoTime;
     }
 
-    private static ScheduledExecutorService createRenewer() {
+    private static ScheduledExecutorService createRenewalScheduler() {
         ScheduledThreadPoolExecutor executor =
                 new ScheduledThreadPoolExecutor(
-                        1, new ExecutorThreadFactory("rest-commit-lock-renew"));
+                        1, new ExecutorThreadFactory("rest-commit-lock-timer"));
         executor.setRemoveOnCancelPolicy(true);
         return executor;
     }
@@ -161,25 +171,51 @@ public class RESTCatalogLock implements Lock {
     }
 
     private class Lease implements AutoCloseable {
-        private final ScheduledExecutorService executor;
         private final ScheduledFuture<?> renewal;
         private final AtomicBoolean closed = new AtomicBoolean();
+        private final AtomicBoolean renewing = new AtomicBoolean();
         private final long leaseMillis;
         private volatile long renewedAt;
-        @Nullable private volatile Exception renewalFailure;
+        @Nullable private volatile Throwable renewalFailure;
+        @Nullable private volatile FutureTask<Void> renewalRequest;
 
         private Lease(long leaseMillis, long requestedAt) {
             this.leaseMillis = leaseMillis;
             this.renewedAt = requestedAt;
-            this.executor = renewerFactory.get();
             long interval = Math.max(1, leaseMillis / 3);
+            this.renewal =
+                    scheduler.scheduleWithFixedDelay(
+                            this::submitRenewal, interval, interval, TimeUnit.MILLISECONDS);
+        }
+
+        private void submitRenewal() {
+            if (closed.get() || renewalFailure != null || !renewing.compareAndSet(false, true)) {
+                return;
+            }
+            FutureTask<Void> request =
+                    new FutureTask<>(
+                            () -> {
+                                try {
+                                    renew();
+                                } finally {
+                                    renewing.set(false);
+                                }
+                            },
+                            null);
+            renewalRequest = request;
+            // Closing can race with dispatch. Publish the request before rechecking closed so
+            // either close or this dispatcher cancels it before it can start another RPC.
+            if (closed.get()) {
+                request.cancel(true);
+                renewing.set(false);
+                return;
+            }
             try {
-                this.renewal =
-                        executor.scheduleWithFixedDelay(
-                                this::renew, interval, interval, TimeUnit.MILLISECONDS);
+                workers.execute(request);
             } catch (RuntimeException | Error e) {
-                Lock.release(executor::shutdownNow, e);
-                throw e;
+                renewalFailure = e;
+                request.cancel(false);
+                renewing.set(false);
             }
         }
 
@@ -201,7 +237,7 @@ public class RESTCatalogLock implements Lock {
                             "The commit lease duration changed during renewal.");
                 }
                 renewedAt = requestedAt;
-            } catch (Exception e) {
+            } catch (Exception | Error e) {
                 renewalFailure = e;
             }
         }
@@ -222,9 +258,12 @@ public class RESTCatalogLock implements Lock {
         public void close() {
             if (closed.compareAndSet(false, true)) {
                 try {
-                    renewal.cancel(true);
+                    renewal.cancel(false);
                 } finally {
-                    executor.shutdownNow();
+                    FutureTask<Void> request = renewalRequest;
+                    if (request != null) {
+                        request.cancel(true);
+                    }
                 }
             }
         }
@@ -232,6 +271,6 @@ public class RESTCatalogLock implements Lock {
 
     @Override
     public void close() {
-        // Lease scopes own their renewal workers; the RESTApi has no owned closeable resources.
+        // Lease scopes cancel their own tasks; shared executors outlive individual locks.
     }
 }
