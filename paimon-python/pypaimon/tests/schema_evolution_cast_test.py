@@ -17,6 +17,7 @@
 
 from decimal import Decimal, DefaultContext, Inexact, localcontext, Rounded
 import os
+import struct
 import time
 from types import SimpleNamespace
 
@@ -25,6 +26,25 @@ import pytest
 
 from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
 from pypaimon.schema.data_types import AtomicType
+
+
+@pytest.mark.parametrize('chunked', [False, True])
+def test_decimal_evolution_uses_supported_jvm_floating_decimal_digits(chunked):
+    # Java 8/11/17 retain exact digits in this integral fast path. JDK 19+
+    # shortest text changes the integer by four, before scale is applied.
+    value = struct.unpack('>d', bytes.fromhex('c381e88f38c0c8fd'))[0]
+    source = pa.array([None, value, -value, 1e23, None]).slice(1, 4)
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 1), source.slice(1)])
+    result = cast_array_for_schema_evolution(source, pa.decimal128(38, 20))
+    assert result.to_pylist() == [
+        Decimal('-161304845894623136.00000000000000000000'),
+        Decimal('161304845894623136.00000000000000000000'), None, None,
+    ]
+    # For the power-of-ten boundary, the old converter excludes the upper
+    # interval endpoint and preserves 9.999999999999999E22, rather than 1E23.
+    result = cast_array_for_schema_evolution(pa.array([1e23]), pa.decimal128(38, 6))
+    assert result.to_pylist() == [Decimal('99999999999999990000000.000000')]
 
 
 @pytest.mark.parametrize('chunked', [False, True])

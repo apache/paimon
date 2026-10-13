@@ -18,6 +18,7 @@
 """Java decimal golden values through Python and Native REST reads."""
 
 from decimal import Decimal
+import struct
 
 import pyarrow as pa
 import pytest
@@ -37,6 +38,11 @@ pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
 
 
 _CASES = [
+    (pa.float64(), 'DECIMAL(38,20)',
+     [struct.unpack('>d', bytes.fromhex('c381e88f38c0c8fd'))[0], None],
+     ['-161304845894623136.00000000000000000000', None]),
+    (pa.float64(), 'DECIMAL(38,6)', [1e23, -1e23, None],
+     ['99999999999999990000000.000000', '-99999999999999990000000.000000', None]),
     (pa.float64(), 'DECIMAL(5,2)', [1.005, -1.005, 0.145, 999.995, 1e30, None],
      ['1.01', '-1.01', '0.15', None, None, None]),
     (pa.float32(), 'DECIMAL(5,2)', [1.005, -1.005, 0.145, 999.995, 1e30, None],

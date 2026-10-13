@@ -22,7 +22,7 @@ import re
 
 import pyarrow as pa
 
-from pypaimon.casting.numeric_utils import java_floating_string
+from pypaimon.casting.numeric_utils import java_double_decimal_text
 
 
 _DECIMAL_TEXT = re.compile(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z')
@@ -52,7 +52,7 @@ def cast_decimal(array, target):
                 values.append(None)
                 continue
             if floating:
-                value = java_floating_string(value)
+                value = java_double_decimal_text(value)
             if floating or text:
                 if _DECIMAL_TEXT.fullmatch(value) is None:
                     raise pa.ArrowInvalid('Invalid decimal schema-evolution value: %s' % value)
