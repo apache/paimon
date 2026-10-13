@@ -737,19 +737,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private void releaseCompactionExecutor(BinaryRow partition, int bucket) {
-        if (compactionTaskExecutorMode != CompactionTaskExecutorMode.PER_BUCKET
-                || externalCompactExecutor) {
+        if (compactionTaskExecutorMode != CompactionTaskExecutorMode.PER_BUCKET) {
             return;
-        }
-
-        if (compactionMetrics != null) {
-            compactionMetrics.retireCompactTimersForBucket(partition, bucket);
         }
 
         ExecutorService removed =
                 perBucketCompactExecutors.remove(
                         new BucketCompactionExecutorKey(partition, bucket));
         if (removed != null) {
+            if (compactionMetrics != null) {
+                compactionMetrics.retireCompactTimersForBucket(partition, bucket);
+            }
             removed.shutdownNow();
         }
     }

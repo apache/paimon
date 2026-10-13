@@ -178,6 +178,38 @@ class CompactionTaskExecutorRoutingTest {
     }
 
     @Test
+    void testLateExternalOverrideReleasesOwnedPerBucketExecutor() throws Exception {
+        externalExecutor = Executors.newSingleThreadExecutor();
+        BinaryRow partition = EMPTY_ROW.copy();
+        ExecutorRoutingWrite write = new ExecutorRoutingWrite(coreOptions(-1));
+        write.withMetricRegistry(new TestMetricRegistry());
+
+        ExecutorService owned = write.compactExecutorForTesting(partition, 0);
+        assertThat(write.activePerBucketExecutorCountForTesting()).isEqualTo(1);
+
+        write.withCompactExecutor(externalExecutor);
+        assertThat(write.compactExecutorForTesting(partition, 1)).isSameAs(externalExecutor);
+        assertThat(write.activePerBucketExecutorCountForTesting()).isEqualTo(1);
+
+        CompactionMetrics metrics = write.compactionMetrics();
+        CompactionMetrics.Reporter reporter = metrics.createReporter(partition, 0);
+        owned.submit(
+                        () -> {
+                            reporter.getCompactTimer().start();
+                            reporter.getCompactTimer().finish();
+                        })
+                .get(30, TimeUnit.SECONDS);
+        assertThat(metrics.activeCompactTimerCount()).isEqualTo(1);
+
+        write.releaseCompactionExecutorForTesting(partition, 0);
+        assertThat(write.activePerBucketExecutorCountForTesting()).isZero();
+        assertThat(owned.isShutdown()).isTrue();
+        assertThat(metrics.activeCompactTimerCount()).isZero();
+        reporter.unregister();
+        write.close();
+    }
+
+    @Test
     void testExternalExecutorDisablesCompactTimerRetirementOnPerBucketMode() throws Exception {
         externalExecutor = Executors.newSingleThreadExecutor();
         ExecutorRoutingWrite write = new ExecutorRoutingWrite(coreOptions(-1));
