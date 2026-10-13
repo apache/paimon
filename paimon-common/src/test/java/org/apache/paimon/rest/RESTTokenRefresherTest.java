@@ -85,6 +85,51 @@ class RESTTokenRefresherTest {
     }
 
     @Test
+    void testSlowFailedReloadStartsTheRetryIntervalWhenItFinishes() {
+        when(api.loadTableToken(identifier)).thenAnswer(invocation -> slowFailure());
+        RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(2)));
+        now.addAndGet(Duration.ofSeconds(61).toMillis());
+
+        assertThat(refresher.token().token()).containsEntry("k", "first");
+        assertThat(refresher.token().token()).containsEntry("k", "first");
+        verify(api, times(1)).loadTableToken(identifier);
+
+        now.addAndGet(RESTTokenRefresher.RELOAD_INTERVAL_MILLIS);
+        assertThat(refresher.token().token()).containsEntry("k", "first");
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testSlowFailedReloadDoesNotReturnATokenThatExpiredMeanwhile() {
+        when(api.loadTableToken(identifier)).thenAnswer(invocation -> slowFailure());
+        RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(2)));
+        // still valid when the reload starts, expired when it fails
+        now.addAndGet(Duration.ofSeconds(110).toMillis());
+
+        assertThatThrownBy(refresher::token).hasMessageContaining("REST server unavailable");
+        assertThatThrownBy(refresher::token)
+                .hasMessageContaining("reloading it failed")
+                .hasRootCauseMessage("REST server unavailable");
+        verify(api, times(1)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testSlowReloadKeepsTheNewTokenForTheReloadIntervalAfterItArrives() {
+        when(api.loadTableToken(identifier))
+                .thenAnswer(
+                        invocation -> {
+                            now.addAndGet(Duration.ofSeconds(20).toMillis());
+                            return response("second", Duration.ofSeconds(16));
+                        });
+        RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(2)));
+        now.addAndGet(Duration.ofSeconds(61).toMillis());
+
+        assertThat(refresher.token().token()).containsEntry("k", "second");
+        assertThat(refresher.token().token()).containsEntry("k", "second");
+        verify(api, times(1)).loadTableToken(identifier);
+    }
+
+    @Test
     void testOtherCallersKeepTheValidTokenWhileOneReloads() throws Exception {
         CountDownLatch loading = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -207,6 +252,12 @@ class RESTTokenRefresherTest {
 
     private RESTTokenRefresher refresher(RESTToken token) {
         return new RESTTokenRefresher(new Options(), identifier, api, token, now::get);
+    }
+
+    /** A request that fails after the 20 seconds a slow catalog may take. */
+    private GetTableTokenResponse slowFailure() {
+        now.addAndGet(Duration.ofSeconds(20).toMillis());
+        throw new IllegalStateException("REST server unavailable");
     }
 
     private RESTToken token(String value, Duration lifetime) {

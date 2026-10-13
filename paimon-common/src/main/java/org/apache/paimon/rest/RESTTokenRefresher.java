@@ -196,13 +196,15 @@ public class RESTTokenRefresher {
         }
         try {
             RESTToken loaded = load();
-            cached = new CachedToken(loaded, now);
+            cached = new CachedToken(loaded, currentTimeMillis());
             lastFailure = null;
             return loaded;
         } catch (RuntimeException e) {
+            // A slow request must neither use up the retry interval nor outlive the current token.
+            long failedAt = currentTimeMillis();
             lastFailure = e;
-            nextAttemptMillis = now + RELOAD_INTERVAL_MILLIS;
-            if (!valid) {
+            nextAttemptMillis = failedAt + RELOAD_INTERVAL_MILLIS;
+            if (current == null || failedAt >= current.token.expireAtMillis()) {
                 throw e;
             }
             LOG.warn(
