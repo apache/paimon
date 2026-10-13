@@ -562,10 +562,12 @@ public class RESTCatalog implements Catalog {
             @Nullable String tableUuid,
             Instant instant,
             @Nullable Long fromSnapshot,
+            @Nullable String fromSnapshotUuid,
             @Nullable String commitUser)
             throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, tableUuid, instant, fromSnapshot, commitUser);
+            api.rollbackTo(
+                    identifier, tableUuid, instant, fromSnapshot, fromSnapshotUuid, commitUser);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(

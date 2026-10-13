@@ -80,10 +80,15 @@ class CatalogEnvironmentTest {
                         true,
                         false);
         Instant instant = Instant.snapshot(1L);
-        environment.catalogTableRollback(branch, "writer").rollbackTo(instant, 2L);
+        environment.catalogTableRollback(branch, "writer").rollbackTo(instant, 2L, "head-uuid");
         verify(catalog)
                 .rollbackTo(
-                        new Identifier("db", "table", branch), "table-id", instant, 2L, "writer");
+                        new Identifier("db", "table", branch),
+                        "table-id",
+                        instant,
+                        2L,
+                        "head-uuid",
+                        "writer");
     }
 
     @ParameterizedTest
@@ -102,9 +107,15 @@ class CatalogEnvironmentTest {
                         true,
                         false);
         Instant instant = Instant.tag("tag-1");
-        environment.catalogTableRollback(null, null).rollbackTo(instant, null);
+        environment.catalogTableRollback(null, null).rollbackTo(instant, null, null);
         verify(catalog)
-                .rollbackTo(new Identifier("db", "table", branch), tableUuid, instant, null, null);
+                .rollbackTo(
+                        new Identifier("db", "table", branch),
+                        tableUuid,
+                        instant,
+                        null,
+                        null,
+                        null);
     }
 
     @ParameterizedTest
@@ -131,12 +142,12 @@ class CatalogEnvironmentTest {
         CatalogEnvironment copied = environment.copy(targetIdentifier);
 
         Instant snapshot = Instant.snapshot(1L);
-        copied.catalogTableRollback(null, null).rollbackTo(snapshot, 2L);
-        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, snapshot, 2L, null);
+        copied.catalogTableRollback(null, null).rollbackTo(snapshot, 2L, "head-uuid");
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, snapshot, 2L, "head-uuid", null);
 
         Instant tag = Instant.tag("checkpoint");
         copied.snapshotLoader().rollback(tag);
-        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, tag, null, null);
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, tag, null, null, null);
         assertThat(environment.uuid()).isEqualTo(sourceUuid);
     }
 

@@ -180,7 +180,7 @@ public class CatalogEnvironment implements Serializable {
                         lockContext, lockIdentifier, uuid, commitUser, tableOptions);
     }
 
-    /** Create rollback with the table incarnation and optional writer lock context. */
+    /** Create rollback with the table incarnation and optional writer identity. */
     @Nullable
     public TableRollback catalogTableRollback(
             @Nullable String branch, @Nullable String commitUser) {
@@ -193,9 +193,15 @@ public class CatalogEnvironment implements Serializable {
                                     identifier.getDatabaseName(),
                                     identifier.getTableName(),
                                     branch);
-            return (instant, fromSnapshot) -> {
+            return (instant, fromSnapshot, fromSnapshotUuid) -> {
                 try {
-                    catalog.rollbackTo(rollbackIdentifier, uuid, instant, fromSnapshot, commitUser);
+                    catalog.rollbackTo(
+                            rollbackIdentifier,
+                            uuid,
+                            instant,
+                            fromSnapshot,
+                            fromSnapshotUuid,
+                            commitUser);
                 } catch (Catalog.TableNotExistException e) {
                     throw new RuntimeException(e);
                 }

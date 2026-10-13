@@ -717,6 +717,7 @@ public abstract class AbstractCatalog implements Catalog {
             @Nullable String tableUuid,
             Instant instant,
             @Nullable Long fromSnapshot,
+            @Nullable String fromSnapshotUuid,
             @Nullable String commitUser)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();

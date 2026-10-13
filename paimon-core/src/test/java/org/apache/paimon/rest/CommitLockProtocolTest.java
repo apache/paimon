@@ -131,7 +131,8 @@ class CommitLockProtocolTest {
                     };
             Identifier identifier = new Identifier("db", "table", "dev");
             server.enqueue(json("{}"));
-            catalog.rollbackTo(identifier, "table-id", Instant.snapshot(1L), 2L, "morax-job");
+            catalog.rollbackTo(
+                    identifier, "table-id", Instant.snapshot(1L), 2L, "head-uuid", "morax-job");
             RecordedRequest owned = server.takeRequest(10, TimeUnit.SECONDS);
             assertThat(owned.getPath()).endsWith("/rollback");
             RollbackTableRequest request =
@@ -140,13 +141,14 @@ class CommitLockProtocolTest {
             assertThat(request.getCommitUser()).isEqualTo("morax-job");
             assertThat(request.getFromSnapshot()).isEqualTo(2L);
             server.enqueue(json("{}"));
-            catalog.rollbackTo(identifier, null, Instant.snapshot(1L), 2L, null);
+            catalog.rollbackTo(identifier, null, Instant.snapshot(1L), 2L, null, null);
             ObjectNode legacy =
                     RESTApi.fromJson(
                             server.takeRequest(10, TimeUnit.SECONDS).getBody().readUtf8(),
                             ObjectNode.class);
             assertThat(legacy.has("tableId")).isFalse();
             assertThat(legacy.has("commitUser")).isFalse();
+            assertThat(legacy.has("fromSnapshotUuid")).isFalse();
         }
     }
 

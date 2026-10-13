@@ -134,10 +134,17 @@ respect another writer's active lease. The server uses its own persisted table p
 decision, rather than client options. Capability changes must be serialized with publication and
 lease acquisition; disabling enforcement must not bypass an active lease.
 
-Rollback inside a lease supplies `tableId` and `commitUser` in addition to the expected
-`fromSnapshot`. The server must validate the lease and expected head, roll back and clear the lease
-atomically. Ordinary rollback still supplies a known table UUID but omits `commitUser`; it cannot
-change a leased head. The UUID is omitted only when the target table or branch identity is unknown.
+Automatic conflict rollback always supplies the runtime branch and writer's `commitUser`, together
+with the expected head's `fromSnapshot` and `fromSnapshotUuid`. Snapshot IDs can be reused after a
+rollback, so the server must check both fields against the current head inside the mutation
+transaction, before changing partitions or deleting files. Automatic rollback skips legacy snapshots
+without a UUID. A known table or branch UUID is supplied independently of writer identity.
+
+`commitUser` identifies the writer; it does not require a lease to exist. If a live lease exists, the
+writer and authenticated caller must match its owner. Without a live lease, conditional optimistic
+rollback is allowed. The server must validate admission and the expected head, roll back and clear
+the lease atomically. Manual rollback can omit writer identity, but cannot change a leased head.
+The table UUID is omitted only when the target table or branch identity is unknown.
 
 This is a commit admission lease, not a generation or fencing token. Requests with the same
 commit user and authenticated caller share ownership. Use a unique commit user per logical writer

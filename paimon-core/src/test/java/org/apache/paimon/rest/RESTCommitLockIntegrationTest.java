@@ -325,9 +325,9 @@ class RESTCommitLockIntegrationTest {
                                 assertThat(requestBody.getTableId()).isEqualTo("branch-id");
                                 assertThat(requestBody.getFromSnapshot())
                                         .isEqualTo(head.get().id());
-                                assertThat(requestBody.getCommitUser()).isEqualTo(owner.get());
                                 if (locking) {
                                     assertThat(owner.get()).isNotNull();
+                                    assertThat(requestBody.getCommitUser()).isEqualTo(owner.get());
                                 }
                                 head.set(
                                         snapshots.get(
@@ -424,10 +424,10 @@ class RESTCommitLockIntegrationTest {
                 assertThat(replacement.uuid()).isNotEqualTo(compactHead.uuid());
                 assertThat(replacement.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
                 assertThat(rollback.get().getFromSnapshot()).isEqualTo(6L);
+                assertThat(rollback.get().getFromSnapshotUuid()).isEqualTo(compactHead.uuid());
                 assertThat(((Instant.SnapshotInstant) rollback.get().getInstant()).getSnapshotId())
                         .isEqualTo(5L);
-                assertThat(rollback.get().getCommitUser())
-                        .isEqualTo(locking ? replacement.commitUser() : null);
+                assertThat(rollback.get().getCommitUser()).isEqualTo(replacement.commitUser());
                 if (locking) {
                     assertThat(events)
                             .containsSubsequence(
