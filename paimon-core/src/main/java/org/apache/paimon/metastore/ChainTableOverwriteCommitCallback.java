@@ -82,6 +82,13 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
      */
     public static final String SNAPSHOT_BRANCH_POSITION = "chain-table.snapshot-branch.snapshot-id";
 
+    /**
+     * The delta manifest list of that snapshot, which no other snapshot shares: a rollback of the
+     * snapshot branch can give its id to a later snapshot, and this tells the two apart.
+     */
+    public static final String SNAPSHOT_BRANCH_POSITION_MANIFEST_LIST =
+            "chain-table.snapshot-branch.delta-manifest-list";
+
     private transient FileStoreTable table;
     private transient CoreOptions coreOptions;
     private final String commitUser;
@@ -105,9 +112,13 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
         if (!ChainTableUtils.isScanFallbackDeltaBranch(coreOptions)) {
             return;
         }
-        Long latest = snapshotTable().snapshotManager().latestSnapshotId();
-        committable.addProperty(
-                SNAPSHOT_BRANCH_POSITION, String.valueOf(latest == null ? 0L : latest));
+        Snapshot latest = snapshotTable().snapshotManager().latestSnapshot();
+        if (latest == null) {
+            committable.addProperty(SNAPSHOT_BRANCH_POSITION, "0");
+            return;
+        }
+        committable.addProperty(SNAPSHOT_BRANCH_POSITION, String.valueOf(latest.id()));
+        committable.addProperty(SNAPSHOT_BRANCH_POSITION_MANIFEST_LIST, latest.deltaManifestList());
     }
 
     @Override
@@ -214,6 +225,22 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
                             partitions, table.name(), overwrite.id(), asOfId));
         }
         Snapshot asOf = snapshotManager.snapshot(asOfId);
+        String manifestList = overwrite.properties().get(SNAPSHOT_BRANCH_POSITION_MANIFEST_LIST);
+        if (manifestList == null || !manifestList.equals(asOf.deltaManifestList())) {
+            // A rollback of the snapshot branch to before this snapshot, and commits after it,
+            // give its id to a snapshot of another history; files the replacement holds may well
+            // have been written after the overwrite.
+            throw new IllegalStateException(
+                    String.format(
+                            "Cannot redo the snapshot branch cleanup of the overwrite of partitions "
+                                    + "%s in table %s (snapshot %s): snapshot %s of the snapshot "
+                                    + "branch is not the one that overwrite recorded, as when the "
+                                    + "snapshot branch was rolled back and committed to since, so "
+                                    + "what the overwrite superseded cannot be told from what was "
+                                    + "written after it. Clear the superseded rows of these "
+                                    + "partitions manually.",
+                            partitions, table.name(), overwrite.id(), asOfId));
+        }
         Snapshot latest = snapshotManager.latestSnapshot();
 
         // Follow the superseded files through the rewrites of the snapshot branch since then.

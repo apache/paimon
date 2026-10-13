@@ -1586,6 +1586,94 @@ public class ChainTableFileStoreTableTest {
         assertThat(deltaTable.snapshotManager().latestSnapshot()).isNull();
     }
 
+    @Test
+    public void testChainOverwriteReplayAfterSnapshotBranchRollbackReusedTheRecordedId()
+            throws Exception {
+        // Reviewer P1 on #10105: the overwrite records the snapshot branch position as a snapshot
+        // id, and a rollback of the snapshot branch can give that id to a different, later
+        // snapshot. The retry must not take the replacement for the snapshot it recorded.
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "old", "CN", "20250810", "20"));
+        writeWithCommit(snapshotTable, row(3L, 1L, "old-2", "CN", "20250810", "20"));
+        assertThat(snapshotTable.snapshotManager().latestSnapshotId()).isEqualTo(2);
+
+        // The overwrite is published, recording snapshot 2, and its cleanup fails.
+        assertCleanupFails(
+                snapshotTable,
+                () ->
+                        commitOverwrite(
+                                deltaTable,
+                                partition,
+                                0,
+                                row(1L, 2L, "new", "CN", "20250810", "20")));
+        assertThat(
+                        deltaTable
+                                .snapshotManager()
+                                .latestSnapshot()
+                                .properties()
+                                .get(ChainTableOverwriteCommitCallback.SNAPSHOT_BRANCH_POSITION))
+                .isEqualTo("2");
+
+        // The snapshot branch is rolled back to snapshot 1, and a row written afterwards becomes
+        // a new snapshot 2.
+        loadTable().switchToBranch(SNAPSHOT_BRANCH).rollbackTo(1);
+        writeWithCommit(
+                loadTable().switchToBranch(SNAPSHOT_BRANCH),
+                row(2L, 1L, "later", "CN", "20250810", "20"));
+        assertThat(loadTable().switchToBranch(SNAPSHOT_BRANCH).snapshotManager().latestSnapshotId())
+                .isEqualTo(2);
+
+        // The retry cannot tell what the overwrite superseded on the replacement history, so it
+        // must refuse rather than delete the row written after the overwrite.
+        assertThatThrownBy(
+                        () ->
+                                commitOverwrite(
+                                        deltaTable,
+                                        partition,
+                                        0,
+                                        row(1L, 2L, "new", "CN", "20250810", "20")))
+                .hasStackTraceContaining("is not the one that overwrite recorded");
+        assertThat(getResult(loadTable().switchToBranch(SNAPSHOT_BRANCH), partition))
+                .containsExactlyInAnyOrder(
+                        row(1L, 1L, "old", "CN", "20250810", "20"),
+                        row(2L, 1L, "later", "CN", "20250810", "20"));
+    }
+
+    @Test
+    public void testChainOverwriteReplayAfterSnapshotBranchRollbackKeepingTheRecordedSnapshot()
+            throws Exception {
+        // A rollback that keeps the snapshot the overwrite recorded leaves its history intact:
+        // the retry still clears what the overwrite superseded and keeps what came after it.
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition = partition("20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "old", "CN", "20250810", "20"));
+        assertCleanupFails(
+                snapshotTable,
+                () ->
+                        commitOverwrite(
+                                deltaTable,
+                                partition,
+                                0,
+                                row(1L, 2L, "new", "CN", "20250810", "20")));
+        writeWithCommit(snapshotTable, row(2L, 1L, "later", "CN", "20250810", "20"));
+        writeWithCommit(snapshotTable, row(3L, 1L, "rolled-back", "CN", "20250810", "20"));
+        loadTable().switchToBranch(SNAPSHOT_BRANCH).rollbackTo(2);
+
+        commitOverwrite(deltaTable, partition, 0, row(1L, 2L, "new", "CN", "20250810", "20"));
+
+        assertThat(getResult(loadTable().switchToBranch(SNAPSHOT_BRANCH), partition))
+                .containsExactly(row(2L, 1L, "later", "CN", "20250810", "20"));
+    }
+
     private void compactSnapshotPartition(FileStoreTable snapshotTable) throws Exception {
         BinaryRow partitionRow =
                 snapshotTable.newSnapshotReader().read().dataSplits().get(0).partition();
