@@ -327,7 +327,7 @@ def test_refinement_uses_global_candidates(table):
             return
         # Row 3 is the true nearest, but is outside the GLOBAL approximate top-2.
         # Refining independently per shard would incorrectly bring it back in.
-        assert args[-1] is True  # Index tasks request plan-ordered results.
+        assert args[2] is True  # Index tasks request plan-ordered results.
         yield 0, ("l2", {0: 10., 1: 9.})
         yield 1, ("l2", {2: 8., 3: 7.})
 
@@ -348,7 +348,7 @@ def test_duplicate_scores_keep_plan_order(table):
     splits = [IndexVectorSearchSplit(0, 1, [index_file]), IndexVectorSearchSplit(0, 3, [index_file])]
 
     def completed(*args):
-        assert args[-1] is True
+        assert args[5] is True
         yield 0, ("l2", {0: 1., 1: 2.})
         yield 1, ("l2", {0: 100.})
 
@@ -376,7 +376,7 @@ def test_metric_mismatch_fails_even_when_one_shard_has_no_hits(table):
     with patch.object(search_module, "_map_tasks", completed), \
             pytest.raises(ValueError, match="different metrics"):
         list(distributed._search_index_splits(
-            [IndexVectorSearchSplit(0, 1, []), IndexVectorSearchSplit(2, 3, [])], [1., 1.], 1, []))
+            [IndexVectorSearchSplit(0, 1, []), IndexVectorSearchSplit(2, 3, [])], [1., 1.], 1, None))
     assert closed == [True]
 
 

@@ -34,7 +34,6 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.read.native_plan import native_plan, native_version_at_least
 from pypaimon.schema.data_types import AtomicType
-from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 
@@ -68,9 +67,8 @@ def _table(tmp_path, layout, first_partition='a', partition_type=None, legacy_pa
     catalog.create_table('db.t', Schema.from_pyarrow_schema(
         schema, partition_keys=['p'], options=options), False)
     table = catalog.get_table('db.t')
-    # Seed the legacy Python partition paths and deterministic row-id ordering
-    # which these compatibility/decoy tests deliberately reference. Updates and
-    # reads below still exercise the configured native backend.
+    # Seed through Python with deterministic row-id ordering. Updates and
+    # reads below exercise the configured backend against Java index paths.
     builder = table.copy({'write.native.enabled': 'false'}).new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
@@ -150,37 +148,71 @@ def test_delete_paths_preserve_repeated_deletes_and_historical_reads(tmp_path, p
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)
-def test_legacy_python_index_directory_remains_readable_and_new_deletes_use_bucket(tmp_path, planner):
-    table = _table(tmp_path, 'bucket')
-    # Old Python writers ignored the option and placed the index under table/index.
-    legacy_factory = table.path_factory()
-    legacy_factory.index_file_in_data_file_dir = False
-    legacy_table = table.copy({'write.native.enabled': 'false'})
-    with patch.object(legacy_table, 'path_factory', return_value=legacy_factory):
-        _delete(legacy_table, [0, 2])
-    old_paths = [Path(table.table_path) / 'index' / entry.index_file.file_name for entry in _entries(table, 2)]
-    assert all(path.is_file() for path in old_paths)
-    _read(table, planner, 2, [1, 3])
-    _delete(table, [1])
-    _read(table, planner, 3, [3])
-    _read(table, planner, 2, [1, 3])
-    for entry in _entries(table, 3):
-        if entry.partition.values == ['a']:
-            assert (Path(table.path_factory().bucket_path(('a',), entry.bucket)) /
-                    entry.index_file.file_name).is_file()
-    assert all(path.is_file() for path in old_paths)
+@pytest.mark.parametrize('wrong_directory', ['table-index', 'unescaped-partition'])
+def test_bucket_dv_requires_java_directory(tmp_path, planner, wrong_directory):
+    table = _table(tmp_path, 'bucket', 'a/b')
+    _delete(table, [0])
+    entry = _entries(table, 2)[0]
+    factory = table.path_factory()
+    file = entry.index_file
+    assert file.external_path is None
+    partition = tuple(entry.partition.values)
+    path = factory.bucket_index_path(partition, entry.bucket, file)
+    wrong_parent = (factory.index_path() if wrong_directory == 'table-index'
+                    else factory.bucket_path(partition, entry.bucket))
+    wrong_path = wrong_parent + '/' + file.file_name
+    with table.file_io.new_input_stream(path) as stream:
+        data = stream.read()
+    table.file_io.delete_quietly(path)
+    with table.file_io.new_output_stream(wrong_path) as stream:
+        stream.write(data)
+    with pytest.raises((FileNotFoundError, ValueError)) as error:
+        _read(table, planner, 2, [1, 2, 3])
+    assert file.file_name in str(error.value)
+    with pytest.raises((FileNotFoundError, ValueError)) as error:
+        _delete(table, [1])
+    assert file.file_name in str(error.value)
+    assert table.snapshot_manager().get_latest_snapshot().id == 2
+    assert table.file_io.exists(wrong_path)
+
+
+@pytest.mark.parametrize('file_uri', [False, True])
+@pytest.mark.parametrize('escaped_root', [False, True])
+def test_floating_bucket_dv_does_not_search_python_directory(tmp_path, file_uri, escaped_root):
+    if escaped_root:
+        tmp_path = tmp_path / 'root%2Fdir'
+    table = _table(tmp_path, 'bucket', 0.1, pa.float32()).copy({'read.native.enabled': 'false'})
+    _delete(table, [0])
+    entry = _entries(table, 2)[0]
+    factory = table.path_factory()
+    if file_uri:
+        factory._root = 'file://' + table.table_path
+    partition = tuple(entry.partition.values)
+    file = replace(entry.index_file, external_path=None)
+    canonical = factory.bucket_index_path(partition, entry.bucket, file)
+    python_path = factory.bucket_path(partition, entry.bucket) + '/' + file.file_name
+    with table.file_io.new_input_stream(canonical) as stream:
+        data = stream.read()
+    table.file_io.delete_quietly(canonical)
+    with table.file_io.new_output_stream(python_path) as stream:
+        stream.write(data)
+    assert factory.bucket_index_path(partition, entry.bucket, file) == canonical
+    with patch.object(table, 'path_factory', return_value=factory):
+        with pytest.raises(FileNotFoundError, match=file.file_name):
+            _read(table, 'python', 2, [1, 2, 3])
+    assert table.file_io.exists(python_path)
 
 
 @pytest.mark.parametrize('layout', ['bucket', 'bucket-external', 'global-external'])
-def test_abort_removes_uncommitted_dv_from_its_actual_directory(tmp_path, layout):
-    table = _table(tmp_path, layout)
+def test_explicit_abort_removes_uncommitted_dv_from_its_actual_directory(tmp_path, layout):
+    table = _table(tmp_path, layout, 'a/b')
     _delete(table, [0])
     builder = table.new_batch_write_builder()
     messages = builder.new_update().delete_by_row_id([1])
     uncommitted = [entry for message in messages for entry in message.index_adds]
     assert uncommitted
     files_before = set(tmp_path.rglob('index-*'))
-    _abort_commit_messages(table, messages)
+    builder.new_commit().abort(messages)
     files_after = set(tmp_path.rglob('index-*'))
     removed = {path.name for path in files_before - files_after}
     assert removed == {entry.index_file.file_name for entry in uncommitted}
@@ -208,48 +240,59 @@ def test_missing_explicit_dv_is_not_replaced_by_a_local_copy(tmp_path, planner):
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)
-@pytest.mark.parametrize('partition', ['a/b', 'a%2Fb', 'a=b', 'a#b', 'a b', '中文'])
-def test_bucket_dv_in_partition_requiring_path_escaping(tmp_path, planner, partition):
-    table = _table(tmp_path, 'bucket', partition)
+@pytest.mark.parametrize('layout', ['bucket', 'bucket-external'])
+@pytest.mark.parametrize('partition,escaped', [
+    ('a/b', 'a%2Fb'), ('a%2Fb', 'a%252Fb'), ('a=b', 'a%3Db'),
+    ('a#b', 'a%23b'), ('a b', 'a b'), ('中文', '中文')])
+def test_bucket_dv_in_partition_requiring_path_escaping(tmp_path, planner, layout, partition, escaped):
+    table = _table(tmp_path, layout, partition)
     _delete(table, [0])
-    file = _entries(table, 2)[0].index_file
-    if partition in ['a b', '中文']:
-        assert file.external_path is None
-    else:
-        assert file.external_path is not None
-        assert table.file_io.exists(file.external_path)
+    entry = _entries(table, 2)[0]
+    file = entry.index_file
+    assert (file.external_path is not None) == (layout == 'bucket-external')
+    root = tmp_path / 'external-data' if layout == 'bucket-external' else Path(table.table_path)
+    path = root / ('p=' + escaped) / ('bucket-' + str(entry.bucket)) / file.file_name
+    assert path.is_file()
     _read(table, planner, 2, [1, 2, 3])
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)
-@pytest.mark.parametrize('partition_type,value', [(pa.bool_(), True), (pa.float32(), 0.1), (pa.float64(), 0.1)],
-                         ids=['BOOLEAN', 'FLOAT', 'DOUBLE'])
-def test_bucket_dv_preserves_python_typed_partition_directory(tmp_path, planner, partition_type, value):
+@pytest.mark.parametrize('partition_type,value,canonical_name', [
+    (pa.bool_(), True, 'true'), (pa.float32(), 0.1, '0.1'), (pa.float64(), 0.1, '0.1'),
+    (pa.float32(), 1.1754943508222875e-38, '1.1754944E-38'),
+    (pa.float64(), 1e23, '1.0E23')])
+def test_bucket_dv_writes_java_typed_partition_directory(tmp_path, planner, partition_type, value, canonical_name):
     table = _table(tmp_path, 'bucket', value, partition_type)
     _delete(table, [0])
-    file = _entries(table, 2)[0].index_file
-    assert file.external_path is not None
-    assert table.file_io.exists(file.external_path)
-    effective_planner = planner
-    if planner == 'native' and pa.types.is_floating(partition_type):
-        # Rust intentionally rejects floating partition formatting until it can
-        # reproduce Java Float/Double.toString, including boundary values.
-        with pytest.raises(NotImplementedError, match='type is not supported as partition key'):
-            native_plan(table)
-        native_table = table.copy({'scan.native-plan.enabled': 'true'})
-        scan = native_table.new_read_builder().new_scan()
-        with patch('pypaimon.read.native_plan.native_plan', wraps=native_plan) as native_call:
-            with patch.object(scan.file_scanner, 'scan', wraps=scan.file_scanner.scan) as fallback:
-                plan = scan.plan()
-        assert native_call.call_count == 1
-        assert fallback.call_count == 1
-        result = native_table.new_read_builder().new_read().to_arrow(plan.splits())
-        assert sorted(result.column('k').to_pylist()) == [1, 2, 3]
-        effective_planner = 'python'
-    _read(table, effective_planner, 2, [1, 2, 3])
+    entry = _entries(table, 2)[0]
+    file = entry.index_file
+    assert file.external_path is None
+    path = Path(table.table_path) / ('p=' + canonical_name) / ('bucket-' + str(entry.bucket)) / file.file_name
+    assert path.is_file()
+    _read(table, planner, 2, [1, 2, 3])
     _delete(table, [1])
-    _read(table, effective_planner, 3, [2, 3])
-    _read(table, effective_planner, 2, [1, 2, 3])
+    _read(table, planner, 3, [2, 3])
+    _read(table, planner, 2, [1, 2, 3])
+
+
+@pytest.mark.parametrize('planner', _PLANNERS)
+def test_floating_bucket_dv_requires_current_java_directory(tmp_path, planner):
+    table = _table(tmp_path, 'bucket', 1e23, pa.float64())
+    _delete(table, [0])
+    entry = _entries(table, 2)[0]
+    canonical = (Path(table.table_path) / 'p=1.0E23' /
+                 ('bucket-' + str(entry.bucket)) / entry.index_file.file_name)
+    alternate = (Path(table.table_path) / 'p=9.999999999999999E22' /
+                 ('bucket-' + str(entry.bucket)) / entry.index_file.file_name)
+    alternate.parent.mkdir(parents=True, exist_ok=True)
+    canonical.rename(alternate)
+    expected = table.path_factory().bucket_index_path(
+        tuple(entry.partition.values), entry.bucket, entry.index_file)
+    assert expected == str(canonical)
+    with pytest.raises((FileNotFoundError, ValueError)) as error:
+        _read(table, planner, 2, [1, 2, 3])
+    assert entry.index_file.file_name in str(error.value)
+    assert alternate.is_file()
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)
@@ -261,14 +304,11 @@ def test_bucket_dv_preserves_python_typed_partition_directory(tmp_path, planner,
     (-0.0, pa.float32(), '-0.0'),
     (1.4e-45, pa.float32(), '1.4E-45'),
     (3.4028234663852886e38, pa.float32(), '3.4028235E38'),
-    (1.17549435e-38, pa.float32(), '1.17549435E-38'),
     (1.17549435e-38, pa.float32(), '1.1754944E-38'),
-    (2.68873286e11, pa.float32(), '2.68873286E11'),
     (2.68873286e11, pa.float32(), '2.6887329E11'),
-    (9.64991956e24, pa.float32(), '9.6499195E24'),
-    (1e23, pa.float64(), '9.999999999999999E22'),
+    (9.64991956e24, pa.float32(), '9.6499196E24'),
     (1e23, pa.float64(), '1.0E23'),
-    (-2.3345394554987242e17, pa.float64(), '-2.33453945549872416E17'),
+    (-2.3345394554987242e17, pa.float64(), '-2.3345394554987242E17'),
     (5e-324, pa.float64(), '4.9E-324'),
     (datetime(2026, 9, 15, 12), pa.timestamp('s'), '2026-09-15 12%3A00%3A00'),
     (datetime(2026, 9, 15, 12), pa.timestamp('ms'), '2026-09-15 12%3A00%3A00.000'),
@@ -368,7 +408,7 @@ def _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_na
     # Model the persisted layout produced by Java: the bucket path is canonical
     # and no explicit index location is needed in its manifest metadata.
     old_path = table.path_factory().bucket_index_path(
-        tuple(old.partition.values), old.bucket, old.index_file, table.file_io)
+        tuple(old.partition.values), old.bucket, old.index_file)
     with table.file_io.new_input_stream(old_path) as stream:
         data = stream.read()
     with table.file_io.new_output_stream(canonical_path) as stream:
@@ -384,9 +424,6 @@ def _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_na
     # Case-insensitive local filesystems consider p=True and p=true identical.
     if not Path(old_path).samefile(canonical_path):
         table.file_io.delete_quietly(old_path)
-        # Both previous Python locations must lose to every Java spelling.
-        with table.file_io.new_output_stream(old_path) as stream:
-            stream.write(b'not the canonical deletion vector')
     with table.file_io.new_output_stream(table.path_factory().index_path() + '/' + old.index_file.file_name) as stream:
         stream.write(b'not a bucket deletion vector')
     if partition_type is not None and pa.types.is_floating(partition_type):
@@ -394,16 +431,7 @@ def _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_na
                               old.index_file.file_name)
         with table.file_io.new_output_stream(other_partition) as stream:
             stream.write(b'not the requested floating partition')
-    if planner == 'native' and partition_type is not None and pa.types.is_floating(partition_type):
-        # Rust does not support floating partitions; exercise the real adapter
-        # fallback against the same Java-produced DV layout.
-        table = table.copy({'scan.native-plan.enabled': 'true'})
-        planner = 'python'
-        with patch('pypaimon.read.native_plan.native_plan', wraps=native_plan) as native_call:
-            plan = _read(table, planner, 3, [1, 2, 3])
-        assert native_call.call_count == 1
-    else:
-        plan = _read(table, planner, 3, [1, 2, 3])
+    plan = _read(table, planner, 3, [1, 2, 3])
     paths = [dv.dv_index_path for split in plan.splits()
              for dv in split.data_deletion_files or [] if dv is not None]
     assert paths == [canonical_path]

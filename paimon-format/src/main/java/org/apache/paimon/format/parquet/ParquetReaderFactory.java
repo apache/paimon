@@ -34,6 +34,9 @@ import org.apache.paimon.format.shredding.ShreddingReadPlanFactories;
 import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
@@ -130,12 +133,52 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 // Parquet treats unprojected filter columns as null. Keep only conjuncts
                 // covered by the projection; an OR with an unprojected field must be dropped.
                 for (Predicate conjunct : PredicateBuilder.splitAnd(predicate)) {
-                    if (projectedFields.containsAll(PredicateVisitor.collectFieldNames(conjunct))) {
+                    if (projectedFields.containsAll(PredicateVisitor.collectFieldNames(conjunct))
+                            && nestedPathsProjected(conjunct)) {
                         this.predicates.add(conjunct);
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Parquet also reads an unrequested nested column as all-null, so a nested field filter is only
+     * safe when its whole path survives the (possibly pruned) read type.
+     */
+    private boolean nestedPathsProjected(Predicate predicate) {
+        if (predicate instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                if (!nestedPathsProjected(child)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (!(predicate instanceof LeafPredicate)
+                || !(((LeafPredicate) predicate).transform() instanceof NestedFieldTransform)) {
+            return true;
+        }
+        NestedFieldTransform nested =
+                (NestedFieldTransform) ((LeafPredicate) predicate).transform();
+        DataType current = findProjectedField(readType, nested.fieldRef().name());
+        for (String component : nested.path()) {
+            current =
+                    current instanceof RowType
+                            ? findProjectedField((RowType) current, component)
+                            : null;
+        }
+        return current != null;
+    }
+
+    @Nullable
+    private DataType findProjectedField(RowType rowType, String name) {
+        for (DataField field : rowType.getFields()) {
+            if (caseSensitive ? field.name().equals(name) : field.name().equalsIgnoreCase(name)) {
+                return field.type();
+            }
+        }
+        return null;
     }
 
     @VisibleForTesting

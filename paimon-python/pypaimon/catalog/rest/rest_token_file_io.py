@@ -326,5 +326,10 @@ class RESTTokenFileIO(FileIO):
         self.try_to_refresh_token()
         return self.token
 
+    def _existing_valid_token(self) -> Optional[RESTToken]:
+        """Return this instance's valid token without locks or refresh requests."""
+        token = self.token
+        return token if not self._is_token_expired(token) else None
+
     def close(self):
         pass

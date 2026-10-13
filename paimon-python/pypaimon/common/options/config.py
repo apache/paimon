@@ -21,7 +21,9 @@ from pypaimon.common.options.config_options import ConfigOptions
 
 class OssOptions:
     OSS_IMPL = ConfigOptions.key("fs.oss.impl").string_type().default_value("jindo").with_description(
-        "OSS filesystem implementation: legacy or jindo")
+        "OSS filesystem implementation: legacy, jindo, or cpp (native reads only)")
+    OSS_PYTHON_IMPL = ConfigOptions.key("fs.oss.python.impl").string_type().default_value("jindo").with_description(
+        "Python OSS implementation when fs.oss.impl=cpp: jindo or legacy")
     OSS_ACCESS_KEY_ID = ConfigOptions.key("fs.oss.accessKeyId").string_type().no_default_value().with_description(
         "OSS access key ID")
     OSS_ACCESS_KEY_SECRET = ConfigOptions.key(
@@ -46,6 +48,9 @@ class OssOptions:
 
 
 class S3Options:
+    CHECKSUM_COMPATIBILITY_AUTO_CONFIGURE = (
+        ConfigOptions.key("fs.s3.checksum-compatibility.auto-configure").boolean_type().default_value(True)
+        .with_description("Apply a process-wide optional-checksum default for PyArrow OSS/custom S3 clients."))
     S3_ACCESS_KEY_ID = ConfigOptions.key("fs.s3.accessKeyId").string_type().no_default_value().with_description(
         "S3 access key ID")
     S3_ACCESS_KEY_SECRET = ConfigOptions.key("fs.s3.accessKeySecret").string_type().no_default_value().with_description(
@@ -87,6 +92,13 @@ class PVFSOptions:
 
 
 class CatalogOptions:
+    CACHE_BLOB_INDEX_MAX_SIZE = (
+        ConfigOptions.key("cache.blob-index.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(64))
+        .with_description("Maximum estimated Python BLOB index cache size per catalog.")
+    )
+
     URI = ConfigOptions.key("uri").string_type().no_default_value().with_description("Catalog URI")
     METASTORE = ConfigOptions.key("metastore").string_type().default_value("filesystem").with_description(
         "Metastore type")
@@ -131,7 +143,17 @@ class CatalogOptions:
         "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
-        "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+        "header.User-Agent").string_type().no_default_value().with_description(
+        "The User-Agent of REST catalog requests, replacing Paimon's unified one")
+    USER_AGENT_MODULE = ConfigOptions.key(
+        "user-agent.module").string_type().no_default_value().with_description(
+        "The module of Paimon's unified User-Agent, 'pypaimon/<version>' by default")
+    USER_AGENT_FEATURES = ConfigOptions.key(
+        "user-agent.features").string_type().no_default_value().with_description(
+        "Space-separated features of Paimon's unified User-Agent")
+    USER_AGENT_EXTENDED = ConfigOptions.key(
+        "user-agent.extended").string_type().no_default_value().with_description(
+        "Free text appended to Paimon's unified User-Agent")
     SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
         "Sync all table properties to the catalog metastore")
     RESOLVING_FILE_IO_ENABLED = (

@@ -1530,6 +1530,163 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
+    public void testAddVideoColumnToExistingImages() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("image", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable oldTable = getTableDefault();
+        byte[] image = "original-image".getBytes();
+        writeRows(oldTable, Collections.singletonList(GenericRow.of(0, new BlobData(image))));
+        long oldSnapshot = oldTable.latestSnapshot().get().id();
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn("video", DataTypes.BYTES(), "__VIDEO_FRAME_FIELD"),
+                false);
+        FileStoreTable table = getTableDefault();
+        List<InternalRow> rows = read(table);
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).getBlob(1).toData()).isEqualTo(image);
+        assertThat(rows.get(0).isNullAt(2)).isTrue();
+
+        // An already running writer can still append rows using the old schema.
+        writeRows(oldTable, Collections.singletonList(GenericRow.of(1, new BlobData(image))));
+        byte[] payload = "complete-video".getBytes();
+        java.nio.file.Path source = tempPath.resolve("evolved-video.mp4");
+        java.nio.file.Files.write(source, payload);
+        writeRows(
+                table,
+                Collections.singletonList(
+                        GenericRow.of(
+                                2,
+                                new BlobData(image),
+                                Blob.fromDescriptor(
+                                        UriReader.fromFile(LocalFileIO.create()),
+                                        new VideoFrameDescriptor(
+                                                new Path(source.toUri()).toString(),
+                                                0,
+                                                payload.length,
+                                                7,
+                                                -1,
+                                                0)))));
+        rows = read(table, org.apache.paimon.utils.Pair.of(CoreOptions.BLOB_AS_DESCRIPTOR, "true"));
+        rows.sort((a, b) -> Integer.compare(a.getInt(0), b.getInt(0)));
+        assertThat(rows.size()).isEqualTo(3);
+        assertThat(rows.get(0).isNullAt(2)).isTrue();
+        assertThat(rows.get(1).isNullAt(2)).isTrue();
+        assertThat(rows.get(2).getBlob(2).toData()).isEqualTo(payload);
+        assertThat(((VideoFrameDescriptor) rows.get(2).getBlob(2).toDescriptor()).frameIndex())
+                .isEqualTo(7);
+        assertThat(liveVideoFiles(table).size()).isEqualTo(1);
+        assertThat(
+                        read(table.copy(
+                                        Collections.singletonMap(
+                                                "scan.snapshot-id", "" + oldSnapshot)))
+                                .size())
+                .isEqualTo(1);
+
+        // Adding another video column automatically preserves the existing video field.
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn("second", DataTypes.BLOB(), "__VIDEO_FRAME_FIELD"),
+                false);
+        assertThat(getTableDefault().schema().options().get("video-frame-field"))
+                .isEqualTo("video,second");
+        for (InternalRow row : read(getTableDefault())) {
+            assertThat(row.isNullAt(3)).isTrue();
+        }
+
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("video"), false);
+        assertThat(getTableDefault().schema().options().get("video-frame-field"))
+                .isEqualTo("second");
+        assertThat(read(getTableDefault()).size()).isEqualTo(3);
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("second"), false);
+        assertThat(getTableDefault().schema().options().containsKey("video-frame-field")).isFalse();
+        assertThat(read(getTableDefault()).size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testRejectUnsafeVideoColumnEvolution() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("image", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                false);
+        writeRows(
+                getTableDefault(),
+                Collections.singletonList(GenericRow.of(0, new BlobData(new byte[] {1}))));
+        for (List<SchemaChange> changes :
+                Arrays.asList(
+                        Collections.singletonList(
+                                SchemaChange.setOption("video-frame-field", "image")),
+                        Arrays.asList(
+                                SchemaChange.addColumn("bad", DataTypes.BLOB()),
+                                SchemaChange.setOption("video-frame-field", "bad")))) {
+            assertThatThrownBy(() -> catalog.alterTable(identifier(), changes, false))
+                    .isInstanceOf(UnsupportedOperationException.class);
+            assertThat(getTableDefault().schema().id()).isZero();
+        }
+        for (org.apache.paimon.types.DataType type :
+                Arrays.asList(DataTypes.INT(), DataTypes.BLOB().notNull())) {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier(),
+                                            SchemaChange.addColumn(
+                                                    "bad", type, "__VIDEO_FRAME_FIELD"),
+                                            false))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(getTableDefault().schema().id()).isZero();
+        }
+        // Editing an existing column's comment must not change its storage mode.
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.updateColumnComment(
+                                                "image", "__VIDEO_FRAME_FIELD"),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(getTableDefault().schema().options().containsKey("video-frame-field")).isFalse();
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn("video", DataTypes.BLOB(), "__VIDEO_FRAME_FIELD"),
+                false);
+        for (String value : Arrays.asList("", "image", "video,image")) {
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterTable(
+                                            identifier(),
+                                            SchemaChange.setOption("video-frame-field", value),
+                                            false))
+                    .isInstanceOf(UnsupportedOperationException.class);
+        }
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.removeOption("video-frame-field"),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(
+                        () ->
+                                getTableDefault()
+                                        .copy(
+                                                Collections.singletonMap(
+                                                        "video-frame-field", "video,image")))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     public void testVideoRollingAndCompaction() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("id", DataTypes.INT());
@@ -1561,31 +1718,31 @@ public class BlobTableTest extends TableTestBase {
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                firstUri, 0, firstBytes.length, 0))),
+                                                firstUri, 0, firstBytes.length, 0, -1, 0))),
                         GenericRow.of(
                                 1,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                firstUri, 0, firstBytes.length, 1))),
+                                                firstUri, 0, firstBytes.length, 1, -1, 0))),
                         GenericRow.of(
                                 2,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                firstUri, 0, firstBytes.length, 2))),
+                                                firstUri, 0, firstBytes.length, 2, -1, 0))),
                         GenericRow.of(
                                 3,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                secondUri, 0, secondBytes.length, 0))),
+                                                secondUri, 0, secondBytes.length, 0, -1, 0))),
                         GenericRow.of(
                                 4,
                                 Blob.fromDescriptor(
                                         sourceReader,
                                         new VideoFrameDescriptor(
-                                                secondUri, 0, secondBytes.length, 1)))));
+                                                secondUri, 0, secondBytes.length, 1, -1, 0)))));
 
         FileStoreTable table = getTableDefault();
         List<DataFileMeta> videoFiles = liveVideoFiles(table);
@@ -1651,7 +1808,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.column("id", DataTypes.INT());
         schemaBuilder.column("video", DataTypes.BLOB());
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
-        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "20 b");
         schemaBuilder.option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "1000");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
@@ -1660,10 +1817,14 @@ public class BlobTableTest extends TableTestBase {
 
         byte[] firstBytes = "first-video".getBytes();
         byte[] secondBytes = "second-video".getBytes();
+        byte[] keyframeIndex =
+                fromHex(
+                        "0149464b4f45444956010000000200000000000000000000000100000000000000"
+                                + "789c6360c00e78a0f4821e08cd04e503001394013b");
         java.nio.file.Path firstSource = tempPath.resolve("size-first-source.mp4");
         java.nio.file.Path secondSource = tempPath.resolve("size-second-source.mp4");
-        java.nio.file.Files.write(firstSource, firstBytes);
-        java.nio.file.Files.write(secondSource, secondBytes);
+        java.nio.file.Files.write(firstSource, concat("first-video".getBytes(), keyframeIndex));
+        java.nio.file.Files.write(secondSource, concat("second-video".getBytes(), keyframeIndex));
         UriReader sourceReader = UriReader.fromFile(LocalFileIO.create());
         String firstUri = new Path(firstSource.toUri()).toString();
         String secondUri = new Path(secondSource.toUri()).toString();
@@ -1676,7 +1837,12 @@ public class BlobTableTest extends TableTestBase {
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            firstUri, 0, firstBytes.length, frame))));
+                                            firstUri,
+                                            0,
+                                            firstBytes.length,
+                                            frame,
+                                            firstBytes.length,
+                                            keyframeIndex.length))));
         }
         for (int frame = 0; frame < 2; frame++) {
             rows.add(
@@ -1685,7 +1851,12 @@ public class BlobTableTest extends TableTestBase {
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            secondUri, 0, secondBytes.length, frame))));
+                                            secondUri,
+                                            0,
+                                            secondBytes.length,
+                                            frame,
+                                            secondBytes.length,
+                                            keyframeIndex.length))));
         }
         writeRows(getTableDefault(), rows);
 
@@ -1739,11 +1910,21 @@ public class BlobTableTest extends TableTestBase {
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            uris[cameraA], 0, payloads[cameraA].length, frame)),
+                                            uris[cameraA],
+                                            0,
+                                            payloads[cameraA].length,
+                                            frame,
+                                            -1,
+                                            0)),
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            uris[cameraB], 0, payloads[cameraB].length, frame))));
+                                            uris[cameraB],
+                                            0,
+                                            payloads[cameraB].length,
+                                            frame,
+                                            -1,
+                                            0))));
         }
         writeRows(getTableDefault(), input);
 
@@ -1807,11 +1988,12 @@ public class BlobTableTest extends TableTestBase {
                             row,
                             Blob.fromDescriptor(
                                     sourceReader,
-                                    new VideoFrameDescriptor(uris[0], 0, payload.length, row)),
+                                    new VideoFrameDescriptor(
+                                            uris[0], 0, payload.length, row, -1, 0)),
                             Blob.fromDescriptor(
                                     sourceReader,
                                     new VideoFrameDescriptor(
-                                            uris[cameraB], 0, payload.length, row % 2))));
+                                            uris[cameraB], 0, payload.length, row % 2, -1, 0))));
         }
         writeRows(getTableDefault(), rows);
 
@@ -2451,6 +2633,24 @@ public class BlobTableTest extends TableTestBase {
         try (org.apache.paimon.fs.PositionOutputStream out = fileIO.newOutputStream(path, true)) {
             out.write(bytes);
         }
+    }
+
+    private static byte[] concat(byte[] first, byte[] second) {
+        byte[] result = Arrays.copyOf(first, first.length + second.length);
+        System.arraycopy(second, 0, result, first.length, second.length);
+        return result;
+    }
+
+    private static byte[] fromHex(String hex) {
+        byte[] bytes = new byte[hex.length() / 2];
+        for (int i = 0; i < bytes.length; i++) {
+            int offset = i * 2;
+            bytes[i] =
+                    (byte)
+                            ((Character.digit(hex.charAt(offset), 16) << 4)
+                                    + Character.digit(hex.charAt(offset + 1), 16));
+        }
+        return bytes;
     }
 
     private static long countFilesWithSuffix(FileIO fileIO, Path root, String suffix)

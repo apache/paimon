@@ -45,6 +45,9 @@ _PHYSICAL_COLUMN_PREFIX = "__col_"
 _FIELD_ID_BASE = 2147483647 // 4
 _FIELD_ID_DEPTH_LIMIT = 1 << 10
 _CONVERSION_BYTES = 8 * 1024 * 1024
+_ROW_GROUP_MAX_ROWS = 1024 * 1024
+# Match the default Parquet block target, measured here in physical Arrow bytes.
+_DEFAULT_ROW_GROUP_BYTES = 128 * 1024 * 1024
 
 
 class MapSharedShreddingWriter:
@@ -90,6 +93,11 @@ class MapSharedShreddingWriter:
         self._validate_format("file.format", file_format)
         self._validate_format("changelog.file.format", changelog_format)
         self._parquet_writer_options = create_parquet_writer_options(options)
+        block_size = options.file_block_size()
+        self._row_group_bytes = (block_size.get_bytes() if block_size is not None
+                                 else _DEFAULT_ROW_GROUP_BYTES)
+        if self._row_group_bytes <= 0:
+            raise ValueError('file.block-size must be positive')
         self._validate_compression("file.compression", options.file_compression())
         if options.bucket() == BucketMode.POSTPONE_BUCKET.value:
             raise ValueError(
@@ -107,7 +115,7 @@ class MapSharedShreddingWriter:
         return bool(self._fields)
 
     def write_parquet(self, file_io, path, data, compression, zstd_level):
-        """Plan key metadata, then write bounded physical batches without retaining them."""
+        """Convert small batches, buffering physical rows independently of conversion."""
         import pyarrow.parquet as pq
 
         fields = list(data.schema)
@@ -163,23 +171,28 @@ class MapSharedShreddingWriter:
         kwargs = dict(self._parquet_writer_options, compression=compression)
         if compression.lower() == 'zstd':
             kwargs['compression_level'] = zstd_level
+
+        def physical_batches():
+            for offset in range(0, data.num_rows, batch_rows):
+                for bounded in _bounded_batches(data.slice(offset, batch_rows)):
+                    batch = bounded.combine_chunks().to_batches()[0]
+                    columns = list(batch.columns)
+                    for index, converter in converters.items():
+                        columns[index] = converter.convert(columns[index])
+                    yield pa.Table.from_arrays(columns, schema=schema)
+
+        groups = _physical_row_groups(physical_batches(), self._row_group_bytes)
         try:
             with file_io.new_output_stream(path) as stream:
                 with pq.ParquetWriter(stream, schema, **kwargs) as writer:
-                    for offset in range(0, data.num_rows, batch_rows):
-                        for bounded in _bounded_batches(data.slice(offset, batch_rows)):
-                            # Coalesce only this bounded logical window, not the
-                            # file. Input calls must not define row groups.
-                            batch = bounded.combine_chunks().to_batches()[0]
-                            columns = list(batch.columns)
-                            for index, converter in converters.items():
-                                columns[index] = converter.convert(columns[index])
-                            physical = pa.Table.from_arrays(columns, schema=schema)
-                            writer.write_table(physical)
-                            del physical, columns
+                    for physical in groups:
+                        writer.write_table(physical, row_group_size=physical.num_rows)
+                        del physical
         except Exception:
             file_io.delete_quietly(path)
             raise
+        finally:
+            groups.close()
         return completed
 
     def file_completed(self, completed):
@@ -394,6 +407,67 @@ class _MapFieldConverter:
                 selected = column_id
                 selected_last_used = last_used
         return selected
+
+
+def _physical_row_groups(batches, target_bytes, max_rows=_ROW_GROUP_MAX_ROWS):
+    """Group converted batches without copying them into one contiguous Arrow table.
+
+    Bytes are an Arrow-side target, not compressed Parquet size or a process RSS
+    limit. One indivisible row may exceed it. In addition to the pending group,
+    the current conversion batch and Parquet encoder retain their own buffers.
+    """
+    pending = []
+    rows = size = 0
+    try:
+        for batch in batches:
+            offset = 0
+            while offset < batch.num_rows:
+                count = min(batch.num_rows - offset, max_rows - rows)
+                piece = _physical_slice(batch, offset, count)
+                available = target_bytes - size
+                if piece.nbytes > available:
+                    low, high = 0, count
+                    while low < high:
+                        middle = (low + high + 1) // 2
+                        if _physical_slice(batch, offset, middle).nbytes <= available:
+                            low = middle
+                        else:
+                            high = middle - 1
+                    if low == 0 and rows:
+                        yield pa.concat_tables(pending)
+                        pending.clear()
+                        rows = size = 0
+                        continue
+                    count = max(1, low)
+                    piece = _physical_slice(batch, offset, count)
+                pending.append(piece)
+                rows += count
+                size += piece.nbytes
+                offset += count
+                del piece
+                if rows >= max_rows or size >= target_bytes:
+                    yield pa.concat_tables(pending)
+                    pending.clear()
+                    rows = size = 0
+            del batch
+        if rows:
+            yield pa.concat_tables(pending)
+    finally:
+        pending.clear()
+        close = getattr(batches, 'close', None)
+        if close is not None:
+            close()
+
+
+def _physical_slice(batch, offset, count):
+    piece = batch.slice(offset, count)
+    # Arrow 6 accounts full backing buffers for slices. Compact partial slices
+    # there, as the row-ID update writer does, for bounded retained-byte accounting.
+    if int(pa.__version__.split('.')[0]) < 7:
+        piece = pa.Table.from_arrays([
+            pa.concat_arrays(column.chunks) for column in piece.columns
+        ], schema=piece.schema)
+    return piece
 
 
 def _bounded_batches(batch):

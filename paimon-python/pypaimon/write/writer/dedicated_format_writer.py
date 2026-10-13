@@ -29,11 +29,11 @@ from pypaimon.schema.data_types import (
     is_blob_type,
 )
 from pypaimon.table.row.blob import (
-    Blob,
     BlobConsumer,
     video_payload_descriptor,
 )
 from pypaimon.write.row_utils import (
+    inline_blob_value,
     require_columns,
     row_to_named_values,
     row_values_to_arrow_table,
@@ -317,25 +317,8 @@ class DedicatedFormatWriter(CompositeDataWriter):
             raise e
 
     def _normal_row_value(self, field_name: str, value):
-        if field_name in self.blob_descriptor_fields and value is not None:
-            if isinstance(value, Blob):
-                try:
-                    return value.to_descriptor().serialize()
-                except Exception as e:
-                    raise ValueError(
-                        "blob-descriptor-field row values must be serialized "
-                        "BlobDescriptor bytes or a Blob with a descriptor."
-                    ) from e
-            return value
-
-        if field_name in self.blob_view_fields and value is not None:
-            from pypaimon.table.row.blob import BlobView
-
-            if isinstance(value, BlobView):
-                return value.view_struct.serialize()
-            return value
-
-        return value
+        return inline_blob_value(value, field_name in self.blob_descriptor_fields,
+                                 field_name in self.blob_view_fields)
 
     def abort(self):
         """Abort all writers and clean up resources."""
@@ -403,14 +386,9 @@ class DedicatedFormatWriter(CompositeDataWriter):
                         "BlobDescriptor."
                     )
                 descriptor_bytes = bytes(value)
-                if descriptor_bytes:
-                    version = descriptor_bytes[0]
-                    if version < 1 or version > BlobDescriptor.CURRENT_VERSION:
-                        raise ValueError(
-                            f"blob-descriptor-field requires BlobDescriptor version "
-                            f"in [1, {BlobDescriptor.CURRENT_VERSION}], but found "
-                            f"{version}."
-                        )
+                # Like Java, schema-declared descriptors use the prefix parser.
+                # Exact wire length is only needed when detecting descriptors
+                # among arbitrary payload bytes.
                 try:
                     BlobDescriptor.deserialize(descriptor_bytes)
                 except Exception as e:
@@ -418,10 +396,6 @@ class DedicatedFormatWriter(CompositeDataWriter):
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     ) from e
-                # serialize() always emits CURRENT_VERSION, so a round-trip
-                # would reject exact v1 bytes. Check exact wire length instead.
-                if BlobDescriptor.parse_if_serialized(descriptor_bytes) is None:
-                    raise ValueError("Descriptor payload contains trailing bytes.")
 
         for field_name in self.blob_view_fields:
             if field_name not in data.schema.names:

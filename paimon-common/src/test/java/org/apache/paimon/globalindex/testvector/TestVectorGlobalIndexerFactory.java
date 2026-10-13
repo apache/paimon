@@ -39,16 +39,11 @@ public class TestVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField field, Options options) {
-        return new TestVectorGlobalIndexer(field.type(), options);
-    }
-
-    @Override
-    public GlobalIndexer create(
-            DataField indexField, List<DataField> extraFields, Options options) {
-        if (extraFields == null || extraFields.isEmpty()) {
-            return create(indexField, options);
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        if (indexFields.size() == 1) {
+            return new TestVectorGlobalIndexer(indexFields.get(0).type(), options);
         }
-        return new TestMultiFieldVectorGlobalIndexer(indexField, extraFields, options);
+        return new TestMultiFieldVectorGlobalIndexer(
+                indexFields.get(0), indexFields.subList(1, indexFields.size()), options);
     }
 }

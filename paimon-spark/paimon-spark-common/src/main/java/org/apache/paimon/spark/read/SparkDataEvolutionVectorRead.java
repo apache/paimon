@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -126,7 +127,9 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
                 group -> {
                     GlobalIndexer taskGlobalIndexer =
                             GlobalIndexerFactoryUtils.load(indexType)
-                                    .create(vectorColumn, table.coreOptions().toConfiguration());
+                                    .create(
+                                            Collections.singletonList(vectorColumn),
+                                            table.coreOptions().toConfiguration());
                     IndexPathFactory indexPathFactory =
                             table.store().pathFactory().globalIndexFileFactory();
 

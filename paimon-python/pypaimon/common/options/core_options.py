@@ -264,6 +264,16 @@ class CoreOptions:
         )
     )
 
+    POSTPONE_DEFAULT_BUCKET_NUM: ConfigOption[int] = (
+        ConfigOptions.key("postpone.default-bucket-num")
+        .int_type()
+        .no_default_value()
+        .with_description(
+            "Exact bucket count for new postpone partitions and overwrite writes. "
+            "Takes precedence over automatic bucket estimation."
+        )
+    )
+
     POSTPONE_TARGET_ROW_NUM_PER_BUCKET: ConfigOption[int] = (
         ConfigOptions.key("postpone.target-row-num-per-bucket")
         .long_type()
@@ -982,7 +992,7 @@ class CoreOptions:
         .default_value(1)
         .with_description(
             "Number of global index shards built concurrently by the local "
-            "Python builder. Each shard may also use native worker threads, "
+            "builder, including native builds. Each shard may also use native worker threads, "
             "so increase this value conservatively."
         )
     )
@@ -1141,7 +1151,8 @@ class CoreOptions:
         .default_value("meta,global-index")
         .with_description(
             "Comma-separated list of file types to cache. "
-            "Supported values: meta, global-index, bucket-index, data, file-index."
+            "Supported values: meta, global-index, bucket-index, data, file-index, "
+            "or * for all of them."
         )
     )
 
@@ -1150,6 +1161,15 @@ class CoreOptions:
         .int_type()
         .default_value(1024)
         .with_description("Read batch size for any file format if it supports.")
+    )
+
+    READ_VIDEO_MAX_OPEN_DECODERS: ConfigOption[int] = (
+        ConfigOptions.key("read.video.max-open-decoders")
+        .int_type()
+        .default_value(16)
+        .with_description(
+            "Maximum cached video decoders per video feature in a PyPaimon "
+            "LeRobot DataLoader worker.")
     )
 
     PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
@@ -1185,18 +1205,6 @@ class CoreOptions:
         .with_description(
             "When adding a new column, if the table has partition keys, "
             "insert the new column before the first partition column by default."
-        )
-    )
-
-    VARIANT_SHREDDING_ENABLED: ConfigOption[bool] = (
-        ConfigOptions.key("variant.shredding.enabled")
-        .boolean_type()
-        .default_value(True)
-        .with_description(
-            "Whether to enable VARIANT shredding. When True (default), writes apply the "
-            "shredding schema configured via 'variant.shreddingSchema', and reads "
-            "automatically reassemble shredded columns back to the standard "
-            "struct<value, metadata> form. Set to False to bypass both behaviours."
         )
     )
 
@@ -1307,6 +1315,12 @@ class CoreOptions:
             default,
         )
 
+    def postpone_default_bucket_num(self):
+        value = self.options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)
+        if value is not None and not 0 < value <= 2147483647:
+            raise ValueError('postpone.default-bucket-num must be a positive 32-bit integer')
+        return value
+
     def postpone_target_row_num_per_bucket(self, default=None):
         return self.options.get(
             CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET, default
@@ -1381,9 +1395,6 @@ class CoreOptions:
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
-    def variant_shredding_enabled(self) -> bool:
-        return self.options.get(CoreOptions.VARIANT_SHREDDING_ENABLED, True)
-
     def variant_shredding_schema(self) -> Optional[str]:
         val = self.options.get(CoreOptions.VARIANT_SHREDDING_SCHEMA)
         if val is None:
@@ -1392,15 +1403,11 @@ class CoreOptions:
         return val
 
     def blob_descriptor_fields(self, default=None):
-        # Do not treat blob.stored-descriptor-fields as a layout switch.
-        # Python master ignored that key and wrote dedicated .blob payloads;
-        # a global fallback would mis-parse those files during a rolling
-        # upgrade. The cost is that Java tables which only set the fallback
-        # key store inline descriptors, and Python returns those bytes
-        # instead of fetching payload. Migrate explicitly to
-        # blob-descriptor-field (column directives already copy the legacy
-        # key onto the canonical option).
-        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        # Java's fallback key applies only when the canonical key is absent.
+        if self.options.contains_key(CoreOptions.BLOB_DESCRIPTOR_FIELD.key()):
+            value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        else:
+            value = self.options.to_map().get('blob.stored-descriptor-fields', default)
         return CoreOptions._parse_field_set(value)
 
     def blob_view_fields(self, default=None):
@@ -1692,13 +1699,13 @@ class CoreOptions:
         )
         if value is None:
             return None
-        parts = value.split(",")
+        parts = value.rstrip(",").split(",")
         weights = []
         for part in parts:
             parsed = int(part.strip())
-            if parsed <= 0:
+            if parsed <= 0 or parsed > 2147483647:
                 raise ValueError(
-                    f"Weight must be positive, got: {parsed}"
+                    f"Weight must be a positive 32-bit integer, got: {parsed}"
                 )
             weights.append(parsed)
         return weights
@@ -1928,6 +1935,20 @@ class CoreOptions:
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+
+    def read_video_max_open_decoders(self) -> int:
+        option = CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS
+        raw = self.options.to_map().get(option.key())
+        if isinstance(raw, (bool, float)):
+            raise ValueError("%s must be a positive integer." % option.key())
+        try:
+            value = self.options.get(option)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "%s must be a positive integer." % option.key()) from error
+        if value <= 0:
+            raise ValueError("%s must be a positive integer." % option.key())
+        return value
 
     def parquet_column_index_enabled(self) -> bool:
         return self.options.get(CoreOptions.PARQUET_COLUMN_INDEX_ENABLED)

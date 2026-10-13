@@ -540,10 +540,15 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String commitUser)
             throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, instant, fromSnapshot);
+            api.rollbackTo(identifier, tableUuid, instant, fromSnapshot, commitUser);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
@@ -692,6 +697,10 @@ public class RESTCatalog implements Catalog {
                 } else if (StringUtils.equals(
                         e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
                     throw new ColumnNotExistException(identifier, e.resourceName());
+                } else {
+                    // rethrow other typed 404s, for example a DATABASE dropped
+                    // concurrently; swallowing would report success for a failed ALTER
+                    throw e;
                 }
             }
         } catch (AlreadyExistsException e) {

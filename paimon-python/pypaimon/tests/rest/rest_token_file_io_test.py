@@ -49,6 +49,22 @@ class RESTTokenFileIOTest(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
+    def test_existing_valid_token_does_not_refresh_or_read_shared_cache(self):
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path)
+        now = 1700000000
+        valid = RESTToken({'key': 'value'}, (now + 7200) * 1000)
+        expiring = RESTToken({'key': 'value'}, (now + 1800) * 1000)
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now), \
+                patch.object(file_io, 'try_to_refresh_token') as refresh, \
+                patch.object(file_io, '_get_cached_token') as shared_cache:
+            self.assertIsNone(file_io._existing_valid_token())
+            file_io.token = valid
+            self.assertIs(file_io._existing_valid_token(), valid)
+            file_io.token = expiring
+            self.assertIsNone(file_io._existing_valid_token())
+            refresh.assert_not_called()
+            shared_cache.assert_not_called()
+
     def test_blob_presigned_url_bound_table_root(self):
         root = "oss://bucket/table-a"
         file_io = RESTTokenFileIO(self.identifier, root, self.catalog_options)

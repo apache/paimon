@@ -44,7 +44,7 @@ final class JsonMapKeyConverter {
             case DOUBLE:
                 return Double.parseDouble(value);
             case BOOLEAN:
-                return Boolean.parseBoolean(value);
+                return parseBoolean(value);
             case CHAR:
             case VARCHAR:
                 return BinaryString.fromString(value);
@@ -56,5 +56,15 @@ final class JsonMapKeyConverter {
                 }
                 return cast.cast(BinaryString.fromString(value));
         }
+    }
+
+    private static boolean parseBoolean(String value) {
+        if ("true".equalsIgnoreCase(value)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(value)) {
+            return false;
+        }
+        throw new IllegalArgumentException("Invalid boolean value: " + value);
     }
 }

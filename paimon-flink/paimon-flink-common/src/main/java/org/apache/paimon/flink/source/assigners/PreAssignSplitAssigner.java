@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source.assigners;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.source.DynamicPartitionFilteringInfo;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.utils.BinPacking;
@@ -44,6 +45,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Pre-calculate which splits each task should process according to the weight or given
@@ -142,6 +144,10 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             Collection<FileStoreSourceSplit> splits,
             SerializableFunction<FileStoreSourceSplit, Long> weightFunc,
             @Nullable SerializableFunction<FileStoreSourceSplit, ?> groupFunc) {
+        checkArgument(
+                splitBatchSize > 0,
+                "%s must be positive.",
+                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE.key());
         this.splitBatchSize = splitBatchSize;
         this.parallelism = parallelism;
         this.splits = splits;

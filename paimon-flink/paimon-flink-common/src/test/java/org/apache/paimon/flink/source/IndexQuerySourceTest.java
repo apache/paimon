@@ -181,7 +181,8 @@ public class IndexQuerySourceTest extends DataEvolutionTestBase {
         List<CommitMessage> commits = new ArrayList<>();
         for (String field : new String[] {"f1", "f2"}) {
             SortedGlobalIndexScanner builder =
-                    new SortedGlobalIndexScanner(table, "btree").withIndexField(field);
+                    new SortedGlobalIndexScanner(table, "btree")
+                            .withIndexFields(Collections.singletonList(field));
             for (DataSplit split : builder.scan().get().entries()) {
                 commits.addAll(
                         SortedGlobalIndexTestUtils.buildIndex(

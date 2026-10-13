@@ -49,14 +49,7 @@ public interface GlobalIndexer {
             @Nullable List<Range> rowRanges,
             ExecutorService executor);
 
-    static GlobalIndexer create(String type, DataField indexField, Options options) {
-        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(indexField, options);
-    }
-
-    static GlobalIndexer create(
-            String type, DataField indexField, List<DataField> extraFields, Options options) {
-        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(indexField, extraFields, options);
+    static GlobalIndexer create(String type, List<DataField> indexFields, Options options) {
+        return GlobalIndexerFactoryUtils.load(type).create(indexFields, options);
     }
 }

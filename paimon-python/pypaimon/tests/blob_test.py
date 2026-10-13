@@ -1479,7 +1479,7 @@ class BlobTest(unittest.TestCase):
         self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
         self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
 
-        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2)
+        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0)
         video_bytes = video.serialize()
         self.assertEqual(video_bytes, BlobDescriptor.deserialize(video_bytes).serialize())
         self.assertEqual(video, BlobDescriptor.parse_if_serialized(video_bytes))
@@ -1597,14 +1597,12 @@ class BlobTest(unittest.TestCase):
             BlobDescriptor("file:///tmp/blob.bin", 0, 10),
         )
 
-    def test_blob_descriptor_fields_ignores_legacy_stored_key(self):
+    def test_blob_descriptor_fields_uses_java_fallback_key(self):
         from pypaimon.common.options.core_options import CoreOptions
 
-        # Python master ignored this key and wrote dedicated .blob files.
-        # A global fallback would break rolling upgrades.
         legacy_only = CoreOptions(
             Options({"blob.stored-descriptor-fields": "legacy_col"}))
-        self.assertEqual(set(), legacy_only.blob_descriptor_fields())
+        self.assertEqual({'legacy_col'}, legacy_only.blob_descriptor_fields())
 
         canonical_wins = CoreOptions(Options({
             "blob-descriptor-field": "canon",
@@ -1618,7 +1616,7 @@ class BlobTest(unittest.TestCase):
         }))
         self.assertEqual(set(), blank_canonical.blob_descriptor_fields())
 
-    def test_dedicated_writer_accepts_exact_v1_descriptor_bytes(self):
+    def test_dedicated_writer_accepts_java_descriptor_prefixes(self):
         from pypaimon.write.writer.dedicated_format_writer import (
             DedicatedFormatWriter)
 
@@ -1642,19 +1640,16 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=['payload']))
 
-        padded = pa.RecordBatch.from_arrays(
-            [pa.array([v1 + b"x"], type=pa.large_binary())], names=['payload'])
-        with self.assertRaisesRegex(ValueError, "trailing bytes"):
-            writer._validate_inline_stored_fields_input(padded)
-
+        # Java's known-descriptor parser accepts padding and the older
+        # no-magic layout. Do not apply heuristic exact-length detection here.
         v0 = bytes([0]) + v1[1:]
-        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 0"):
+        for value in (v0, v1 + b"x", v2 + b"padding"):
             writer._validate_inline_stored_fields_input(
                 pa.RecordBatch.from_arrays(
-                    [pa.array([v0], type=pa.large_binary())], names=['payload']))
+                    [pa.array([value], type=pa.large_binary())], names=['payload']))
 
         v3 = bytes([3]) + v2[1:]
-        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 3"):
+        with self.assertRaisesRegex(ValueError, "serialized BlobDescriptor"):
             writer._validate_inline_stored_fields_input(
                 pa.RecordBatch.from_arrays(
                     [pa.array([v3], type=pa.large_binary())], names=['payload']))
@@ -1666,7 +1661,7 @@ class BlobTest(unittest.TestCase):
             pa.RecordBatch.from_arrays(
                 [pa.array([v1], type=pa.large_binary())], names=["payload"]))
 
-        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2).serialize()
+        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2, -1, 0).serialize()
         writer._validate_inline_stored_fields_input(
             pa.RecordBatch.from_arrays(
                 [pa.array([video_bytes], type=pa.large_binary())], names=["payload"]))
@@ -1760,7 +1755,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"video-frame-payload"
         descriptor = VideoFrameDescriptor(
-            "file-backed/video.mp4", 0, len(data), 2)
+            "file-backed/video.mp4", 0, len(data), 2, -1, 0)
         file_io = self._token_aware_file_io(data)
         row = OffsetRow(
             (descriptor.serialize(),), 0, 1,
@@ -1788,7 +1783,7 @@ class BlobTest(unittest.TestCase):
 
         data = b"convert video blob"
         descriptor = VideoFrameDescriptor(
-            "file-backed/convert.mp4", 0, len(data), 2)
+            "file-backed/convert.mp4", 0, len(data), 2, -1, 0)
         file_io = self._token_aware_file_io(data)
         batch = RecordBatch.from_arrays(
             [pa.array([descriptor.serialize()], type=pa.large_binary())],
@@ -2431,7 +2426,7 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(needs_blob_inline_convert(_Table({
             "blob-as-descriptor": "true",
         })))
-        self.assertFalse(needs_blob_inline_convert(_Table({
+        self.assertTrue(needs_blob_inline_convert(_Table({
             "blob.stored-descriptor-fields": "picture",
         })))
 
@@ -3184,6 +3179,120 @@ class BlobEndToEndTest(unittest.TestCase):
                 [BlobData(value)], [field], RowKind.INSERT))
             writer.close()
 
+    def test_blob_index_cache_size_controls_repeated_file_reads(self):
+        from pypaimon.catalog.catalog_context import CatalogContext
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        paths = [os.path.join(self.temp_dir, "cache-{}.blob".format(i)) for i in range(17)]
+        for i, path in enumerate(paths):
+            self._write_single_blob(path, field, bytes([i]))
+        open_stream = file_io.new_input_stream
+        for max_size, expected_reads, expected_entries in [
+            ("1 kb", 34, None),
+            ("1 mb", 0, 17),
+            ("0 b", 34, 0),
+        ]:
+            with self.subTest(max_size=max_size):
+                cache = CatalogContext.create_from_options(
+                    Options({"cache.blob-index.max-size": max_size})).blob_index_cache
+                streams = []
+
+                def counted_open(path):
+                    stream = MagicMock(wraps=open_stream(path))
+                    streams.append(stream)
+                    return stream
+
+                with patch.object(file_io, "new_input_stream", side_effect=counted_open):
+                    results = []
+                    reads = []
+                    for _ in range(2):
+                        streams.clear()
+                        descriptors = []
+                        for path in paths:
+                            reader = FormatBlobReader(
+                                file_io, path, [field.name], [field], None, True,
+                                index_cache=cache)
+                            try:
+                                descriptors.extend(reader.read_arrow_batch().column(0).to_pylist())
+                            finally:
+                                reader.close()
+                        results.append(descriptors)
+                        reads.append(sum(stream.read.call_count for stream in streams))
+                    self.assertEqual(reads, [34, expected_reads])
+                    self.assertEqual(results[0], results[1])
+                    self.assertLessEqual(cache.size_bytes, cache.max_size_bytes)
+                    if expected_entries is not None:
+                        self.assertEqual(len(cache), expected_entries)
+
+    def test_blob_index_cache_skips_oversized_entry(self):
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        from pypaimon.common.memory_size import MemorySize
+
+        cache = BlobIndexCache(MemorySize.of_kibi_bytes(1))
+        cache.put("small.blob", (1,), (0,))
+        self.assertEqual(((1,), (0,)), cache.get("small.blob"))
+
+        values = tuple(range(100))
+        cache.put("oversized.blob", values, values)
+        self.assertIsNone(cache.get("oversized.blob"))
+        self.assertEqual(((1,), (0,)), cache.get("small.blob"))
+
+    def test_blob_index_cache_accounts_for_many_small_entries(self):
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        from pypaimon.common.memory_size import MemorySize
+
+        cache = BlobIndexCache(MemorySize.of_mebi_bytes(1))
+        for i in range(10000):
+            cache.put("small-{:05d}.blob".format(i), (1,), (0,))
+
+        self.assertLess(len(cache), 2048)
+        self.assertLessEqual(cache.size_bytes, cache.max_size_bytes)
+        self.assertNotIn("small-00000.blob", cache)
+        self.assertIn("small-09999.blob", cache)
+
+    def test_blob_index_cache_catalog_scope_and_serialization(self):
+        import pickle
+        from pypaimon import CatalogFactory, Schema
+        from pypaimon.catalog.catalog_context import CatalogContext
+
+        self.assertEqual(
+            64 * 1024 * 1024,
+            CatalogContext.create_from_options(
+                Options({})).blob_index_cache.max_size_bytes,
+        )
+        for value in ("-1 mb", "invalid"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                CatalogContext.create_from_options(
+                    Options({"cache.blob-index.max-size": value}))
+
+        options = {"warehouse": self.temp_dir, "cache.blob-index.max-size": "64 kb"}
+        catalog = CatalogFactory.create(options)
+        catalog.create_database("db", True)
+        for name in ("a", "b"):
+            catalog.create_table("db." + name, Schema.from_pyarrow_schema(
+                pa.schema([("value", pa.binary())])), False)
+        first = catalog.get_table("db.a")
+        second = catalog.get_table("db.b")
+        cache = first.catalog_environment.blob_index_cache()
+        self.assertIs(cache, second.catalog_environment.blob_index_cache())
+        self.assertIs(cache, first.copy({"blob-as-descriptor": "true"})
+                      .catalog_environment.blob_index_cache())
+        cache.put("file.blob", (1,), (0,))
+
+        other = CatalogFactory.create(dict(options, **{"cache.blob-index.max-size": "32 kb"}))
+        other_cache = other.get_table("db.a").catalog_environment.blob_index_cache()
+        self.assertIsNot(cache, other_cache)
+        self.assertEqual(other_cache.max_size_bytes, 32 * 1024)
+        self.assertEqual(len(other_cache), 0)
+
+        restored = pickle.loads(pickle.dumps(first.catalog_environment))
+        restored_cache = restored.blob_index_cache()
+        self.assertEqual(restored_cache.max_size_bytes, 64 * 1024)
+        self.assertEqual(len(restored_cache), 0)
+        restored_cache.put("worker.blob", (1,), (0,))
+        self.assertIsNone(cache.get("worker.blob"))
+
     def test_blob_end_to_end(self):
         # Set up file I/O
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -3295,14 +3404,13 @@ class BlobEndToEndTest(unittest.TestCase):
             reader.close()
 
     def test_blob_readers_reuse_index_by_path(self):
-        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE, _BLOB_INDEX_CACHE_LOCK
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
 
         field = DataField(0, "blob_field", AtomicType("BLOB"))
         path = os.path.join(self.temp_dir, "cached-index.blob")
         file_io = CountingBlobFileIO(self.temp_dir)
         self._write_single_blob(path, field, b"cached-value")
-        with _BLOB_INDEX_CACHE_LOCK:
-            _BLOB_INDEX_CACHE.clear()
+        _BLOB_INDEX_CACHE.clear()
         results = []
 
         try:
@@ -3334,8 +3442,7 @@ class BlobEndToEndTest(unittest.TestCase):
                 self.assertEqual((path, 4, len(b"cached-value")),
                                  (descriptor.uri, descriptor.offset, descriptor.length))
         finally:
-            with _BLOB_INDEX_CACHE_LOCK:
-                _BLOB_INDEX_CACHE.clear()
+            _BLOB_INDEX_CACHE.clear()
 
     def test_blob_cached_index_keeps_payload_reads(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))
@@ -3559,13 +3666,18 @@ class BlobEndToEndTest(unittest.TestCase):
         evolution_read = DataEvolutionSplitRead(
             table, None, [field], split, False)
 
-        with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
+        from pypaimon.common.blob_index_cache import BlobIndexCache
+        from pypaimon.common.memory_size import MemorySize
+        cache = BlobIndexCache(MemorySize.of_kibi_bytes(32))
+        with patch.object(table.catalog_environment, "blob_index_cache", return_value=cache), \
+                patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
             def assert_file_size():
                 args, kwargs = reader_cls.call_args
                 arguments = inspect.signature(FormatBlobReader).bind_partial(
                     *args, **kwargs
                 ).arguments
                 self.assertEqual(123, arguments.get("file_size"))
+                self.assertIs(cache, arguments.get("index_cache"))
 
             raw_read.file_reader_supplier(file, False, [field.name], False)
             assert_file_size()

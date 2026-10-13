@@ -223,7 +223,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit._abort_commit_messages',
+            'pypaimon.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
             commit_self_merge_with_compaction_retry(
                 table,
@@ -260,7 +260,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit._abort_commit_messages',
+            'pypaimon.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(
             RowIdExistenceConflict,
         ) as context:
@@ -295,7 +295,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit._abort_commit_messages',
+            'pypaimon.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
             commit_self_merge_with_compaction_retry(
                 table,

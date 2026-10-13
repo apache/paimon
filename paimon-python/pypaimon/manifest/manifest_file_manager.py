@@ -31,6 +31,8 @@ except ImportError:  # pragma: no cover - supported fastavro versions provide th
 
 from datetime import datetime
 
+from pypaimon.filesystem.caching_file_io import (
+    CachingInputStream, _open_input_stream_with_known_size)
 from pypaimon.manifest.manifest_sidecar import (
     Query, read_sidecar, read_selected_bytes,
 )
@@ -112,6 +114,7 @@ class ManifestFileManager:
     """Writer for manifest files in Avro format using unified FileIO."""
 
     _AVRO_SYNC_INTERVAL = 16000
+    _CHECK_ROLLING_RECORD_COUNT = 1000
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
@@ -151,7 +154,8 @@ class ManifestFileManager:
                 early_entry_filter=early_entry_filter,
                 early_record_filter=early_record_filter,
                 partition_filter=partition_filter,
-                selected_blocks=selected)
+                selected_blocks=selected,
+                file_size=manifest_file.file_size)
 
         def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
@@ -195,6 +199,7 @@ class ManifestFileManager:
              early_record_filter: Optional[Callable[[dict], bool]] = None,
              partition_filter=None,
              selected_blocks=None,
+             file_size: Optional[int] = None,
              ) -> List[ManifestEntry]:
         """
         early_entry_filter: ``(bucket, total_buckets) -> bool``, skip before deserializing _FILE.
@@ -209,10 +214,15 @@ class ManifestFileManager:
 
         entries = []
         if selected_blocks is not None:
-            avro_bytes = read_selected_bytes(self.file_io, manifest_file_path, selected_blocks)
+            avro_bytes = read_selected_bytes(
+                self.file_io, manifest_file_path, selected_blocks, file_size)
         else:
-            with self.file_io.new_input_stream(manifest_file_path) as input_stream:
+            with _open_input_stream_with_known_size(
+                    self.file_io, manifest_file_path, file_size) as input_stream:
                 avro_bytes = input_stream.read()
+                if (isinstance(input_stream, CachingInputStream) and file_size is not None
+                        and file_size > 0 and len(avro_bytes) != file_size):
+                    raise EOFError('Truncated manifest file {}'.format(manifest_file_path))
         buffer = BytesIO(avro_bytes)
         records = _read_manifest_records(
             buffer, early_entry_filter, partition_filter,
@@ -359,17 +369,20 @@ class ManifestFileManager:
 
         from fastavro.write import Writer
 
-        sync_interval = min(self._AVRO_SYNC_INTERVAL, suggested_file_size)
         result = []
         written_files = []
         chunk_start = 0
         buf = BytesIO()
         writer = Writer(buf, MANIFEST_ENTRY_SCHEMA,
-                        sync_interval=sync_interval, codec=self._codec)
+                        sync_interval=self._AVRO_SYNC_INTERVAL, codec=self._codec)
         try:
             for i, entry in enumerate(entries):
                 writer.write(self._to_avro_record(entry))
-                if buf.tell() >= suggested_file_size:
+                # Java checks the bytes already flushed by Avro every 1000
+                # records. Keep the count across files and the normal Avro
+                # block size, even when the requested target is very small.
+                if ((i + 1) % self._CHECK_ROLLING_RECORD_COUNT == 0
+                        and buf.tell() >= suggested_file_size):
                     writer.flush()
                     avro_bytes = buf.getvalue()
                     file_name = f"{name_prefix}-{len(result)}"
@@ -381,7 +394,7 @@ class ManifestFileManager:
                     buf = BytesIO()
                     writer = Writer(
                         buf, MANIFEST_ENTRY_SCHEMA,
-                        sync_interval=sync_interval, codec=self._codec)
+                        sync_interval=self._AVRO_SYNC_INTERVAL, codec=self._codec)
 
             if chunk_start < len(entries):
                 writer.flush()

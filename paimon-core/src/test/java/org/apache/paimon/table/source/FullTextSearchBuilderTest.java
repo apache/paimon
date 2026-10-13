@@ -31,6 +31,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.fmindex.FMGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexReader;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -132,6 +133,64 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids.size()).isLessThanOrEqualTo(3);
         // Rows 0, 1, 3 contain "Paimon"
         assertThat(ids).containsAnyOf(0, 1, 3);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"full,true", "detail,true", "full,false", "detail,false"})
+    public void testPartialCompositeKeepsScalarFilterCoverage(String mode, boolean scalar)
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode));
+        String[] documents = {"alpha keyword", "beta keyword", "gamma keyword"};
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        if (scalar) {
+            buildAndCommitIdBTreeIndex(table, documents.length);
+            buildAndCommitBTreeIndex(table, documents);
+        }
+        List<DataField> fields =
+                Arrays.asList(
+                        table.rowType().getField(TEXT_FIELD_NAME), table.rowType().getField("id"));
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table, "btree", fields, table.coreOptions().toConfiguration());
+        writer.write(GenericRow.of(BinaryString.fromString(documents[0]), 0), 0);
+        List<IndexFileMeta> files =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, 0),
+                        fields,
+                        "btree",
+                        writer.finish(),
+                        null);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    DataIncrement.indexIncrement(files),
+                                    CompactIncrement.emptyIncrement())));
+        }
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(1)
+                        .withFilter(
+                                PredicateBuilder.and(
+                                        predicates.equal(0, 1),
+                                        predicates.equal(1, BinaryString.fromString(documents[1]))))
+                        .executeLocal();
+        assertThat(result.results()).containsExactly(1L);
     }
 
     @Test
@@ -854,6 +913,28 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                                         1)
                                 .results())
                 .containsExactly(5L);
+    }
+
+    @ParameterizedTest(name = "scalar-index.search-mode={0}")
+    @CsvSource({"fast", "full", "detail"})
+    public void testFullTextSearchReadsFilterColumnsWhenScalarIndexDeclinesFilter(String scalarMode)
+            throws Exception {
+        // FM covers the filter column but cannot evaluate equality, so no index decides the
+        // rows. Like rows without an index, full and detail decide them from the data.
+        FileStoreTable table = createTable("full_text_declined_" + scalarMode, scalarMode, false);
+        writeDocuments(table, RANKED_DOCUMENTS);
+        buildAndCommitIndex(table, RANKED_DOCUMENTS);
+        buildAndCommitBTreeIndex(table, RANKED_DOCUMENTS, FMGlobalIndexerFactory.IDENTIFIER);
+
+        Predicate filter =
+                new PredicateBuilder(table.rowType())
+                        .equal(1, BinaryString.fromString("paimon zeta"));
+        RoaringNavigableMap64 rows = searchWithFilter(table, filter, 1).results();
+        if (scalarMode.equals("fast")) {
+            assertThat(rows).isEmpty();
+        } else {
+            assertThat(rows).containsExactly(5L);
+        }
     }
 
     @ParameterizedTest(name = "scalar-index.search-mode={0}, refine-from-data={1}")
@@ -1616,7 +1697,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(documents[i], i);
@@ -1657,7 +1738,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(documents[i], i);
@@ -1724,7 +1805,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         // Doc ids are file-local (0-based); the global row offset is carried by rowRange.from,
         // which
@@ -1816,7 +1897,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(documents[i], i);
@@ -1856,7 +1937,10 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(idField),
+                                options);
         for (long rowId = rowRange.from; rowId <= rowRange.to; rowId++) {
             writer.write((int) rowId, rowId - rowRange.from);
         }
@@ -1886,13 +1970,18 @@ public class FullTextSearchBuilderTest extends TableTestBase {
 
     private void buildAndCommitBTreeIndex(FileStoreTable table, String[] documents)
             throws Exception {
+        buildAndCommitBTreeIndex(table, documents, BTreeGlobalIndexerFactory.IDENTIFIER);
+    }
+
+    private void buildAndCommitBTreeIndex(
+            FileStoreTable table, String[] documents, String indexType) throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
 
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, textField, options);
+                                table, indexType, Collections.singletonList(textField), options);
         for (int i = 0; i < documents.length; i++) {
             writer.write(BinaryString.fromString(documents[i]), i);
         }
@@ -1906,7 +1995,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         table.coreOptions(),
                         rowRange,
                         textField.id(),
-                        BTreeGlobalIndexerFactory.IDENTIFIER,
+                        indexType,
                         entries);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
@@ -1944,7 +2033,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = 0; i < mid; i++) {
             writer1.write(documents[i], i);
@@ -1967,7 +2056,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                                textField,
+                                Collections.singletonList(textField),
                                 options);
         for (int i = mid; i < documents.length; i++) {
             writer2.write(documents[i], i - mid);

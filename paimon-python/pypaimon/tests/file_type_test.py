@@ -108,5 +108,82 @@ class FileTypeClassifyTest(unittest.TestCase):
         self.assertFalse(FileType.DATA.is_index())
 
 
+class FileTypeMutableTest(unittest.TestCase):
+
+    UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    def test_temp_file_is_mutable(self):
+        path = f"/warehouse/db/t/snapshot/.snapshot-13.{self.UUID}.tmp"
+        self.assertEqual(FileType.META, FileType.classify(path))
+        self.assertTrue(FileType.is_mutable(path))
+        self.assertTrue(FileType.is_mutable(f"/warehouse/db/t/bucket-0/.data-abc.orc.{self.UUID}.tmp"))
+
+    def test_hint_files_are_mutable(self):
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/snapshot/EARLIEST"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/snapshot/LATEST"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/changelog/LATEST"))
+
+    def test_tag_consumer_service_are_mutable(self):
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/tag/tag-v1.0"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/consumer/consumer-group1"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/service/service-primary-key-lookup"))
+
+    def test_success_files_are_mutable(self):
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/dt=2024-01-01/_SUCCESS"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/tag/tag-success-file/t1_SUCCESS"))
+
+    def test_iceberg_metadata_rewritten_in_place_is_mutable(self):
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/metadata/version-hint.text"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/metadata/retire-pending"))
+        self.assertTrue(FileType.is_mutable("/warehouse/db/t/metadata/v1.metadata.json"))
+
+    def test_changelog_meta_not_mutable(self):
+        path = "/warehouse/db/t/changelog/changelog-5"
+        self.assertEqual(FileType.META, FileType.classify(path))
+        self.assertFalse(FileType.is_mutable(path))
+
+    def test_immutable_files(self):
+        for path in ("/warehouse/db/t/snapshot/snapshot-13",
+                     "/warehouse/db/t/schema/schema-0",
+                     "/warehouse/db/t/manifest/manifest-abc-0",
+                     "/warehouse/db/t/manifest/manifest-abc-0.avro.sidecar",
+                     "/warehouse/db/t/statistics/stat-abc",
+                     "/warehouse/db/t/metadata/snap-1-1-a1b2c3d4.avro",
+                     "/warehouse/db/t/bucket-0/data-abc.orc",
+                     "/warehouse/db/t/bucket-0/data-abc.orc.index",
+                     "/warehouse/db/t/index/index-uuid-0",
+                     "/warehouse/db/t/index/global-index-uuid.index"):
+            with self.subTest(path=path):
+                self.assertFalse(FileType.is_mutable(path))
+
+    def test_temp_like_name_not_unwrapped(self):
+        self.assertFalse(FileType.is_mutable("/warehouse/db/t/bucket-0/.short.tmp"))
+
+
+class FileTypeParseWhitelistTest(unittest.TestCase):
+
+    ALL = {FileType.META, FileType.DATA, FileType.BUCKET_INDEX,
+           FileType.GLOBAL_INDEX, FileType.FILE_INDEX}
+
+    def test_named_values(self):
+        self.assertEqual({FileType.META, FileType.GLOBAL_INDEX},
+                         FileType.parse_whitelist("meta,global-index"))
+        self.assertEqual({FileType.BUCKET_INDEX, FileType.DATA, FileType.FILE_INDEX},
+                         FileType.parse_whitelist(" bucket-index , data,file-index "))
+
+    def test_wildcard(self):
+        self.assertEqual(self.ALL, FileType.parse_whitelist("*"))
+        self.assertEqual(self.ALL, FileType.parse_whitelist(" meta , * "))
+
+    def test_empty(self):
+        self.assertEqual(set(), FileType.parse_whitelist(""))
+
+    def test_unknown_value_warns(self):
+        with self.assertLogs("pypaimon.utils.file_type", level="WARNING") as logs:
+            self.assertEqual({FileType.META}, FileType.parse_whitelist("meta,bogus"))
+        self.assertEqual(1, len(logs.output))
+        self.assertIn("'bogus'", logs.output[0])
+
+
 if __name__ == '__main__':
     unittest.main()

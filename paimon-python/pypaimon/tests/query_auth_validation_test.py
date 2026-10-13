@@ -119,7 +119,16 @@ def _make_read(table, read_type, nested_name_paths=None):
     read = TableRead.__new__(TableRead)
     read.table = table
     read.read_type = read_type
-    read.nested_name_paths = nested_name_paths
+    read.predicate = None
+    read.output_projection = None
+    if nested_name_paths:
+        from pypaimon.read.read_type import project_read_type
+        read.read_type = project_read_type(table.fields, nested_name_paths)
+    from pypaimon.read.read_type import reader_adapter
+    read._adapter_read_type, _ = reader_adapter(read.read_type, table.fields)
+    if nested_name_paths:
+        from pypaimon.read.read_type import OutputProjection
+        read.output_projection = OutputProjection([(f.name, path) for f, path in zip(read_type, nested_name_paths)])
     return read
 
 

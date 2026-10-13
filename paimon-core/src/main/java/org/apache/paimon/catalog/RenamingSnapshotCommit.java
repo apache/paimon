@@ -37,20 +37,19 @@ import java.util.concurrent.Callable;
  * <p>Note that when the file system is local or HDFS, rename is atomic. But if the file system is
  * object storage, we need additional lock protection.
  */
-public class RenamingSnapshotCommit implements SnapshotCommit {
+public class RenamingSnapshotCommit extends SnapshotCommit {
 
     private final SnapshotManager snapshotManager;
     private final FileIO fileIO;
-    private final Lock lock;
 
     public RenamingSnapshotCommit(SnapshotManager snapshotManager, Lock lock) {
+        super(lock);
         this.snapshotManager = snapshotManager;
         this.fileIO = snapshotManager.fileIO();
-        this.lock = lock;
     }
 
     @Override
-    public boolean commit(
+    protected boolean commitImpl(
             @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             String branch,
@@ -63,7 +62,17 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
 
         Callable<Boolean> callable =
                 () -> {
-                    boolean committed = fileIO.tryToWriteAtomic(newSnapshotPath, snapshot.toJson());
+                    boolean committed;
+                    try {
+                        committed = fileIO.tryToWriteAtomic(newSnapshotPath, snapshot.toJson());
+                    } catch (IOException e) {
+                        // the rename may have succeeded even if the file system reports an
+                        // error, check the snapshot file below
+                        if (!fileIO.exists(newSnapshotPath)) {
+                            throw e;
+                        }
+                        committed = false;
+                    }
                     if (!committed) {
                         if (!fileIO.exists(newSnapshotPath)) {
                             throw new IOException(
@@ -83,18 +92,8 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
                     }
                     return committed;
                 };
-        return lock.runWithLock(
-                () ->
-                        // fs.rename may not returns false if target file
-                        // already exists, or even not atomic
-                        // as we're relying on external locking, we can first
-                        // check if file exist then rename to work around this
-                        // case
-                        !fileIO.exists(newSnapshotPath) && callable.call());
-    }
-
-    @Override
-    public void close() throws Exception {
-        this.lock.close();
+        // fs.rename may not return false if the target file already exists, or even be atomic.
+        // The bound lock lets us check existence before publishing.
+        return !fileIO.exists(newSnapshotPath) && callable.call();
     }
 }

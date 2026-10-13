@@ -22,12 +22,15 @@ This module provides a builder for configuring streaming reads from Paimon
 tables, similar to ReadBuilder but for continuous streaming use cases.
 """
 
-from typing import Callable, List, Optional, Set
+import logging
+
+from typing import Callable, Dict, List, Optional, Set, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.read.read_builder import ReadBuilder
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import DataField
 
@@ -54,7 +57,7 @@ class StreamReadBuilder:
 
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
-        self._projection: Optional[List[str]] = None
+        self._read_builder = ReadBuilder(table)
         self._poll_interval_ms: int = 1000
         self._include_row_kind: bool = False
         self._bucket_filter: Optional[Callable[[int], bool]] = None
@@ -63,11 +66,20 @@ class StreamReadBuilder:
     def with_filter(self, predicate: Predicate) -> 'StreamReadBuilder':
         """Set a filter predicate for the streaming read."""
         self._predicate = predicate
+        self._read_builder.with_filter(predicate)
         return self
 
-    def with_projection(self, projection: List[str]) -> 'StreamReadBuilder':
+    def with_projection(
+        self,
+        projection: Union[List[str], Dict[str, str]],
+    ) -> 'StreamReadBuilder':
         """Set column projection for the streaming read."""
-        self._projection = projection
+        self._read_builder.with_projection(projection)
+        return self
+
+    def with_read_type(self, read_type: List[DataField]) -> 'StreamReadBuilder':
+        """Set the canonical reader type and reset the output projection."""
+        self._read_builder.with_read_type(read_type)
         return self
 
     def with_poll_interval_ms(self, poll_interval_ms: int) -> 'StreamReadBuilder':
@@ -113,10 +125,21 @@ class StreamReadBuilder:
         bucket_set: Set[int] = set(bucket_ids)
         return self.with_bucket_filter(lambda bucket: bucket in bucket_set)
 
-    def new_streaming_scan(self) -> AsyncStreamingTableScan:
-        """Create a new AsyncStreamingTableScan with this builder's settings."""
+    def new_streaming_scan(self) -> Union[AsyncStreamingTableScan, StreamTableScan]:
+        """Create a stateful streaming scan using the configured backend."""
         projection = self._projection_builder()
         projection._validate_map_key_filter()
+        if (self.table.options.native_plan_enabled()
+                and self.table.catalog_environment.table_query_auth(
+                    self.table.options, self.table.identifier) is None):
+            try:
+                return StreamTableScan(
+                    self.table, predicate=self._predicate, read_type=projection.read_type(),
+                    poll_interval_ms=self._poll_interval_ms, bucket_filter=self._bucket_filter,
+                    consumer_id=self._consumer_id)
+            except Exception as error:
+                _raise_if_native_fork_safety_error(error)
+                logging.warning("Cannot create Native stream scan, using Python: %s", error)
         scan = AsyncStreamingTableScan(
             table=self.table,
             predicate=self._predicate,
@@ -124,7 +147,7 @@ class StreamReadBuilder:
             bucket_filter=self._bucket_filter,
             consumer_id=self._consumer_id
         )
-        scan._read_type = projection._scan_read_type()
+        scan._read_type = projection.read_type()
         return scan
 
     def new_read(self) -> TableRead:
@@ -135,7 +158,7 @@ class StreamReadBuilder:
             table=self.table,
             predicate=self._predicate,
             read_type=projection.read_type(),
-            nested_name_paths=projection._nested_name_paths(),
+            output_projection=projection._output_projection,
             include_row_kind=self._include_row_kind
         )
 
@@ -153,9 +176,4 @@ class StreamReadBuilder:
 
     def _projection_builder(self) -> ReadBuilder:
         """Share projection and validation semantics with batch reads."""
-        builder = ReadBuilder(self.table)
-        if self._projection is not None:
-            builder.with_projection(self._projection)
-        if self._predicate is not None:
-            builder.with_filter(self._predicate)
-        return builder
+        return self._read_builder

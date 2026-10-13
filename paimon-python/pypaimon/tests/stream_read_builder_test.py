@@ -17,12 +17,15 @@
 
 """Tests for StreamReadBuilder."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pypaimon.read.read_type import OutputProjection
+
 from pypaimon.read.stream_read_builder import StreamReadBuilder
 from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class MockEntry:
@@ -99,6 +102,24 @@ class TestStreamReadBuilderValidation:
         assert builder._bucket_filter is not None
         assert builder._include_row_kind is True
 
+    def test_named_variant_projection_is_read_not_plan_schema(self, mock_table):
+        mock_table.fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('VARIANT')),
+        ]
+        builder = StreamReadBuilder(mock_table).with_projection({
+            'id_alias': 'id',
+            'ratio': "try_variant_get(payload, '$.ratio', 'float')",
+        })
+        scan = builder.new_streaming_scan()
+        assert [field.name for field in scan._read_type] == ['id', 'payload']
+        with patch('pypaimon.read.stream_read_builder.TableRead') as read:
+            builder.new_read()
+        assert read.call_args.kwargs['output_projection'] == OutputProjection([
+            ('id_alias', ['id']), ('ratio', ['payload', '0'])], True)
+        assert (read.call_args.kwargs['read_type'][1].type.fields[0].description
+                == '__VARIANT_METADATA$.ratio;false;UTC')
+
 
 class TestAsyncStreamingTableScanFiltering:
     """Test AsyncStreamingTableScan._filter_entries_for_shard()."""
@@ -146,3 +167,26 @@ class TestConsumerIdPassthrough:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestNativeStreamFactory:
+    def test_optional_native_initialization_falls_back(self, mock_scan_table):
+        mock_scan_table.options.native_plan_enabled.return_value = True
+        builder = StreamReadBuilder(mock_scan_table)
+        with patch('pypaimon.read.stream_read_builder.StreamTableScan',
+                   side_effect=ImportError('optional native runtime unavailable')):
+            assert isinstance(builder.new_streaming_scan(), AsyncStreamingTableScan)
+
+    def test_native_planning_failure_is_not_retried_with_python(self, mock_scan_table):
+        from pypaimon.read.streaming_table_scan import StreamTableScan
+        failure = LookupError('native planning failed')
+        native = MagicMock()
+        native.plan.side_effect = failure
+        with patch('pypaimon.read.native_plan.native_stream_scan', return_value=native):
+            scan = StreamTableScan(mock_scan_table)
+        with patch('pypaimon.read.streaming_table_scan.FileScanner') as python_planner:
+            with pytest.raises(LookupError) as caught:
+                scan.plan()
+        assert caught.value is failure
+        python_planner.assert_not_called()
+        native.plan.assert_called_once()

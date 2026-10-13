@@ -44,7 +44,7 @@ class BranchManagerTest(unittest.TestCase):
         self.assertEqual(BranchManager.normalize_branch("  "), DEFAULT_MAIN_BRANCH)
         self.assertEqual(BranchManager.normalize_branch("main"), "main")
         self.assertEqual(BranchManager.normalize_branch("feature"), "feature")
-        self.assertEqual(BranchManager.normalize_branch("  feature  "), "feature")
+        self.assertEqual(BranchManager.normalize_branch("  feature  "), "  feature  ")
 
     def test_branch_path(self):
         """Test branch_path method."""
@@ -87,6 +87,8 @@ class BranchManagerTest(unittest.TestCase):
         BranchManager.validate_branch("feature")
         BranchManager.validate_branch("develop")
         BranchManager.validate_branch("feature-branch-123")
+        BranchManager.validate_branch(" main ")
+        BranchManager.validate_branch(" 123 ")
 
     def test_fast_forward_validate_to_main(self):
         """Test fast_forward_validate rejects fast-forward to main."""

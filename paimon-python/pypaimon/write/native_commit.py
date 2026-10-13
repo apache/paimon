@@ -29,9 +29,6 @@ from pypaimon.write.commit_message_serializer import (
 )
 
 
-_DEFAULT_MANIFEST_TARGET_SIZE = 8 * 1024 * 1024
-
-
 def native_commit_available() -> bool:
     """Whether the optional Rust bindings are installed."""
     try:
@@ -41,25 +38,13 @@ def native_commit_available() -> bool:
     return True
 
 
-def _native_publication_supported(table) -> bool:
-    # Data evolution needs sidecar ranges and row-id recovery. Custom manifest
-    # targets need Java's forced size checks between manifest entry groups.
-    return (not table.options.data_evolution_enabled()
-            and table.options.manifest_target_size() == _DEFAULT_MANIFEST_TARGET_SIZE)
-
-
 def native_messages_supported(table, messages) -> bool:
-    if not _native_publication_supported(table):
-        return False
-    path_factory = table.path_factory()
     for message in messages:
         if (message.compact_before or message.compact_after
                 or message.compact_changelog_files
                 or message.compact_index_adds or message.compact_index_deletes):
             return False
         partition = tuple(message.partition)
-        bucket_path = path_factory.bucket_path(
-            partition, message.bucket, canonical_partition=True)
         for file in message.new_files + message.changelog_files:
             if file.external_path:
                 continue
@@ -68,18 +53,19 @@ def native_messages_supported(table, messages) -> bool:
             if file.file_path:
                 if str(file.file_path) != expected:
                     return False
-            elif path_factory.bucket_path(partition, message.bucket) != bucket_path:
-                # The message does not say which of the two partition layouts
-                # contains the file. Use Python's path-aware commit and abort.
-                return False
     return True
 
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
-    if (not _native_publication_supported(table)
-            or not _rest_catalog_supported(table)
-            or not native_commit_available()):
+    if not _rest_catalog_supported(table) or not native_commit_available():
+        return None
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.write.native_write import _native_partition_types_supported
+    if not _native_partition_types_supported(
+            PyarrowFieldParser.from_paimon_schema(table.table_schema.fields), table.partition_keys,
+            table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
@@ -127,9 +113,10 @@ def _native_rest_table(table, schema_json):
     catalog_options = _catalog_context_options(table)
     catalog_options['metastore'] = 'rest'
     native_table = NativeCatalog(catalog_options).get_table((
-        table.identifier.get_database_name(), table.identifier.get_table_name()))
+        table.identifier.get_database_name(), table.identifier.get_object_name()))
     if (native_table.location() != table.table_path
-            or native_table.rest_table_uuid() != table.catalog_environment.uuid):
+            or native_table.rest_table_uuid() != table.catalog_environment.uuid
+            or native_table.branch() != table.current_branch()):
         return None
     return native_table.copy_with_resolved_schema(schema_json)
 
@@ -140,15 +127,11 @@ def create_native_write_table(table):
     from pypaimon.filesystem.local_file_io import LocalFileIO
     from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
     from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-    from pypaimon.table.bucket_mode import BucketMode
     from pypaimon.table.file_store_table import FileStoreTable
 
-    # Native branch and postpone writes are not supported.
     environment = table.catalog_environment
     if (type(table) is not FileStoreTable
             or type(environment) is not CatalogEnvironment
-            or table.current_branch() != 'main'
-            or table.bucket_mode() == BucketMode.POSTPONE_MODE
             or table.options.query_auth_enabled):
         return None
 
@@ -162,6 +145,10 @@ def create_native_write_table(table):
         table.options.dynamic_partition_overwrite())
     options['snapshot.ignore-empty-commit'] = _option_value_to_string(
         table.options.snapshot_ignore_empty_commit())
+    options['row-tracking.partition-group-on-commit'] = _option_value_to_string(
+        table.options.row_tracking_partition_group_on_commit())
+    options['data-evolution.row-sidecar.enabled'] = _option_value_to_string(
+        table.options.data_evolution_row_sidecar_enabled())
     schema_json = JSON.to_json(table.table_schema.copy(new_options=options))
     if environment.supports_version_management:
         if not _rest_catalog_supported(table):
@@ -175,7 +162,7 @@ def create_native_write_table(table):
     return NativeTable.from_resolved_schema(
         table.table_path, schema_json,
         database=table.identifier.get_database_name(),
-        table=table.identifier.get_table_name(),
+        table=table.identifier.get_table_name(), branch=table.current_branch(),
         options=file_io_options)
 
 
@@ -194,6 +181,28 @@ def from_native_commit_messages(table, messages):
         table.trimmed_primary_keys_fields) for message in messages]
     for message in decoded:
         for file in message.new_files + message.changelog_files:
-            file.file_path = file.external_path or canonical_data_file_path(
+            file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
                 table, message.partition, message.bucket, file.file_name)
     return decoded
+
+
+def native_commit_callback(table, callbacks):
+    """Translate the native notification into the existing Python context."""
+    from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+    from pypaimon.snapshot.snapshot import Snapshot
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.write.commit_callback import CommitCallbackContext
+
+    def notify(native_context):
+        entries = []
+        for entry in native_context.commit_entries:
+            message = from_native_commit_messages(table, [entry._to_commit_message()])[0]
+            entries.append(ManifestEntry(
+                entry.kind, GenericRow(list(message.partition), table.partition_keys_fields),
+                entry.bucket, entry.total_buckets, message.new_files[0]))
+        context = CommitCallbackContext(
+            JSON.from_json(native_context._snapshot_json(), Snapshot), entries, native_context.identifier)
+        for callback in callbacks:
+            callback.call(context)
+
+    return notify

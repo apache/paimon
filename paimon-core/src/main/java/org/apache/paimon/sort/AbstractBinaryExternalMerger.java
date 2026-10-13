@@ -18,6 +18,7 @@
 
 package org.apache.paimon.sort;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.disk.ChannelReaderInputView;
@@ -36,6 +37,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Spilled files Merger of {@link BinaryExternalSortBuffer}. It merges {@link #maxFanIn} spilled
@@ -64,6 +67,12 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
             SpillChannelManager channelManager,
             BlockCompressionFactory compressionCodecFactory,
             int compressionBlockSize) {
+        checkArgument(
+                maxFanIn >= 2,
+                "The fan-in for external merge sort must be at least 2, but was %s. "
+                        + "Please adjust '%s'.",
+                maxFanIn,
+                CoreOptions.LOCAL_SORT_MAX_NUM_FILE_HANDLES.key());
         this.ioManager = ioManager;
         this.pageSize = pageSize;
         this.maxFanIn = maxFanIn;

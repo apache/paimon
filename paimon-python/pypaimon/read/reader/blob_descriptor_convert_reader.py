@@ -23,6 +23,28 @@ from pyarrow import RecordBatch
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.table.row.blob import Blob, BlobViewStruct
+from pypaimon.utils.arrow_utils import as_blob_data, clear_blob_data, is_blob_data
+
+
+class BlobDataBatchReader(RecordBatchReader):
+    """Keep ROW payload provenance after file schema and row-id normalization."""
+
+    def __init__(self, inner, field_names):
+        self._inner = inner
+        self._field_names = field_names
+        self._adopt_metadata(inner)
+
+    def read_arrow_batch(self):
+        batch = self._inner.read_arrow_batch()
+        if batch is None:
+            return None
+        fields = [as_blob_data(field) if field.name in self._field_names else field
+                  for field in batch.schema]
+        return RecordBatch.from_arrays(
+            batch.columns, schema=pyarrow.schema(fields, metadata=batch.schema.metadata))
+
+    def close(self):
+        self._inner.close()
 
 
 class BlobInlineConvertReader(RecordBatchReader):
@@ -93,7 +115,7 @@ class BlobInlineConvertReader(RecordBatchReader):
                 and not self._blob_as_descriptor):
             batch, view_blobs = self._resolve_view_fields(batch, self._blob_view_lookup)
         # Resolve BlobDescriptor -> real bytes (if blob-as-descriptor=false)
-        return self._resolve_descriptor_fields(batch, view_blobs)
+        return clear_blob_data(self._resolve_descriptor_fields(batch, view_blobs))
 
     # ------------------------------------------------------------------
     # Stage 1: BlobView prescan (lightweight, only reads view columns)
@@ -114,7 +136,8 @@ class BlobInlineConvertReader(RecordBatchReader):
                 if batch is None:
                     break
                 for field_name in self._view_fields:
-                    if field_name not in batch.schema.names:
+                    if (field_name not in batch.schema.names
+                            or is_blob_data(batch.schema.field(field_name))):
                         continue
                     for value in batch.column(field_name).to_pylist():
                         value = self._normalize_blob_to_bytes(value)
@@ -143,7 +166,8 @@ class BlobInlineConvertReader(RecordBatchReader):
         """Replace BlobViewStruct bytes in view fields with descriptor bytes."""
         view_blobs = {}
         for field_name in self._view_fields:
-            if field_name not in batch.schema.names:
+            if (field_name not in batch.schema.names
+                    or is_blob_data(batch.schema.field(field_name))):
                 continue
             values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
             converted_values = []
@@ -182,7 +206,8 @@ class BlobInlineConvertReader(RecordBatchReader):
             return batch
 
         for field_name in self._descriptor_fields:
-            if field_name not in batch.schema.names:
+            if (field_name not in batch.schema.names
+                    or is_blob_data(batch.schema.field(field_name))):
                 continue
             values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
             blobs = [

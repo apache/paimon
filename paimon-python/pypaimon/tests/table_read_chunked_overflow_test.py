@@ -49,6 +49,16 @@ class TableReadChunkedOverflowTest(unittest.TestCase):
 
     OVERFLOW_THRESHOLD = 4  # pretend any column with > 4 rows overflows 2GB
 
+    def test_zero_column_rows_keep_count_and_schema_metadata(self):
+        schema = pa.schema([], metadata={b'contract': b'empty projection'})
+        read = _make_table_read(include_row_kind=False)
+        batches = list(read._convert_rows_to_arrow_batches_with_row_kind(
+            [(), (), ()], [], schema))
+        actual = pa.Table.from_batches(batches)
+        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.num_columns, 0)
+        self.assertTrue(actual.schema.equals(schema, check_metadata=True))
+
     def _patched_array(self, obj, *args, **kwargs):
         real = _REAL_ARRAY(obj, *args, **kwargs)
         if isinstance(real, pa.Array) and len(real) > self.OVERFLOW_THRESHOLD:

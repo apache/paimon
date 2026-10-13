@@ -69,6 +69,26 @@ CALL sys.create_tag_from_timestamp(
 );
 ```
 
+## create_tag_from_watermark
+
+Create a tag from the first retained snapshot (including tagged snapshots) whose watermark is at or after the given value.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier.
+- `tag` (`STRING`, required): name of the new tag.
+- `watermark` (`BIGINT`, required): find the first snapshot whose watermark is later than or equal to this value.
+- `time_retained` (`STRING`, optional): The maximum time retained for newly created tags.
+
+```sql
+CALL sys.create_tag_from_watermark(
+  `table` => 'default.T',
+  `tag` => 'my_tag',
+  `watermark` => 1724404318750,
+  time_retained => '1 d'
+);
+```
+
 ## replace_tag
 
 Replace an existing tag with new tag info.
@@ -238,6 +258,29 @@ CALL sys.rollback(table => 'default.T', version => 10);
 
 CALL sys.rollback(table => 'default.T', tag => 'tag1');
 CALL sys.rollback(table => 'default.T', snapshot => 2);
+```
+
+## rollback_to_as_latest
+
+Roll back to a retained snapshot or tag and materialize it as the latest snapshot, without deleting
+later snapshots or tags. Specify exactly one of `snapshot_id` or `tag`. Batch and time-travel reads
+are correct; for deletion-vector tables, a rollback whose only difference is a deletion-vector
+change is not guaranteed to be observed by streaming overwrite readers.
+
+When rolling back to a snapshot, the procedure creates a tag named
+`rollback-to-as-latest-<snapshot_id>-<uuid>` that protects the restored data files from snapshot
+expiration.
+
+**Arguments**
+
+- `table` (`STRING`, required): the target table identifier.
+- `tag` (`STRING`, optional): tag that will roll back to.
+- `snapshot_id` (`BIGINT`, optional): snapshot that will roll back to.
+
+```sql
+CALL sys.rollback_to_as_latest(table => 'default.T', snapshot_id => 10);
+
+CALL sys.rollback_to_as_latest(table => 'default.T', tag => 'tag1');
 ```
 
 ## rollback_to_timestamp

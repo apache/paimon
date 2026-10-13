@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.ExpireConfig;
@@ -184,13 +185,94 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
         assertThat(fileIO.exists(changelogManager.longLivedChangelogPath(middleId))).isTrue();
         fileIO.deleteQuietly(changelogManager.longLivedChangelogPath(middleId));
 
+        int expectedDeleted = 0;
+        for (long id = earliestChangelogId; id < latestChangelogId; id++) {
+            if (changelogManager.longLivedChangelogExists(id)) {
+                expectedDeleted++;
+            }
+        }
+        assertThat(expectedDeleted).isLessThan((int) (latestChangelogId - earliestChangelogId));
+
         ExpireChangelogImpl expire =
                 (ExpireChangelogImpl) table.newExpireChangelog().config(expireConfig);
 
-        // should not throw even though a middle changelog is missing
-        assertThatCode(expire::expire).doesNotThrowAnyException();
+        // should not throw even though a middle changelog is missing, and the count excludes it
+        assertThat(expire.expire()).isEqualTo(expectedDeleted);
 
         // earliest should be advanced past the deleted range
         assertThat(changelogManager.earliestLongLivedChangelogId()).isEqualTo(latestChangelogId);
+        assertThat(changelogManager.longLivedChangelogExists(latestChangelogId)).isTrue();
+    }
+
+    @Test
+    public void testDeleteChangelogFileRequiresActualRemoval() throws Exception {
+        LocalFileIO fileIO = new LocalFileIO();
+        java.nio.file.Path tempDir = java.nio.file.Files.createTempDirectory("changelog-delete");
+        Path dir = new Path(tempDir.toString());
+        try {
+            Path removed = new Path(dir, "changelog-1");
+            fileIO.writeFile(removed, "{}", false);
+            assertThat(ExpireChangelogImpl.deleteChangelogFile(fileIO, removed)).isTrue();
+            assertThat(fileIO.exists(removed)).isFalse();
+
+            Path blocked = new Path(dir, "changelog-2");
+            assertThat(fileIO.mkdirs(blocked)).isTrue();
+            fileIO.writeFile(new Path(blocked, "keep"), "x", false);
+            assertThat(ExpireChangelogImpl.deleteChangelogFile(fileIO, blocked)).isFalse();
+            assertThat(fileIO.exists(blocked)).isTrue();
+        } finally {
+            fileIO.delete(dir, true);
+        }
+    }
+
+    @Test
+    public void testExpireAllDeletedCountSkipsMissingChangelog() throws Exception {
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+        for (int i = 1; i <= 10; i++) {
+            write(write, createRow(1, 0, i, i * 10));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        write.close();
+        commit.close();
+
+        SnapshotManager snapshotManager = table.snapshotManager();
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        // changelogRetainMax > snapshotRetainMax to ensure changelogDecoupled=true
+        ExpireConfig expireConfig =
+                ExpireConfig.builder()
+                        .changelogRetainMax((int) latestSnapshotId)
+                        .changelogRetainMin(1)
+                        .changelogTimeRetain(Duration.ofMillis(0))
+                        .snapshotRetainMax(1)
+                        .snapshotRetainMin(1)
+                        .build();
+        ExpireSnapshotsImpl expireSnapshots =
+                (ExpireSnapshotsImpl) table.newExpireSnapshots().config(expireConfig);
+        expireSnapshots.expire();
+
+        ChangelogManager changelogManager = table.changelogManager();
+        FileIO fileIO = table.fileIO();
+        long latestChangelogId = changelogManager.latestLongLivedChangelogId();
+        long earliestChangelogId = changelogManager.earliestLongLivedChangelogId();
+
+        long middleId = (earliestChangelogId + latestChangelogId) / 2;
+        assertThat(fileIO.exists(changelogManager.longLivedChangelogPath(middleId))).isTrue();
+        fileIO.deleteQuietly(changelogManager.longLivedChangelogPath(middleId));
+
+        int existing = 0;
+        for (long id = earliestChangelogId; id <= latestChangelogId; id++) {
+            if (changelogManager.longLivedChangelogExists(id)) {
+                existing++;
+            }
+        }
+        assertThat(existing).isEqualTo((int) (latestChangelogId - earliestChangelogId));
+
+        ExpireChangelogImpl expire = (ExpireChangelogImpl) table.newExpireChangelog();
+        assertThat(expire.expireAllDeletedCount()).isEqualTo(existing);
+        assertThat(changelogManager.latestLongLivedChangelogId()).isNull();
+        assertThat(changelogManager.earliestLongLivedChangelogId()).isNull();
     }
 }

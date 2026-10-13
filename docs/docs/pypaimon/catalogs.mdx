@@ -170,6 +170,17 @@ PyPaimon supports filesystem, JDBC, and REST catalogs. See [Catalog](../concepts
 
 Use this catalog for the database and table operations below.
 
+## OSS and custom S3 checksums
+
+OSS rejects PyArrow 22+ optional checksum trailers (checksums sent after the data).
+For PyArrow-backed OSS and explicit S3 endpoints (including AWS), PyPaimon sets
+`AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` to disable optional checksums.
+This also affects later AWS clients in the process. Explicit environment values take
+precedence; required checksums and older PyArrow versions are unchanged.
+
+Set `fs.s3.checksum-compatibility.auto-configure=false` on all relevant catalogs before
+creating clients to disable this setup. Existing process settings are not cleared.
+
 ## Create Database
 
 Tables belong to a database. Create the database before creating its tables.

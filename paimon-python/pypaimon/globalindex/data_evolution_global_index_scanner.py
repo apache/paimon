@@ -371,9 +371,12 @@ def _resolve_snapshot(table, snapshot):
 
 
 def is_supported_scalar_index(index_file):
+    meta = index_file.global_index_meta
     return (
-        index_file.global_index_meta is not None
+        meta is not None
         and index_file.index_type in _SUPPORTED_SCALAR_INDEX_TYPES
+        # Composite BTree keys cannot use scalar readers or their coverage.
+        and not (index_file.index_type == 'btree' and meta.extra_field_ids)
     )
 
 

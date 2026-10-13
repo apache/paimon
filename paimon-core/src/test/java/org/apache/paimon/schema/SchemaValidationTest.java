@@ -701,6 +701,30 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testPartialUpdateRejectsOverlappingSequenceGroupOrderingFields() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "a", DataTypes.INT()),
+                        new DataField(2, "b", DataTypes.INT()),
+                        new DataField(3, "s", DataTypes.INT()),
+                        new DataField(4, "t", DataTypes.INT()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put("fields.s.sequence-group", "a");
+        options.put("fields.t,s.sequence-group", "b");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Sequence field 's' is shared by sequence groups")
+                .hasMessageContaining("fields.s.sequence-group")
+                .hasMessageContaining("fields.t,s.sequence-group");
+    }
+
+    @Test
     public void testPrimaryKeyBlobViewCoexistsWithManagedBlob() {
         List<DataField> fields =
                 Arrays.asList(

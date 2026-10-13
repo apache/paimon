@@ -136,6 +136,8 @@ public class SchemaValidation {
 
     private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
 
+    private static final int MIN_ICEBERG_VARIANT_FORMAT_VERSION = 3;
+
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(
                     MapType.class,
@@ -254,6 +256,7 @@ public class SchemaValidation {
         validateVariantTypes(schema, options);
         validateIcebergTimestampPrecisions(tableRowType, options);
         validateIcebergTimePrecisions(tableRowType, options);
+        validateIcebergPublishableTypes(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -687,7 +690,49 @@ public class SchemaValidation {
             validateIcebergGeospatialTypes(schema.logicalRowType(), options);
             validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
             validateIcebergTimePrecisions(schema.logicalRowType(), options);
+            validateIcebergPublishableTypes(schema.logicalRowType(), options);
         }
+    }
+
+    /**
+     * Refuses the types the mirror cannot publish: the conversion that would catch them only runs
+     * once the snapshot is durable.
+     */
+    public static void validateIcebergPublishableTypes(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isUnpublishableType),
+                "Columns of type %s or %s cannot be published as Iceberg metadata. The schema "
+                        + "history counts too, so dropping such a column does not make an existing "
+                        + "table publishable; disable '%s' instead.",
+                DataTypeRoot.BLOB,
+                DataTypeRoot.VECTOR,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.FORMAT_VERSION)
+                                >= MIN_ICEBERG_VARIANT_FORMAT_VERSION
+                        || !containsType(dataType, type -> type.is(DataTypeRoot.VARIANT)),
+                "Columns of type %s require Iceberg format version %s. Set '%s' = '%s', or remove "
+                        + "them.",
+                DataTypeRoot.VARIANT,
+                MIN_ICEBERG_VARIANT_FORMAT_VERSION,
+                IcebergOptions.FORMAT_VERSION.key(),
+                MIN_ICEBERG_VARIANT_FORMAT_VERSION);
+        checkArgument(
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                                != IcebergOptions.StorageType.REST_CATALOG
+                        || !containsType(dataType, type -> type.is(DataTypeRoot.VARIANT)),
+                "Variant columns do not support '%s'='%s' because the bundled Iceberg REST client "
+                        + "cannot parse the Iceberg variant type.",
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.REST_CATALOG);
+    }
+
+    private static boolean isUnpublishableType(DataType dataType) {
+        return dataType.isAnyOf(DataTypeRoot.BLOB, DataTypeRoot.VECTOR);
     }
 
     /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
@@ -1466,25 +1511,25 @@ public class SchemaValidation {
         for (String column : options.primaryKeyBTreeIndexColumns()) {
             GlobalIndexer.create(
                     BTreeGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyBTreeIndexOptions(column));
         }
         for (String column : options.primaryKeyBitmapIndexColumns()) {
             GlobalIndexer.create(
                     BitmapGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyBitmapIndexOptions(column));
         }
         for (String column : options.primaryKeyMultiValueIndexColumns()) {
             GlobalIndexer.create(
                     MultiValueGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyMultiValueIndexOptions(column));
         }
         for (String column : options.primaryKeyFMIndexColumns()) {
             GlobalIndexer.create(
                     FMGlobalIndexerFactory.IDENTIFIER,
-                    fields.get(column),
+                    Collections.singletonList(fields.get(column)),
                     options.primaryKeyFMIndexOptions(column));
         }
     }

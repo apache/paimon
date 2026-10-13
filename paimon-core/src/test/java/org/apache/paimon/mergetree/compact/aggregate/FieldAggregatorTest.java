@@ -40,6 +40,7 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFa
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapWithKeyTimeAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
@@ -3069,6 +3070,40 @@ public class FieldAggregatorTest {
                 createExpectedEntry("key1", "A1"),
                 createExpectedEntry("key2", "B"),
                 createExpectedEntry("key3", "C"));
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggFactoryRejectsNonStringTsField() {
+        // The merge path reads the ts field via InternalRow#getString, so a non-string ts field
+        // (declared BIGINT/TIMESTAMP/INT, which is natural for a "ts" field) is accepted at DDL
+        // today and only throws ClassCastException at the first merge/compaction, naming neither
+        // the field nor the function. Validate it is a string type at factory creation.
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.BIGINT())));
+        assertThatThrownBy(
+                        () ->
+                                new FieldMergeMapWithKeyTimeAggFactory()
+                                        .create(mapType, new CoreOptions(new HashMap<>()), "f"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be a string type");
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggFactoryAcceptsStringTsField() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        assertThat(
+                        new FieldMergeMapWithKeyTimeAggFactory()
+                                .create(mapType, new CoreOptions(new HashMap<>()), "f"))
+                .isNotNull();
     }
 
     /**

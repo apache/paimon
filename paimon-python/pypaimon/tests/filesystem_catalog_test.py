@@ -60,6 +60,30 @@ class FileSystemCatalogTest(unittest.TestCase):
         database = catalog.get_database("test_db")
         self.assertEqual(database.name, "test_db")
 
+    def test_cascade_drop_preserves_table_created_during_drop(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("db", False)
+        schema = Schema(fields=[DataField(0, "value", AtomicType("INT"))])
+        catalog.create_table("db.old", schema, False)
+        delete = catalog.file_io.delete
+        old_path = catalog.get_database_path("db") + "/old"
+
+        def delete_and_create(path, recursive=False):
+            result = delete(path, recursive)
+            if path == old_path:
+                catalog.create_table("db.new", schema, False)
+            return result
+
+        with patch.object(catalog.file_io, "delete", side_effect=delete_and_create):
+            with self.assertRaisesRegex(OSError, "changed during drop"):
+                catalog.drop_database("db", cascade=True)
+
+        self.assertEqual(["new"], catalog.list_tables("db"))
+        self.assertIsNotNone(catalog.get_table("db.new"))
+        catalog.drop_database("db", cascade=True)
+        with self.assertRaises(DatabaseNotExistException):
+            catalog.get_database("db")
+
     def test_table(self):
         fields = [
             DataField.from_dict({"id": 1, "name": "f0", "type": "INT"}),
@@ -713,3 +737,21 @@ class FileSystemCatalogTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             catalog.drop_partitions(identifier, [])
+
+    def test_create_table_auto_create_boolean_parsing(self):
+        fields = [DataField.from_dict({"id": 0, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        # auto-create=false is a legal no-op (the default) and must not be rejected.
+        catalog.create_table(
+            "test_db.ac_false",
+            Schema(fields=fields, options={"auto-create": "false"}), False)
+        self.assertTrue(
+            os.path.exists(self.warehouse + "/test_db.db/ac_false/schema/schema-0"))
+
+        # auto-create=true stays unsupported by create_table and is rejected.
+        with self.assertRaises(ValueError):
+            catalog.create_table(
+                "test_db.ac_true",
+                Schema(fields=fields, options={"auto-create": "true"}), False)

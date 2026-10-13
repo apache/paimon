@@ -304,6 +304,19 @@ class SchemaEvolutionReadTest(unittest.TestCase):
                     schema=new_schema)
                 self.assertEqual(expected, actual)
 
+                if name == 'decimal_scale_up':
+                    read_builder = table.new_read_builder()
+                    predicate = read_builder.new_predicate_builder().less_than(
+                        'v', decimal.Decimal('4.5601')
+                    )
+                    read_builder.with_filter(predicate).with_projection(['k'])
+                    filtered = read_builder.new_read().to_arrow(
+                        self._scan_table(read_builder)
+                    )
+                    self.assertEqual(
+                        [1, 2, 4], sorted(filtered.column('k').to_pylist())
+                    )
+
     def test_schema_evolution_type_lossy_old_file_only(self):
         # Reading ONLY old-schema files after a lossy type change (no
         # newer-schema file in the splits). The output type must equal the

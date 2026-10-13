@@ -232,7 +232,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     @TestTemplate
     public void testFallbackScanDisabledByBudget() throws Exception {
         options.set(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(1));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
 
         List<GlobalIndexIOMeta> written = writeData();
         FieldRef ref = new FieldRef(1, "testField", dataType);
@@ -264,7 +267,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         options.set(
                 BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE,
                 MemorySize.ofBytes(written.get(1).fileSize()));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
 
         FieldRef ref = new FieldRef(1, "testField", dataType);
         Object min = data.get(0).getKey();
@@ -336,7 +342,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     @TestTemplate
     public void testAllMatchRangeDoesNotConsumeScanBudget() throws Exception {
         options.set(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(1));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
         List<GlobalIndexIOMeta> written = writeData();
         Object min = data.get(0).getKey();
         Object max = data.get(dataNum - 1).getKey();
@@ -522,7 +531,9 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         stressOptions.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofKibiBytes(64));
         stressOptions.set(BTreeIndexOptions.BTREE_INDEX_HIGH_PRIORITY_POOL_RATIO, 0.1);
         BTreeGlobalIndexer stressIndexer =
-                new BTreeGlobalIndexer(new DataField(1, "testField", dataType), stressOptions);
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        stressOptions);
 
         // Inject null values at the tail to test isNull/isNotNull under concurrency
         for (int i = dataNum - 1; i >= dataNum * 0.9; i--) {

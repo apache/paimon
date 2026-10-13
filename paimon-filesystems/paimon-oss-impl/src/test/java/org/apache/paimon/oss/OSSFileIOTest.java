@@ -93,6 +93,7 @@ public class OSSFileIOTest {
         copied.setPartNumber(1);
         copied.setETag("etag");
         when(client.uploadPartCopy(any())).thenReturn(copied);
+        when(client.getClientConfiguration()).thenReturn(new ClientConfiguration());
         when(client.getEndpoint()).thenReturn(URI.create("https://oss-cn-hangzhou.aliyuncs.com"));
         when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
                 .thenAnswer(
@@ -158,6 +159,7 @@ public class OSSFileIOTest {
                 new BlobDescriptor("oss://bucket/table/-internal.aliyuncs.com/source.blob", 0, 1);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
                 .thenReturn(matchingMetadata(descriptor));
+        when(client.getClientConfiguration()).thenReturn(new ClientConfiguration());
         when(client.getEndpoint())
                 .thenReturn(URI.create("https://oss-cn-hangzhou-internal.aliyuncs.com"));
         when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
@@ -337,11 +339,112 @@ public class OSSFileIOTest {
                 "https://bucket.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash");
     }
 
+    @Test
+    public void testCreateBlobPresignedUrlAcceptsPathStyleWhenSldEnabled() throws Exception {
+        BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/source.blob", 0, 1);
+        String key = "table/_bloburl_" + sha256Hex(descriptor.serialize());
+        for (String endpoint :
+                new String[] {
+                    "https://oss-cn-hangzhou.aliyuncs.com",
+                    "https://oss-cn-hangzhou-internal.aliyuncs.com",
+                    "https://ep-abc.oss.cn-hangzhou.privatelink.aliyuncs.com"
+                }) {
+            String signed = endpoint + "/bucket/" + key + "?Signature=test";
+            assertThat(presignWithSldMock(endpoint, descriptor, signed)).isEqualTo(signed);
+        }
+
+        // The bucket is still verified, now as the first path segment.
+        assertThatThrownBy(
+                        () ->
+                                presignWithSldMock(
+                                        "https://oss-cn-hangzhou.aliyuncs.com",
+                                        descriptor,
+                                        "https://oss-cn-hangzhou.aliyuncs.com/other/" + key))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("invalid target");
+    }
+
+    @Test
+    public void testCreateBlobPresignedUrlAcceptsSdkPathStyleUrlWithEncodedKey() throws Exception {
+        BlobDescriptor descriptor =
+                new BlobDescriptor("oss://bucket/table/a b/\uD55C/source.blob", 0, 1);
+
+        URL url = new URL(presignWithSldClient("https://oss-cn-hangzhou.aliyuncs.com", descriptor));
+
+        assertThat(url.getHost()).isEqualTo("oss-cn-hangzhou.aliyuncs.com");
+        assertThat(url.toURI().getPath())
+                .isEqualTo(
+                        "/bucket/table/a b/\uD55C/_bloburl_" + sha256Hex(descriptor.serialize()));
+    }
+
+    @Test
+    public void testCreateBlobPresignedUrlAcceptsSdkPathStyleUrlWithEndpointPort()
+            throws Exception {
+        BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/source.blob", 0, 1);
+
+        URL url =
+                new URL(
+                        presignWithSldClient(
+                                "https://oss-cn-hangzhou.aliyuncs.com:8443", descriptor));
+
+        assertThat(url.getHost()).isEqualTo("oss-cn-hangzhou.aliyuncs.com");
+        assertThat(url.getPort()).isEqualTo(8443);
+        assertThat(url.getPath())
+                .isEqualTo("/bucket/table/_bloburl_" + sha256Hex(descriptor.serialize()));
+    }
+
+    private static String presignWithSldMock(
+            String endpoint, BlobDescriptor descriptor, String generatedUrl) throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        when(client.headObject(eq("bucket"), contains("_bloburl_")))
+                .thenReturn(matchingMetadata(descriptor));
+        ClientConfiguration configuration = new ClientConfiguration();
+        configuration.setSLDEnabled(true);
+        when(client.getClientConfiguration()).thenReturn(configuration);
+        when(client.getEndpoint()).thenReturn(URI.create(endpoint));
+        when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
+                .thenReturn(presignedUrl(generatedUrl));
+        return new TestOSSFileIO(client)
+                .createBlobPresignedUrl(
+                        new Path("oss://bucket/table"), descriptor, Duration.ofMinutes(5));
+    }
+
+    /**
+     * Presigns with the URL the SDK itself signs once {@code fs.oss.sld.enabled} has turned on
+     * second-level domain mode, so the validator is checked against the real path-style output.
+     */
+    private static String presignWithSldClient(String endpoint, BlobDescriptor descriptor)
+            throws Exception {
+        OSSClient signer = hadoopStyleClient(endpoint);
+        try {
+            signer.getClientConfiguration().setSLDEnabled(true);
+            OSSClient client = mock(OSSClient.class);
+            when(client.headObject(eq("bucket"), contains("_bloburl_")))
+                    .thenReturn(matchingMetadata(descriptor));
+            when(client.getClientConfiguration()).thenReturn(signer.getClientConfiguration());
+            when(client.getEndpoint()).thenReturn(signer.getEndpoint());
+            when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
+                    .thenAnswer(
+                            invocation ->
+                                    signer.generatePresignedUrl(
+                                            "bucket",
+                                            invocation.getArgument(1),
+                                            invocation.getArgument(2),
+                                            HttpMethod.GET));
+            return new TestOSSFileIO(client)
+                    .createBlobPresignedUrl(
+                            new Path("oss://bucket/table"), descriptor, Duration.ofMinutes(5));
+        } finally {
+            signer.shutdown();
+        }
+    }
+
     private static void assertInvalidPresignedUrl(String endpoint, String generatedUrl) {
         OSSClient client = mock(OSSClient.class);
         BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/source.blob", 0, 1);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
                 .thenReturn(matchingMetadata(descriptor));
+        when(client.getClientConfiguration()).thenReturn(new ClientConfiguration());
         when(client.getEndpoint()).thenReturn(URI.create(endpoint));
         when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
                 .thenReturn(presignedUrl(generatedUrl));
@@ -407,6 +510,7 @@ public class OSSFileIOTest {
     }
 
     private static void stubPresigning(OSSClient client) {
+        when(client.getClientConfiguration()).thenReturn(new ClientConfiguration());
         when(client.getEndpoint()).thenReturn(URI.create("https://oss-cn-hangzhou.aliyuncs.com"));
         when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
                 .thenAnswer(

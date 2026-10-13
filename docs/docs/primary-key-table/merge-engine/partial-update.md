@@ -73,6 +73,8 @@ independent streams update different columns, give each stream its own sequence 
 stream's version does not determine whether the other stream's update is accepted.
 
 Configure `fields.<ordering-field>.sequence-group` with the columns that the version protects.
+Ordering fields cannot be shared by different sequence groups. If multiple fields use the same
+ordering tuple, list those protected value fields in one group.
 This example separates profile updates from score updates:
 
 ```sql
@@ -235,6 +237,11 @@ fields is skipped, and ungrouped fields are not retracted.
 Set `partial-update.remove-record-on-sequence-group` to a comma-separated list of ordering
 field names from the groups whose deletes should remove the whole row. For the `profiles`
 schema above, using `profile_version` allows an accepted profile delete to remove the row.
+
+While merging a deleted row, subsequent retractions or updates to other groups do not cancel
+the whole-row deletion. An `INSERT` or `UPDATE_AFTER` for a configured deletion group can
+restore the row only when its group version passes the normal newer-or-equal comparison.
+An older update or a group with all-null ordering fields cannot restore the row.
 
 `partial-update.remove-record-on-delete` cannot be combined with sequence groups. Neither
 whole-row removal option can be combined with `ignore-delete`.

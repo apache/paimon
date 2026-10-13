@@ -51,6 +51,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -177,7 +178,9 @@ public class DataEvolutionFullTextRead implements FullTextRead {
      *       dropped, or a {@code contains} / {@code endsWith} / {@code like} leaf, which BTree
      *       answers with every non-null row), the candidates are refined by reading their filter
      *       columns if {@code global-index.filter.refine-from-data} allows it, and excluded
-     *       otherwise.
+     *       otherwise. When every index covering the filter columns declines the predicate, the
+     *       rows are excluded in {@code fast} and otherwise decided by reading their filter
+     *       columns.
      *   <li>Rows whose filter columns are not covered follow {@code scalar-index.search-mode}:
      *       excluded in {@code fast}, otherwise decided by reading their filter columns.
      * </ul>
@@ -246,6 +249,11 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                 matched.or(fromIndex);
             } else {
                 warnUnindexedFilter();
+                if (table.coreOptions().scalarIndexSearchMode() != GlobalIndexSearchMode.FAST) {
+                    // No scalar index could evaluate the filter: decide these rows from the data,
+                    // like rows whose filter columns have no index.
+                    unindexed.or(decidedByIndex);
+                }
             }
         }
         if (!unindexed.isEmpty()) {
@@ -259,7 +267,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     private Optional<GlobalIndexEvaluator.Evaluation> evaluateWithIndexes(
             Set<IndexFileMeta> scalarIndexFiles, @Nullable Snapshot planSnapshot) {
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
@@ -386,12 +394,13 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         if (meta.extraFieldIds() != null) {
             return GlobalIndexerFactoryUtils.load(indexType)
                     .create(
-                            meta.getIndexField(table.rowType()),
-                            meta.getExtraFields(table.rowType()),
+                            meta.getIndexedFields(table.rowType()),
                             table.coreOptions().toConfiguration());
         }
         return GlobalIndexerFactoryUtils.load(indexType)
-                .create(textColumn, table.coreOptions().toConfiguration());
+                .create(
+                        Collections.singletonList(textColumn),
+                        table.coreOptions().toConfiguration());
     }
 
     private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(

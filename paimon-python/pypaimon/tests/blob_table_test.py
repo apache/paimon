@@ -295,7 +295,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             }
         )
         self.catalog.create_table('test_db.blob_detection_test', schema, False)
-        table = self.catalog.get_table('test_db.blob_detection_test')
+        # This test inspects the Python writer's internal column routing.
+        table = self.catalog.get_table('test_db.blob_detection_test').copy(
+            {'write.native.enabled': 'false'})
 
         # Use proper table API to create writer
         write_builder = table.new_batch_write_builder()
@@ -1746,7 +1748,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[('bad', None)]], type=map_blob_type),
         }, schema=pa_schema)
         invalid_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "does not allow null values"):
+        with self.assertRaisesRegex(ValueError, "does not allow null values|non-nullable"):
             invalid_writer.write_arrow(invalid_data)
         invalid_writer.abort()
 
@@ -1819,7 +1821,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=array_blob_type),
         }, schema=pa_schema)
         invalid_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "does not allow null elements"):
+        with self.assertRaisesRegex(ValueError, "does not allow null elements|cannot contain nulls"):
             invalid_writer.write_arrow(invalid_data)
         invalid_writer.abort()
 
@@ -2494,7 +2496,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
-        result = table_read.to_arrow(splits)
+        # Scans do not promise an ordering across partitions.
+        result = table_read.to_arrow(splits).sort_by('id')
 
         # Verify the data was read back correctly
         self.assertEqual(result.num_rows, 5, "Should have 5 rows")
@@ -2689,9 +2692,13 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
         self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
 
+    @pytest.mark.python_read
     def test_blob_view_fields_resolve_upstream_blob(self):
+        from unittest import mock
+
         from pypaimon import Schema
         from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.read.reader import format_blob_reader
         from pypaimon.table.row.blob import BlobViewStruct
 
         source_schema = pa.schema([
@@ -2758,15 +2765,24 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             "Blob view fields should be stored inline without writing new blob files",
         )
 
-        result = target_table.new_read_builder().new_read().to_arrow(
-            target_table.new_read_builder().new_scan().plan().splits()
-        ).sort_by('id')
-        self.assertEqual(result.column('picture').to_pylist(), payloads)
+        with mock.patch.object(
+                format_blob_reader,
+                '_decode_blob_index',
+                wraps=format_blob_reader._decode_blob_index,
+        ) as decode_index:
+            result = target_table.new_read_builder().new_read().to_arrow(
+                target_table.new_read_builder().new_scan().plan().splits()
+            ).sort_by('id')
+            self.assertEqual(result.column('picture').to_pylist(), payloads)
 
-        descriptor_table = target_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'})
-        descriptor_result = descriptor_table.new_read_builder().new_read().to_arrow(
-            descriptor_table.new_read_builder().new_scan().plan().splits()
-        ).sort_by('id')
+            descriptor_table = target_table.copy({
+                CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'
+            })
+            descriptor_result = descriptor_table.new_read_builder().new_read().to_arrow(
+                descriptor_table.new_read_builder().new_scan().plan().splits()
+            ).sort_by('id')
+
+        self.assertEqual(1, decode_index.call_count)
         # With blob-as-descriptor=true, view fields return BlobDescriptor bytes
         from pypaimon.table.row.blob import BlobDescriptor
         for value in descriptor_result.column('picture').to_pylist():
@@ -5338,14 +5354,10 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result['id'], list(range(2000)))
         self.assertEqual(result['name'], ['updated'] * 2000)
 
-    def test_legacy_stored_descriptor_fields_keeps_dedicated_blob_layout(self):
-        """blob.stored-descriptor-fields must not switch Python to inline descriptors.
-
-        Master ignored that key and wrote dedicated .blob payloads. Head write
-        with the same option must keep that layout so old readers still see
-        payloads, and head read must not fail-fast on those bytes.
-        """
+    def test_stored_descriptor_fallback_uses_java_inline_layout(self):
+        """The fallback option stores references in Parquet, as Java does."""
         from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobDescriptor
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -5364,11 +5376,15 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         table = self.catalog.get_table('test_db.legacy_stored_descriptor_fields')
 
         payload = b'legacy-dedicated-blob-payload'
+        source = os.path.join(self.temp_dir, 'fallback-descriptor-source')
+        with open(source, 'wb') as stream:
+            stream.write(payload)
+        descriptor = BlobDescriptor(source, 0, len(payload)).serialize()
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
         writer.write_arrow(pa.Table.from_pydict({
             'id': [1],
-            'picture': [payload],
+            'picture': [descriptor],
         }, schema=pa_schema))
         commit_messages = writer.prepare_commit()
         write_builder.new_commit().commit(commit_messages)
@@ -5376,8 +5392,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         all_files = [f for msg in commit_messages for f in msg.new_files]
         blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
-        self.assertGreaterEqual(len(blob_files), 1)
-        self.assertTrue(all(f.write_cols == ['picture'] for f in blob_files))
+        self.assertEqual(blob_files, [])
+        self.assertTrue(all(f.file_name.endswith('.parquet') for f in all_files))
 
         result = table.new_read_builder().new_read().to_arrow(
             table.new_read_builder().new_scan().plan().splits())
@@ -6286,11 +6302,9 @@ class BlobConsumerTest(unittest.TestCase):
 
         self.assertGreater(len(received), 0)
 
-        # Capture data writers before close() clears them, then abort each one.
-        data_writers = list(writer.file_store_write.data_writers.values())
-        self.assertGreater(len(data_writers), 0)
-        for dw in data_writers:
-            dw.abort()
+        # Public abort covers both Python and Native writers. Consumer-held
+        # descriptors keep their Blob files regardless of the writer backend.
+        writer.abort()
 
         # Every descriptor returned to the consumer must still be readable.
         uri_reader = FileUriReader(table.file_io)

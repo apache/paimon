@@ -190,7 +190,7 @@ public class JavaPyNativeFullTextE2ETest {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 NativeFullTextGlobalIndexerFactory.IDENTIFIER,
-                                contentField,
+                                Collections.singletonList(contentField),
                                 indexOptions);
 
         // Write the same text data to the index.

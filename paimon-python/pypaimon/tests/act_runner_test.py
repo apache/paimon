@@ -258,6 +258,15 @@ def benchmark_input(tmp_path, monkeypatch):
     return root, warehouse
 
 
+def _frame_for_append(frames, predicate):
+    # A full-row append must retain all required Blob fields, including depth
+    # images outside the RGB-only ACT input projection.
+    scalar, blobs = frames.scan().where(predicate).read_blobs()
+    row = scalar.to_pylist()[0]
+    row.update({name: values[0] for name, values in blobs.items()})
+    return row
+
+
 class _Policy(torch.nn.Module):
 
     def __init__(self):
@@ -630,15 +639,10 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
             for name in IMAGE_COLUMNS
         } == {name: 1 for name in IMAGE_COLUMNS}
 
-    scalar, blobs = frames.scan().where(
-        "episode_id = 'train-a' AND frame_index = 5"
-    ).read_blobs(IMAGE_COLUMNS)
-    appended = scalar.to_pylist()[0]
+    appended = _frame_for_append(frames, "episode_id = 'train-a' AND frame_index = 5")
     appended["frame_index"] = 6
     appended["index"] = max(
         row["index"] for row in frames.scan().select(["index"]).to_list()) + 1
-    for name in IMAGE_COLUMNS:
-        appended[name] = blobs[name][0]
     frames.add([appended])
 
     assert train.snapshot_id == snapshot_id
@@ -749,12 +753,8 @@ def test_preparation_uses_published_group_after_new_episode_commit(
     changed["split"] = "test"
     episodes.add([changed])
     frames = connection.get_table(agilex.FRAMES_TABLE)
-    scalar, blobs = frames.scan().where(
-        "episode_id = 'train-a' AND frame_index = 0").read_blobs(IMAGE_COLUMNS)
-    changed_frame = scalar.to_pylist()[0]
+    changed_frame = _frame_for_append(frames, "episode_id = 'train-a' AND frame_index = 0")
     changed_frame["action"] = [0.0] * 14
-    for name in IMAGE_COLUMNS:
-        changed_frame[name] = blobs[name][0]
     frames.add([changed_frame])
     assert latest_snapshot_id(frames) != before["paimon"]["frames_snapshot_id"]
 
@@ -810,12 +810,8 @@ def test_dense_comparison_rejects_selected_episode_with_invalid_frames(
         options={"warehouse": str(warehouse)})
     frames = connection.get_table(agilex.FRAMES_TABLE)
     indices = episode_indices(connection, "act-test@1")
-    scalar, blobs = frames.scan().where(
-        "episode_id = 'val-a' AND frame_index = 0").read_blobs(IMAGE_COLUMNS)
-    invalid = scalar.to_pylist()[0]
+    invalid = _frame_for_append(frames, "episode_id = 'val-a' AND frame_index = 0")
     invalid["quality_status"] = 2
-    for name in IMAGE_COLUMNS:
-        invalid[name] = blobs[name][0]
     frames.add([invalid])
     frames.raw_table.create_tag("invalid-frames")
 

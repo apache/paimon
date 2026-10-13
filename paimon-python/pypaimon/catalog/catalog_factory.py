@@ -57,7 +57,7 @@ class CatalogFactory:
                 "Unknown catalog identifier: {}. Available types: {}".format(
                     identifier, list(CatalogFactory.CATALOG_REGISTRY.keys())))
         if identifier == "filesystem":
-            return catalog_class(context.options)
+            return catalog_class(context.options, context)
         if identifier == "rest":
             return catalog_class(context, config_required=config_required)
         return catalog_class(context)

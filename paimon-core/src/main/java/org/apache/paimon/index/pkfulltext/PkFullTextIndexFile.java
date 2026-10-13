@@ -63,7 +63,9 @@ public class PkFullTextIndexFile extends IndexFile {
             throws IOException {
         GlobalIndexer indexer;
         try {
-            indexer = GlobalIndexer.create(INDEX_TYPE, textField, indexOptions);
+            indexer =
+                    GlobalIndexer.create(
+                            INDEX_TYPE, Collections.singletonList(textField), indexOptions);
         } catch (RuntimeException | Error failure) {
             IOUtils.closeQuietly(textReader);
             throw failure;
@@ -76,7 +78,9 @@ public class PkFullTextIndexFile extends IndexFile {
             throws IOException {
         GlobalIndexer indexer;
         try {
-            indexer = GlobalIndexer.create(INDEX_TYPE, textField, indexOptions);
+            indexer =
+                    GlobalIndexer.create(
+                            INDEX_TYPE, Collections.singletonList(textField), indexOptions);
         } catch (RuntimeException | Error failure) {
             closeSources(sources);
             throw failure;

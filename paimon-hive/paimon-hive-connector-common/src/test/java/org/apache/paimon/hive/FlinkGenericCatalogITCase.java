@@ -46,7 +46,6 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** IT cases for using Flink {@code FlinkGenericCatalog}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -179,14 +178,12 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
                         Row.of(3L, 0L, "APPEND"),
                         Row.of(4L, 0L, "APPEND"));
 
-        // check with wrong range
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id>9"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage(
-                        "snapshot upper id:10 should not greater than latestSnapshotId:4");
+        // check with out-of-range snapshot id: the filter matches no snapshot, so the query
+        // returns zero rows instead of failing
+        assertThat(
+                        sql(
+                                "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id>9"))
+                .isEmpty();
     }
 
     @Test

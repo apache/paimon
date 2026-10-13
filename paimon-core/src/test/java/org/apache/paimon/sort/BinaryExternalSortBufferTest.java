@@ -428,4 +428,13 @@ public class BinaryExternalSortBufferTest {
             return row;
         }
     }
+
+    @Test
+    void testFanInBelowTwoFailsFast() {
+        // a fan-in of 1 previously overflowed the merge arithmetic at flush time and
+        // restart-looped on the same config; it must be rejected up front
+        assertThatThrownBy(() -> createBuffer(1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fan-in for external merge sort must be at least 2");
+    }
 }

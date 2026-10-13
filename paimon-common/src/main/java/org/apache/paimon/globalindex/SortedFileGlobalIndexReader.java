@@ -327,7 +327,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         return visitSelectedFiles(selector.get(), visitor);
     }
 
-    private CompletableFuture<Optional<GlobalIndexResult>> visitSelectedFiles(
+    protected CompletableFuture<Optional<GlobalIndexResult>> visitSelectedFiles(
             Optional<List<GlobalIndexIOMeta>> selectedOpt,
             Function<R, Optional<GlobalIndexResult>> visitor) {
         if (!selectedOpt.isPresent()) {

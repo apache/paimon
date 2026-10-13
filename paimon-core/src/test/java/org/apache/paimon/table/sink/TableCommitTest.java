@@ -19,10 +19,12 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -33,6 +35,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -42,6 +45,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -722,6 +726,166 @@ public class TableCommitTest {
         commit1.close();
         write2.close();
         commit2.close();
+    }
+
+    @Test
+    public void testStrictModeIgnoresDeletionVectorsInheritedByCompaction() throws Exception {
+        // A streaming upsert job on a primary-key table with deletion vectors keeps compacting
+        // pt=2 while a job pinned to the snapshot it started from (e.g. rescale) writes pt=1.
+        FileStoreTable table = createPkDvTable();
+        String streamingUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write =
+                        table.newWrite(streamingUser)
+                                .withIOManager(new IOManagerImpl(tempDir.toString()));
+                TableCommitImpl commit = table.newCommit(streamingUser)) {
+            for (int k = 0; k < 3; k++) {
+                write.write(GenericRow.of(1, k, 0L));
+                write.write(GenericRow.of(2, k, 0L));
+            }
+            commit.commit(0, write.prepareCommit(true, 0));
+            // updating a key of pt=1 gives pt=1 a deletion vector before the pinned job starts
+            write.write(GenericRow.of(1, 0, 1L));
+            commit.commit(1, write.prepareCommit(true, 1));
+            long jobStart = table.snapshotManager().latestSnapshotId();
+
+            // the compaction of this pt=2 update changes only pt=2's deletion vectors, while
+            // its index manifest still lists pt=1's
+            write.write(GenericRow.of(2, 0, 2L));
+            commit.commit(2, write.prepareCommit(true, 2));
+            assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                    .isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            FileStoreTable pinned =
+                    table.copy(
+                            singletonMap(
+                                    COMMIT_LAST_SAFE_SNAPSHOT.key(), String.valueOf(jobStart)));
+            String pinnedUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> pinnedWrite =
+                            pinned.newWrite(pinnedUser)
+                                    .withIOManager(new IOManagerImpl(tempDir.toString()));
+                    TableCommitImpl pinnedCommit = pinned.newCommit(pinnedUser)) {
+                pinnedWrite.write(GenericRow.of(1, 9, 9L));
+                assertThatCode(() -> pinnedCommit.commit(0, pinnedWrite.prepareCommit(false, 0)))
+                        .doesNotThrowAnyException();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStrictModeDetectsIndexRemovalWithoutDataDelta(boolean targetHasIndexManifest)
+            throws Exception {
+        // Rolling back a DV-only commit is an OVERWRITE that drops the DV entry without any
+        // data-file delta, so the index check must also flag partitions whose entries the
+        // checked snapshot removed, including when its index manifest becomes null.
+        FileStoreTable table = createDvAppendTable();
+        String user1 = UUID.randomUUID().toString();
+        commitRow(table, user1, GenericRow.of(1, 0, 0L), GenericRow.of(2, 0, 0L));
+        long commitId = 2;
+        if (targetHasIndexManifest) {
+            commitDvOnly(table, user1, partitionRow(2), commitId++);
+        }
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot target = snapshotManager.latestSnapshot();
+        commitDvOnly(table, user1, partitionRow(1), commitId);
+        long lastSafe = snapshotManager.latestSnapshotId();
+
+        try (FileStoreCommit commit = table.store().newCommit(user1, table)) {
+            assertThat(commit.rollbackToAsLatest(target)).isTrue();
+        }
+        Snapshot rollback = snapshotManager.latestSnapshot();
+        assertThat(rollback.indexManifest() != null).isEqualTo(targetHasIndexManifest);
+        assertThat(
+                        table.store()
+                                .newScan()
+                                .withSnapshot(rollback)
+                                .withKind(ScanMode.DELTA)
+                                .plan()
+                                .files())
+                .isEmpty();
+
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_LAST_SAFE_SNAPSHOT.key(), String.valueOf(lastSafe)));
+        // pt=2's index entries are untouched by the rollback -> no error
+        assertThatCode(
+                        () ->
+                                commitRow(
+                                        tableWithStrict,
+                                        UUID.randomUUID().toString(),
+                                        GenericRow.of(2, 1, 1L)))
+                .doesNotThrowAnyException();
+        // the rollback removed pt=1's DV entry -> must throw
+        assertThatThrownBy(
+                        () ->
+                                commitRow(
+                                        tableWithStrict,
+                                        UUID.randomUUID().toString(),
+                                        GenericRow.of(1, 1, 1L)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("found a OVERWRITE snapshot (id: " + rollback.id() + ")")
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.enabled is true.");
+    }
+
+    private FileStoreTable createPkDvTable() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(), new Path(path), tableSchema, CatalogEnvironment.empty());
+    }
+
+    private FileStoreTable createDvAppendTable() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "k");
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(), new Path(path), tableSchema, CatalogEnvironment.empty());
+    }
+
+    private static void commitRow(FileStoreTable table, String user, GenericRow... rows)
+            throws Exception {
+        try (TableWriteImpl<?> write = table.newWrite(user);
+                TableCommitImpl commit = table.newCommit(user)) {
+            for (GenericRow row : rows) {
+                write.write(row);
+            }
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
     }
 
     @Test

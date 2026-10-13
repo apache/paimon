@@ -98,6 +98,29 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             pmm.connect(self.warehouse)
 
+    def test_copy_applies_dynamic_table_options(self):
+        table = self.conn.create_table(
+            "frames", schema=_schema({"id": pa.int32()}),
+            options=_PARQUET_OPTIONS)
+        copied = table.copy({"read.video.max-open-decoders": "8"})
+
+        self.assertEqual(table.identifier, copied.identifier)
+        self.assertIs(table.catalog, copied.catalog)
+        self.assertNotIn(
+            "read.video.max-open-decoders",
+            table.raw_table.table_schema.options)
+        self.assertEqual(
+            "8", copied.raw_table.table_schema.options[
+                "read.video.max-open-decoders"])
+
+        table.add([{"id": 1}])
+        snapshot_id = table.raw_table.snapshot_manager().get_latest_snapshot().id
+        table.raw_table.create_tag("training", snapshot_id=snapshot_id)
+        tagged = copied.raw_table.copy({"scan.tag-name": "training"})
+        self.assertEqual(
+            "8", tagged.table_schema.options[
+                "read.video.max-open-decoders"])
+
     def test_create_table_defaults_data_evolution_options(self):
         table = self.conn.create_table(
             "docs",
@@ -120,6 +143,113 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("default.docs", self.conn.get_table("docs").identifier)
         self.assertEqual(["id", "content", "embedding", "payload"],
                          [field.name for field in table.raw_table.fields])
+
+    def test_add_video_column_to_existing_images(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        table = self.conn.create_table(
+            "evolved_video", schema=_schema({"id": pa.int32(), "image": pa.large_binary()}),
+            options=_PARQUET_OPTIONS)
+        table.add([{"id": 0, "image": b"image-0"}, {"id": 1, "image": b"image-1"}])
+        table.raw_table.create_tag("before_video")
+        old_table = table
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD"),
+        ])
+        table = self.conn.get_table("evolved_video")
+        self.assertEqual([None, None], [r["video"] for r in table.scan().to_list()])
+        old_table.add([{"id": 2, "image": b"image-2"}])
+        video_path = os.path.join(self.temp_dir, "backfill.mp4")
+        with open(video_path, "wb") as out:
+            out.write(b"complete-video-payload")
+        table.replace_video("id < 2", pmm.Blob.from_local(video_path), first_frame=7)
+        # A retained writer must not stamp its old schema onto a new snapshot.
+        old_table.add([{"id": 3, "image": b"image-3"}])
+        snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(table.raw_table.table_schema.id, snapshot.schema_id)
+        table.raw_table.create_tag("after_old_append")
+        rows = sorted(table.scan().select(["id", "image", "video", "_ROW_ID"]).to_list(),
+                      key=lambda row: row["id"])
+        self.assertEqual([0, 1, 2, 3], [row["_ROW_ID"] for row in rows])
+        self.assertEqual([7, 8], [pmm.VideoFrameDescriptor.deserialize(row["video"]).frame_index
+                                  for row in rows[:2]])
+        self.assertTrue(all(row["video"] is None for row in rows[2:]))
+        _, images = table.scan().read_blobs("image")
+        self.assertEqual([b"image-0", b"image-1", b"image-2", b"image-3"], images["image"])
+        _, videos = table.scan().where("id < 2").read_blobs("video")
+        self.assertEqual([b"complete-video-payload"] * 2, videos["video"])
+        for options in ({"scan.snapshot-id": str(snapshot.id)}, {"scan.tag-name": "after_old_append"}):
+            with self.subTest(options=options):
+                historical = table.raw_table.copy(options)
+                self.assertEqual(["id", "image", "video"], [field.name for field in historical.fields])
+                read = historical.new_read_builder()
+                restored = sorted(read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist(),
+                                  key=lambda row: row["id"])
+                self.assertEqual([0, 1, 2, 3], [row["id"] for row in restored])
+                self.assertEqual([row["video"] for row in rows], [row["video"] for row in restored])
+        historical = self.conn.catalog.get_table("default.evolved_video").copy({"scan.tag-name": "before_video"})
+        self.assertNotIn("video-frame-field", historical.table_schema.options)
+        # The retained old schema still reads the original rows after the backfill.
+        read = historical.new_read_builder()
+        historical_rows = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist()
+        self.assertEqual([0, 1], sorted(row["id"] for row in historical_rows))
+        self.assertTrue(all(row.get("video") is None for row in historical_rows))
+
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("second", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        for column, remaining in (("video", "second"), ("second", None)):
+            self.conn.catalog.alter_table("default.evolved_video", [SchemaChange.drop_column(column)])
+            current = self.conn.get_table("evolved_video")
+            self.assertEqual(remaining, current.raw_table.table_schema.options.get("video-frame-field"))
+            self.assertEqual(4, len(current.scan().to_list()))
+        self.conn.catalog.alter_table("default.evolved_video", [
+            SchemaChange.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        current = self.conn.get_table("evolved_video")
+        self.assertEqual([None] * 4, [row["video"] for row in current.scan().to_list()])
+
+    def test_add_video_column_validation(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange as C
+
+        table = self.conn.create_table(
+            "video_evolution_validation",
+            schema=_schema({"id": pa.int32(), "image": pa.large_binary()}),
+            options=_PARQUET_OPTIONS)
+        table.add([{"id": 0, "image": b"original"}])
+        identifier = "default.video_evolution_validation"
+
+        with self.assertRaisesRegex(ValueError, "immutable option"):
+            table.raw_table.copy({"video-frame-field": "image"})
+
+        def alter(changes):
+            self.conn.catalog.alter_table(identifier, changes)
+
+        for changes in [
+            [C.set_option("video-frame-field", "image")],
+            [C.set_option("video-frame-field", "missing")],
+            [C.add_column("bad", AtomicType("INT"), "__VIDEO_FRAME_FIELD")],
+            [C.add_column("bad", AtomicType("BLOB", False), "__VIDEO_FRAME_FIELD")],
+            [C.add_column("bad", AtomicType("BLOB")), C.set_option("video-frame-field", "image,bad")],
+        ]:
+            with self.subTest(changes=changes):
+                with self.assertRaises(RuntimeError):
+                    alter(changes)
+                self.assertEqual(0, self.conn.catalog.get_table(identifier).table_schema.id)
+        alter([C.update_column_comment("image", "__VIDEO_FRAME_FIELD")])
+        self.assertNotIn("video-frame-field", self.conn.catalog.get_table(identifier).table_schema.options)
+        alter([C.add_column("video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD")])
+        alter([C.add_column("second", AtomicType("BLOB"), "__VIDEO_FRAME_FIELD")])
+        self.assertEqual(
+            "video,second", self.conn.catalog.get_table(identifier).table_schema.options["video-frame-field"])
+        for change in [C.set_option("video-frame-field", "second"),
+                       C.set_option("video-frame-field", ""), C.remove_option("video-frame-field")]:
+            with self.assertRaises(RuntimeError):
+                alter([change])
+        # A column added by a previous commit may already contain ordinary BLOB data.
+        alter([C.add_column("later", AtomicType("BLOB"))])
+        with self.assertRaisesRegex(RuntimeError, "not supported yet"):
+            alter([C.set_option("video-frame-field", "video,second,later")])
 
     def test_add_video_embeds_frame_ordinals_outside_normal_data(self):
         table = self.conn.create_table(
@@ -298,6 +428,128 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertTrue(descriptors[0].uri.endswith(".video"))
         self.assertEqual(2, len({d.payload_descriptor for d in descriptors}))
 
+    def test_add_video_indexes_path_and_local_blob_with_unknown_length(self):
+        av = pytest.importorskip("av")
+        np = pytest.importorskip("numpy")
+        from fractions import Fraction
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+        table = self.conn.create_table(
+            "local_video_indexes",
+            schema=_schema({
+                "frame_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "local-indexed.mp4")
+        with av.open(video_path, mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=10)
+            stream.width = stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.gop_size = 4
+            for index in range(12):
+                frame = av.VideoFrame.from_ndarray(
+                    np.full((16, 16, 3), index * 16, dtype=np.uint8),
+                    format="rgb24",
+                )
+                frame.pts = index
+                frame.time_base = Fraction(1, 10)
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+
+        table.add_video(video_path, [{"frame_id": 0}])
+        table.add_video(
+            Blob.from_local(video_path), [{"frame_id": 1}], first_frame=1)
+
+        descriptors = [
+            VideoFrameDescriptor.deserialize(row["video"])
+            for row in sorted(
+                table.scan().select(["frame_id", "video"]).to_list(),
+                key=lambda row: row["frame_id"],
+            )
+        ]
+        self.assertEqual([0, 1], [value.frame_index for value in descriptors])
+        for descriptor in descriptors:
+            stored_index = descriptor.keyframe_index_descriptor
+            self.assertIsNotNone(stored_index)
+            VideoKeyframeIndex.deserialize(
+                Blob.from_file(
+                    table.raw_table.file_io,
+                    stored_index.uri,
+                    stored_index.offset,
+                    stored_index.length,
+                ).to_data(),
+                descriptor.length,
+            )
+
+    def test_video_write_apis_preserve_existing_keyframe_index(self):
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+        table = self.conn.create_table(
+            "indexed_video_write_apis",
+            schema=_schema({
+                "frame_id": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        video = b"indexed-video"
+        index = VideoKeyframeIndex(
+            [(0, 1)], [(0, 0, 1)]
+        ).serialize()
+        source_path = os.path.join(self.temp_dir, "indexed-source.mp4")
+        with open(source_path, "wb") as output:
+            output.write(video + index)
+        source = VideoFrameDescriptor(
+            "file://" + source_path,
+            0,
+            len(video),
+            0,
+            len(video),
+            len(index),
+        )
+
+        table.add_video(source, [{"frame_id": 1}], first_frame=1)
+        table.add_videos([(source, [{"frame_id": 2}], 2)])
+        plain_path = os.path.join(self.temp_dir, "plain-source.mp4")
+        with open(plain_path, "wb") as output:
+            output.write(b"plain-video")
+        table.add_video(Blob.from_local(plain_path), [{"frame_id": 3}])
+        table.replace_video("frame_id = 3", source, first_frame=3)
+
+        rows = sorted(
+            table.scan().select(["frame_id", "video"]).to_list(),
+            key=lambda row: row["frame_id"],
+        )
+        descriptors = [
+            VideoFrameDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual([1, 2, 3], [value.frame_index for value in descriptors])
+        for descriptor in descriptors:
+            stored_index = descriptor.keyframe_index_descriptor
+            self.assertIsNotNone(stored_index)
+            self.assertEqual(
+                index,
+                Blob.from_file(
+                    table.raw_table.file_io,
+                    stored_index.uri,
+                    stored_index.offset,
+                    stored_index.length,
+                ).to_data(),
+            )
+
     def test_normal_update_preserves_video_descriptors(self):
         from pypaimon.table.row.blob import Blob
 
@@ -440,7 +692,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         payload = Blob.from_local(video_path).to_descriptor()
         valid = VideoFrameDescriptor(
-            payload.uri, payload.offset, payload.length, 0
+            payload.uri, payload.offset, payload.length, 0, -1, 0
         ).serialize()
         with self.assertRaisesRegex(ValueError, "VideoFrameDescriptor"):
             table.add_batches([
@@ -1800,8 +2052,6 @@ class MultimodalTableTest(unittest.TestCase):
             t.search([1.0, 0.0, 0.0], column="emb").read_blobs("img")
         with self.assertRaisesRegex(TypeError, "only supported on scan"):
             t.search([1.0, 0.0, 0.0], column="emb").stream_blobs("img")
-        with self.assertRaisesRegex(TypeError, "only supported on scan"):
-            t.search([1.0, 0.0, 0.0], column="emb").to_ray()
 
     def test_scan_stream_blobs(self):
         obs = self.conn.create_table(
@@ -2713,7 +2963,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         calls = []
 
-        def create_global_index(column, index_type, options=None):
+        def create_global_index(column, index_type, options=None, **kwargs):
             calls.append((column, index_type, options))
             return index_type
 
@@ -2743,7 +2993,7 @@ class MultimodalTableTest(unittest.TestCase):
             options=_PARQUET_OPTIONS,
         )
 
-        def create_global_index(column, index_type, options=None):
+        def create_global_index(column, index_type, options=None, **kwargs):
             return index_type
 
         docs.raw_table.create_global_index = create_global_index

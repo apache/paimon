@@ -429,7 +429,7 @@ class _BaseTorchIterDataset(IterableDataset):
     ):
         self.table_read = table_read
         self.splits = splits
-        self.field_names = [field.name for field in table_read.read_type]
+        self.field_names = table_read._output_arrow_schema().names
         self.auto_detect_rank = auto_detect_rank
         self.sharding_rank = sharding_rank
         self.sharding_world_size = sharding_world_size

@@ -211,7 +211,8 @@ class RawFullTextReadImpl {
             indexType = checkNotNull(fallbackIndexType);
         }
         GlobalIndexer globalIndexer =
-                GlobalIndexerFactoryUtils.load(indexType).create(textColumn, rawSearchOptions());
+                GlobalIndexerFactoryUtils.load(indexType)
+                        .create(Collections.singletonList(textColumn), rawSearchOptions());
         try {
             RawFullTextIndexFileWriter fileWriter = new RawFullTextIndexFileWriter(column);
             GlobalIndexWriter indexWriter = globalIndexer.createWriter(fileWriter);

@@ -421,6 +421,110 @@ public class SearchArgumentToPredicateConverterTest {
         assertExpected(sarg, expected);
     }
 
+    private static final List<String> NARROW_COLUMN_NAMES =
+            Arrays.asList("f_decimal", "f_tinyint", "f_int");
+    private static final List<DataType> NARROW_COLUMN_TYPES =
+            Arrays.asList(DataTypes.DECIMAL(5, 2), DataTypes.TINYINT(), DataTypes.INT());
+    private static final PredicateBuilder NARROW_BUILDER =
+            new PredicateBuilder(
+                    RowType.of(
+                            NARROW_COLUMN_TYPES.toArray(new DataType[0]),
+                            NARROW_COLUMN_NAMES.toArray(new String[0])));
+
+    @Test
+    public void testDecimalLiteralExceedingPrecision() {
+        SearchArgument sarg =
+                SearchArgumentFactory.newBuilder()
+                        .lessThan("f_decimal", PredicateLeaf.Type.DECIMAL, hiveDecimal("1000"))
+                        .build();
+        assertNarrowExpected(sarg, null);
+
+        sarg =
+                SearchArgumentFactory.newBuilder()
+                        .startAnd()
+                        .between(
+                                "f_decimal",
+                                PredicateLeaf.Type.DECIMAL,
+                                hiveDecimal("0"),
+                                hiveDecimal("1000"))
+                        .in(
+                                "f_decimal",
+                                PredicateLeaf.Type.DECIMAL,
+                                hiveDecimal("1.5"),
+                                hiveDecimal("1000"))
+                        .lessThan("f_tinyint", PredicateLeaf.Type.LONG, 10L)
+                        .end()
+                        .build();
+        assertNarrowExpected(sarg, NARROW_BUILDER.lessThan(1, (byte) 10));
+    }
+
+    @Test
+    public void testDecimalLiteralExceedingScale() {
+        SearchArgument sarg =
+                SearchArgumentFactory.newBuilder()
+                        .startAnd()
+                        .startNot()
+                        .lessThanEquals(
+                                "f_decimal", PredicateLeaf.Type.DECIMAL, hiveDecimal("1.005"))
+                        .end()
+                        .lessThan("f_int", PredicateLeaf.Type.LONG, 100L)
+                        .end()
+                        .build();
+        assertNarrowExpected(sarg, NARROW_BUILDER.lessThan(2, 100));
+    }
+
+    @Test
+    public void testIntegerLiteralOutOfRange() {
+        SearchArgument sarg =
+                SearchArgumentFactory.newBuilder()
+                        .lessThan("f_tinyint", PredicateLeaf.Type.LONG, 200L)
+                        .build();
+        assertNarrowExpected(sarg, null);
+
+        sarg =
+                SearchArgumentFactory.newBuilder()
+                        .lessThan("f_int", PredicateLeaf.Type.LONG, 3000000000L)
+                        .build();
+        assertNarrowExpected(sarg, null);
+    }
+
+    @Test
+    public void testRepresentableNarrowLiterals() {
+        SearchArgument sarg =
+                SearchArgumentFactory.newBuilder()
+                        .startAnd()
+                        .lessThan("f_decimal", PredicateLeaf.Type.DECIMAL, hiveDecimal("1.50"))
+                        .lessThanEquals(
+                                "f_decimal", PredicateLeaf.Type.DECIMAL, hiveDecimal("999.99"))
+                        .lessThanEquals("f_int", PredicateLeaf.Type.LONG, (long) Integer.MAX_VALUE)
+                        .in("f_tinyint", PredicateLeaf.Type.LONG, 0L, null, 127L)
+                        .end()
+                        .build();
+        Predicate expected =
+                PredicateBuilder.and(
+                        NARROW_BUILDER.lessThan(0, decimal("1.50")),
+                        NARROW_BUILDER.lessOrEqual(0, decimal("999.99")),
+                        NARROW_BUILDER.lessOrEqual(2, Integer.MAX_VALUE),
+                        NARROW_BUILDER.in(1, Arrays.asList((byte) 0, null, (byte) 127)));
+        assertNarrowExpected(sarg, expected);
+    }
+
+    private static HiveDecimalWritable hiveDecimal(String value) {
+        return new HiveDecimalWritable(HiveDecimal.create(value));
+    }
+
+    private static Decimal decimal(String value) {
+        return Decimal.fromBigDecimal(new BigDecimal(value), 5, 2);
+    }
+
+    private void assertNarrowExpected(SearchArgument sarg, Predicate expected) {
+        SearchArgumentToPredicateConverter converter =
+                new SearchArgumentToPredicateConverter(
+                        sarg, NARROW_COLUMN_NAMES, NARROW_COLUMN_TYPES, null);
+        Predicate actual = converter.convert().orElse(null);
+        assertThat(actual).isEqualTo(expected);
+    }
+
     private void assertExpected(SearchArgument sarg, Predicate expected) {
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(sarg, COLUMN_NAMES, COLUMN_TYPES, null);

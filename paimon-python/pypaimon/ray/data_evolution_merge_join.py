@@ -345,7 +345,6 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
 def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
-    from pypaimon.write.file_store_commit import _abort_commit_messages
     from pypaimon.write.row_id_file_index import RowIdFileIndex
 
     table_read = TableRead(
@@ -394,7 +393,8 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     try:
         messages = updater.update_columns(updates, context.update_cols)
     except Exception:
-        _abort_commit_messages(context.table, updater.commit_messages)
+        # Never delete files from CommitMessage on failure.
+        # A commit can succeed even when its response raises an exception.
         raise
     return messages, updates.num_rows, row_ids
 
@@ -466,8 +466,8 @@ def distributed_self_merge_update_apply(
             submit_next()
 
     if first_error is not None:
-        from pypaimon.write.file_store_commit import _abort_commit_messages
-        _abort_commit_messages(plan.table, messages)
+        # Never delete files from CommitMessage on failure.
+        # A commit can succeed even when its response raises an exception.
         raise first_error
     return messages, num_updated, row_ids
 
@@ -689,6 +689,7 @@ def distributed_update_apply(
     estimated_size_bytes: Optional[int] = None,
     estimated_num_rows: Optional[int] = None,
     data_context=None,
+    materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -728,6 +729,9 @@ def distributed_update_apply(
         len(sorted_first_row_ids),
         data_context=data_context,
     )
+    if materialize_before_routing:
+        # Keep the matched join and file-routing shuffle in separate Ray jobs.
+        update_ds = update_ds.materialize()
 
     # Pin commit-time conflict check to the snapshot the join was built on,
     # so concurrent commits between read and planner are detected.
@@ -827,6 +831,9 @@ def distributed_update_apply(
             )
 
         for_update = group.drop_columns([frid_col])
+        info = ray.get(precomputed_info_ref)
+        _validate_live_row_ids(
+            captured_table, info, int(group[frid_col][0].as_py()), for_update[row_id_name].to_pylist())
         row_ids = (
             for_update.column(row_id_name).to_pylist()
             if collect_row_ids else []
@@ -904,7 +911,6 @@ def distributed_read_by_row_id(
     import ray
 
     from pypaimon.globalindex.indexed_split import IndexedSplit
-    from pypaimon.read.split import DataSplit
     from pypaimon.table.special_fields import SpecialFields
     from pypaimon.utils.range import Range
 
@@ -979,12 +985,8 @@ def distributed_read_by_row_id(
         frid = int(group.column(frid_col)[0].as_py())
         info = ray.get(precomputed_info_ref)
         owning_split, target_files = info.first_row_id_index[frid]
-        origin_split = DataSplit(
-            files=target_files,
-            partition=owning_split.partition,
-            bucket=owning_split.bucket,
-            raw_convertible=True,
-        )
+        target_names = {file.file_name for file in target_files}
+        origin_split = owning_split.filter_file(lambda file: file.file_name in target_names)
         # Only matched rows (deduped, contiguous ids -> ranges); blob gets row-index pushdown.
         wanted = set(group.column(row_id_name).to_pylist())
         indexed = IndexedSplit(origin_split, Range.to_ranges(list(wanted)))
@@ -1009,6 +1011,7 @@ def distributed_delete_apply(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
     import base64
     import numpy as np
@@ -1031,6 +1034,10 @@ def distributed_delete_apply(
     anchor_info = planner._snapshot_anchor_ranges()
     if not anchor_info.anchors:
         return [], 0, []
+
+    if materialize_before_routing:
+        # Keep the matched join and file-routing shuffle in separate Ray jobs.
+        delete_ds = delete_ds.materialize()
 
     precomputed_info_ref = ray.put(anchor_info)
 
@@ -1266,3 +1273,24 @@ def distributed_write_collect_msgs(
         write_kwargs["concurrency"] = concurrency
     insert_ds.write_datasink(sink, **write_kwargs)
     return sink.collected
+
+
+def _validate_live_row_ids(table, info, first_row_id, row_ids):
+    """Reject deleted updates using only the routed snapshot's DV files.
+
+    The writer must still merge physical rows, including tombstones, to preserve
+    row-id offsets. Filtering the writer's original data would shift those offsets.
+    """
+    from pypaimon.deletionvectors.deletion_vector import DeletionVector
+
+    split, files = info.first_row_id_index[first_row_id]
+    if split.data_deletion_files is None:
+        return
+    target_names = {file.file_name for file in files}
+    for file, deletion in zip(split.files, split.data_deletion_files):
+        if deletion is None or file.file_name not in target_names:
+            continue
+        vector = DeletionVector.read(table.file_io, deletion)
+        for row_id in row_ids:
+            if file.row_id_range().contains(row_id) and vector.is_deleted(row_id - file.first_row_id):
+                raise ValueError("Cannot update deleted _ROW_ID {}.".format(row_id))

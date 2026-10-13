@@ -855,7 +855,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     private void createIndexIncremental(String fieldName) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, "btree").withIndexField(fieldName);
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexFields(Collections.singletonList(fieldName));
         ScanResult<DataSplit> scanResult =
                 builder.incrementalScan()
                         .orElseThrow(
@@ -880,7 +881,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         SortedGlobalIndexScanner builder =
-                new SortedGlobalIndexScanner(table, "btree").withIndexField(fieldName);
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexFields(Collections.singletonList(fieldName));
         ScanResult<DataSplit> scanResult =
                 builder.scan()
                         .orElseThrow(

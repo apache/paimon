@@ -401,7 +401,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
+        SchemaValidation.validateTableSchema(
+                withoutIcebergMirror(newTableSchema), dynamicOptions.keySet());
         if (new CoreOptions(tableSchema.options())
                         .toConfiguration()
                         .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
@@ -427,11 +428,18 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
             mergedOptions.putAll(tableSchema.options());
             TableSchema newTableSchema = latestSchema.copy(mergedOptions);
-            SchemaValidation.validateTableSchema(newTableSchema);
+            SchemaValidation.validateTableSchema(withoutIcebergMirror(newTableSchema));
             return copy(newTableSchema);
         } else {
             return this;
         }
+    }
+
+    /** Tables the mirror cannot publish must still load; every commit still checks them. */
+    private static TableSchema withoutIcebergMirror(TableSchema schema) {
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.remove(IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        return schema.copy(options);
     }
 
     @Override
@@ -580,7 +588,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     /** Prevents current column declarations from overriding a historical schema's field options. */
     private static Map<String, String> excludeCurrentSchemaFieldOptions(
             TableSchema historicalSchema, Options options, Set<String> dynamicOptionKeys) {
-        // Keep scan and runtime options. Only these directive-managed column declarations
+        // Keep scan and runtime options. These column storage declarations
         // must follow the historical schema, since columns may have been added or dropped.
         Map<String, String> historicalOptions = new HashMap<>(options.toMap());
         for (ConfigOption<String> option :
@@ -588,7 +596,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         CoreOptions.VECTOR_FIELD,
                         CoreOptions.BLOB_FIELD,
                         CoreOptions.BLOB_DESCRIPTOR_FIELD,
-                        CoreOptions.BLOB_VIEW_FIELD)) {
+                        CoreOptions.BLOB_VIEW_FIELD,
+                        CoreOptions.VIDEO_FRAME_FIELD)) {
             // Restore the canonical key and aliases together, or a stale alias may take effect
             // when the historical schema has no canonical value.
             List<String> keys = new ArrayList<>();

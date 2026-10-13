@@ -48,6 +48,10 @@ class CatalogEnvironmentTest(unittest.TestCase):
         dependency_context = environment.dependency_read_context()
 
         self.assertIsNot(dependency_context, context)
+        self.assertIs(
+            dependency_context.blob_index_cache,
+            context.blob_index_cache,
+        )
         self.assertFalse(context.options.contains_key(self._READ_VIA_OPTION))
         self.assertEqual(
             dependency_context.options.get(CatalogOptions.METASTORE), "rest")
@@ -97,6 +101,37 @@ class CatalogEnvironmentTest(unittest.TestCase):
         )
 
         self.assertIsNot(environment.dependency_read_context(), context)
+
+    def test_filesystem_catalog_loader_preserves_context_cache(self):
+        context = CatalogContext.create_from_options(Options({
+            CatalogOptions.WAREHOUSE.key(): "/tmp/warehouse",
+        }))
+
+        catalog = FileSystemCatalogLoader(context).load()
+
+        self.assertIs(catalog.catalog_context, context)
+        self.assertIs(
+            catalog.catalog_context.blob_index_cache,
+            context.blob_index_cache,
+        )
+
+    def test_rest_catalog_preserves_context_cache(self):
+        from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+
+        context = CatalogContext.create_from_options(Options({
+            CatalogOptions.WAREHOUSE.key(): "/tmp/warehouse",
+            CatalogOptions.METASTORE.key(): "rest",
+        }))
+        with mock.patch(
+                "pypaimon.catalog.rest.rest_catalog.RESTApi") as rest_api:
+            rest_api.return_value.options = context.options
+
+            catalog = RESTCatalog(context)
+
+        self.assertIs(
+            catalog.context.blob_index_cache,
+            context.blob_index_cache,
+        )
 
     def test_dependency_read_context_preserves_custom_rest_metastore(self):
         context = CatalogContext.create_from_options(Options({

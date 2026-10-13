@@ -192,6 +192,10 @@ class PaimonDatasink(_DatasinkBase):
                         f"Error aborting worker-side table_write: {abort_error}",
                         exc_info=abort_error
                     )
+            # prepare_commit has handed these files off, but a failed close
+            # prevents this worker from returning them to the coordinator.
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
 
     @staticmethod
@@ -331,7 +335,9 @@ def write_paimon_dataset(
         planner = (
             postpone_bucket_planner
             if postpone_bucket_planner is not None
-            else PostponeBucketPlanner(table)
+            else PostponeBucketPlanner(
+                table, known_num_buckets={}
+                if overwrite or static_partition is not None else None)
         )
         plan = planner.current_plan()
         if table.partition_keys or not plan.contains(()):
@@ -344,7 +350,7 @@ def write_paimon_dataset(
                     overwrite or static_partition is not None
                 ),
             )
-        return _write_postpone_primary_key_blocks(
+        return _write_primary_key_groups(
             dataset,
             table,
             overwrite=overwrite,
@@ -381,80 +387,6 @@ def write_paimon_dataset(
         ray_remote_args=ray_remote_args,
     )
     return datasink.commit_result
-
-
-def _write_postpone_primary_key_blocks(
-    dataset,
-    table,
-    *,
-    overwrite: bool,
-    static_partition: Optional[Dict[str, Any]],
-    concurrency: Optional[int],
-    ray_remote_args: Optional[Dict[str, Any]],
-    bucket_extractor,
-    postpone_bucket_plan,
-) -> Optional[PaimonWriteResult]:
-    import pickle
-
-    from pypaimon.ray.shuffle import (
-        _sort_by_partition_bucket_primary_key,
-    )
-
-    sorted_dataset, routing_columns = (
-        _sort_by_partition_bucket_primary_key(
-            dataset, table, bucket_extractor
-        )
-    )
-    message_col = "__paimon_commit_messages__"
-    error_col = "__paimon_write_error__"
-    captured_table = table
-
-    def _write_block(batch: pa.Table) -> pa.Table:
-        if batch.num_rows == 0:
-            return pa.table({
-                message_col: pa.array([], type=pa.binary()),
-                error_col: pa.array([], type=pa.string()),
-            })
-
-        rows = batch.drop_columns(routing_columns)
-        worker_sink = PaimonDatasink(
-            captured_table,
-            overwrite=overwrite,
-            static_partition=static_partition,
-            postpone_bucket_plan=postpone_bucket_plan,
-        )
-        try:
-            commit_messages = worker_sink.write([rows], None)
-            error = None
-        except Exception:
-            commit_messages = []
-            error = traceback.format_exc()
-        return pa.table({
-            message_col: pa.array(
-                [pickle.dumps(commit_messages)], type=pa.binary()
-            ),
-            error_col: pa.array([error], type=pa.string()),
-        })
-
-    map_kwargs = _ray_map_kwargs(
-        sorted_dataset.map_batches,
-        concurrency,
-        ray_remote_args,
-        batch_size=None,
-        batch_format="pyarrow",
-        zero_copy_batch=True,
-    )
-
-    results = sorted_dataset.map_batches(_write_block, **map_kwargs)
-    coordinator = PaimonDatasink(
-        table,
-        overwrite=overwrite,
-        static_partition=static_partition,
-    )
-    coordinator.on_write_start()
-    return _consume_write_results(
-        results, coordinator, message_col, error_col
-    )
 
 
 def _ray_map_kwargs(method, concurrency, ray_remote_args, **kwargs):

@@ -16,21 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.oss;
 
-import org.apache.paimon.annotation.Public;
+/** Versions written in at build time, so reading them needs no class loader lookup. */
+final class OSSBuildVersions {
 
-import java.io.Closeable;
-import java.util.concurrent.Callable;
+    static final String PAIMON = "${project.version}";
 
-/**
- * An interface that allows source and sink to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
-@Public
-public interface CatalogLock extends Closeable {
+    /** The aliyun-sdk-oss version bundled into this plugin. */
+    static final String OSS_SDK = "${fs.oss.sdk.version}";
 
-    /** Run with catalog lock. The caller should tell catalog the database and table name. */
-    <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+    private OSSBuildVersions() {}
 }

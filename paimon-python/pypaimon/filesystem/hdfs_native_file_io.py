@@ -617,6 +617,22 @@ class HdfsNativeFileIO(FileIO):
             fastavro.writer(output_stream, avro_schema,
                             record_generator(), codec=codec, **kwargs)
 
+    def write_row(self, path: str, data: pyarrow.Table, fields=None,
+                  zstd_level: int = 1, **kwargs):
+        try:
+            from pypaimon.write.writer.format_row_writer import FormatRowWriter
+
+            if fields is None:
+                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
+
+            with self.new_output_stream(path) as output_stream:
+                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
+                writer.write_table(data)
+                writer.close()
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
+
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             if data.num_columns != 1:

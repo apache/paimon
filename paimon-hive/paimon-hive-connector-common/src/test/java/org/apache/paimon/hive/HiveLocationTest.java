@@ -87,7 +87,7 @@ public class HiveLocationTest {
         options.set(CatalogOptions.WAREHOUSE, objectStorePath);
         options.set(CatalogOptions.METASTORE, "hive");
         options.set(CatalogOptions.URI, "");
-        options.set(CatalogOptions.LOCK_ENABLED, false);
+        options.set(HiveCatalogOptions.LOCK_ENABLED, false);
         options.set(HiveCatalogOptions.HIVE_CONF_DIR, hiveShell.getBaseDir() + HIVE_CONF);
         options.set(HiveCatalogOptions.LOCATION_IN_PROPERTIES, true);
 

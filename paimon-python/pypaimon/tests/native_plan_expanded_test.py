@@ -199,7 +199,8 @@ def test_scored_de_preserves_score_mapping_and_selection(catalog, native, dv):
 
 
 @pytest.mark.parametrize('covered', [True, False])
-def test_pk_sorted_index_refines_native_splits_at_selected_snapshot(catalog, native, covered):
+@pytest.mark.python_plan
+def test_python_pk_sorted_index_refines_splits_at_selected_snapshot(catalog, covered):
     from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
     from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.index.index_file_meta import IndexFileMeta
@@ -234,19 +235,17 @@ def test_pk_sorted_index_refines_native_splits_at_selected_snapshot(catalog, nat
     with patch('pypaimon.index.index_file_handler.IndexFileHandler.scan', return_value=[entry]) as scan_index, \
             patch('pypaimon.table.source.primary_key_sorted_index_scan.reader_factory',
                   return_value=lambda *args: _Reader([Range(1, 1)])):
-        plan, rows = read(table.copy({'scan.version': '1'}), native, predicate)
+        plan, rows = read(table.copy({'scan.version': '1'}), False, predicate)
     assert rows == [{'id': 2, 'v': 20}]
     assert plan.snapshot_id == 1
     assert scan_index.call_args[0][0].id == 1
     assert any(isinstance(split, IndexedSplit) for split in plan.splits()) == covered
-    if native:
-        assert all(split.snapshot_id == 1 for split in plan.splits())
     # The latest snapshot includes a newer version. Index pruning must not
     # resurrect the old matching version from a merge-required split.
     with patch('pypaimon.index.index_file_handler.IndexFileHandler.scan', return_value=[entry]), \
             patch('pypaimon.table.source.primary_key_sorted_index_scan.reader_factory',
                   return_value=lambda *args: _Reader([Range(1, 1)])):
-        assert read(table, native, predicate)[1] == []
+        assert read(table, False, predicate)[1] == []
 
 
 def test_scored_result_requires_a_score_for_each_selected_row(catalog, native):

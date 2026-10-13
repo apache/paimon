@@ -285,7 +285,10 @@ class DeferredBlobResolveTest(unittest.TestCase):
         read_builder = table.new_read_builder().with_projection(
             ["sample_id", "payload", "score"]
         ).with_limit(2)
-        splits = read_builder.new_scan().plan().splits()
+        # The reader's remaining-limit behavior needs both partitions, even
+        # when a planner could satisfy the limit with a single partition.
+        splits = sorted(table.new_read_builder().new_scan().plan().splits(),
+                        key=lambda split: split.partition.values)
 
         rows = list(read_builder.new_read().to_iterator(splits))
 
@@ -308,7 +311,10 @@ class DeferredBlobResolveTest(unittest.TestCase):
         auth_result = _RejectScoreOneAuthResult()
         splits = [
             QueryAuthSplit(split, auth_result)
-            for split in read_builder.new_scan().plan().splits()
+            # Attach authorization after planning; do not push the reader's
+            # limit into this unauthenticated scan. Order partitions explicitly.
+            for split in sorted(table.new_read_builder().new_scan().plan().splits(),
+                                key=lambda split: split.partition.values)
         ]
 
         scores = [

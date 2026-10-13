@@ -61,13 +61,10 @@ public class GlobalIndexerFactoryUtils {
     /** Keep unrecognized index types for the reader to resolve at execution time. */
     public static List<GlobalIndexIOMeta> selectFiles(
             String type,
-            DataField indexField,
-            List<DataField> extraFields,
+            List<DataField> indexFields,
             Predicate predicate,
             List<GlobalIndexIOMeta> files) {
         GlobalIndexerFactory factory = factories.get(type);
-        return factory == null
-                ? files
-                : factory.selectFiles(indexField, extraFields, predicate, files);
+        return factory == null ? files : factory.selectFiles(indexFields, predicate, files);
     }
 }

@@ -26,6 +26,8 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.SnapshotLoader;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Optional;
 
@@ -34,10 +36,13 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
 
     private final CatalogLoader catalogLoader;
     private final Identifier identifier;
+    @Nullable private final String uuid;
 
-    public SnapshotLoaderImpl(CatalogLoader catalogLoader, Identifier identifier) {
+    public SnapshotLoaderImpl(
+            CatalogLoader catalogLoader, Identifier identifier, @Nullable String uuid) {
         this.catalogLoader = catalogLoader;
         this.identifier = identifier;
+        this.uuid = uuid;
     }
 
     @Override
@@ -54,7 +59,7 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     @Override
     public void rollback(Instant instant) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            catalog.rollbackTo(identifier, instant);
+            catalog.rollbackTo(identifier, uuid, instant, null, null);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -64,8 +69,10 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
 
     @Override
     public SnapshotLoader copyWithBranch(String branch) {
+        Identifier branchIdentifier =
+                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
+        // A different branch can have its own UUID. Its identity is unknown in this view.
         return new SnapshotLoaderImpl(
-                catalogLoader,
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch));
+                catalogLoader, branchIdentifier, branchIdentifier.equals(identifier) ? uuid : null);
     }
 }

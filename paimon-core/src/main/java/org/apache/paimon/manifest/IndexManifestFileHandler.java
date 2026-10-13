@@ -29,7 +29,6 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -150,10 +149,12 @@ public class IndexManifestFileHandler {
                     }
                     indexEntries.put(fileName, entry);
                 } else {
+                    IndexManifestEntry previous = indexEntries.get(fileName);
                     checkState(
-                            indexEntries.containsKey(fileName),
+                            previous != null,
                             "Trying to delete file %s which is not exists.",
                             fileName);
+                    checkDeletedIndexFile(previous, entry);
                     if (dvRanges != null) {
                         for (String dataFile : dvRanges.keySet()) {
                             checkState(
@@ -222,10 +223,12 @@ public class IndexManifestFileHandler {
                             .collect(Collectors.toList());
             for (IndexManifestEntry entry : removed) {
                 String fileName = entry.indexFile().fileName();
+                IndexManifestEntry previous = indexEntries.get(fileName);
                 checkState(
-                        indexEntries.containsKey(fileName),
+                        previous != null,
                         "Trying to delete global index file %s which does not exist.",
                         fileName);
+                checkDeletedIndexFile(previous, entry);
                 indexEntries.remove(fileName);
             }
             validateRetainedIndexFiles(indexEntries.values(), added);
@@ -243,6 +246,7 @@ public class IndexManifestFileHandler {
                 if (retainedMeta == null) {
                     continue;
                 }
+                List<Integer> retainedFieldIds = retainedMeta.getIndexedFieldIds();
 
                 for (IndexManifestEntry added : addedIndexFiles) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
@@ -253,14 +257,12 @@ public class IndexManifestFileHandler {
                                             retainedMeta.sourceMeta())
                                     && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
                                             addedMeta.sourceMeta()))
-                            || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
-                            || (Arrays.equals(
-                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
-                                    && !Range.intersect(
-                                            retainedMeta.rowRangeStart(),
-                                            retainedMeta.rowRangeEnd(),
-                                            addedMeta.rowRangeStart(),
-                                            addedMeta.rowRangeEnd()))) {
+                            || !Range.intersect(
+                                    retainedMeta.rowRangeStart(),
+                                    retainedMeta.rowRangeEnd(),
+                                    addedMeta.rowRangeStart(),
+                                    addedMeta.rowRangeEnd())
+                            || !retainedFieldIds.equals(addedMeta.getIndexedFieldIds())) {
                         continue;
                     }
 
@@ -280,6 +282,17 @@ public class IndexManifestFileHandler {
                 }
             }
         }
+    }
+
+    private static void checkDeletedIndexFile(
+            IndexManifestEntry previous, IndexManifestEntry deleted) {
+        // File identity alone does not detect metadata-only row-id reassignment.
+        checkState(
+                previous.partition().equals(deleted.partition())
+                        && previous.bucket() == deleted.bucket()
+                        && previous.indexFile().equals(deleted.indexFile()),
+                "Index file %s metadata does not match the current entry.",
+                deleted.indexFile().fileName());
     }
 
     private static BucketIdentifier identifier(IndexManifestEntry indexManifestEntry) {

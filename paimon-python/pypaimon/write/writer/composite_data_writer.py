@@ -51,6 +51,17 @@ class CompositeDataWriter(DataWriter):
         self._close_current_writers()
         return self.committed_files.copy()
 
+    def _release_prepared_files(self) -> List[DataFileMeta]:
+        """Hand a successfully prepared group to its committer, as Java does.
+
+        Until every partition prepares, retain files for retry/abort. Once the
+        parent accepts the messages, later checkpoints must neither resend
+        those files nor delete them when another write fails.
+        """
+        owned_files = super()._release_prepared_files()
+        self._committed_files_to_delete_on_abort.clear()
+        return owned_files
+
     def close(self):
         if self.closed:
             return

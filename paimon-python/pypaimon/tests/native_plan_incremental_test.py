@@ -28,6 +28,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.read.split import DataSplit
 from pypaimon.utils.range import Range
 
@@ -194,6 +195,35 @@ def test_primary_key_shards_preserve_all_selected_commits(native, catalog):
         (key, version) for key in range(20) for version in ('new', 'old')]
 
 
+@pytest.mark.parametrize('engine,dv', [('first-row', False), ('deduplicate', True)])
+def test_raw_primary_key_incremental_shards_preserve_file_events(native, catalog, engine, dv):
+    table = _table(catalog, 'raw_pk_shards', True, {
+        'bucket': '1', 'merge-engine': engine,
+        'deletion-vectors.enabled': str(dv).lower(),
+        'source.split.target-size': '1b',
+    })
+    _write(table, 100, [{'k': 0, 'v': 'outside'}])
+    for key in range(8):
+        _write(table, 200 + key * 2, [{'k': key, 'v': 'old'}])
+        _write(table, 201 + key * 2, [{'k': key, 'v': 'new'}])
+    events, file_names = [], set()
+    for shard in range(5):
+        plan, rows = _read(table, native, (100, 400), shard=(shard, 5))
+        assert plan.snapshot_id == 17
+        assert all(split.is_streaming and split.bucket == 0 for split in plan.splits())
+        names = {file.file_name for split in plan.splits() for file in split.files}
+        assert all(java_file_name_shard(name, 5) == shard for name in names)
+        assert not file_names.intersection(names)
+        file_names.update(names)
+        events.extend(rows)
+        if rows:
+            _, limited = _read(table, native, (100, 400), shard=(shard, 5), limit=1)
+            assert len(limited) == 1 and limited[0] in rows
+    assert len(file_names) == 16
+    assert sorted((row['k'], row['v']) for row in events) == [
+        (key, version) for key in range(8) for version in ('new', 'old')]
+
+
 def test_data_evolution_positions_intersect_incremental_row_ranges(native, catalog):
     table = _table(catalog, 'de', options={
         'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true',
@@ -256,7 +286,7 @@ def test_incremental_ignores_deletion_vectors_from_window_end(native, catalog):
     assert actual == [rows[4]]
 
 
-@pytest.mark.parametrize('window', ['100,100', '200,100', '100', 'one,200'])
+@pytest.mark.parametrize('window', ['100', 'one,200', '0,100,200'])
 def test_invalid_timestamp_window_is_rejected_even_for_empty_tables(catalog, window):
     table = _table(catalog, 'invalid')
     with pytest.raises(ValueError):
@@ -376,12 +406,9 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
 
 
 @pytest.mark.native_plan
-@pytest.mark.skipif(
-    not native_method_available('ReadBuilder', 'with_nested_projection'),
-    reason='pypaimon_rust nested native reader API required')
 def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
         catalog):
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.read.streaming_table_scan import StreamTableScan
 
     schema = pa.schema([
         ('k', pa.int64()),
@@ -415,11 +442,12 @@ def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
     builder = (native_table.new_stream_read_builder()
                .with_projection(['payload.score', 'k'])
                .with_include_row_kind())
-    # Use the same delta-plan primitive as the streaming loop without polling.
+    # Restore the public stream scan to consume this snapshot as a delta.
     scan = builder.new_streaming_scan()
-    assert isinstance(scan, AsyncStreamingTableScan)
+    assert isinstance(scan, StreamTableScan)
     snapshot = native_table.snapshot_manager().get_latest_snapshot()
-    plan = scan._create_delta_plan(snapshot)
+    scan.restore(snapshot.id)
+    plan = scan.plan()
     with patch(
             'pypaimon.read.table_read.TableRead._create_split_read',
             side_effect=AssertionError('streaming nested native read fell back')):
@@ -464,8 +492,8 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
             if len(plans) == 2:
                 return plans
 
-    with patch.object(
-            scan, '_create_plan_from_manifests',
+    with patch(
+            'pypaimon.read.streaming_table_scan.ManifestFileManager',
             side_effect=AssertionError(
                 'streaming changelog native plan fell back to Python')):
         plans = asyncio.run(first_two_frames())
@@ -560,3 +588,36 @@ def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native,
                 side_effect=AssertionError('explicit DV native read fell back')))
         result = read_table.new_read_builder().new_read().to_arrow([dv_split]).to_pylist()
     assert result == [{'k': 1, 'v': '1'}, {'k': 3, 'v': '3'}]
+
+
+@pytest.mark.parametrize('window', [(100, 100), (200, 100)])
+def test_empty_table_timestamp_windows_follow_java(catalog, native, window):
+    table = _table(catalog, 'empty_window')
+    plan, rows = _read(table, native, window)
+    assert rows == []
+    assert plan.snapshot_id is None
+
+
+def test_reverse_window_is_rejected_when_snapshots_exist(catalog):
+    table = _table(catalog, 'reverse_window')
+    _write(table, 100, [{'k': 1, 'v': 'base'}])
+    with pytest.raises(ValueError, match='Ending timestamp'):
+        table.copy({'incremental-between-timestamp': '200,100'}).new_read_builder().new_scan()
+
+
+def test_equal_window_is_empty_for_populated_tables(native, history):
+    plan, rows = _read(history, native, (100, 100))
+    assert rows == []
+    assert plan.snapshot_id is None
+
+
+def test_timestamp_auto_reads_physical_changelog(native, catalog):
+    table = _table(catalog, 'batch_changelog', True, {'bucket': '1', 'changelog-producer': 'input'})
+    _write(table, 100, [{'k': 1, 'v': 'old'}])
+    _write(table, 200, [{'k': 1, 'v': 'new'}, {'k': 2, 'v': 'insert'}])
+    _write(table, 300, [{'k': 9, 'v': 'overwrite'}], overwrite=True)
+    plan, rows = _read(table, native, (100, 300))
+    assert plan.snapshot_id == 3
+    assert all(split.snapshot_id == 3 for split in plan.splits())
+    assert all(file.file_name.startswith('changelog-') for split in plan.splits() for file in split.files)
+    assert sorted((row['k'], row['v']) for row in rows) == [(1, 'new'), (2, 'insert')]

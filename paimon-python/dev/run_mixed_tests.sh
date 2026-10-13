@@ -660,29 +660,8 @@ ensure_paimon_vindex() {
         return 0
     fi
 
-    echo "Installing Python paimon-vindex dependency..."
-    if python -m pip install 'paimon-vindex==0.5.0'; then
-        return 0
-    fi
-
-    echo -e "${YELLOW}Direct pip install failed; installing paimon-vindex into a temporary target directory...${NC}"
-    local target_dir="${TMPDIR:-/tmp}/paimon-vindex-site"
-    rm -rf "$target_dir"
-    if python -m pip install --target "$target_dir" 'paimon-vindex==0.5.0'; then
-        export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
-        return 0
-    fi
-
-    if python -c "import numpy" >/dev/null 2>&1; then
-        echo -e "${YELLOW}Dependency install failed but numpy is already available; retrying paimon-vindex without dependencies...${NC}"
-        rm -rf "$target_dir"
-        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.5.0'; then
-            export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
-            return 0
-        fi
-    fi
-
-    echo -e "${RED}✗ Failed to install paimon-vindex${NC}"
+    echo -e "${RED}Missing paimon-vindex; install the Python dev dependency group first.${NC}"
+    echo "From paimon-python: python -m pip install -e . --group dev"
     return 1
 }
 

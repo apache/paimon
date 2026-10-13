@@ -45,22 +45,13 @@ public class TestFullTextGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField field, Options options) {
-        return new TestFullTextGlobalIndexer(field.type(), options);
-    }
-
-    @Override
-    public GlobalIndexer create(
-            DataField indexField, List<DataField> extraFields, Options options) {
-        // Multi-column support: this brute-force backend indexes a single text column, which may be
-        // the primary field or an extra field. Pick the VARCHAR/STRING column among them.
-        DataField textField = indexField;
-        if (!(textField.type() instanceof VarCharType) && extraFields != null) {
-            for (DataField extra : extraFields) {
-                if (extra.type() instanceof VarCharType) {
-                    textField = extra;
-                    break;
-                }
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        // This brute-force backend indexes the first VARCHAR/STRING column.
+        DataField textField = indexFields.get(0);
+        for (DataField field : indexFields) {
+            if (field.type() instanceof VarCharType) {
+                textField = field;
+                break;
             }
         }
         return new TestFullTextGlobalIndexer(textField.type(), options);

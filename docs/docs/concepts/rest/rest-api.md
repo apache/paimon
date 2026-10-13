@@ -74,6 +74,19 @@ dropped, no data is deleted, and the request needs `replaceStatistics=true` with
 invalid, so a server that does not implement this rejects the request rather than storing it. A
 server also rejects additive statistics for a partition that already has a custom location.
 
+Format Table partitions can also override the table format with `file.format`, for example
+`"partitionOptions": [{"file.format": "orc"}]`. An explicit format updates an existing partition
+even with `ignoreIfExists=true`, preserving other options. Omitting it preserves the stored
+override; a partition without an override inherits the table format, defaulting to `parquet`.
+An empty or unsupported format is rejected. The server and all readers and writers must support
+partition formats before mixed-format partitions are used.
+
+An additive statistics request that explicitly supplies a different format from the existing
+partition's effective format is rejected. Replacement statistics (`replaceStatistics=true`) can
+update the format and statistics together. Each request batch is atomic for catalog metadata;
+multiple batches and filesystem writes are not one transaction. See the
+[Format Table write and recovery boundaries](../../spark/format-table.md#partition-file-formats).
+
 ## Semantic views
 
 See [Semantic Views](semantic-views.md) for experimental definition management, complete-document

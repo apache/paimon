@@ -378,8 +378,12 @@ class RESTCatalogServer:
                 rename_request = JSON.from_json(data, RenameTableRequest)
                 source_table = rename_request.source
                 destination_table = rename_request.destination
-                source = self.table_metadata_store.get(source_table.get_full_name())
-                self.table_metadata_store.update({destination_table.get_full_name(): source})
+                source_name = source_table.get_full_name()
+                destination_name = destination_table.get_full_name()
+                if source_name not in self.table_metadata_store:
+                    raise TableNotExistException(source_table)
+                if destination_name in self.table_metadata_store:
+                    raise TableAlreadyExistException(destination_table)
                 source_table_dir = (Path(self.data_path) / self.warehouse
                                     / source_table.get_database_name() / source_table.get_object_name())
                 destination_table_dir = (Path(self.data_path) / self.warehouse
@@ -387,7 +391,12 @@ class RESTCatalogServer:
                 if not source_table_dir.exists():
                     destination_table_dir.mkdir(parents=True)
                 else:
+                    destination_table_dir.parent.mkdir(parents=True, exist_ok=True)
                     source_table_dir.rename(destination_table_dir)
+                for store in (self.table_metadata_store, self.branch_store, self.tag_store,
+                              self.table_latest_snapshot_store, self.table_partitions_store):
+                    if source_name in store:
+                        store[destination_name] = store.pop(source_name)
                 return self._mock_response("", 200)
 
             # Global functions endpoint (catalog-scoped)
@@ -512,6 +521,9 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_DEFINITION, e.name, str(e), 404
             )
             return self._mock_response(response, 404)
+        except ValueError as e:
+            response = ErrorResponse(None, None, str(e), 400)
+            return self._mock_response(response, 400)
         except Exception as e:
             self.logger.error(f"Unexpected error: {e}")
             response = ErrorResponse(None, None, str(e), 500)
@@ -876,6 +888,11 @@ class RESTCatalogServer:
 
     # ======================= Branch Handlers ================================
 
+    @staticmethod
+    def _validate_branch_name(branch_name):
+        from pypaimon.branch.branch_manager import BranchManager
+        BranchManager.validate_branch(branch_name)
+
     def _branches_handle(self, method: str, data: str,
                          identifier: Identifier) -> Tuple[str, int]:
         """Handle the table-scoped branches collection (POST create / GET list)."""
@@ -884,18 +901,26 @@ class RESTCatalogServer:
 
         if method == "POST":
             request = JSON.from_json(data, CreateBranchRequest)
+            self._validate_branch_name(request.branch)
             store = self.branch_store.setdefault(identifier.get_full_name(), set())
             if request.branch in store:
                 raise BranchAlreadyExistException(request.branch)
 
+            schema_id = self.table_metadata_store[identifier.get_full_name()].schema.id
             if request.from_tag is not None:
                 tags = self.tag_store.get(identifier.get_full_name(), {})
                 if request.from_tag not in tags:
                     raise TagNotExistException(request.from_tag)
                 snapshot = tags[request.from_tag].snapshot
                 if snapshot is not None:
+                    schema_id = snapshot.schema_id
                     self._write_snapshot_files(
                         identifier, snapshot, None, request.branch)
+            manager = self._schema_manager(identifier)
+            target = manager.copy_with_branch(request.branch)
+            for schema in manager.list_all():
+                if schema.id <= schema_id:
+                    target.commit(schema)
             store.add(request.branch)
             return self._mock_response("", 200)
 
@@ -914,8 +939,11 @@ class RESTCatalogServer:
         store = self.branch_store.get(identifier.get_full_name(), set())
 
         if method == "DELETE":
+            self._validate_branch_name(branch_name)
             if branch_name not in store:
                 raise BranchNotExistException(branch_name)
+            manager = self._schema_manager(identifier, branch_name)
+            manager.file_io.delete(manager.branch_path, recursive=True)
             store.discard(branch_name)
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
@@ -931,8 +959,13 @@ class RESTCatalogServer:
         if from_branch not in store:
             raise BranchNotExistException(from_branch)
         request = JSON.from_json(data, RenameBranchRequest)
+        self._validate_branch_name(from_branch)
+        self._validate_branch_name(request.to_branch)
         if request.to_branch in store:
             raise BranchAlreadyExistException(request.to_branch)
+        source = self._schema_manager(identifier, from_branch)
+        target = self._schema_manager(identifier, request.to_branch)
+        Path(source.branch_path).rename(target.branch_path)
         store.discard(from_branch)
         store.add(request.to_branch)
         return self._mock_response("", 200)
@@ -1035,7 +1068,8 @@ class RESTCatalogServer:
         if method == "GET":
             if identifier.get_full_name() not in self.table_metadata_store:
                 raise TableNotExistException(identifier)
-            table_metadata = self.table_metadata_store[identifier.get_full_name()]
+            table_metadata = self._branch_table_metadata(
+                identifier, (response_identifier or identifier).get_branch_name())
             table_path = (f'file://{self.data_path}/{self.warehouse}/'
                           f'{identifier.get_database_name()}/{identifier.get_object_name()}')
             schema = table_metadata.schema.to_schema()
@@ -1045,7 +1079,7 @@ class RESTCatalogServer:
         elif method == "POST":
             # Alter table
             request_body = JSON.from_json(data, AlterTableRequest)
-            self._alter_table_impl(identifier, request_body.changes)
+            self._alter_table_impl(response_identifier or identifier, request_body.changes)
             return self._mock_response("", 200)
         elif method == "DELETE":
             # Drop table
@@ -1296,10 +1330,7 @@ class RESTCatalogServer:
         from pypaimon.common.options.options import Options
         from pypaimon.table.file_store_table import FileStoreTable
 
-        table_metadata = self.table_metadata_store.get(identifier.get_full_name())
-        if table_metadata is None:
-            raise TableNotExistException(identifier)
-
+        table_metadata = self._branch_table_metadata(identifier, branch)
         table_schema = table_metadata.schema
         table_path = (
             f'file://{self.data_path}/{self.warehouse}/'
@@ -1457,9 +1488,28 @@ class RESTCatalogServer:
 
         return '^' + ''.join(regex) + '$'
 
+    def _schema_manager(self, identifier: Identifier, branch: str = None):
+        table_path = (Path(self.data_path) / self.warehouse /
+                      identifier.get_database_name() / identifier.get_table_name())
+        return SchemaManager(self._get_file_io(), str(table_path), branch or 'main')
+
+    def _branch_table_metadata(self, identifier: Identifier, branch: str = None):
+        base = Identifier.create(identifier.get_database_name(), identifier.get_table_name())
+        metadata = self.table_metadata_store.get(base.get_full_name())
+        if metadata is None:
+            raise TableNotExistException(base)
+        if branch is None or branch == 'main':
+            return metadata
+        if branch not in self.branch_store.get(base.get_full_name(), set()):
+            raise BranchNotExistException(branch)
+        schema = self._schema_manager(base, branch).latest()
+        if schema is None:
+            raise BranchNotExistException(branch)
+        return TableMetadata(schema=schema, uuid=metadata.uuid, is_external=metadata.is_external)
+
     def _alter_table_impl(self, identifier: Identifier, changes: List) -> None:
-        if identifier.get_full_name() not in self.table_metadata_store:
-            raise TableNotExistException(identifier)
+        branch = identifier.get_branch_name()
+        table_metadata = self._branch_table_metadata(identifier, branch)
 
         schema_changes = []
         for change in changes:
@@ -1471,13 +1521,7 @@ class RESTCatalogServer:
             else:
                 schema_changes.append(change)
 
-        table_metadata = self.table_metadata_store[identifier.get_full_name()]
-
-        table_path = (
-            Path(self.data_path) / self.warehouse /
-            identifier.get_database_name() / identifier.get_object_name()
-        )
-        schema_manager = SchemaManager(self._get_file_io(), str(table_path))
+        schema_manager = self._schema_manager(identifier, branch)
         new_schema = schema_manager.commit_changes(schema_changes)
 
         updated_metadata = TableMetadata(
@@ -1485,7 +1529,9 @@ class RESTCatalogServer:
             is_external=table_metadata.is_external,
             uuid=table_metadata.uuid
         )
-        self.table_metadata_store[identifier.get_full_name()] = updated_metadata
+        if branch is None or branch == 'main':
+            base = Identifier.create(identifier.get_database_name(), identifier.get_table_name())
+            self.table_metadata_store[base.get_full_name()] = updated_metadata
 
     def _get_file_io(self):
         """Get FileIO instance for SchemaManager"""

@@ -136,10 +136,12 @@ class RowIdConflictRewriter:
                         updater.update_columns(update_data, column_names)
                     )
                 except Exception:
-                    self._abort(updater.commit_messages)
+                    # Never delete files from CommitMessage on failure.
+                    # A commit can succeed even when its response raises an exception.
                     raise
         except Exception:
-            self._abort(new_messages)
+            # Preserve prepared outputs from earlier groups as well.
+            # Never infer deletion ownership from CommitMessage.
             raise
 
         rewritten_entries = [
@@ -202,7 +204,7 @@ class RowIdConflictRewriter:
                 ):
                     key = (
                         base_key,
-                        base.file.external_path or base.file.file_path
+                        base.file.physical_path()
                         or base.file.file_name,
                     )
                     affected[key] = base.file
@@ -270,13 +272,6 @@ class RowIdConflictRewriter:
                     file=file,
                 ))
         return entries
-
-    def _abort(self, messages):
-        for message in messages:
-            for file in message.new_files:
-                path = file.external_path or file.file_path
-                if path:
-                    self.table.file_io.delete_quietly(path)
 
     @staticmethod
     def _range_key(entry):

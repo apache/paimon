@@ -2372,7 +2372,8 @@ public class JavaPyE2ETest {
     private List<CommitMessage> buildSortedIndex(
             FileStoreTable table, String indexType, String indexFieldName) throws Exception {
         SortedGlobalIndexScanner scanner =
-                new SortedGlobalIndexScanner(table, indexType).withIndexField(indexFieldName);
+                new SortedGlobalIndexScanner(table, indexType)
+                        .withIndexFields(Collections.singletonList(indexFieldName));
         ScanResult<DataSplit> scanResult =
                 scanner.scan()
                         .orElseThrow(

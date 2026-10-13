@@ -88,8 +88,25 @@ public class OrcSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
             case BINARY:
             case VARBINARY:
                 return new SimpleColStats(null, null, stats.nullCount());
+            case FLOAT:
+            case DOUBLE:
+                // ORC cannot prove a +0.0 minimum is not hiding -0.0.
+                if (isPositiveZero(stats.min())) {
+                    return new SimpleColStats(null, null, stats.nullCount());
+                }
+                return stats;
         }
         return stats;
+    }
+
+    private static boolean isPositiveZero(Object value) {
+        if (value instanceof Float) {
+            return Float.floatToRawIntBits((Float) value) == Float.floatToRawIntBits(0.0f);
+        }
+        if (value instanceof Double) {
+            return Double.doubleToRawLongBits((Double) value) == Double.doubleToRawLongBits(0.0d);
+        }
+        return false;
     }
 
     @Override

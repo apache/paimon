@@ -123,6 +123,8 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_SKIP_UPDATE_STATS;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
@@ -211,6 +213,20 @@ public class HiveCatalog extends AbstractCatalog {
 
     private boolean formatTableDisabled() {
         return !options.get(FORMAT_TABLE_ENABLED);
+    }
+
+    @Override
+    public Optional<CatalogLockFactory> lockFactory() {
+        if (!lockEnabled()) {
+            return Optional.empty();
+        }
+        String type = options.get(LOCK_TYPE);
+        return type == null ? defaultLockFactory() : Optional.of(CatalogLockFactory.discover(type));
+    }
+
+    @Override
+    protected boolean lockEnabled() {
+        return options.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     @Override
@@ -441,8 +457,13 @@ public class HiveCatalog extends AbstractCatalog {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         StorageDescriptor sd = hmsTable.getSd();
         String dataFilePath = getDataFilePath(tableIdentifier, hmsTable);
+        List<String> partitionKeys =
+                hmsTable.getPartitionKeys().stream()
+                        .map(FieldSchema::getName)
+                        .collect(Collectors.toList());
         List<Partition> hivePartitions = new ArrayList<>();
-        for (Map<String, String> partitionSpec : partitions) {
+        for (Map<String, String> spec : partitions) {
+            Map<String, String> partitionSpec = orderByPartitionKeys(partitionKeys, spec);
             Partition hivePartition = new Partition();
             StorageDescriptor newSd = new StorageDescriptor(sd);
             hivePartition.setDbName(tableIdentifier.getDatabaseName());
@@ -475,7 +496,9 @@ public class HiveCatalog extends AbstractCatalog {
                             ? partitions
                             : removePartitionsExistsInOtherBranches(identifier, partitions);
             for (Map<String, String> part : metaPartitions) {
-                List<String> partitionValues = new ArrayList<>(part.values());
+                List<String> partitionValues =
+                        new ArrayList<>(
+                                orderByPartitionKeys(schema.partitionKeys(), part).values());
                 try {
                     clients()
                             .execute(
@@ -512,6 +535,22 @@ public class HiveCatalog extends AbstractCatalog {
                 + Path.SEPARATOR
                 + PartitionPathUtils.generatePartitionPathUtil(
                         new LinkedHashMap<>(partitionSpec), onlyValue);
+    }
+
+    /**
+     * Hive metastore matches partition values to partition keys by position, so reorder the spec by
+     * the partition keys. The spec is returned unchanged if its keys differ from them.
+     */
+    private static Map<String, String> orderByPartitionKeys(
+            List<String> partitionKeys, Map<String, String> spec) {
+        if (partitionKeys.size() != spec.size() || !spec.keySet().containsAll(partitionKeys)) {
+            return spec;
+        }
+        Map<String, String> ordered = new LinkedHashMap<>();
+        for (String key : partitionKeys) {
+            ordered.put(key, spec.get(key));
+        }
+        return ordered;
     }
 
     @Override
@@ -1915,16 +1954,9 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
-        if (!lockEnabled()) {
-            return callable.call();
+        try (Lock lock = createLock(identifier, null, null, new Options())) {
+            return lock.runWithLock(callable);
         }
-
-        HiveCatalogLock lock =
-                new HiveCatalogLock(
-                        clients(),
-                        HiveCatalogLock.checkMaxSleep(hiveConf),
-                        HiveCatalogLock.acquireTimeout(hiveConf));
-        return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 
     public static HiveConf createHiveConf(

@@ -1,0 +1,142 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+import os
+import sys
+from collections import namedtuple
+from concurrent.futures import Future
+from threading import Lock
+from types import SimpleNamespace
+
+from cachetools import LRUCache
+
+from pypaimon.common.memory_size import MemorySize
+
+
+_CachedBlobIndex = namedtuple(
+    "_CachedBlobIndex", ["blob_lengths", "blob_offsets", "size_bytes"]
+)
+_CACHED_ENTRY_OVERHEAD = sys.getsizeof(_CachedBlobIndex((), (), 0))
+_ESTIMATED_INT_SIZE = sys.getsizeof(1 << 60)
+# Allow for cachetools' two dict slots, OrderedDict node, and allocator slack.
+_LRU_ENTRY_OVERHEAD = 256
+
+
+class BlobIndexCache:
+    """Catalog-owned parsed indexes bounded by estimated retained bytes."""
+
+    def __init__(self, max_size):
+        if not isinstance(max_size, MemorySize):
+            raise ValueError("cache.blob-index.max-size must be a memory size")
+        self.max_size_bytes = max_size.get_bytes()
+        self._states = {}
+
+    def _state(self):
+        pid = os.getpid()
+        states = self._states
+        state = states.get(pid)
+        if state is None:
+            # Publish a complete state atomically; never touch inherited locks or Futures.
+            state = states.setdefault(pid, SimpleNamespace(
+                lock=Lock(), loading={}, cache=LRUCache(
+                    maxsize=self.max_size_bytes,
+                    getsizeof=lambda entry: entry.size_bytes)))
+            self._states = {pid: state}
+        return state
+
+    def get(self, file_path):
+        if self.max_size_bytes == 0:
+            return None
+        state = self._state()
+        with state.lock:
+            entry = state.cache.get(file_path)
+        if entry is None:
+            return None
+        return entry.blob_lengths, entry.blob_offsets
+
+    def put(self, file_path, blob_lengths, blob_offsets):
+        if self.max_size_bytes == 0:
+            return
+        size_bytes = (
+            sys.getsizeof(file_path)
+            + sys.getsizeof(blob_lengths)
+            + sys.getsizeof(blob_offsets)
+            + _CACHED_ENTRY_OVERHEAD
+            + _LRU_ENTRY_OVERHEAD
+            + (len(blob_lengths) + len(blob_offsets)) * _ESTIMATED_INT_SIZE
+        )
+        if size_bytes > self.max_size_bytes:
+            return
+        entry = _CachedBlobIndex(blob_lengths, blob_offsets, size_bytes)
+        state = self._state()
+        with state.lock:
+            state.cache[file_path] = entry
+
+    def get_or_load(self, file_path, loader):
+        """Share an in-flight load without holding the cache lock during I/O."""
+        if self.max_size_bytes == 0:
+            return loader()
+        state = self._state()
+        with state.lock:
+            entry = state.cache.get(file_path)
+            if entry is not None:
+                return entry.blob_lengths, entry.blob_offsets
+            pending = state.loading.get(file_path)
+            owner = pending is None
+            if owner:
+                pending = Future()
+                state.loading[file_path] = pending
+
+        if not owner:
+            return pending.result()
+        try:
+            index = loader()
+            self.put(file_path, *index)
+        except BaseException as error:
+            # Unblock waiters even if the loading thread is interrupted.
+            pending.set_exception(error)
+            raise
+        else:
+            pending.set_result(index)
+            return index
+        finally:
+            with state.lock:
+                del state.loading[file_path]
+
+    def __len__(self):
+        state = self._state()
+        with state.lock:
+            return len(state.cache)
+
+    def __contains__(self, file_path):
+        state = self._state()
+        with state.lock:
+            return file_path in state.cache
+
+    def clear(self):
+        state = self._state()
+        with state.lock:
+            state.cache.clear()
+
+    @property
+    def size_bytes(self):
+        state = self._state()
+        with state.lock:
+            return state.cache.currsize
+
+    def __reduce__(self):
+        return type(self), (MemorySize.of_bytes(self.max_size_bytes),)

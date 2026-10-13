@@ -37,6 +37,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -188,7 +189,8 @@ public class GlobalIndexEvaluator implements Closeable {
                             }
                             return compoundResult.map(
                                     result ->
-                                            new Evaluation(result, Collections.singleton(fieldId)));
+                                            new Evaluation(
+                                                    result, Collections.singleton(fieldId), null));
                         });
     }
 
@@ -278,7 +280,7 @@ public class GlobalIndexEvaluator implements Closeable {
                 compoundResult = compoundResult.or(child.get().result());
                 contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            return Optional.of(new Evaluation(compoundResult, contributingFieldIds));
+            return Optional.of(new Evaluation(compoundResult, contributingFieldIds, null));
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<Evaluation> child : results) {
@@ -295,7 +297,7 @@ public class GlobalIndexEvaluator implements Closeable {
                     break;
                 }
             }
-            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds));
+            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds, null));
         }
     }
 
@@ -306,15 +308,28 @@ public class GlobalIndexEvaluator implements Closeable {
 
         private final GlobalIndexResult result;
         private final Set<Integer> contributingFieldIds;
+        @Nullable private final List<Range> coveredRanges;
 
-        Evaluation(GlobalIndexResult result, Collection<Integer> contributingFieldIds) {
+        Evaluation(
+                GlobalIndexResult result,
+                Collection<Integer> contributingFieldIds,
+                @Nullable List<Range> coveredRanges) {
             this.result = result;
+            this.coveredRanges =
+                    coveredRanges == null
+                            ? null
+                            : Collections.unmodifiableList(new ArrayList<>(coveredRanges));
             this.contributingFieldIds =
                     Collections.unmodifiableSet(new HashSet<>(contributingFieldIds));
         }
 
         public GlobalIndexResult result() {
             return result;
+        }
+
+        @Nullable
+        public List<Range> coveredRanges() {
+            return coveredRanges;
         }
 
         public Set<Integer> contributingFieldIds() {

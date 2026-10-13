@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests {@link PreAssignSplitAssigner} pruning over {@link QueryAuthSplit}. */
 public class PreAssignSplitAssignerTest {
@@ -122,6 +123,19 @@ public class PreAssignSplitAssignerTest {
         assertThat(assigner.remainingSplits()).isEmpty();
         assertThat(assigner.numberOfRemainingSplits()).isZero();
         assertThat(assigner.getNext(0, null)).isEmpty();
+    }
+
+    @Test
+    public void testNonPositiveSplitBatchSizeRejected() {
+        // A non-positive scan.split-enumerator.batch-size makes PreAssignSplitAssigner#getNext's
+        // "assignment.size() < splitBatchSize" loop never run, so the enumerator hands out no
+        // splits and a bounded read silently returns zero rows. Reject it at construction.
+        Collection<FileStoreSourceSplit> splits = Collections.singletonList(partitionSplit(1));
+        for (int invalid : new int[] {0, -1}) {
+            assertThatThrownBy(() -> new PreAssignSplitAssigner(invalid, 1, splits))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("scan.split-enumerator.batch-size must be positive.");
+        }
     }
 
     private static SplitAssigner pruningAssigner(Collection<FileStoreSourceSplit> splits) {

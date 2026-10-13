@@ -92,6 +92,14 @@ def merge_into(
     The returned messages must be committed by the caller's matching
     ``TableCommit``.
     """
+    if target_table.options.native_write_enabled():
+        from pypaimon.write.native_merge_into import create_native_merge_into
+
+        native = create_native_merge_into(target_table, source, on, when_matched, when_not_matched,
+                                          commit_user, commit_identifier)
+        if native is not None:
+            return native.prepare_commit()
+
     base_snapshot = target_table.snapshot_manager().get_latest_snapshot()
     source_table, matched_specs, not_matched_specs, ctx = _prepare(
         target_table,
@@ -128,6 +136,8 @@ def _prepare(
     when_matched,
     when_not_matched,
     on,
+    *,
+    source_schema=None,
 ):
     if not when_matched and not when_not_matched:
         raise ValueError(
@@ -241,7 +251,8 @@ def _prepare(
         source_table = None
         source_col_names = set(full_target_field_names) | set(source_on_cols)
     else:
-        source_table = _normalize_source(source)
+        # Native table input needs schema validation without Python I/O.
+        source_table = source_schema.empty_table() if source_schema is not None else _normalize_source(source)
         _validate_source_on_cols(source_table, source_on_cols)
         source_col_names = set(source_table.schema.names)
 
@@ -326,6 +337,14 @@ def _build_tables(
 
     if matched_specs and base_snapshot is not None:
         update_cols_union = _union_update_cols(matched_specs)
+        if not update_cols_union and not any(c.delete for c in matched_specs):
+            names = list(dict.fromkeys(ctx.target_on_cols + [SpecialFields.ROW_ID.name]))
+            target = _read_table(target_table, projection=names, snapshot_id=base_snapshot_id)
+            target = _rename_with_prefix(target, "t.")
+            _join_with_row_indices(target, _rename_with_prefix(source_table, "s."),
+                                   ["t." + name for name in ctx.target_on_cols],
+                                   ["s." + name for name in ctx.source_on_cols],
+                                   "inner", check_cardinality=True)
         if update_cols_union:
             update_table = _build_matched_update_table(
                 target_table,
@@ -491,6 +510,7 @@ def _build_matched_update_table(
         keys=["t.{}".format(c) for c in ctx.target_on_cols],
         right_keys=["s.{}".format(c) for c in ctx.source_on_cols],
         join_type="inner",
+        check_cardinality=True,
     )
     transform = _build_matched_transform(
         clauses,
@@ -531,6 +551,8 @@ def _build_matched_delete_table(
         keys=["t.{}".format(c) for c in ctx.target_on_cols],
         right_keys=["s.{}".format(c) for c in ctx.source_on_cols],
         join_type="inner",
+        check_cardinality=not (len(clauses) == 1 and clauses[0].delete and clauses[0].condition is None),
+        deduplicate_left=len(clauses) == 1 and clauses[0].delete and clauses[0].condition is None,
     )
     transform = _build_matched_delete_transform(
         clauses,
@@ -579,7 +601,8 @@ def _build_not_matched_insert_table(
     return transform(unmatched)
 
 
-def _join_with_row_indices(left, right, keys, right_keys, join_type):
+def _join_with_row_indices(left, right, keys, right_keys, join_type,
+                           check_cardinality=False, deduplicate_left=False):
     """Keep nested payloads out of Arrow's join, then gather matched rows."""
     key_names = ["key_%d" % index for index in range(len(keys))]
     left_keys = left.select(keys).rename_columns(key_names).append_column(
@@ -589,6 +612,14 @@ def _join_with_row_indices(left, right, keys, right_keys, join_type):
         right_keys_table = right_keys_table.append_column(
             "right_index", pa.array(range(right.num_rows), type=pa.int64()))
     indices = left_keys.join(right_keys_table, keys=key_names, join_type=join_type)
+    # Spark checks source-match cardinality before action predicates. A sole
+    # unconditional DELETE is unambiguous and may collapse duplicate matches.
+    if check_cardinality and pc.count_distinct(indices["left_index"]).as_py() != indices.num_rows:
+        raise ValueError("MERGE matched multiple source rows to the same target _ROW_ID. "
+                         "Deduplicate the source before merging.")
+    if deduplicate_left:
+        indices = indices.group_by("left_index", use_threads=False).aggregate([
+            ("right_index", "first")]).rename_columns(["left_index", "right_index"])
     result = left.take(indices["left_index"])
     if join_type == "inner":
         # Match Table.join's coalesced-key schema: keep only the left keys.
@@ -723,9 +754,9 @@ def _normalize_source(source: Any) -> pa.Table:
     if isinstance(source, pa.Table):
         return source
     if _is_table_like(source):
-        snapshot = source.snapshot_manager().get_latest_snapshot()
-        snapshot_id = snapshot.id if snapshot is not None else None
-        return _read_table(source, snapshot_id=snapshot_id)
+        # Let the read resolve its branch and point-in-time selectors once.
+        # Pinning the latest snapshot here would override the source's options.
+        return _read_table(source)
     try:
         import pandas as pd
     except ImportError:

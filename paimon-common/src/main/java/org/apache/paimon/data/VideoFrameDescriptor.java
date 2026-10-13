@@ -37,15 +37,31 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     private static final long MAGIC = 0x564944454F46524DL; // "VIDEOFRM"
     private static final byte CURRENT_VERSION = 1;
     private static final int FIXED_LENGTH =
-            Byte.BYTES + Long.BYTES + Integer.BYTES + 3 * Long.BYTES;
+            Byte.BYTES + Long.BYTES + Integer.BYTES + 5 * Long.BYTES;
 
     private final long frameIndex;
+    private final long keyframeIndexOffset;
+    private final long keyframeIndexLength;
 
-    public VideoFrameDescriptor(String uri, long offset, long length, long frameIndex) {
+    public VideoFrameDescriptor(
+            String uri,
+            long offset,
+            long length,
+            long frameIndex,
+            long keyframeIndexOffset,
+            long keyframeIndexLength) {
         super(uri, offset, length);
         checkArgument(
                 frameIndex >= 0, "Video frame index must be non-negative, but was %s.", frameIndex);
+        checkArgument(
+                keyframeIndexLength >= 0, "Video keyframe index length must be non-negative.");
+        checkArgument(
+                (keyframeIndexLength == 0 && keyframeIndexOffset == -1)
+                        || (keyframeIndexLength > 0 && keyframeIndexOffset >= 0),
+                "Invalid video keyframe index range.");
         this.frameIndex = frameIndex;
+        this.keyframeIndexOffset = keyframeIndexOffset;
+        this.keyframeIndexLength = keyframeIndexLength;
     }
 
     public long frameIndex() {
@@ -55,6 +71,22 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     /** Returns the physical video identity without the logical frame locator. */
     public BlobDescriptor payloadDescriptor() {
         return new BlobDescriptor(uri(), offset(), length());
+    }
+
+    public @Nullable BlobDescriptor keyframeIndexDescriptor() {
+        return keyframeIndexLength == 0
+                ? null
+                : new BlobDescriptor(uri(), keyframeIndexOffset, keyframeIndexLength);
+    }
+
+    /** Returns the persisted keyframe index carried by an exact frame reference. */
+    public static @Nullable Blob keyframeIndexBlob(Blob blob) {
+        VideoFrameDescriptor frame = fromBlob(blob);
+        BlobDescriptor mapping = frame == null ? null : frame.keyframeIndexDescriptor();
+        if (mapping == null) {
+            return null;
+        }
+        return Blob.fromDescriptor(((BlobRef) blob).uriReader(), mapping);
     }
 
     /** Returns the video frame carried by an exact lazy blob reference, or {@code null}. */
@@ -86,6 +118,8 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         buffer.putLong(offset());
         buffer.putLong(length());
         buffer.putLong(frameIndex);
+        buffer.putLong(keyframeIndexOffset);
+        buffer.putLong(keyframeIndexLength);
         return buffer.array();
     }
 
@@ -109,7 +143,7 @@ public class VideoFrameDescriptor extends BlobDescriptor {
             throw invalidPayload("missing magic header");
         }
         int uriLength = buffer.getInt();
-        // checked by comparison and subtraction: uriLength + 3 * Long.BYTES wraps negative
+        // checked by comparison and subtraction: uriLength + 5 * Long.BYTES wraps negative
         // for a uriLength near Integer.MAX_VALUE
         if (uriLength < 0) {
             throw invalidPayload("negative URI length: " + uriLength);
@@ -117,7 +151,7 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         if (uriLength > buffer.remaining()) {
             throw invalidPayload("URI length exceeds data size");
         }
-        if (buffer.remaining() - uriLength < 3 * Long.BYTES) {
+        if (buffer.remaining() - uriLength < 5 * Long.BYTES) {
             throw invalidPayload("missing offset/length/frame index");
         }
 
@@ -127,13 +161,16 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         long offset = buffer.getLong();
         long length = buffer.getLong();
         long frameIndex = buffer.getLong();
+        long keyframeIndexOffset = buffer.getLong();
+        long keyframeIndexLength = buffer.getLong();
         if (buffer.hasRemaining()) {
             throw invalidPayload("trailing bytes");
         }
         if (frameIndex < 0) {
             throw invalidPayload("negative frame index: " + frameIndex);
         }
-        return new VideoFrameDescriptor(uri, offset, length, frameIndex);
+        return new VideoFrameDescriptor(
+                uri, offset, length, frameIndex, keyframeIndexOffset, keyframeIndexLength);
     }
 
     public static boolean isVideoFrameDescriptor(byte[] bytes) {
@@ -154,12 +191,13 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         }
         VideoFrameDescriptor that = (VideoFrameDescriptor) o;
         return frameIndex == that.frameIndex
-                && payloadDescriptor().equals(that.payloadDescriptor());
+                && payloadDescriptor().equals(that.payloadDescriptor())
+                && Objects.equals(keyframeIndexDescriptor(), that.keyframeIndexDescriptor());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(payloadDescriptor(), frameIndex);
+        return Objects.hash(payloadDescriptor(), frameIndex, keyframeIndexDescriptor());
     }
 
     @Override

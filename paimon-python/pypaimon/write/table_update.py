@@ -47,7 +47,6 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -173,6 +172,14 @@ class TableUpdate:
             shard_num: Index of this shard/subtask.
             total_shard_count: Total number of shards/subtasks.
         """
+        if total_shard_count <= 0 or shard_num < 0 or shard_num >= total_shard_count:
+            raise ValueError('Shard index must be smaller than a positive shard count')
+        from pypaimon.write.native_update import create_native_shard_updator
+        native = create_native_shard_updator(
+            self.table, self.commit_user, self.projection, self.update_cols,
+            shard_num, total_shard_count, stream=isinstance(self, StreamTableUpdate))
+        if native is not None:
+            return native
         return ShardTableUpdator(
             self.table,
             self.projection,
@@ -216,8 +223,8 @@ class TableUpdate:
                 updater.update_columns(table, cols)
             return [] if updater is None else updater.commit_messages
         except Exception:
-            if updater is not None:
-                _abort_commit_messages(self.table, updater.commit_messages)
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
 
     def _upsert_by_arrow_with_key(
@@ -306,7 +313,7 @@ class TableUpdate:
             from pypaimon.write.native_update import create_native_predicate_update
             try:
                 native = create_native_predicate_update(
-                    self.table, self.commit_user, predicate)
+                    self.table, self.commit_user, predicate, list(assignments))
             except Exception as error:
                 logger.debug('Native predicate update preparation failed: %s', error)
             else:
@@ -356,7 +363,8 @@ class TableUpdate:
                         update_table, list(assignments.keys())
                     )
         except Exception:
-            _abort_commit_messages(self.table, updater.commit_messages)
+            # Never delete files from CommitMessage on failure.
+            # A commit can succeed even when its response raises an exception.
             raise
         return updater.commit_messages
 
@@ -539,6 +547,18 @@ class TableUpdate:
             predicate: Optional[Predicate],
             commit_identifier: int,
     ) -> List[CommitMessage]:
+        try:
+            from pypaimon.write.native_update import create_native_predicate_delete
+            native = create_native_predicate_delete(
+                self.table, self.commit_user, predicate)
+        except Exception as error:
+            logger.debug('Native predicate delete preparation failed: %s', error)
+        else:
+            if native is not None:
+                # Matching and DV preparation share one snapshot in Rust.
+                # Keep operation failures outside the preparation fallback;
+                # returned/staged commit files must never be auto-aborted.
+                return native.delete()
         partition_filter = self._partition_only_delete_filter(predicate)
         if partition_filter is not None:
             return self._delete_by_partition_filter(partition_filter)
@@ -558,7 +578,7 @@ class TableUpdate:
             self.table,
             lambda: ([], None),
             partition_predicate=partition_filter,
-        ).read_manifest_entries(manifest_list_manager.read_all(snapshot))
+        ).with_all_buckets().read_manifest_entries(manifest_list_manager.read_all(snapshot))
 
         for entry in data_entries:
             message = self._partition_delete_message(

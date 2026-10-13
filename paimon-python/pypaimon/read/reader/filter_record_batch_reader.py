@@ -70,7 +70,7 @@ class FilterRecordBatchReader(RecordBatchReader):
     def _filter_batch(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
         if not self._use_arrow_filter:
             return self._filter_batch_by_row(batch)
-        expr = self.predicate.to_arrow()
+        expr = self.predicate.to_arrow(batch.schema)
         if expr is None:
             return self._filter_batch_by_row(batch)
         result = ds.InMemoryDataset(pa.Table.from_batches([batch])).scanner(

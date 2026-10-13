@@ -1501,7 +1501,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
     @pytest.mark.python_write
     def test_partitioned_table_matches_normal_plan(self):
-        # Native decoding restores PyPaimon's legacy unescaped partition path.
+        # Python writes and both planners use Java's escaped partition path.
         schema = pa.schema([('k', pa.int64()), ('p', pa.string())])
         self.cat.create_table('default.pt_t', Schema.from_pyarrow_schema(
             schema, partition_keys=['p']), False)

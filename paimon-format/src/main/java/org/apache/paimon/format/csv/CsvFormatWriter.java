@@ -140,9 +140,8 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
             return field;
         }
 
-        // Only escape if needed. The escape character goes first: CsvParser drops an escape
-        // character that is not followed by a quote or another escape, and escaping the quotes
-        // first would double the escape characters inserted for them.
+        // Escape the escape character first so that quoting the field preserves it. Escaping
+        // quotes first would double the escape characters inserted for them.
         String escaped = field.replace(escape, escape + escape);
         return quote + escaped.replace(quote, escape + quote) + quote;
     }

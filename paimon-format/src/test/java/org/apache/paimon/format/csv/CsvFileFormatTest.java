@@ -39,11 +39,14 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -382,6 +385,45 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testSingleNulQuoteOrEscapeWriteRead(boolean nulQuote) throws IOException {
+        Options options = new Options();
+        options.set(CsvOptions.QUOTE_CHARACTER, nulQuote ? "\0" : "\"");
+        options.set(CsvOptions.ESCAPE_CHARACTER, nulQuote ? "\\" : "\0");
+        RowType rowType = DataTypes.ROW(DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING());
+        List<InternalRow> testData = new ArrayList<>();
+        for (String value :
+                new String[] {
+                    "a,b",
+                    "say \"hello\"",
+                    "C:\\Users\\test\\",
+                    "\0start",
+                    "middle\0value",
+                    "end\0",
+                    "plain"
+                }) {
+            testData.add(
+                    GenericRow.of(fromString(value), fromString("middle"), fromString("tail")));
+            testData.add(GenericRow.of(fromString("first"), fromString(value), fromString("tail")));
+            testData.add(
+                    GenericRow.of(fromString("first"), fromString("middle"), fromString(value)));
+        }
+
+        // Use the real writer and reader: a NUL quote/escape is still emitted when only
+        // one of the two characters is NUL. Read multiple rows to exercise parser reuse.
+        List<InternalRow> result =
+                writeThenRead(options, rowType, rowType, testData, "single_nul_" + nulQuote);
+        assertThat(result).hasSize(testData.size());
+        for (int i = 0; i < testData.size(); i++) {
+            for (int column = 0; column < rowType.getFieldCount(); column++) {
+                assertThat(result.get(i).getString(column))
+                        .as("row %s, column %s", i, column)
+                        .isEqualTo(testData.get(i).getString(column));
+            }
+        }
+    }
+
     @Test
     public void testCsvIncludeHeaderWriteRead() throws IOException {
         RowType rowType =
@@ -715,6 +757,26 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         assertThat(parser.parseField("32768", DataTypes.SMALLINT()).getValue()).isNull();
     }
 
+    @Test
+    public void testCsvParserParseBoolean() {
+        RowType rowType = DataTypes.ROW(DataTypes.BOOLEAN());
+        CsvParser parser = new CsvParser(rowType, new int[] {0}, new CsvOptions(new Options()));
+
+        // Recognized boolean literals parse (case-insensitive), matching the writer output.
+        assertThat(parser.parseField("true", DataTypes.BOOLEAN()).getValue()).isEqualTo(true);
+        assertThat(parser.parseField("TRUE", DataTypes.BOOLEAN()).getValue()).isEqualTo(true);
+        assertThat(parser.parseField("false", DataTypes.BOOLEAN()).getValue()).isEqualTo(false);
+        assertThat(parser.parseField("False", DataTypes.BOOLEAN()).getValue()).isEqualTo(false);
+
+        // Unrecognized values are malformed, not silently false, so csv.mode can
+        // null/drop/fail them the same way it does for a malformed number.
+        for (String invalid : new String[] {"1", "0", "t", "yes", "abc"}) {
+            Pair<Boolean, Object> parsed = parser.parseField(invalid, DataTypes.BOOLEAN());
+            assertThat(parsed.getLeft()).as(invalid).isFalse();
+            assertThat(parsed.getValue()).as(invalid).isNull();
+        }
+    }
+
     private List<InternalRow> read(
             FileFormat format, RowType fullRowType, RowType readRowType, Path testFile)
             throws IOException {
@@ -875,8 +937,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     @Test
     public void testFieldsContainingTheEscapeCharacterRoundTrip() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
-        // every one of these is written unquoted or half-quoted unless the escape character is
-        // itself escaped, and CsvParser then drops it
+        // Quoted fields must escape both quotes and the escape character to round-trip.
         String[] inputs = {
             "Special\\Characters", "trailing\\", "a,b\\", "\\\\double", "\\\"quoteAfterEscape"
         };

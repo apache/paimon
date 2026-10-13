@@ -44,21 +44,7 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataField field, Options options) {
-        return new ESIndexGlobalIndexer(java.util.Collections.singletonList(field), options);
-    }
-
-    @Override
-    public GlobalIndexer create(
-            DataField indexField, List<DataField> extraFields, Options options) {
-        List<DataField> fields;
-        if (extraFields == null || extraFields.isEmpty()) {
-            fields = java.util.Collections.singletonList(indexField);
-        } else {
-            fields = new java.util.ArrayList<>(extraFields.size() + 1);
-            fields.add(indexField);
-            fields.addAll(extraFields);
-        }
-        return new ESIndexGlobalIndexer(fields, options);
+    public GlobalIndexer create(List<DataField> indexFields, Options options) {
+        return new ESIndexGlobalIndexer(indexFields, options);
     }
 }

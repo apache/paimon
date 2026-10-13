@@ -143,7 +143,10 @@ public abstract class AbstractIndexReaderTest {
                                 new Path(new Path(tempPath.toUri()), meta.filePath()));
         options = new Options();
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
-        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        globalIndexer =
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(1, "testField", dataType)),
+                        options);
         keySerializer = KeySerializer.create(dataType);
         comparator = keySerializer.createComparator();
 

@@ -129,6 +129,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -174,6 +175,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class RESTApi {
 
     public static final String HEADER_PREFIX = "header.";
+    private static final String USER_AGENT_HEADER = "User-Agent";
     /**
      * Optional header carrying the URL-encoded {@link Identifier} JSON of the table which initiated
      * a dependency read.
@@ -240,13 +242,26 @@ public class RESTApi {
                                             ResourcePaths.config(),
                                             queryParams,
                                             ConfigResponse.class,
-                                            new RESTAuthFunction(baseHeaders, authProvider))
+                                            new RESTAuthFunction(
+                                                    withUserAgent(baseHeaders, options),
+                                                    authProvider))
                                     .merge(options.toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
-        this.restAuthFunction = new RESTAuthFunction(baseHeaders, authProvider);
+        this.restAuthFunction =
+                new RESTAuthFunction(withUserAgent(baseHeaders, options), authProvider);
         this.options = options;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
+    }
+
+    /** Adds Paimon's unified User-Agent unless {@code header.User-Agent} is set. */
+    private static Map<String, String> withUserAgent(Map<String, String> headers, Options options) {
+        if (headers.keySet().stream().anyMatch(USER_AGENT_HEADER::equalsIgnoreCase)) {
+            return headers;
+        }
+        Map<String, String> result = new HashMap<>(headers);
+        result.put(USER_AGENT_HEADER, HttpClientUtils.userAgent(options));
+        return result;
     }
 
     /** Get the configured options which has been merged from REST Server. */
@@ -723,30 +738,24 @@ public class RESTApi {
      * Rollback instant for table.
      *
      * @param identifier database name and table name.
-     * @param instant instant to rollback
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
-     *     or the tag not exists
-     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
-     *     this table
-     */
-    public void rollbackTo(Identifier identifier, Instant instant) {
-        rollbackTo(identifier, instant, null);
-    }
-
-    /**
-     * Rollback instant for table.
-     *
-     * @param identifier database name and table name.
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant instant to rollback
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot.
+     * @param commitUser owner of the writer lock, or null without a writer lock
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
      *     or the tag not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
-        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String commitUser) {
+        RollbackTableRequest request =
+                new RollbackTableRequest(instant, fromSnapshot, tableUuid, commitUser);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),

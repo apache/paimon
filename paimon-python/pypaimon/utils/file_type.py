@@ -46,8 +46,16 @@ class FileType(Enum):
 
     @staticmethod
     def is_mutable(file_path: str) -> bool:
+        """Returns True if the file may be rewritten in place and must not be cached."""
         name = os.path.basename(file_path)
-        return name in ("EARLIEST", "LATEST")
+        # temp files (.{name}.{UUID}.tmp) are still being written
+        if FileType._unwrap_temp_file_name(name) != name:
+            return True
+        # hint, _SUCCESS, consumer, service, tag and Iceberg-compatible metadata (version-hint,
+        # retire-pending, v{N}.metadata.json on tag changes) are overwritten in place
+        return (name in ("EARLIEST", "LATEST", "_SUCCESS", "version-hint.text", "retire-pending")
+                or name.endswith(("_SUCCESS", ".metadata.json"))
+                or name.startswith(("consumer-", "service-", "tag-")))
 
     @staticmethod
     def classify(file_path: str) -> 'FileType':
@@ -98,12 +106,14 @@ class FileType(Enum):
         result = set()
         for name in whitelist_str.split(","):
             name = name.strip()
-            if name in mapping:
+            if name == "*":
+                result.update(FileType)
+            elif name in mapping:
                 result.add(mapping[name])
             elif name:
                 logger.warning(
                     "Unknown local-cache.whitelist value '%s'. "
-                    "Supported values: meta, global-index, bucket-index, data, file-index.",
+                    "Supported values: meta, global-index, bucket-index, data, file-index, or * for all of them.",
                     name,
                 )
         return result

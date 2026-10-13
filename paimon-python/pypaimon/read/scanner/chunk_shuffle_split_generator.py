@@ -178,6 +178,8 @@ class _Chunk:
     subclass-specific payload (file segments for append, aligned-group
     segments for data evolution).
     """
+    __slots__ = ('partition', 'bucket', 'segments')
+
     partition: GenericRow
     bucket: int
     segments: List[Any]
@@ -190,13 +192,14 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
       1. Stable-sort entries (key from :meth:`_sort_key`) so manifest-read
          parallelism cannot bleed into the output.
       2. Group by (partition, bucket); iterate groups in sorted-key order.
-      3. Per group, call :meth:`_slice_group_into_chunks` to produce a list
-         of segment lists — one segment list per chunk.
+      3. Per group, iterate :meth:`_slice_group_into_chunks` to produce
+         one segment list per chunk.
       4. Wrap each chunk with its (partition, bucket) into ``_Chunk``,
          concatenate across groups.
       5. ``random.Random(seed).shuffle`` all chunks.
       6. If sharded, take this worker's slice via balanced ``_compute_shard_range``.
-      7. Map each chunk through :meth:`_chunk_to_split`.
+      7. Consume chunks through :meth:`_chunk_to_split`, releasing their
+         temporary descriptors as splits are created.
 
     Subclasses implement the three abstract hooks. Chunks ride on existing
     reader wrapper (``IndexedSplit``).
@@ -219,7 +222,7 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
         self.chunk_size = chunk_size
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
-        """TODO: Lazily initialize DataSplits to avoid creating too many objects."""
+        """Shuffle chunk descriptors, then materialize only this shard's splits."""
 
         if not file_entries:
             return []
@@ -259,17 +262,23 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
             start, end = self._compute_shard_range(len(all_chunks))
             all_chunks = all_chunks[start:end]
 
-        return [self._chunk_to_split(c) for c in all_chunks]
+        # Pop in shuffle order so temporary segments/ranges can be freed while
+        # the result grows, instead of retaining both complete representations.
+        all_chunks.reverse()
+        splits: List[Split] = []
+        while all_chunks:
+            splits.append(self._chunk_to_split(all_chunks.pop()))
+        return splits
 
     @abstractmethod
     def _sort_key(self, entry: ManifestEntry):
         """Return a comparable, deterministic key for stable sort."""
 
     @abstractmethod
-    def _slice_group_into_chunks(self, entries: List[ManifestEntry]) -> List[List[Any]]:
+    def _slice_group_into_chunks(self, entries: List[ManifestEntry]) -> Iterator[List[Any]]:
         """Cut one (partition, bucket) group into chunks of segments.
 
-        Each returned inner list represents one chunk; segment shape is
+        Each yielded list represents one chunk; segment shape is
         subclass-defined.
         """
 
@@ -333,6 +342,8 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
 @dataclass
 class _FileSegment:
     """Visible file-local row ranges from a data file inside one chunk."""
+    __slots__ = ('file', 'row_ranges', 'live_row_count')
+
     file: DataFileMeta
     row_ranges: List[Range]
     live_row_count: int
@@ -350,13 +361,12 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
 
     def _slice_group_into_chunks(
         self, entries: List[ManifestEntry]
-    ) -> List[List[_FileSegment]]:
+    ) -> Iterator[List[_FileSegment]]:
         """Cut a (partition, bucket) group into chunks of at most
         ``self.chunk_size`` live rows. ``chunk_size`` is a hard upper bound:
         the last chunk may be smaller, but no chunk exceeds it after DV
         filtering.
         """
-        chunks: List[List[_FileSegment]] = []
         current: List[_FileSegment] = []
         current_rows = 0
 
@@ -374,7 +384,7 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             while True:
                 avail = self.chunk_size - current_rows
                 if avail <= 0:
-                    chunks.append(current)
+                    yield current
                     current = []
                     current_rows = 0
                     avail = self.chunk_size
@@ -394,9 +404,7 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                 current_rows += physical_slice.live_row_count
 
         if current:
-            chunks.append(current)
-
-        return chunks
+            yield current
 
     def _chunk_to_split(self, chunk: _Chunk) -> Split:
         files: List[DataFileMeta] = []
@@ -459,6 +467,8 @@ class _AlignedGroupSegment:
     group's row_id range lands in this chunk. ``row_ranges`` are the
     inclusive global row-id ranges of visible rows this segment owns.
     """
+    __slots__ = ('files', 'row_ranges', 'live_row_count')
+
     files: List[DataFileMeta]
     row_ranges: List[Range]
     live_row_count: int
@@ -494,18 +504,19 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
 
     def _slice_group_into_chunks(
         self, entries: List[ManifestEntry]
-    ) -> List[List[_AlignedGroupSegment]]:
-        files = [e.file for e in entries]
+    ) -> Iterator[List[_AlignedGroupSegment]]:
         # (Range, [files]) pairs sorted by row_id — see helper docstring.
-        aligned_groups = self._split_by_row_id_with_range(files)
+        aligned_groups = self._split_by_row_id_with_range([e.file for e in entries])
+        # Release consumed group descriptors as chunks are yielded to the caller.
+        aligned_groups.reverse()
 
-        chunks: List[List[_AlignedGroupSegment]] = []
         current: List[_AlignedGroupSegment] = []
         current_rows = 0
         partition = entries[0].partition
         bucket = entries[0].bucket
 
-        for group_range, group_files in aligned_groups:
+        while aligned_groups:
+            group_range, group_files = aligned_groups.pop()
             anchor = None
             deletion_file = None
             if self.deletion_files_map:
@@ -541,7 +552,7 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             while True:
                 avail = self.chunk_size - current_rows
                 if avail <= 0:
-                    chunks.append(current)
+                    yield current
                     current = []
                     current_rows = 0
                     avail = self.chunk_size
@@ -559,9 +570,7 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                 current_rows += physical_slice.live_row_count
 
         if current:
-            chunks.append(current)
-
-        return chunks
+            yield current
 
     def _chunk_to_split(self, chunk: _Chunk) -> Split:
         segments = chunk.segments

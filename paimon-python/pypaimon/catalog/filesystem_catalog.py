@@ -35,6 +35,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.time_utils import (duration_to_iso8601,
                                         local_datetime_to_system_zone_millis)
 from pypaimon.filesystem.caching_file_io import CachingFileIO
@@ -50,12 +51,17 @@ from pypaimon.table.table import Table
 
 
 class FileSystemCatalog(Catalog):
-    def __init__(self, catalog_options: Options):
+    def __init__(self, catalog_options: Options,
+                 catalog_context: Optional[CatalogContext] = None):
         if not catalog_options.contains(CatalogOptions.WAREHOUSE):
             raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE.key()}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
-        self.catalog_context = CatalogContext.create_from_options(catalog_options)
+        self.catalog_context = (
+            catalog_context
+            if catalog_context is not None
+            else CatalogContext.create_from_options(catalog_options)
+        )
         self._cache_manager = CachingFileIO.create_cache_manager(self.catalog_options)
         self.file_io = CachingFileIO.wrap_with_caching_if_needed(
             FileIO.get(self.warehouse, self.catalog_options), self.catalog_options,
@@ -107,7 +113,10 @@ class FileSystemCatalog(Catalog):
 
         # Check if database still has tables
         remaining_tables = self.list_tables(name)
-        if remaining_tables and not cascade:
+        if remaining_tables:
+            if cascade:
+                raise OSError(f"Database {name} changed during drop; "
+                              f"remaining tables: {remaining_tables}")
             raise ValueError(
                 f"Database {name} is not empty. "
                 f"Use cascade=True to drop all tables first."
@@ -174,7 +183,8 @@ class FileSystemCatalog(Catalog):
         return sys_table
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
-        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
+        auto_create = schema.options.get(CoreOptions.AUTO_CREATE.key()) if schema.options else None
+        if auto_create is not None and OptionsUtils.convert_to_boolean(auto_create):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 
         if not isinstance(identifier, Identifier):
@@ -300,95 +310,14 @@ class FileSystemCatalog(Catalog):
             page_token: Optional[str] = None,
             partition_name_pattern: Optional[str] = None,
     ) -> PagedList[Partition]:
-        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        from pypaimon.catalog.catalog_utils import list_partitions_from_file_system
 
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
 
         table = self.get_table(identifier)
-        snapshot = table.snapshot_manager().get_latest_snapshot()
-        if snapshot is None:
-            return PagedList(elements=[])
-
-        # Read all manifest entries (ADD - DELETE merged)
-        manifest_list_manager = ManifestListManager(table)
-        manifest_file_manager = ManifestFileManager(table)
-        manifest_files = manifest_list_manager.read_all(snapshot)
-        entries = manifest_file_manager.read_entries_parallel(manifest_files, drop_stats=True)
-
-        # Group entries by partition spec
-        partition_map = {}  # spec_key -> aggregated stats
-        for entry in entries:
-            spec = {field.name: str(v) for field, v in
-                    zip(entry.partition.fields, entry.partition.values)}
-            spec_key = tuple(sorted(spec.items()))
-
-            if spec_key not in partition_map:
-                partition_map[spec_key] = {
-                    'spec': spec,
-                    'record_count': 0,
-                    'file_size_in_bytes': 0,
-                    'file_count': 0,
-                    'last_file_creation_time': 0,
-                    'buckets': set(),
-                }
-            stats = partition_map[spec_key]
-            stats['record_count'] += entry.file.row_count
-            stats['file_size_in_bytes'] += entry.file.file_size
-            stats['file_count'] += 1
-            if entry.file.creation_time is not None:
-                ct = entry.file.creation_time.get_millisecond()
-                if ct > stats['last_file_creation_time']:
-                    stats['last_file_creation_time'] = ct
-            stats['buckets'].add(entry.bucket)
-
-        # Convert to Partition objects
-        partitions = []
-        for stats in partition_map.values():
-            partitions.append(Partition(
-                spec=stats['spec'],
-                record_count=stats['record_count'],
-                file_size_in_bytes=stats['file_size_in_bytes'],
-                file_count=stats['file_count'],
-                last_file_creation_time=stats['last_file_creation_time'],
-                total_buckets=len(stats['buckets']),
-            ))
-
-        # Apply pattern filter with proper regex escaping
-        if partition_name_pattern:
-            import re
-
-            # Escape special regex chars except '*', then replace '*' with '.*'
-            escaped_pattern = re.escape(partition_name_pattern).replace(r'\*', '.*')
-            regex = re.compile(escaped_pattern)
-            partitions = [
-                p for p in partitions
-                if regex.fullmatch(','.join(f'{k}={v}' for k, v in p.spec.items()))
-            ]
-
-        # Sort partitions by name (partition spec string)
-        partitions.sort(key=lambda p: ','.join(f'{k}={v}' for k, v in sorted(p.spec.items())))
-
-        # Apply pagination
-        start_index = 0
-        if page_token is not None:
-            try:
-                start_index = int(page_token)
-            except ValueError:
-                # Invalid token, start from beginning
-                start_index = 0
-
-        end_index = len(partitions)
-        if max_results is not None and max_results > 0:
-            end_index = min(start_index + max_results, len(partitions))
-
-        result_partitions = partitions[start_index:end_index]
-        next_page_token = None
-        if max_results is not None and end_index < len(partitions):
-            next_page_token = str(end_index)
-
-        return PagedList(elements=result_partitions, next_page_token=next_page_token)
+        return list_partitions_from_file_system(
+            table, max_results, page_token, partition_name_pattern)
 
     def drop_partitions(
             self,
@@ -516,6 +445,40 @@ class FileSystemCatalog(Catalog):
             next_token = None
         return PagedList(elements=page, next_page_token=next_token)
 
+    def rename_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            target_tag_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.rename_tag(tag_name, target_tag_name)
+        except ValueError as e:
+            _reraise_tag_value_error(
+                e, missing_tag=tag_name, conflict_tag=target_tag_name)
+
+    def replace_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.replace_tag(
+                tag_name,
+                snapshot_id=snapshot_id,
+                time_retained=time_retained,
+            )
+        except ValueError as e:
+            _reraise_tag_value_error(e, missing_tag=tag_name)
+
     # ===================== Branch CRUD =====================
     # Thin wrappers that delegate to FileSystemBranchManager (returned by
     # FileStoreTable.branch_manager() in the local-catalog case). Mirrors
@@ -607,3 +570,18 @@ class FileSystemCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         table = self.get_table(identifier)
         return table.branch_manager().branches()
+
+
+def _reraise_tag_value_error(exc, missing_tag, conflict_tag=None):
+    """Map TagManager ValueError text onto catalog exceptions.
+
+    Snapshot-missing and blank-name errors stay ValueError. Only a missing
+    or conflicting tag name is translated. The ``Tag `` prefix keeps a
+    snapshot error such as ``Snapshot id '999' doesn't exist.`` as ValueError.
+    """
+    message = str(exc)
+    if message.startswith("Tag ") and "doesn't exist" in message:
+        raise TagNotExistException(missing_tag) from exc
+    if conflict_tag is not None and "already exists" in message:
+        raise TagAlreadyExistException(conflict_tag) from exc
+    raise

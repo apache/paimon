@@ -27,6 +27,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Pair;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
+import com.aliyun.oss.ClientConfiguration;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.model.ObjectMetadata;
@@ -124,6 +125,7 @@ public class JindoFileIOTest {
                 "paimon-blob-descriptor-sha256", sha256Hex(descriptor.serialize()));
         when(client.headObject(eq("bucket"), contains("_bloburl_"))).thenReturn(metadata);
         when(client.getEndpoint()).thenReturn(URI.create("https://oss.example.com"));
+        when(client.getClientConfiguration()).thenReturn(new ClientConfiguration());
         when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
                 .thenAnswer(
                         invocation ->

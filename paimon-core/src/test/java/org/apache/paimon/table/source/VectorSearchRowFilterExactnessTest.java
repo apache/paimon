@@ -50,6 +50,7 @@ import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
@@ -127,6 +128,49 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                         .executeLocal();
 
         assertThat(result.results()).containsExactly(1L);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"full,true", "detail,true", "full,false", "detail,false"})
+    public void testPartialCompositeKeepsScalarFilterCoverage(String mode, boolean indexed)
+            throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "vector_composite_" + mode + indexed,
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode)
+                                .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full"));
+        String[] names = {"alpha", "beta", "gamma"};
+        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}, {0.0f, 1.0f}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors, new Range(0, indexed ? 2 : 0));
+        buildAndCommitNameBTreeIndex(table, names);
+        buildAndCommitIdBTreeIndex(table, names.length);
+        List<DataField> fields =
+                Arrays.asList(table.rowType().getField("name"), table.rowType().getField("id"));
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table, "btree", fields, table.coreOptions().toConfiguration());
+        writer.write(GenericRow.of(BinaryString.fromString(names[0]), 0), 0);
+        writer.write(GenericRow.of(BinaryString.fromString(names[1]), 1), 1);
+        commitIndex(
+                table,
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, 1),
+                        fields,
+                        "btree",
+                        writer.finish(),
+                        null));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        Predicate query =
+                PredicateBuilder.and(
+                        predicates.equal(0, 2),
+                        predicates.equal(1, BinaryString.fromString("gamma")));
+        assertThat(search(table, query, 1)).containsExactly(2L);
     }
 
     @Test
@@ -467,7 +511,7 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
-                                vectorField,
+                                Collections.singletonList(vectorField),
                                 options);
         for (long rowId = rowRange.from; rowId <= rowRange.to; rowId++) {
             writer.write(vectors[(int) rowId], rowId - rowRange.from);
@@ -491,7 +535,10 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, nameField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(nameField),
+                                options);
         // The btree writer needs sorted keys.
         Integer[] order = new Integer[names.length];
         for (int i = 0; i < names.length; i++) {
@@ -519,7 +566,10 @@ public class VectorSearchRowFilterExactnessTest extends TableTestBase {
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
-                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
+                                table,
+                                BTreeGlobalIndexerFactory.IDENTIFIER,
+                                Collections.singletonList(idField),
+                                options);
         for (int i = 0; i < rowCount; i++) {
             writer.write(i, i);
         }

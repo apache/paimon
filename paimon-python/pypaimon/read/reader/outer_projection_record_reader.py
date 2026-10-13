@@ -47,8 +47,6 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         vector_field_indices=None,
         descriptor_field_indices=None,
     ):
-        if not name_paths:
-            raise ValueError("name_paths must be non-empty")
         for path in name_paths:
             if not path:
                 raise ValueError("each name path must contain at least one name")
@@ -147,15 +145,21 @@ def _extract(row: InternalRow, spec: _PathSpec) -> Any:
 
 
 def _step_into(value: Any, name: str) -> Any:
-    """Take one step into a ROW sub-structure by sub-field name.
+    """Take one step into a ROW field or a selected string MAP key.
 
     Upstream materialises nested ROW values as plain Python dicts (e.g.
-    polars row-by-row iteration produces a dict for each struct slot),
-    so dict access is the only supported form here. Anything else is
-    rejected loudly to surface schema/wiring mismatches early.
+    polars row-by-row iteration produces a dict for each struct slot).
+    Arrow MAPs use key/value pairs; Polars materialises those entries as
+    key/value dicts. Match the first key, including a null first value.
     """
     if isinstance(value, dict):
         return value.get(name)
+    if isinstance(value, list):
+        for entry in value:
+            key, item = (entry['key'], entry['value']) if isinstance(entry, dict) else entry
+            if key == name:
+                return item
+        return None
     if isinstance(value, InternalRow):
         # Defensive: if the upstream reader handed us a wrapped sub-row,
         # we cannot index it by name without its schema, so fail fast

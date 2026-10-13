@@ -44,6 +44,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link LanceRecordsWriter}. */
 class LanceRecordsWriterTest {
@@ -209,10 +210,86 @@ class LanceRecordsWriterTest {
         assertThat(nativeWriter.snapshots.get(0).values.get(0)).containsExactly(10);
     }
 
+    @Test
+    void testCloseContinuesCleanupAfterFlushFailure() {
+        RowType rowType = RowType.builder().field("value", DataTypes.INT()).build();
+        RuntimeException flushFailure = new RuntimeException("flush failed");
+        IOException nativeCloseFailure = new IOException("native close failed");
+        IllegalStateException arrowCloseFailure = new IllegalStateException("arrow close failed");
+        FailingCloseArrowFormatWriter arrowWriter =
+                new FailingCloseArrowFormatWriter(rowType, flushFailure, arrowCloseFailure);
+        FailingCloseLanceWriter nativeWriter = new FailingCloseLanceWriter(nativeCloseFailure);
+        LanceRecordsWriter writer = new LanceRecordsWriter(() -> 0L, arrowWriter, nativeWriter);
+
+        try {
+            assertThatThrownBy(writer::close).isSameAs(flushFailure);
+            assertThat(flushFailure.getSuppressed())
+                    .containsExactly(nativeCloseFailure, arrowCloseFailure);
+            assertThat(nativeWriter.closeCount).isEqualTo(1);
+            assertThat(arrowWriter.closeCount).isEqualTo(1);
+        } finally {
+            if (arrowWriter.closeCount == 0) {
+                arrowWriter.closeWithoutFailure();
+            }
+        }
+    }
+
     private static void setInt(IntVector vector, int value) {
         vector.allocateNew(1);
         vector.setSafe(0, value);
         vector.setValueCount(1);
+    }
+
+    private static class FailingCloseArrowFormatWriter extends ArrowFormatWriter {
+
+        private final RuntimeException flushFailure;
+        private final RuntimeException closeFailure;
+        private int closeCount;
+
+        private FailingCloseArrowFormatWriter(
+                RowType rowType, RuntimeException flushFailure, RuntimeException closeFailure) {
+            super(rowType, 1024, true);
+            this.flushFailure = flushFailure;
+            this.closeFailure = closeFailure;
+        }
+
+        @Override
+        public void flush() {
+            throw flushFailure;
+        }
+
+        @Override
+        public void close() {
+            closeCount++;
+            super.close();
+            throw closeFailure;
+        }
+
+        private void closeWithoutFailure() {
+            super.close();
+        }
+    }
+
+    private static class FailingCloseLanceWriter extends LanceWriter {
+
+        private final IOException closeFailure;
+        private int closeCount;
+
+        private FailingCloseLanceWriter(IOException closeFailure) {
+            super("unused", Collections.emptyMap());
+            this.closeFailure = closeFailure;
+        }
+
+        @Override
+        public void close() throws IOException {
+            closeCount++;
+            throw closeFailure;
+        }
+
+        @Override
+        public String path() {
+            return "unused";
+        }
     }
 
     private static class CapturingLanceWriter extends LanceWriter {

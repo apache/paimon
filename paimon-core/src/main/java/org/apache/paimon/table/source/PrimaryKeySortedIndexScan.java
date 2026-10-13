@@ -114,7 +114,7 @@ public final class PrimaryKeySortedIndexScan {
             GlobalIndexer indexer =
                     GlobalIndexer.create(
                             definition.indexType(),
-                            rowType.getField(definition.fieldId()),
+                            Collections.singletonList(rowType.getField(definition.fieldId())),
                             definition.options());
             return indexer.createReader(fileReader, ioMetas, totalRowCount, null, executor);
         };

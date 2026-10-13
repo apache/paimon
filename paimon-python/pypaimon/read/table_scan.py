@@ -17,11 +17,12 @@
 
 import json as _json
 import logging
+import re
 from typing import List, Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.common.identifier import UNKNOWN_DATABASE
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -171,7 +172,8 @@ class TableScan:
         by the reader. Snapshot metadata is preserved even when pruning removes
         every split.
         """
-        from pypaimon.read.native_plan import native_plan
+        from pypaimon.read.native_plan import (
+            _raise_if_native_fork_safety_error, native_plan)
 
         try:
             fs = self.file_scanner
@@ -182,12 +184,15 @@ class TableScan:
                 if self._incremental_snapshot_range is None:
                     return Plan([])
                 extra_options['incremental_range'] = self._incremental_snapshot_range
+                if self.table.options.changelog_producer() != ChangelogProducer.NONE:
+                    extra_options['incremental_mode'] = 'changelog'
             chunk_shuffle = fs.chunk_shuffle
             if chunk_shuffle is not None:
                 extra_options['chunk_shuffle'] = chunk_shuffle
-                if fs.idx_of_this_subtask is not None:
-                    extra_options['shard'] = (
-                        fs.idx_of_this_subtask, fs.number_of_para_subtasks)
+            if (fs.idx_of_this_subtask is not None
+                    and (chunk_shuffle is not None or self.table.is_primary_key_table)):
+                extra_options['shard'] = (
+                    fs.idx_of_this_subtask, fs.number_of_para_subtasks)
             if (has_distribution and not self.table.is_primary_key_table
                     and chunk_shuffle is None):
                 if fs.idx_of_this_subtask is not None:
@@ -205,10 +210,13 @@ class TableScan:
                         self.file_scanner.partition_key_predicate,
                     ) if predicate is not None
                 ])
+            # Append positions still precede LIMIT. Rust owns PK shards and
+            # source-backed sorted-index refinement before applying LIMIT.
+            defer_limit = has_distribution and not self.table.is_primary_key_table
             plan = native_plan(
                 self.table,
                 predicate=native_predicate,
-                limit=None if has_distribution else self.limit,
+                limit=None if defer_limit else self.limit,
                 projection=(
                     [field.name for field in self._read_type]
                     if self._read_type is not None and chunk_shuffle is None else None),
@@ -230,15 +238,7 @@ class TableScan:
                 splits = [s for s in splits
                           if getattr(s, 'partition', None) is None
                           or partition_predicate.test(s.partition)]
-            if (self.table.is_primary_key_table and not fs.is_streaming and self.predicate is not None
-                    and self.table.options.global_index_enabled()
-                    and plan.snapshot_id is not None):
-                snapshot = self.table.snapshot_manager().get_snapshot_by_id(plan.snapshot_id)
-                splits = fs._apply_primary_key_sorted_indexes(splits, snapshot)
-            if chunk_shuffle is None and has_distribution:
-                if self.table.is_primary_key_table:
-                    splits = [s for s in splits
-                              if s.bucket % fs.number_of_para_subtasks == fs.idx_of_this_subtask]
+            if chunk_shuffle is None and defer_limit:
                 # A partial IndexedSplit plus a file-wide DV cardinality cannot
                 # reveal how many deleted rows lie inside the selected range.
                 # Keep every selected split and let the reader enforce LIMIT.
@@ -256,6 +256,7 @@ class TableScan:
                 ) for split in splits]
             return Plan(splits, snapshot_id=plan.snapshot_id)
         except Exception as e:
+            _raise_if_native_fork_safety_error(e)
             # Any native construction/planning/pruning failure -> fall back.
             logger.warning(
                 "Native plan failed, falling back to the Python scanner: %s", e)
@@ -312,26 +313,21 @@ class TableScan:
             )
 
         if has_incremental:
-            ts = options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP).split(",")
-            if len(ts) != 2:
-                raise ValueError(
-                    "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: " +
-                    options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
-            start_timestamp = int(ts[0])
-            end_timestamp = int(ts[1])
-            if start_timestamp >= end_timestamp:
-                raise ValueError(
-                    "Ending timestamp %s must be greater than starting timestamp %s."
-                    % (end_timestamp, start_timestamp))
-            earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
+            start_timestamp, end_timestamp = _parse_incremental_timestamp_window(
+                options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
             latest_snapshot = snapshot_manager.get_latest_snapshot()
+            earliest_snapshot = snapshot_manager.try_get_earliest_snapshot() if latest_snapshot is not None else None
             if earliest_snapshot is None or latest_snapshot is None:
                 return FileScanner(
                     self.table,
                     lambda: ([], None),
                     partition_predicate=self.partition_predicate,
                 )
-            if (start_timestamp > latest_snapshot.time_millis
+            if start_timestamp > end_timestamp:
+                raise ValueError(
+                    "Ending timestamp %s should be >= starting timestamp %s."
+                    % (end_timestamp, start_timestamp))
+            if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
                     or end_timestamp < earliest_snapshot.time_millis):
                 return FileScanner(
                     self.table,
@@ -352,6 +348,9 @@ class TableScan:
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             end_id = end_snapshot.id if end_snapshot else (latest_snapshot.id if latest_snapshot else -1)
             self._incremental_snapshot_range = (start_id, end_id)
+            # Java's AUTO mode uses physical changelogs when a producer is
+            # configured, and APPEND deltas otherwise.
+            changelog = self.table.options.changelog_producer() != ChangelogProducer.NONE
 
             def incremental_manifest():
                 snapshots_in_range = []
@@ -359,13 +358,15 @@ class TableScan:
                 for snapshot_id in range(start_id + 1, end_id + 1):
                     snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
                     end_snapshot = snapshot
-                    if snapshot.commit_kind == "APPEND":
+                    if (snapshot.commit_kind != "OVERWRITE" and snapshot.changelog_manifest_list
+                            if changelog else snapshot.commit_kind == "APPEND"):
                         snapshots_in_range.append(snapshot)
 
                 manifests = []
 
                 for snapshot in snapshots_in_range:
-                    manifest_files = manifest_list_manager.read_delta(snapshot)
+                    manifest_files = (manifest_list_manager.read_changelog(snapshot) if changelog else
+                                      manifest_list_manager.read_delta(snapshot))
                     manifests.extend(manifest_files)
                 return manifests, end_snapshot
 
@@ -431,109 +432,125 @@ class TableScan:
         return self
 
     def _validate_scan_mode(self):
-        """Validate scan.mode against companion options using a whitelist approach.
+        _validate_scan_mode(self.table)
 
-        Each StartupMode declares exactly which scan keys are allowed. Any
-        scan key present but not in the whitelist for the resolved mode is
-        rejected. This matches Java's SchemaValidation mutual-exclusion matrix.
-        """
-        from pypaimon.common.options.core_options import StartupMode
 
-        core_options = self.table.options
-        mode = core_options.startup_mode()
-        options = core_options.options
+def _validate_scan_mode(table):
+    """Validate scan.mode against companion options using a whitelist approach.
 
-        has_snapshot_id = options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
-        has_tag_name = options.contains(CoreOptions.SCAN_TAG_NAME)
-        has_version = options.contains(CoreOptions.SCAN_VERSION)
-        has_watermark = options.contains(CoreOptions.SCAN_WATERMARK)
-        has_timestamp_millis = options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
-        has_timestamp = options.contains(CoreOptions.SCAN_TIMESTAMP)
-        has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
-        has_file_creation_time = options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS)
-        has_creation_time = options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS)
+    Each StartupMode declares exactly which scan keys are allowed. Any
+    scan key present but not in the whitelist for the resolved mode is
+    rejected. This matches Java's SchemaValidation mutual-exclusion matrix.
+    """
+    from pypaimon.common.options.core_options import StartupMode
 
-        present_keys = []
-        if has_version:
-            present_keys.append(CoreOptions.SCAN_VERSION.key())
-        if has_snapshot_id:
-            present_keys.append(CoreOptions.SCAN_SNAPSHOT_ID.key())
-        if has_tag_name:
-            present_keys.append(CoreOptions.SCAN_TAG_NAME.key())
-        if has_watermark:
-            present_keys.append(CoreOptions.SCAN_WATERMARK.key())
-        if has_timestamp_millis:
-            present_keys.append(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())
-        if has_timestamp:
-            present_keys.append(CoreOptions.SCAN_TIMESTAMP.key())
-        if has_incremental:
-            present_keys.append(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key())
-        if has_file_creation_time:
-            present_keys.append(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key())
-        if has_creation_time:
-            present_keys.append(CoreOptions.SCAN_CREATION_TIME_MILLIS.key())
+    core_options = table.options
+    mode = core_options.startup_mode()
+    options = core_options.options
 
-        # scan.timestamp-millis and scan.timestamp are mutually exclusive
-        if has_timestamp_millis and has_timestamp:
+    has_snapshot_id = options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
+    has_tag_name = options.contains(CoreOptions.SCAN_TAG_NAME)
+    has_version = options.contains(CoreOptions.SCAN_VERSION)
+    has_watermark = options.contains(CoreOptions.SCAN_WATERMARK)
+    has_timestamp_millis = options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
+    has_timestamp = options.contains(CoreOptions.SCAN_TIMESTAMP)
+    has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+    has_file_creation_time = options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS)
+    has_creation_time = options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS)
+
+    present_keys = []
+    if has_version:
+        present_keys.append(CoreOptions.SCAN_VERSION.key())
+    if has_snapshot_id:
+        present_keys.append(CoreOptions.SCAN_SNAPSHOT_ID.key())
+    if has_tag_name:
+        present_keys.append(CoreOptions.SCAN_TAG_NAME.key())
+    if has_watermark:
+        present_keys.append(CoreOptions.SCAN_WATERMARK.key())
+    if has_timestamp_millis:
+        present_keys.append(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())
+    if has_timestamp:
+        present_keys.append(CoreOptions.SCAN_TIMESTAMP.key())
+    if has_incremental:
+        present_keys.append(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key())
+    if has_file_creation_time:
+        present_keys.append(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key())
+    if has_creation_time:
+        present_keys.append(CoreOptions.SCAN_CREATION_TIME_MILLIS.key())
+
+    # scan.timestamp-millis and scan.timestamp are mutually exclusive
+    if has_timestamp_millis and has_timestamp:
+        raise ValueError(
+            "scan.timestamp-millis and scan.timestamp cannot both be set."
+        )
+
+    # Define allowed companion keys per mode
+    if mode == StartupMode.FROM_TIMESTAMP:
+        allowed = {
+            CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+            CoreOptions.SCAN_TIMESTAMP.key(),
+        }
+        if not (has_timestamp_millis or has_timestamp):
             raise ValueError(
-                "scan.timestamp-millis and scan.timestamp cannot both be set."
+                "scan.mode is 'from-timestamp' but neither "
+                "scan.timestamp-millis nor scan.timestamp is set."
             )
-
-        # Define allowed companion keys per mode
-        if mode == StartupMode.FROM_TIMESTAMP:
-            allowed = {
-                CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-                CoreOptions.SCAN_TIMESTAMP.key(),
-            }
-            if not (has_timestamp_millis or has_timestamp):
-                raise ValueError(
-                    "scan.mode is 'from-timestamp' but neither "
-                    "scan.timestamp-millis nor scan.timestamp is set."
-                )
-        elif mode == StartupMode.FROM_SNAPSHOT_FULL:
-            allowed = {CoreOptions.SCAN_SNAPSHOT_ID.key()}
-            if not has_snapshot_id:
-                raise ValueError(
-                    "scan.mode is 'from-snapshot-full' but scan.snapshot-id is not set."
-                )
-        elif mode == StartupMode.FROM_SNAPSHOT:
-            allowed = {
-                CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                CoreOptions.SCAN_TAG_NAME.key(),
-                CoreOptions.SCAN_WATERMARK.key(),
-                CoreOptions.SCAN_VERSION.key(),
-            }
-            if not (has_snapshot_id or has_tag_name or has_watermark or has_version):
-                raise ValueError(
-                    "scan.mode is 'from-snapshot' but none of "
-                    "scan.version, scan.snapshot-id, scan.tag-name, or scan.watermark is set."
-                )
-        elif mode == StartupMode.INCREMENTAL:
-            allowed = {CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()}
-            if not has_incremental:
-                raise ValueError(
-                    "scan.mode is 'incremental' but "
-                    "incremental-between-timestamp is not set."
-                )
-        elif mode in (StartupMode.LATEST_FULL, StartupMode.LATEST):
-            allowed = set()
-        elif mode in (StartupMode.COMPACTED_FULL,
-                      StartupMode.FROM_CREATION_TIMESTAMP,
-                      StartupMode.FROM_FILE_CREATION_TIME):
+    elif mode == StartupMode.FROM_SNAPSHOT_FULL:
+        allowed = {CoreOptions.SCAN_SNAPSHOT_ID.key()}
+        if not has_snapshot_id:
             raise ValueError(
-                f"scan.mode '{mode.value}' is not yet supported in pypaimon."
+                "scan.mode is 'from-snapshot-full' but scan.snapshot-id is not set."
             )
-        else:
-            allowed = set()
-
-        # Reject any scan key that's not in the whitelist for this mode
-        disallowed = [k for k in present_keys if k not in allowed]
-        if disallowed:
+    elif mode == StartupMode.FROM_SNAPSHOT:
+        allowed = {
+            CoreOptions.SCAN_SNAPSHOT_ID.key(),
+            CoreOptions.SCAN_TAG_NAME.key(),
+            CoreOptions.SCAN_WATERMARK.key(),
+            CoreOptions.SCAN_VERSION.key(),
+        }
+        if not (has_snapshot_id or has_tag_name or has_watermark or has_version):
             raise ValueError(
-                f"scan.mode '{mode.value}' conflicts with: {disallowed}. "
-                f"Only {sorted(allowed) if allowed else 'no scan keys'} "
-                f"are allowed for this mode."
+                "scan.mode is 'from-snapshot' but none of "
+                "scan.version, scan.snapshot-id, scan.tag-name, or scan.watermark is set."
             )
+    elif mode == StartupMode.INCREMENTAL:
+        allowed = {CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()}
+        if not has_incremental:
+            raise ValueError(
+                "scan.mode is 'incremental' but "
+                "incremental-between-timestamp is not set."
+            )
+    elif mode in (StartupMode.LATEST_FULL, StartupMode.LATEST):
+        allowed = set()
+    elif mode in (StartupMode.COMPACTED_FULL,
+                  StartupMode.FROM_CREATION_TIMESTAMP,
+                  StartupMode.FROM_FILE_CREATION_TIME):
+        raise ValueError(
+            f"scan.mode '{mode.value}' is not yet supported in pypaimon."
+        )
+    else:
+        allowed = set()
+
+    # Reject any scan key that's not in the whitelist for this mode
+    disallowed = [k for k in present_keys if k not in allowed]
+    if disallowed:
+        raise ValueError(
+            f"scan.mode '{mode.value}' conflicts with: {disallowed}. "
+            f"Only {sorted(allowed) if allowed else 'no scan keys'} "
+            f"are allowed for this mode."
+        )
+
+
+def _parse_incremental_timestamp_window(value):
+    """Numeric milliseconds use Java Long parsing, including its range."""
+    parts = value.split(',')
+    if len(parts) != 2 or any(re.fullmatch(r'[+-]?[0-9]+', part) is None for part in parts):
+        raise ValueError('incremental-between-timestamp requires start(exclusive),end(inclusive) '
+                         'in milliseconds, got: ' + value)
+    start, end = map(int, parts)
+    if not all(-(1 << 63) <= timestamp < (1 << 63) for timestamp in (start, end)):
+        raise ValueError('incremental-between-timestamp milliseconds must be signed 64-bit integers')
+    return start, end
 
 
 def latest_auth_fields(table):

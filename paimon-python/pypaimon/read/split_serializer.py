@@ -655,7 +655,7 @@ def _datafilemeta_from_row(row_bytes: bytes, bucket_path: str, arity: int,
         write_cols_sequences=(
             _decode_non_null_long_array(g(20)) if arity >= 21 else None),
     )
-    meta.file_path = external_path if external_path else to_file_io_path(
+    meta.file_path = meta.physical_path() if external_path else to_file_io_path(
         "%s/%s" % (bucket_path.rstrip('/'), file_name))
     return meta
 

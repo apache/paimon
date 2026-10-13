@@ -25,6 +25,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
@@ -713,7 +715,7 @@ public interface Catalog extends AutoCloseable {
      * <ul>
      *   <li>{@link #commitSnapshot(Identifier, String, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
-     *   <li>{@link #rollbackTo(Identifier, Instant)}.
+     *   <li>{@link #rollbackTo(Identifier, String, Instant, Long, String)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
      *   <li>{@link #renameBranch(Identifier, String, String)}.
@@ -838,31 +840,24 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * rollback table by the given {@link Identifier} and instant.
+     * Rollback table by the given {@link Identifier} and instant.
      *
      * @param identifier path of the table
-     * @param instant like snapshotId or tagName
-     * @throws Catalog.TableNotExistException if the table does not exist
-     * @throws UnsupportedOperationException if the catalog does not {@link
-     *     #supportsVersionManagement()}
-     */
-    default void rollbackTo(Identifier identifier, Instant instant)
-            throws Catalog.TableNotExistException {
-        rollbackTo(identifier, instant, null);
-    }
-
-    /**
-     * rollback table by the given {@link Identifier} and instant.
-     *
-     * @param identifier path of the table
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant like snapshotId or tagName
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
-     *     snapshot.
+     *     snapshot
+     * @param commitUser owner of the writer's lock, or null when no writer lock is used
      * @throws Catalog.TableNotExistException if the table does not exist
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+    void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String commitUser)
             throws Catalog.TableNotExistException;
 
     /**
@@ -1320,6 +1315,28 @@ public interface Catalog extends AutoCloseable {
      */
     TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
+
+    // ========================== Locking ==============================
+
+    /**
+     * Create a lock bound to the table incarnation and exact writer identity.
+     *
+     * <p>The caller owns the returned lock and must close it. A lease may end when its snapshot is
+     * published; each additional snapshot must use a new {@link Lock#runWithLock} scope. Catalogs
+     * without configured locking return a no-op lock.
+     *
+     * @param identifier table and branch to lock
+     * @param tableUuid table incarnation, required by catalogs that fence table recreation
+     * @param commitUser exact logical writer identity for commits; null for catalog operations
+     * @param tableOptions runtime table options controlling lock support
+     */
+    default Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        return Lock.empty();
+    }
 
     // ==================== Catalog Information ==========================
 

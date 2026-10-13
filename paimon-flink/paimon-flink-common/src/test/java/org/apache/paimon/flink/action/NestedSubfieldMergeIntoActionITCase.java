@@ -120,6 +120,28 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testUpdateSubFieldOfRowWithDefault() throws Exception {
+        prepareNestedTarget(true);
+        sEnv.executeSql("CALL sys.alter_column_default_value('default.T', 'nest', '{42, z}')")
+                .await();
+        assertThat(getFileStoreTable("T").rowType().getField("nest").defaultValue())
+                .isEqualTo("{42, z}");
+        prepareSubFieldSource();
+
+        builder(warehouse, database, "T")
+                .withMergeCondition("T.id=S.id")
+                .withMatchedUpdateSet("T.nest.a=S.newa")
+                .withSourceTable("S")
+                .withSinkParallelism(2)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, nest.a, nest.b FROM T",
+                Arrays.asList(changelogRow("+I", 1, 100, "x"), changelogRow("+I", 2, 20, "y")));
+    }
+
+    @Test
     public void testUpdateSubFieldDisabledThrows() throws Exception {
         // data-evolution.nested-field.enabled left at its default (false)
         prepareNestedTarget(false);

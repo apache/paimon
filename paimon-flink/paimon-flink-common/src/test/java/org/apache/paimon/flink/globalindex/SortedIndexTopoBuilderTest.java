@@ -117,7 +117,8 @@ public class SortedIndexTopoBuilderTest {
     @Test
     public void testBuildIndexReturnsFalseWhenNoBuildTask() throws Exception {
         SortedGlobalIndexScanner indexScanner = mock(SortedGlobalIndexScanner.class);
-        when(indexScanner.withIndexField("id")).thenReturn(indexScanner);
+        when(indexScanner.withIndexFields(Collections.singletonList("id")))
+                .thenReturn(indexScanner);
         when(indexScanner.incrementalScan()).thenReturn(Optional.empty());
         StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
 
@@ -126,7 +127,7 @@ public class SortedIndexTopoBuilderTest {
                                 env,
                                 () -> indexScanner,
                                 mock(FileStoreTable.class),
-                                Collections.singletonList("id"),
+                                Collections.singletonList(Collections.singletonList("id")),
                                 "btree",
                                 null,
                                 new Options()))
@@ -138,7 +139,8 @@ public class SortedIndexTopoBuilderTest {
     @Test
     public void testBuildIndexStreamReturnsEmptyWhenNoBuildTask() throws Exception {
         SortedGlobalIndexScanner indexScanner = mock(SortedGlobalIndexScanner.class);
-        when(indexScanner.withIndexField("id")).thenReturn(indexScanner);
+        when(indexScanner.withIndexFields(Collections.singletonList("id")))
+                .thenReturn(indexScanner);
         when(indexScanner.incrementalScan()).thenReturn(Optional.empty());
         StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
 
@@ -147,7 +149,7 @@ public class SortedIndexTopoBuilderTest {
                                 env,
                                 () -> indexScanner,
                                 mock(FileStoreTable.class),
-                                Collections.singletonList("id"),
+                                Collections.singletonList(Collections.singletonList("id")),
                                 "btree",
                                 null,
                                 new Options()))

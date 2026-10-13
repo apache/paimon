@@ -18,9 +18,11 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
@@ -34,9 +36,12 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sst.BloomFilterHandle;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -73,6 +78,43 @@ class BTreeBloomFilterTest {
         Fixture fixture = writeIndex(new Options());
 
         assertThat(fixture.footer.getBloomFilterHandle()).isNull();
+    }
+
+    @Test
+    void testCompositeNaNPointLookupWithBloom() throws Exception {
+        RowType type = RowType.of(DataTypes.FLOAT(), DataTypes.DOUBLE());
+        Options options = new Options();
+        options.set(BTreeIndexOptions.BTREE_INDEX_BLOOM_FILTER_ENABLED, true);
+        ByteArrayGlobalIndexFileWriter fileWriter = new ByteArrayGlobalIndexFileWriter();
+        GlobalIndexSingleColumnWriter writer =
+                new BTreeGlobalIndexer(type.getFields(), options).createWriter(fileWriter);
+        writer.write(GenericRow.of(-1.0f, -1.0d), 0);
+        writer.write(
+                GenericRow.of(
+                        Float.intBitsToFloat(0xffc00001),
+                        Double.longBitsToDouble(0xfff8000000000001L)),
+                1);
+        writer.write(GenericRow.of(Float.NaN, Double.NaN), 2);
+        ResultEntry entry = writer.finish().get(0);
+        byte[] bytes = fileWriter.bytes();
+        GlobalIndexIOMeta meta =
+                new GlobalIndexIOMeta(
+                        new Path(entry.fileName()), bytes.length, entry.rowCount(), entry.meta());
+        try (CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0.5);
+                BTreeIndexReader reader =
+                        new BTreeIndexReader(
+                                new CompositeKeySerializer(type),
+                                ignored -> new ByteArraySeekableStream(bytes),
+                                meta,
+                                cacheManager,
+                                null)) {
+            assertThat(
+                            reader.visitEqual(GenericRow.of(Float.NaN, Double.NaN))
+                                    .get()
+                                    .results()
+                                    .toRangeList())
+                    .containsExactly(new Range(1, 2));
+        }
     }
 
     @Test
@@ -115,7 +157,8 @@ class BTreeBloomFilterTest {
     private Fixture writeIndex(Options options) throws IOException {
         ByteArrayGlobalIndexFileWriter fileWriter = new ByteArrayGlobalIndexFileWriter();
         BTreeGlobalIndexer indexer =
-                new BTreeGlobalIndexer(new DataField(0, "k", new IntType()), options);
+                new BTreeGlobalIndexer(
+                        Collections.singletonList(new DataField(0, "k", new IntType())), options);
         GlobalIndexSingleColumnWriter writer = indexer.createWriter(fileWriter);
         for (int i = 0; i < ENTRY_COUNT; i++) {
             writer.write(i * 2, i);

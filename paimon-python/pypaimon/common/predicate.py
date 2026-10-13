@@ -18,13 +18,17 @@
 import re
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from typing import ClassVar
+from decimal import Decimal
+from typing import Any, ClassVar, Dict, List, Optional, Sequence, cast
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute
 from pyarrow import dataset as pyarrow_dataset
 
+from pypaimon.common.decimal_arrow_predicate import (
+    DecimalLiteral,
+    decimal_arrow_expression,
+)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.internal_row import InternalRow
 
@@ -124,15 +128,22 @@ class Predicate:
             return tester.test_by_stats(min_value, max_value, self.literals)
         raise ValueError(f"Unsupported predicate method: {self.method}")
 
-    def to_arrow(self) -> Any:
+    def to_arrow(self, schema: Optional[pyarrow.Schema] = None) -> Any:
+        """Convert to Arrow, using the input schema for exact decimal comparisons."""
         if self.method == 'and':
             return _combine_arrow_expressions(
-                [p.to_arrow() for p in self.literals],
+                [
+                    p.to_arrow(schema) if schema is not None else p.to_arrow()
+                    for p in self.literals
+                ],
                 lambda left, right: left & right,
             )
         if self.method == 'or':
             return _combine_arrow_expressions(
-                [p.to_arrow() for p in self.literals],
+                [
+                    p.to_arrow(schema) if schema is not None else p.to_arrow()
+                    for p in self.literals
+                ],
                 lambda left, right: left | right,
             )
 
@@ -183,9 +194,39 @@ class Predicate:
                 return None
 
         field = pyarrow_dataset.field(self.field)
+        literals = self.literals
+        if schema is not None and self.field in schema.names:
+            field_type = schema.field(self.field).type
+            if (
+                pyarrow.types.is_decimal(field_type)
+                and literals
+                and all(
+                    value is None or isinstance(value, (Decimal, int))
+                    for value in literals
+                )
+                and self.method
+                in (
+                    'equal',
+                    'notEqual',
+                    'lessThan',
+                    'lessOrEqual',
+                    'greaterThan',
+                    'greaterOrEqual',
+                    'in',
+                    'notIn',
+                    'between',
+                    'notBetween',
+                )
+            ):
+                return decimal_arrow_expression(
+                    field,
+                    field_type,
+                    self.method,
+                    cast(Sequence[Optional[DecimalLiteral]], literals),
+                )
         tester = Predicate.testers.get(self.method)
         if tester:
-            return tester.test_by_arrow(field, self.literals)
+            return tester.test_by_arrow(field, literals)
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
 
