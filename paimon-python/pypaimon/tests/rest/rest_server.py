@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import json
 import logging
 import re
 import threading
@@ -34,8 +33,7 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
                                       CreateDatabaseRequest,
                                       CreatePartitionsRequest,
                                       CreateTableRequest, CreateTagRequest,
-                                      DropPolicyRequest,
-                                      GrantPermissionRequest, PolicyRequest,
+                                      GrantPermissionRequest,
                                       RenameBranchRequest,
                                       RenameTableRequest,
                                       RevokePermissionRequest)
@@ -50,8 +48,7 @@ from pypaimon.api.api_response import (AuthTableQueryRequest, AuthTableQueryResp
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
                                        ListPartitionsResponse,
-                                       ListPermissionsResponse,
-                                       ListPoliciesResponse, ListTablesResponse,
+                                       ListPermissionsResponse, ListTablesResponse,
                                        ListTagsResponse,
                                        PagedList, Partition,
                                        RESTResponse, ErrorResponse)
@@ -70,12 +67,11 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
                                                 TagAlreadyExistException)
-from pypaimon.casting import data_type_casts as casts
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
 from pypaimon.common.json_util import JSON
-from pypaimon.management.data_policy import DataPolicy
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.management.permission_access import PermissionAccess
 from pypaimon.management.permission_assignment import (PermissionAssignment, _INSTANT,
                                                        _days_from_civil)
@@ -83,7 +79,6 @@ from pypaimon.management.permission_columns import PermissionColumns
 from pypaimon.management.permission_resource import PermissionResource
 from pypaimon.management.resource_type import ResourceType
 from pypaimon import Schema
-from pypaimon.schema.data_types import AtomicType, DataType, DataTypeParser
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -228,125 +223,9 @@ def _assignment_key(assignment: PermissionAssignment) -> str:
         assignment.get_resource(), assignment.get_access(), assignment.get_principal())
 
 
-def _policy_identity(policy: DataPolicy) -> Tuple[str, str, Optional[str]]:
-    mask = policy.get_column_mask()
-    return policy.type().name, policy.get_principal(), None if mask is None else mask.get_on_column()
-
-
-def _policy_key(policy: DataPolicy) -> str:
-    return _cursor_key(*_policy_identity(policy))
-
-
-def _policy_name(policy_type: str, principal: str, column: Optional[str]) -> str:
-    return ":".join(part for part in (policy_type, principal, column) if part is not None)
-
-
 def _resource_name(resource: PermissionResource) -> str:
     name = resource.get_table() or resource.get_function() or resource.get_view()
     return ".".join(part for part in (resource.get_database(), name) if part) or "catalog"
-
-
-def _transform_columns(transform: Dict[str, Any]) -> set:
-    refs = list(transform.get("inputs") or []) + [transform.get("fieldRef")]
-    return {ref["name"] for ref in refs if isinstance(ref, dict)}
-
-
-def _leaf_transforms(predicate: Dict[str, Any]) -> List[Dict[str, Any]]:
-    if predicate["kind"] == "COMPOUND":
-        children = predicate.get("children")
-        if not predicate.get("function") or not children or None in children:
-            raise ValueError("Compound predicate needs a function and at least one predicate.")
-        return [transform for child in children for transform in _leaf_transforms(child)]
-    return [predicate["transform"]]
-
-
-def _policy_columns(policy: DataPolicy) -> set:
-    mask = policy.get_column_mask()
-    if mask is None:
-        predicate = json.loads(policy.get_row_filter().get_predicate())
-        return set().union(*map(_transform_columns, _leaf_transforms(predicate)))
-    return {mask.get_on_column()} | _transform_columns(json.loads(mask.get_transform()))
-
-
-_DATE_PARTS = ("YEAR", "QUARTER", "MONTH", "WEEK", "YEAR_OF_WEEK", "DAY", "DAY_OF_WEEK", "ISO_DAY_OF_WEEK",
-               "WEEKDAY", "DAY_OF_YEAR", "HOUR", "MINUTE", "SECOND")
-_TRANSFORM_INPUTS = {
-    "CONCAT": ("s", 0, None, "STRING"), "CONCAT_WS": ("s", 2, None, "STRING"),
-    "UPPER": ("s", 1, 1, "STRING"), "LOWER": ("s", 1, 1, "STRING"), "TRIM": ("s", 1, 2, "STRING"),
-    "TRANSLATE": ("s", 3, 3, "STRING"), "SUBSTRING": ("a", 2, 3, "STRING"),
-    "OVERLAY": ("ssii", 3, 4, "STRING"), "PAD": ("sis", 3, 3, "STRING"),
-    "LENGTH": ("s", 1, 1, "INT"), "BIT_LENGTH": ("s", 1, 1, "INT"),
-    "DATE_ADD": ("di", 2, 2, "DATE"), "DATE_DIFF": ("dd", 2, 2, "INT"), "DATE_TRUNC": ("ds", 2, 2, "DATE"),
-}
-_TRANSFORM_FLAGS = {"TRIM": ("trimFlag", ("LEADING", "TRAILING", "BOTH")), "PAD": ("direction", ("LEFT", "RIGHT"))}
-_INPUT_ROOTS = {"s": casts.CHARACTER_STRING, "i": casts.INTEGER_NUMERIC, "d": {casts.DATE}}
-_TYPE_DEFAULTS = {casts.CHAR: (1,), casts.VARCHAR: (1,), casts.BINARY: (1,), casts.VARBINARY: (1,),
-                  casts.DECIMAL: (10, 0), casts.TIME: (0,), casts.TIMESTAMP: (6,), casts.TIMESTAMP_LTZ: (6,)}
-
-
-def _logical_type(data_type: Optional[DataType]) -> Any:
-    if not isinstance(data_type, AtomicType):
-        return data_type
-    spelling = data_type.type.upper()
-    root = casts.TIMESTAMP_LTZ if "LOCAL TIME ZONE" in spelling else casts._root(data_type)
-    found = (2147483647,) if spelling in ("STRING", "BYTES") else tuple(map(int, re.findall(r"\d+", spelling)))
-    return root, found + _TYPE_DEFAULTS.get(root, ())[len(found):], data_type.nullable
-
-
-def _input_fits(kind: str, value: Any, columns: Dict[str, DataType]) -> bool:
-    if value is None or kind == "a":
-        return True
-    if isinstance(value, dict):
-        return casts._root(columns[value["name"]]) in _INPUT_ROOTS[kind]
-    if kind == "s":
-        return isinstance(value, str)
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _transform_type(transform: Dict[str, Any], columns: Dict[str, DataType]) -> Optional[DataType]:
-    name = transform["name"]
-    if "fieldRef" in transform:
-        source = columns[transform["fieldRef"]["name"]]
-        if name == "CAST":
-            target = DataTypeParser.parse_data_type(transform["type"])
-            return target if casts.supports_cast(source, target) else None
-        if name in _DATE_PARTS:
-            return AtomicType("INT") if casts._root(source) in (casts.DATE, casts.TIMESTAMP) else None
-        for part in transform.get("path") or []:
-            source = next((field.type for field in getattr(source, "fields", ()) if field.name == part), None)
-        nested = name == "NESTED_FIELD_REF" and transform.get("path")
-        return source if name == "FIELD_REF" or nested else None
-    if name == "NULL":
-        return AtomicType("BOOLEAN")
-    if name in _TRANSFORM_FLAGS:
-        flag, values = _TRANSFORM_FLAGS[name]
-        if transform.get(flag) not in values:
-            return None
-    kinds, low, high, output = _TRANSFORM_INPUTS.get(name, ("", 1, 0, None))
-    inputs = transform.get("inputs") or []
-    if not low <= len(inputs) <= (len(inputs) if high is None else high):
-        return None
-    fits = all(_input_fits(kinds[min(position, len(kinds) - 1)], value, columns)
-               for position, value in enumerate(inputs))
-    return AtomicType(output) if fits else None
-
-
-def _policy_type_error(policy: DataPolicy, schema: TableSchema) -> Optional[str]:
-    columns = {field.name: field.type for field in schema.fields}
-    mask = policy.get_column_mask()
-    if mask is None:
-        predicate = json.loads(policy.get_row_filter().get_predicate())
-        invalid = [transform["name"] for transform in _leaf_transforms(predicate)
-                   if _transform_type(transform, columns) is None]
-        return "Row filter transform {} does not fit the table schema.".format(invalid[0]) if invalid else None
-    transform = json.loads(mask.get_transform())
-    output = _transform_type(transform, columns)
-    if output is None:
-        return "Column mask transform {} does not fit the table schema.".format(transform["name"])
-    if _logical_type(output) != _logical_type(columns[mask.get_on_column()]):
-        return "Column mask output type {} does not match target column {} type {}.".format(
-            output, mask.get_on_column(), columns[mask.get_on_column()])
-    return None
 
 
 def _granted_columns(assignment: PermissionAssignment) -> List[str]:
@@ -376,7 +255,7 @@ def _renamed_columns(previous: TableSchema, current: TableSchema) -> Dict[str, O
 
 
 def _query_auth_enabled(schema: TableSchema) -> bool:
-    return schema.options.get("query-auth.enabled", "").lower() == "true"
+    return CoreOptions.from_dict(schema.options).query_auth_enabled
 
 
 def _on_table(resource: PermissionResource, identifier: Identifier) -> bool:
@@ -387,14 +266,6 @@ def _on_table(resource: PermissionResource, identifier: Identifier) -> bool:
 
 def _matches(parameters: Dict[str, str], name: str, value: Optional[str]) -> bool:
     return name not in parameters or parameters[name] == value
-
-
-def _matches_policy(policy: DataPolicy, parameters: Dict[str, str]) -> bool:
-    mask = policy.get_column_mask()
-    if "column" in parameters and (mask is None or mask.get_on_column() != parameters["column"]):
-        return False
-    return _matches(parameters, "type", policy.type().name) \
-        and _matches(parameters, "principal", policy.get_principal())
 
 
 class RESTCatalogServer:
@@ -425,7 +296,6 @@ class RESTCatalogServer:
         self.no_permission_tables: List[str] = []
         self.table_token_store: Dict[str, "RESTToken"] = {}
         self.permission_store: Dict[str, PermissionAssignment] = {}
-        self.policy_store: Dict[str, Dict[str, DataPolicy]] = {}
         self.query_principals: set = set()
 
         # Initialize mock catalog (simplified)
@@ -780,13 +650,8 @@ class RESTCatalogServer:
                 return self._branches_handle(method, data, lookup_identifier)
             elif operation == "auth" and method == "POST":
                 return self._table_auth_handle(lookup_identifier, data)
-            elif operation == ResourcePaths.POLICIES:
-                return self._policies_handle(method, data, lookup_identifier, parameters, False)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
-        elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.POLICIES \
-                and path_parts[4] == "drop":
-            return self._policies_handle(method, data, lookup_identifier, parameters, True)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
             tag_name = RESTUtil.decode_string(path_parts[4])
             return self._tag_handle(method, lookup_identifier, tag_name)
@@ -866,8 +731,12 @@ class RESTCatalogServer:
         resource = assignment.get_resource()
         if resource.get_type() != ResourceType.COLUMN:
             return None
-        schema = self.table_metadata_store[
-            Identifier.create(resource.get_database(), resource.get_table()).get_full_name()].schema
+        identifier = Identifier.create(resource.get_database(), resource.get_table())
+        schema = self.table_metadata_store[identifier.get_full_name()].schema
+        if self.branch_store.get(identifier.get_full_name()):
+            return self._mock_response(ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TABLE, _resource_name(resource),
+                "Column permissions are not supported on tables with branches.", 400), 400)
         if not _query_auth_enabled(schema):
             return self._mock_response(ErrorResponse(
                 ErrorResponse.RESOURCE_TYPE_TABLE, _resource_name(resource),
@@ -880,62 +749,23 @@ class RESTCatalogServer:
                     "Permission column does not exist.", 404), 404)
         return None
 
+    def _restricted(self, identifier: Identifier) -> bool:
+        return bool(self._column_grants(identifier))
+
     def _column_grants(self, identifier: Identifier) -> List[PermissionAssignment]:
         return [assignment for assignment in self.permission_store.values()
                 if assignment.get_resource().get_type() == ResourceType.COLUMN
                 and _on_table(assignment.get_resource(), identifier)]
-
-    def _policies_handle(self, method: str, data: str, identifier: Identifier,
-                         parameters: Dict[str, str], drop: bool) -> Tuple[str, int]:
-        resource = PermissionResource(
-            ResourceType.TABLE, identifier.get_database_name(), identifier.get_table_name())
-        metadata = self.table_metadata_store.get(identifier.get_full_name())
-        if metadata is None:
-            return self._missing_permission_resource(resource)
-        policies = self._table_policies(identifier, metadata)
-        if method == "GET" and not drop:
-            matched = [DataPolicy(resource, policy.get_row_filter(), policy.get_column_mask(),
-                                  policy.get_principal())
-                       for policy in policies.values() if _matches_policy(policy, parameters)]
-            return self._mock_response(ListPoliciesResponse(
-                *self._management_page({_policy_key(policy): policy for policy in matched}, parameters)), 200)
-        if method == "POST" and not drop:
-            policy = JSON.from_json(data, PolicyRequest).policy(resource)
-            if not _query_auth_enabled(metadata.schema):
-                return self._mock_response(ErrorResponse(
-                    ErrorResponse.RESOURCE_TYPE_TABLE, identifier.get_full_name(),
-                    "Data policies require the target table option query-auth.enabled=true.",
-                    409), 409)
-            identity = _policy_identity(policy)
-            missing = sorted(_policy_columns(policy) - {field.name for field in metadata.schema.fields})
-            error = "Policy column {} does not exist in table {}.".format(
-                missing[0], identifier.get_full_name()) if missing else _policy_type_error(policy, metadata.schema)
-            if error:
-                return self._mock_response(ErrorResponse(
-                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity), error, 400), 400)
-            if _cursor_key(*identity) in policies:
-                return self._mock_response(ErrorResponse(
-                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity),
-                    "Policy already exists.", 409), 409)
-            policies[_cursor_key(*identity)] = policy
-            return self._mock_response("", 200)
-        if method == "POST" and drop:
-            request = JSON.from_json(data, DropPolicyRequest)
-            identity = (request.get_type().name, request.get_principal(), request.get_column())
-            if policies.pop(_cursor_key(*identity), None) is None:
-                return self._mock_response(ErrorResponse(
-                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity),
-                    "Policy does not exist.", 404), 404)
-            return self._mock_response("", 200)
-        return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
     def _remove_permissions(self, matches) -> None:
         for key in [key for key, assignment in self.permission_store.items()
                     if matches(assignment.get_resource())]:
             del self.permission_store[key]
 
-    def _drop_table_access(self, identifier: Identifier, metadata: TableMetadata) -> None:
-        self.policy_store.pop(metadata.uuid or identifier.get_full_name(), None)
+    def _drop_table_access(self, identifier: Identifier) -> None:
+        for branch in self.branch_store.pop(identifier.get_full_name(), ()):
+            manager = self._schema_manager(identifier, branch)
+            manager.file_io.delete(manager.branch_path, recursive=True)
         self._remove_permissions(lambda resource: _on_table(resource, identifier))
 
     def _rename_table_access(self, source: Identifier, destination: Identifier) -> None:
@@ -950,10 +780,6 @@ class RESTCatalogServer:
                 assignment.get_columns(), assignment.get_expire_time())
             self.permission_store[_assignment_key(renamed)] = renamed
 
-    def _table_policies(self, identifier: Identifier,
-                        metadata: TableMetadata) -> Dict[str, DataPolicy]:
-        return self.policy_store.setdefault(metadata.uuid or identifier.get_full_name(), {})
-
     def _table_auth_handle(self, identifier: Identifier, data: str) -> Tuple[str, int]:
         metadata = self.table_metadata_store.get(identifier.get_full_name())
         if metadata is None:
@@ -963,29 +789,17 @@ class RESTCatalogServer:
         if grants:
             included = {field.name for field in metadata.schema.fields}
             for grant in grants:
+                columns = set(_granted_columns(grant))
                 if grant.get_columns().get_column_names() is not None:
-                    included &= set(_granted_columns(grant))
+                    included &= columns
                 else:
-                    included -= set(_granted_columns(grant))
+                    included -= columns
             select = JSON.from_json(data, AuthTableQueryRequest).select if data else None
             if select is None:
                 select = [field.name for field in metadata.schema.fields]
             if any(column not in included for column in select):
                 raise TableNoPermissionException(identifier)
-        policies = self._table_policies(identifier, metadata)
-        filters, masks = [], {}
-        for key in sorted(policies):
-            policy = policies[key]
-            if policy.get_principal() not in self.query_principals:
-                continue
-            if policy.get_row_filter() is not None:
-                filters.append(policy.get_row_filter().get_predicate())
-            else:
-                mask = policy.get_column_mask()
-                if mask.get_on_column() in masks:
-                    raise TableNoPermissionException(identifier)
-                masks[mask.get_on_column()] = mask.get_transform()
-        return self._mock_response(AuthTableQueryResponse(filters or None, masks or None), 200)
+        return self._mock_response(AuthTableQueryResponse(None, None), 200)
 
     # ======================= Function Handlers ===============================
 
@@ -1310,17 +1124,19 @@ class RESTCatalogServer:
             if request.branch in store:
                 raise BranchAlreadyExistException(request.branch)
 
-            schema_id = self.table_metadata_store[identifier.get_full_name()].schema.id
+            metadata = self.table_metadata_store[identifier.get_full_name()]
+            schema_id, snapshot = metadata.schema.id, None
             if request.from_tag is not None:
                 tags = self.tag_store.get(identifier.get_full_name(), {})
                 if request.from_tag not in tags:
                     raise TagNotExistException(request.from_tag)
                 snapshot = tags[request.from_tag].snapshot
-                if snapshot is not None:
-                    schema_id = snapshot.schema_id
-                    self._write_snapshot_files(
-                        identifier, snapshot, None, request.branch)
+                schema_id = schema_id if snapshot is None else snapshot.schema_id
+            if self._restricted(identifier):
+                raise ValueError("Tables with column permissions cannot have branches.")
             manager = self._schema_manager(identifier)
+            if snapshot is not None:
+                self._write_snapshot_files(identifier, snapshot, None, request.branch)
             target = manager.copy_with_branch(request.branch)
             for schema in manager.list_all():
                 if schema.id <= schema_id:
@@ -1433,9 +1249,6 @@ class RESTCatalogServer:
 
         elif method == "DELETE":
             del self.database_store[database_name]
-            for name, metadata in self.table_metadata_store.items():
-                if Identifier.from_string(name).get_database_name() == database_name:
-                    self.policy_store.pop(metadata.uuid or name, None)
             self._remove_permissions(lambda resource: resource.get_database() == database_name)
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
@@ -1494,8 +1307,8 @@ class RESTCatalogServer:
             if identifier.get_full_name() not in self.table_metadata_store:
                 raise TableNotExistException(identifier)
             else:
-                self._drop_table_access(
-                    identifier, self.table_metadata_store.pop(identifier.get_full_name()))
+                del self.table_metadata_store[identifier.get_full_name()]
+                self._drop_table_access(identifier)
             if identifier.get_full_name() in self.table_latest_snapshot_store:
                 del self.table_latest_snapshot_store[identifier.get_full_name()]
             if identifier.get_full_name() in self.table_partitions_store:
@@ -1942,8 +1755,7 @@ class RESTCatalogServer:
         base = Identifier.create(identifier.get_database_name(), identifier.get_table_name())
         if main:
             self._validate_access_for_schema(
-                base, table_metadata,
-                schema_manager._generate_table_schema(table_metadata.schema, schema_changes))
+                base, table_metadata, schema_manager._generate_table_schema(table_metadata.schema, schema_changes))
         new_schema = schema_manager.commit_changes(schema_changes)
 
         updated_metadata = TableMetadata(
@@ -1958,19 +1770,6 @@ class RESTCatalogServer:
     def _validate_access_for_schema(self, identifier: Identifier, metadata: TableMetadata,
                                     schema: TableSchema) -> None:
         name = identifier.get_full_name()
-        columns = {field.name for field in schema.fields}
-        policies = self.policy_store.get(metadata.uuid or name, {})
-        if policies and not _query_auth_enabled(schema):
-            raise ValueError(
-                "Cannot disable query-auth.enabled while table {} has data policies.".format(name))
-        for policy in policies.values():
-            missing = _policy_columns(policy) - columns
-            if missing:
-                raise ValueError("Cannot remove or rename policy column {} from table {}.".format(
-                    sorted(missing)[0], name))
-            mismatch = _policy_type_error(policy, schema)
-            if mismatch:
-                raise ValueError(mismatch)
         grants = self._column_grants(identifier)
         if grants and not _query_auth_enabled(schema):
             raise ValueError(
