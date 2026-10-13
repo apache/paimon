@@ -255,6 +255,17 @@ public class JindoIoCacheRoutingTest {
     }
 
     @Test
+    public void testPostponeFilesAndBlobPacksUseTheirTarget() throws IOException {
+        JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
+        String postpone = "/bucket-postpone/data--u-user-s-7-w-" + UUID + "-0.avro";
+        fileIO.newInputStream(new Path(TABLE + postpone)).close();
+        fileIO.newInputStream(new Path(TABLE + "/dt=1/bucket-0/data-" + UUID + ".managed.blob"))
+                .close();
+        verify(clusterFs, times(2)).open(any(org.apache.hadoop.fs.Path.class));
+        verify(ossFs, never()).open(any(org.apache.hadoop.fs.Path.class));
+    }
+
+    @Test
     public void testSingleCacheTarget() {
         Options options = baseOptions();
         options.set("io-cache.endpoint", "http://" + CLUSTER_HOST);

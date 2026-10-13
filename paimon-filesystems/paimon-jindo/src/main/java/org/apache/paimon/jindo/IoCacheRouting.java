@@ -65,11 +65,13 @@ final class IoCacheRouting implements Serializable {
 
     private static final Pattern TARGET_NAME = Pattern.compile("[a-z][a-z0-9-]*");
 
-    // Data files are named {prefix}{uuid}-{count}.{extension}; this matches what follows the
-    // prefix.
+    // What follows a data file prefix: {uuid}-{count}.{extension}, also after the postpone
+    // writer's -u-{commit user}-s-{write id}-w-, or a paimon-rust BLOB pack {uuid}.managed.blob.
     private static final String UUID =
             "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-    private static final Pattern DATA_FILE_SUFFIX = Pattern.compile(UUID + "-[0-9]+\\..+");
+    private static final Pattern DATA_FILE_SUFFIX =
+            Pattern.compile(
+                    "(?:-u-.+-s-[0-9]+-w-)?" + UUID + "-[0-9]+\\..+|" + UUID + "\\.managed\\.blob");
 
     // Other types are routed only under the names Paimon writes (paimon-rust adds -changelog to
     // changelog manifests); Format Table files may be replaced in place.
