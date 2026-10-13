@@ -57,6 +57,9 @@ def select(paths, full=False):
         if path.startswith("docs/"):
             docs = True
             continue
+        if path.startswith("paimon-python/"):
+            # The PyPaimon licensing check scans every file, Markdown included.
+            licensing = True
         if path.endswith(".md"):
             continue
         if path.startswith("paimon-python/") or path == ".github/workflows/ci-python.yml":

@@ -61,6 +61,15 @@ class SelectionTest(unittest.TestCase):
         self.assertFalse(result['licensing'])
         self.assertFalse(plan.select(['paimon-python/README.md'])['python'])
 
+    def test_python_changes_run_licensing(self):
+        for path in ['paimon-python/pypaimon/table/table.py',
+                     'paimon-python/pypaimon/tests/resources/btree/README.md']:
+            with self.subTest(path=path):
+                result = plan.select([path])
+                self.assertTrue(result['licensing'])
+                self.assertFalse(result['java'])
+                self.assertFalse(result['docs'])
+
     def test_mixed_changes_take_union(self):
         self.assertEqual(self.suites(['docs/intro.md', 'paimon-spark/pom.xml',
                                       'paimon-flink/pom.xml']),
