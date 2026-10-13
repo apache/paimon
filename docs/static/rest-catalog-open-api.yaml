@@ -595,6 +595,12 @@ paths:
           required: true
           schema:
             type: string
+      description: >-
+        Validate the table incarnation, branch and expected head atomically with publication.
+        Every writer must honor an active commit lease, including writers that do not request
+        one. The authenticated caller and snapshot.commitUser must match the active owner.
+        Clear the lease only when a new snapshot is successfully published; rejected requests
+        and idempotent replays of an existing snapshot must not clear a newer lease.
       requestBody:
         content:
           application/json:
@@ -611,6 +617,112 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock:
+    post:
+      tags:
+        - table
+      summary: Acquire a table commit lease
+      operationId: acquireCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the server-side table property rest.commit.lock-enabled=true and the same
+        permission as committing snapshots. Clients opt into acquisition separately using
+        rest.commit.acquire-lock=true; that client option does not enable the table capability.
+        Ownership is the exact commitUser together with the authenticated caller. Contention
+        returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
+        Renewal never revives an expired lease. Publication retains snapshot CAS validation
+        and atomically releases the lease on a new successful commit. A rejected publication
+        does not release the lease. A replay of an already-published snapshot must not release
+        a newer lease. The lease duration is fixed for each scope. There is no unlock RPC.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew:
+    post:
+      tags:
+        - table
+      summary: Renew a table commit lease
+      operationId: renewCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the same permission as committing snapshots. Validate the table incarnation,
+        branch, authenticated caller and exact commitUser against the unexpired lease.
+        Return acquired=false when ownership is lost or the lease has expired; renewal must
+        never acquire a new lease or revive an expired one. Keep leaseMillis fixed within
+        the scope. Each successful new snapshot publication ends its lease.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -3499,6 +3611,39 @@ components:
           $ref: '#/components/schemas/Identifier'
         destination:
           $ref: '#/components/schemas/Identifier'
+    CommitLockRequest:
+      type: object
+      required: [tableId, commitUser]
+      properties:
+        tableId:
+          type: string
+          description: Stable resolved table or branch UUID; a recreated table cannot inherit a lease.
+        commitUser:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Exact commitUser that will appear in the submitted snapshot.
+    CommitLockResponse:
+      type: object
+      required: [acquired, expiresAtMillis, leaseMillis]
+      properties:
+        acquired:
+          type: boolean
+        commitUser:
+          type: [string, "null"]
+        expiresAtMillis:
+          type: integer
+          format: int64
+          description: Server database clock expiration; zero when acquired is false.
+        leaseMillis:
+          type: integer
+          format: int64
+          description: Lease duration in milliseconds, fixed within a scope; zero when acquired is false.
+        snapshot:
+          anyOf:
+            - $ref: '#/components/schemas/Snapshot'
+            - type: "null"
+          description: Authoritative head at grant time; null for an empty table.
     CommitTableRequest:
       type: object
       properties:
@@ -3516,21 +3661,32 @@ components:
       type: object
       description: >-
         tableId identifies the expected table incarnation independently of lock ownership.
-        For rollback within a writer's commit lock, also supply commitUser and fromSnapshot so
-        the server can validate the expected head and owner. Omit commitUser when no writer
-        lock is used, and omit tableId only when its UUID is unavailable.
+        Writer rollback supplies commitUser, fromSnapshot and fromSnapshotUuid regardless of
+        whether the writer acquired a lease. commitUser identifies the writer, not a requirement
+        for a lease to exist. A live lease requires the exact owner and authenticated caller;
+        without a live lease, conditional optimistic rollback is allowed. Snapshot IDs can be
+        reused after rollback, so both expected head fields must be checked against the current
+        head inside the mutation transaction before partition changes or file cleanup. The server
+        must validate table incarnation, admission and expected head, then roll back and clear
+        the lease atomically. Manual rollback may omit writer identity, but cannot change a
+        leased head. Omit tableId only when its UUID is unavailable.
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
         fromSnapshot:
           type: [ integer, "null" ]
           format: int64
+          description: Expected latest snapshot ID, required for writer rollback.
+        fromSnapshotUuid:
+          type: [ string, "null" ]
+          minLength: 1
+          description: Expected latest snapshot UUID; requires fromSnapshot and is required for writer rollback.
         tableId:
           type: [ string, "null" ]
           description: Expected table or branch UUID, independently of commitUser.
         commitUser:
           type: [ string, "null" ]
-          description: Exact owner of the writer's lock.
+          description: Writer identity for admission against any active lease; requires both expected head fields.
     RollbackSchemaRequest:
       type: object
       required:

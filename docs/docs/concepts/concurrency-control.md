@@ -101,6 +101,58 @@ which is stopped when the scope ends, so blocked renewals do not occupy other sc
 threads. Filesystem locks still depend on the storage's atomic publication behavior; they do not
 provide a storage fencing token.
 
+## REST Catalog Commit Leases
+
+Catalog-managed Paimon tables in the REST catalog expose table-bound commit leases through
+`Catalog.createLock` and the unified
+`Lock.acquire` / `Lock.runWithLock` contract. Set the persisted table property
+`rest.commit.lock-enabled = true` to enable server-side lease enforcement. Independently, set
+`rest.commit.acquire-lock = true` in a writer's dynamic options to acquire a lease for each
+publication attempt. Both options default to `false`. Enabling the table capability alone does
+not make clients acquire leases. Requesting acquisition without the table capability fails.
+External tables keep filesystem publication.
+Callers supply their exact `commitUser` and table UUID.
+Leases require the target branch's catalog-resolved UUID. Reload a view switched to another branch
+from the catalog before using leases.
+Lock contention waits until `commit.timeout` when configured, independently of publication retries.
+Scopes share a timer and a cached worker pool. The timer dispatches RPCs to workers so a blocked
+renewal cannot block other scopes' scheduling. Each scope permits only one in-flight renewal and
+cancels its own scheduled and in-flight renewal tasks when it ends, without stopping the shared
+executors. Timer and worker threads exit after one minute of inactivity and restart when needed.
+The timer stays alive while renewal tasks remain scheduled. The client validates the lease's
+monotonic deadline before publishing. A failed operation stops renewal and its lease expires
+automatically. The server keeps the lease duration fixed for each scope; duration changes take effect
+on the next acquisition.
+
+The server must validate the current table incarnation, branch, authenticated caller and exact
+owner, and atomically publish the snapshot and clear the lease. All snapshot writers must honor
+active leases, including writers that do not request one. Each successful snapshot publication
+ends its lease; a later publication must acquire another scope. Snapshot comparison and file
+conflict validation remain necessary.
+
+For a table with lease enforcement disabled, the server can skip lease storage access entirely.
+For a table with enforcement enabled, even writers with `rest.commit.acquire-lock = false` must
+respect another writer's active lease. The server uses its own persisted table property for this
+decision, rather than client options. Capability changes must be serialized with publication and
+lease acquisition; disabling enforcement must not bypass an active lease.
+
+Automatic conflict rollback always supplies the runtime branch and writer's `commitUser`, together
+with the expected head's `fromSnapshot` and `fromSnapshotUuid`. Snapshot IDs can be reused after a
+rollback, so the server must check both fields against the current head inside the mutation
+transaction, before changing partitions or deleting files. Automatic rollback skips legacy snapshots
+without a UUID. A known table or branch UUID is supplied independently of writer identity.
+
+`commitUser` identifies the writer; it does not require a lease to exist. If a live lease exists, the
+writer and authenticated caller must match its owner. Without a live lease, conditional optimistic
+rollback is allowed. The server must validate admission and the expected head, roll back and clear
+the lease atomically. Manual rollback can omit writer identity, but cannot change a leased head.
+The table UUID is omitted only when the target table or branch identity is unknown.
+
+This is a commit admission lease, not a generation or fencing token. Requests with the same
+commit user and authenticated caller share ownership. Use a unique commit user per logical writer
+and preserve it during recovery. A server without the lease protocol rejects acquisition rather
+than silently proceeding without protection.
+
 ## Files conflict
 
 A writer validates file-level changes as well as the snapshot ID. For example, if two compactors

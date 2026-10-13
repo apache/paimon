@@ -196,6 +196,10 @@ public class ResourcePaths {
                 "commit");
     }
 
+    public String commitLock(String databaseName, String objectName) {
+        return table(databaseName, objectName) + "/commit-lock";
+    }
+
     public String rollbackTable(String databaseName, String objectName) {
         return SLASH.join(
                 V1,

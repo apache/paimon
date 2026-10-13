@@ -715,7 +715,7 @@ public interface Catalog extends AutoCloseable {
      * <ul>
      *   <li>{@link #commitSnapshot(Identifier, String, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
-     *   <li>{@link #rollbackTo(Identifier, String, Instant, Long, String)}.
+     *   <li>{@link #rollbackTo(Identifier, String, Instant, Long, String, String)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
      *   <li>{@link #renameBranch(Identifier, String, String)}.
@@ -847,7 +847,8 @@ public interface Catalog extends AutoCloseable {
      * @param instant like snapshotId or tagName
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot
-     * @param commitUser owner of the writer's lock, or null when no writer lock is used
+     * @param fromSnapshotUuid expected head UUID; distinguishes snapshots that reuse the same ID
+     * @param commitUser writer identity for active-lock admission, or null when unavailable
      * @throws Catalog.TableNotExistException if the table does not exist
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
@@ -857,6 +858,7 @@ public interface Catalog extends AutoCloseable {
             @Nullable String tableUuid,
             Instant instant,
             @Nullable Long fromSnapshot,
+            @Nullable String fromSnapshotUuid,
             @Nullable String commitUser)
             throws Catalog.TableNotExistException;
 

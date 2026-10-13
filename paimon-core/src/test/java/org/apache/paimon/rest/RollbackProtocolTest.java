@@ -72,7 +72,7 @@ class RollbackProtocolTest {
                                 .setBody("{}"));
                 String tableUuid = "without-uuid".equals(context) ? null : "table-id";
                 String commitUser = "owned".equals(context) ? "Writer-1" : null;
-                catalog.rollbackTo(identifier, tableUuid, instant, 2L, commitUser);
+                catalog.rollbackTo(identifier, tableUuid, instant, 2L, "head-uuid", commitUser);
                 RecordedRequest recorded = server.takeRequest(10, TimeUnit.SECONDS);
                 assertThat(recorded.getMethod()).isEqualTo("POST");
                 assertThat(recorded.getPath())
@@ -82,6 +82,7 @@ class RollbackProtocolTest {
                 assertThat(payload.get("instant").get("type").asText()).isEqualTo(kind);
                 RollbackTableRequest request = RESTApi.fromJson(body, RollbackTableRequest.class);
                 assertThat(request.getFromSnapshot()).isEqualTo(2L);
+                assertThat(request.getFromSnapshotUuid()).isEqualTo("head-uuid");
                 if ("snapshot".equals(kind)) {
                     assertThat(((Instant.SnapshotInstant) request.getInstant()).getSnapshotId())
                             .isEqualTo(1L);
@@ -100,7 +101,7 @@ class RollbackProtocolTest {
                     assertThat(payload.has("commitUser")).isFalse();
                 }
                 assertThat(payload.size())
-                        .isEqualTo(2 + (tableUuid == null ? 0 : 1) + (commitUser == null ? 0 : 1));
+                        .isEqualTo(3 + (tableUuid == null ? 0 : 1) + (commitUser == null ? 0 : 1));
             }
         }
     }

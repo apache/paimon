@@ -26,6 +26,7 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -44,6 +45,7 @@ import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.SemanticViewManagement;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -403,6 +405,21 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Lock createLock(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            @Nullable String commitUser,
+            Options tableOptions) {
+        return new RESTCatalogLockFactory()
+                .createLock(
+                        CatalogLockContext.fromOptions(context.options()),
+                        identifier,
+                        tableUuid,
+                        commitUser,
+                        tableOptions);
+    }
+
+    @Override
     public Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws TableNotExistException {
         try {
@@ -545,10 +562,12 @@ public class RESTCatalog implements Catalog {
             @Nullable String tableUuid,
             Instant instant,
             @Nullable Long fromSnapshot,
+            @Nullable String fromSnapshotUuid,
             @Nullable String commitUser)
             throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, tableUuid, instant, fromSnapshot, commitUser);
+            api.rollbackTo(
+                    identifier, tableUuid, instant, fromSnapshot, fromSnapshotUuid, commitUser);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(

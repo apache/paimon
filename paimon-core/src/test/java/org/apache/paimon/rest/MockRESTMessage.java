@@ -52,6 +52,7 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -66,6 +67,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -78,6 +81,23 @@ import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 
 /** Mock REST message. */
 public class MockRESTMessage {
+
+    public static void validateRollbackHead(
+            RollbackTableRequest request, @Nullable TableSnapshot current) {
+        if (request.getFromSnapshot() != null
+                && (current == null || request.getFromSnapshot() != current.snapshot().id())) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Latest snapshot %s is not %s",
+                            current == null ? null : current.snapshot().id(),
+                            request.getFromSnapshot()));
+        }
+        if (request.getFromSnapshotUuid() != null
+                && (current == null
+                        || !request.getFromSnapshotUuid().equals(current.snapshot().uuid()))) {
+            throw new IllegalStateException("Latest snapshot UUID changed");
+        }
+    }
 
     public static String databaseName() {
         return "database";
@@ -274,11 +294,11 @@ public class MockRESTMessage {
     }
 
     public static RollbackTableRequest rollbackTableRequestBySnapshot(long snapshotId) {
-        return new RollbackTableRequest(Instant.snapshot(snapshotId), null, null, null);
+        return new RollbackTableRequest(Instant.snapshot(snapshotId), null, null, null, null);
     }
 
     public static RollbackTableRequest rollbackTableRequestByTag(String tagName) {
-        return new RollbackTableRequest(Instant.tag(tagName), null, null, null);
+        return new RollbackTableRequest(Instant.tag(tagName), null, null, null, null);
     }
 
     public static AlterViewRequest alterViewRequest() {
