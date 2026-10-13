@@ -714,7 +714,10 @@ def _open_default_video_decoder(stream, backend=None):
 def _decode_video_frames(decoder, frame_indices, unused_rows):
     get_frames_at = getattr(decoder, "get_frames_at", None)
     if get_frames_at is not None:
-        return get_frames_at(indices=frame_indices).data
+        frames = get_frames_at(indices=frame_indices).data
+        # Iterating a batched tensor returns views backed by the whole batch.
+        # Give each row compact storage before window assembly deep-copies it.
+        return [frame.clone() for frame in frames]
     return [decoder[index] for index in frame_indices]
 
 

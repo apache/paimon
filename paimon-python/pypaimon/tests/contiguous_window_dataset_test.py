@@ -923,7 +923,7 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
 
             def get_frames_at(self, *, indices):
                 decoded.append(tuple(indices))
-                return SimpleNamespace(data=[torch.tensor(index) for index in indices])
+                return SimpleNamespace(data=torch.tensor(indices))
 
         with patch(
                 "pypaimon.multimodal.lerobot.dataset._open_video_decoder",
@@ -943,6 +943,12 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             [[7, 8], [8, 9]],
             [[int(frame) for frame in sample["video"]] for sample in samples],
         )
+        for sample in samples:
+            for frame in sample["video"]:
+                self.assertEqual(
+                    frame.numel() * frame.element_size(),
+                    frame.untyped_storage().nbytes(),
+                )
 
     def test_decodes_encoded_video_windows_with_multiple_workers(self):
         try:
