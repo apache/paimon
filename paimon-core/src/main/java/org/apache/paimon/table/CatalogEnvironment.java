@@ -180,13 +180,22 @@ public class CatalogEnvironment implements Serializable {
                         lockContext, lockIdentifier, uuid, commitUser, tableOptions);
     }
 
+    /** Create rollback with the table incarnation and optional writer lock context. */
     @Nullable
-    public TableRollback catalogTableRollback() {
+    public TableRollback catalogTableRollback(
+            @Nullable String branch, @Nullable String commitUser) {
         if (catalogLoader != null && supportsVersionManagement) {
             Catalog catalog = catalogLoader.load();
+            Identifier rollbackIdentifier =
+                    branch == null
+                            ? identifier
+                            : new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    branch);
             return (instant, fromSnapshot) -> {
                 try {
-                    catalog.rollbackTo(identifier, instant, fromSnapshot);
+                    catalog.rollbackTo(rollbackIdentifier, uuid, instant, fromSnapshot, commitUser);
                 } catch (Catalog.TableNotExistException e) {
                     throw new RuntimeException(e);
                 }
@@ -215,7 +224,7 @@ public class CatalogEnvironment implements Serializable {
         if (catalogLoader == null) {
             return null;
         }
-        return new SnapshotLoaderImpl(catalogLoader, identifier);
+        return new SnapshotLoaderImpl(catalogLoader, identifier, uuid);
     }
 
     @Nullable
@@ -280,7 +289,7 @@ public class CatalogEnvironment implements Serializable {
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
-                uuid,
+                identifier.equals(this.identifier) ? uuid : null,
                 catalogLoader,
                 lockFactory,
                 lockContext,

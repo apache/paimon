@@ -3514,12 +3514,23 @@ components:
             $ref: '#/components/schemas/PartitionStatistics'
     RollbackTableRequest:
       type: object
+      description: >-
+        tableId identifies the expected table incarnation independently of lock ownership.
+        For rollback within a writer's commit lock, also supply commitUser and fromSnapshot so
+        the server can validate the expected head and owner. Omit commitUser when no writer
+        lock is used, and omit tableId only when its UUID is unavailable.
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
         fromSnapshot:
           type: [ integer, "null" ]
           format: int64
+        tableId:
+          type: [ string, "null" ]
+          description: Expected table or branch UUID, independently of commitUser.
+        commitUser:
+          type: [ string, "null" ]
+          description: Exact owner of the writer's lock.
     RollbackSchemaRequest:
       type: object
       required:
