@@ -131,9 +131,16 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 
 
 class JindoInputFile:
-    def __init__(self, jindo_stream, file_size=None):
+    def __init__(self, jindo_stream, file_size=None, owner=None):
         self._stream = jindo_stream
         self._file_size = file_size
+        # Back-reference keeping the handler (and its native JindoSDK
+        # connection) alive: the stream is a non-owning reference into memory
+        # owned by handler._jindo_fs. Without it, dropping the FileIO that
+        # holds the handler (e.g. RESTTokenFileIO's TTLCache maxsize=1
+        # eviction on token refresh) frees the native connection while other
+        # threads still read from this stream.
+        self._owner = owner
         self._closed = False
 
     @property
@@ -184,8 +191,11 @@ class JindoInputFile:
 
 
 class JindoOutputFile:
-    def __init__(self, jindo_stream):
+    def __init__(self, jindo_stream, owner=None):
         self._stream = jindo_stream
+        # See JindoInputFile._owner: keep the native connection alive while
+        # this stream is open.
+        self._owner = owner
         self._closed = False
 
     @property
@@ -373,20 +383,20 @@ class JindoFileSystemHandler(FileSystemHandler):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
-            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            JindoInputFile(jindo_stream, self._known_file_size(normalized), owner=self),
             mode="r")
 
     def open_input_file(self, path: str):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(
-            JindoInputFile(jindo_stream, self._known_file_size(normalized)),
+            JindoInputFile(jindo_stream, self._known_file_size(normalized), owner=self),
             mode="r")
 
     def open_output_stream(self, path: str, metadata):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "wb")
-        return PythonFile(JindoOutputFile(jindo_stream), mode="w")
+        return PythonFile(JindoOutputFile(jindo_stream, owner=self), mode="w")
 
     def open_append_stream(self, path: str, metadata):
         raise IOError("append mode is not supported")
