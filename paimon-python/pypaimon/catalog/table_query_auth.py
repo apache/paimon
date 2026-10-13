@@ -20,7 +20,6 @@ import json
 from typing import Callable, Dict, List, Optional
 
 import pyarrow as pa
-import pyarrow.compute as pc
 
 from pypaimon.common.predicate_json_parser import (
     _collect_all_field_refs_from_transform,
@@ -138,16 +137,13 @@ class TableQueryAuthResult:
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:
             return None
-        filters = [parse_predicate_to_batch_filter(json_str) for json_str in self.filter]
-        if len(filters) == 1:
-            return filters[0]
-
-        def combined(batch: pa.RecordBatch) -> pa.Array:
-            result = filters[0](batch)
-            for f in filters[1:]:
-                result = pc.and_(result, f(batch))
-            return result
-        return combined
+        if len(self.filter) == 1:
+            return parse_predicate_to_batch_filter(self.filter[0])
+        # Java PredicateBuilder.and evaluates entries in their original order.
+        return parse_predicate_to_batch_filter(json.dumps({
+            'kind': 'COMPOUND', 'function': 'AND',
+            'children': [json.loads(rule) for rule in self.filter],
+        }))
 
     def parsed_column_masking(self) -> Dict[str, dict]:
         if not self.column_masking:
