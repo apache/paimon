@@ -90,7 +90,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 FileStoreTable::newWrite);
     }
 
-    StoreSinkWriteImpl(
+    public StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
             StoreSinkWriteState state,
@@ -277,7 +277,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @FunctionalInterface
-    interface TableWriteFactory {
+    public interface TableWriteFactory {
 
         TableWriteImpl<?> create(
                 FileStoreTable table, String commitUser, @Nullable Integer writeId);

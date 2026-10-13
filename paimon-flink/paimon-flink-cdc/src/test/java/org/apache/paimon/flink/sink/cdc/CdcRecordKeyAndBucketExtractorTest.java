@@ -180,6 +180,44 @@ public class CdcRecordKeyAndBucketExtractorTest {
         assertThat(actual.bucket()).isEqualTo(expected.bucket());
     }
 
+    @Test
+    public void testPerPartitionBucketMapping() throws Exception {
+        TableSchema schema = createTableSchema();
+        Map<String, String> data = new HashMap<>();
+        data.put("pt1", "p1");
+        data.put("pt2", "1");
+        data.put("k1", "1");
+        data.put("v1", "10");
+        data.put("k2", "k2");
+        data.put("v2", "v2");
+
+        CdcRecord record = new CdcRecord(RowKind.INSERT, data);
+        CdcRecordKeyAndBucketExtractor partitionExtractor =
+                new CdcRecordKeyAndBucketExtractor(schema);
+        partitionExtractor.setRecord(record);
+
+        Map<BinaryRow, Integer> bucketCounts = new HashMap<>();
+        bucketCounts.put(partitionExtractor.partition().copy(), 2);
+        PartitionBucketMapping mapping = new PartitionBucketMapping(4, bucketCounts);
+
+        FixedBucketRowKeyExtractor expected = new FixedBucketRowKeyExtractor(schema, mapping);
+        expected.setRecord(
+                new FlinkRowWrapper(
+                        GenericRowData.of(
+                                StringData.fromString("p1"),
+                                1,
+                                1L,
+                                10,
+                                StringData.fromString("k2"),
+                                StringData.fromString("v2"))));
+        CdcRecordKeyAndBucketExtractor actual = new CdcRecordKeyAndBucketExtractor(schema, mapping);
+        actual.setRecord(record);
+
+        assertThat(actual.partition()).isEqualTo(expected.partition());
+        assertThat(actual.bucket()).isEqualTo(expected.bucket());
+        assertThat(actual.bucket()).isLessThan(2);
+    }
+
     private TableSchema createTableSchema() throws Exception {
         return SchemaUtils.forceCommit(
                 new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString())),
