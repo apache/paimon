@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
@@ -184,7 +183,7 @@ final class FileIndexFormatV1 {
 
         @Override
         public void close() throws IOException {
-            IOUtils.closeQuietly(dataOutputStream);
+            dataOutputStream.close();
         }
     }
 }
