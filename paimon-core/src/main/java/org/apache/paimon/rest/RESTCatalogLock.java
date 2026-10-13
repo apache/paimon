@@ -102,11 +102,13 @@ public class RESTCatalogLock implements Lock {
         this.nanoTime = nanoTime;
     }
 
-    private static ScheduledExecutorService createRenewalScheduler() {
+    static ScheduledThreadPoolExecutor createRenewalScheduler() {
         ScheduledThreadPoolExecutor executor =
                 new ScheduledThreadPoolExecutor(
                         1, new ExecutorThreadFactory("rest-commit-lock-timer"));
         executor.setRemoveOnCancelPolicy(true);
+        executor.setKeepAliveTime(1, TimeUnit.MINUTES);
+        executor.allowCoreThreadTimeOut(true);
         return executor;
     }
 

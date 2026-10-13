@@ -40,7 +40,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,6 +72,103 @@ class RESTCatalogLockTest {
     private final RESTCatalogLock lock =
             new RESTCatalogLock(
                     api, identifier, "table-id", "morax-job", 0, renewer, workers, clock::get);
+
+    @Test
+    void idleSchedulerCanRestartAfterTheLastLeaseEnds() throws Exception {
+        grant("morax-job", 60000);
+        ScheduledThreadPoolExecutor scheduler = RESTCatalogLock.createRenewalScheduler();
+        scheduler.setKeepAliveTime(10, TimeUnit.MILLISECONDS);
+        RESTCatalogLock realLock =
+                new RESTCatalogLock(
+                        api,
+                        identifier,
+                        "table-id",
+                        "morax-job",
+                        0,
+                        scheduler,
+                        workers,
+                        clock::get);
+        try {
+            Thread firstTimer;
+            try (AutoCloseable ignored = realLock.acquire()) {
+                firstTimer = scheduler.submit(Thread::currentThread).get(10, TimeUnit.SECONDS);
+                realLock.ensureValid();
+            }
+            firstTimer.join(2000);
+            assertThat(firstTimer.isAlive()).isFalse();
+            assertThat(scheduler.getPoolSize()).isZero();
+
+            Thread nextTimer;
+            try (AutoCloseable ignored = realLock.acquire()) {
+                nextTimer = scheduler.submit(Thread::currentThread).get(10, TimeUnit.SECONDS);
+                assertThat(nextTimer).isNotSameAs(firstTimer);
+                realLock.ensureValid();
+            }
+            nextTimer.join(2000);
+            assertThat(nextTimer.isAlive()).isFalse();
+        } finally {
+            scheduler.shutdownNow();
+            assertThat(scheduler.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void closingOneLeaseKeepsTheSharedSchedulerRenewingOtherLeases() throws Exception {
+        grant("morax-job", 3000);
+        CommitLockResponse otherGrant =
+                new CommitLockResponse(true, "other-job", 100000, 3000, null);
+        when(api.acquireCommitLock(identifier, "table-id", "other-job")).thenReturn(otherGrant);
+        CountDownLatch otherRenewed = new CountDownLatch(1);
+        AtomicBoolean firstClosed = new AtomicBoolean();
+        when(api.renewCommitLock(identifier, "table-id", "other-job"))
+                .thenAnswer(
+                        invocation -> {
+                            if (firstClosed.get()) {
+                                otherRenewed.countDown();
+                            }
+                            return otherGrant;
+                        });
+        ScheduledThreadPoolExecutor scheduler = RESTCatalogLock.createRenewalScheduler();
+        scheduler.setKeepAliveTime(10, TimeUnit.MILLISECONDS);
+        RESTCatalogLock firstLock =
+                new RESTCatalogLock(
+                        api,
+                        identifier,
+                        "table-id",
+                        "morax-job",
+                        0,
+                        scheduler,
+                        workers,
+                        clock::get);
+        RESTCatalogLock otherLock =
+                new RESTCatalogLock(
+                        api,
+                        identifier,
+                        "table-id",
+                        "other-job",
+                        0,
+                        scheduler,
+                        workers,
+                        clock::get);
+        Thread timer;
+        try {
+            try (AutoCloseable first = firstLock.acquire();
+                    AutoCloseable other = otherLock.acquire()) {
+                timer = scheduler.submit(Thread::currentThread).get(10, TimeUnit.SECONDS);
+                first.close();
+                firstClosed.set(true);
+                assertThat(otherRenewed.await(10, TimeUnit.SECONDS)).isTrue();
+                otherLock.ensureValid();
+                assertThat(timer.isAlive()).isTrue();
+            }
+            timer.join(2000);
+            assertThat(timer.isAlive()).isFalse();
+            assertThat(scheduler.getQueue()).isEmpty();
+        } finally {
+            scheduler.shutdownNow();
+            assertThat(scheduler.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
 
     @Test
     void callbackIsProtectedAndLeaseEndsOnReturn() throws Exception {

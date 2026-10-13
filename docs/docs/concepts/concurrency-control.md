@@ -118,9 +118,11 @@ Lock contention waits until `commit.timeout` when configured, independently of p
 Scopes share a timer and a cached worker pool. The timer dispatches RPCs to workers so a blocked
 renewal cannot block other scopes' scheduling. Each scope permits only one in-flight renewal and
 cancels its own scheduled and in-flight renewal tasks when it ends, without stopping the shared
-executors. The client validates the lease's monotonic deadline before publishing. A failed operation
-stops renewal and its lease expires automatically. The server keeps the lease duration fixed for each
-scope; duration changes take effect on the next acquisition.
+executors. Timer and worker threads exit after one minute of inactivity and restart when needed.
+The timer stays alive while renewal tasks remain scheduled. The client validates the lease's
+monotonic deadline before publishing. A failed operation stops renewal and its lease expires
+automatically. The server keeps the lease duration fixed for each scope; duration changes take effect
+on the next acquisition.
 
 The server must validate the current table incarnation, branch, authenticated caller and exact
 owner, and atomically publish the snapshot and clear the lease. All snapshot writers must honor
