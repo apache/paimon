@@ -22,6 +22,7 @@ import math
 
 import pyarrow as pa
 
+from pypaimon.casting.temporal_cast import cast_temporal
 from pypaimon.casting.temporal_string import temporal_to_string
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
@@ -122,11 +123,15 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
     Numeric narrowing preserves low bits, while floating-point values truncate
     and saturate to int/long before byte/short narrowing.
     DECIMAL scale reduction uses HALF_UP and returns NULL on precision overflow.
+    LTZ conversions use the process local zone, including Java gap/overlap rules.
     """
     if pa.types.is_string(target_type):
         strings = temporal_to_string(array, source_paimon_type, target_paimon_type)
         if strings is not None:
             return strings
+    converted = cast_temporal(array, target_type, source_paimon_type, target_paimon_type)
+    if converted is not None:
+        return converted
     timestamp = _truncate_timestamp(array, target_type, source_paimon_type, target_paimon_type)
     if timestamp is not None:
         return timestamp

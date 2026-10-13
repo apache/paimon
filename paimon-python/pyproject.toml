@@ -68,7 +68,9 @@ dependencies = [
     "pyroaring<=0.4.5; python_version == '3.7'",
     "pyroaring>=1.0.0,<=1.0.3; python_version == '3.8'",
     "pyroaring>=1.0.0; python_version >= '3.9'",
-    "readerwriterlock>=1,<2",
+    # readerwriterlock 1.0.10 uses positional-only syntax requiring Python 3.8.
+    "readerwriterlock>=1,<1.0.10; python_version < '3.8'",
+    "readerwriterlock>=1,<2; python_version >= '3.8'",
     "requests>=2.21.0,<3",
     "urllib3>=1.26,<3",
     "zstandard>=0.19,<1",

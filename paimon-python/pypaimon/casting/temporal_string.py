@@ -17,33 +17,10 @@
 
 """Java DateTimeUtils text shared by schema evolution and row rendering."""
 
-import time
-
 import pyarrow as pa
 
+from pypaimon.casting.temporal_utils import _epoch_day_to_date, _local_offset
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
-
-
-def _epoch_day_to_date(days):
-    # March-based Gregorian eras, with floor division also for pre-epoch days.
-    days += 719468
-    era, day_of_era = divmod(days, 146097)
-    year_of_era = (day_of_era - day_of_era // 1460 + day_of_era // 36524 - day_of_era // 146096) // 365
-    year = year_of_era + era * 400
-    day_of_year = day_of_era - (365 * year_of_era + year_of_era // 4 - year_of_era // 100)
-    march_month = (5 * day_of_year + 2) // 153
-    day = day_of_year - (153 * march_month + 2) // 5 + 1
-    month = march_month + (3 if march_month < 10 else -9)
-    return year + (month <= 2), month, day
-
-
-def _local_offset(seconds):
-    # Avoid converting the date itself through datetime's 1..9999 year range.
-    local = time.localtime(seconds)
-    offset = getattr(local, 'tm_gmtoff', None)
-    if offset is not None:
-        return offset
-    return -(time.altzone if local.tm_isdst > 0 else time.timezone)
 
 
 def format_timestamp(value, precision, nanos=None):

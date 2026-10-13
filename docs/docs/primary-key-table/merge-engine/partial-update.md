@@ -73,6 +73,8 @@ independent streams update different columns, give each stream its own sequence 
 stream's version does not determine whether the other stream's update is accepted.
 
 Configure `fields.<ordering-field>.sequence-group` with the columns that the version protects.
+Ordering fields cannot be shared by different sequence groups. If multiple fields use the same
+ordering tuple, list those protected value fields in one group.
 This example separates profile updates from score updates:
 
 ```sql
