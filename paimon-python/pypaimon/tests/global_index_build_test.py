@@ -1034,15 +1034,12 @@ class GlobalIndexBuildTest(
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
+        # Row tracking tables with a fixed bucket are rejected at schema validation,
+        # so they can no longer reach the global index builder.
         bucket_options = dict(self.table_options)
         bucket_options['bucket'] = '1'
-        bucket_table = self._create_table(pa_schema=schema, options=bucket_options)
-        with self.assertRaisesRegex(ValueError, 'unaware-bucket'):
-            bucket_table.create_global_index(
-                'embedding',
-                index_type='ivf-flat',
-                options={'ivf-flat.dimension': '2'},
-            )
+        with self.assertRaisesRegex(ValueError, 'it only support bucket = -1'):
+            self._create_table(pa_schema=schema, options=bucket_options)
 
         dv_options = dict(self.table_options)
         dv_options['deletion-vectors.enabled'] = 'true'

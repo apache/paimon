@@ -295,5 +295,96 @@ class TestOptionValidation(unittest.TestCase):
         self.assertNotIn(key, manager.latest().options)
 
 
+class TestRowTrackingValidation(unittest.TestCase):
+    """Row tracking tables must follow Java SchemaValidation#validateRowTracking."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.file_io = FileIO.get(self.temp_dir, Options({}))
+        self.table_path = f"{self.temp_dir}/test_db.db/test_table"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _schema(options=None, primary_keys=None):
+        return Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT", False)),
+                DataField(1, "name", AtomicType("STRING")),
+            ],
+            primary_keys=primary_keys or [],
+            options=options or {},
+        )
+
+    def test_create_rejects_row_tracking_with_fixed_or_postpone_bucket(self):
+        manager = SchemaManager(self.file_io, self.table_path)
+        for bucket in ["1", "16", "-2"]:
+            with self.subTest(bucket=bucket):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "Cannot define bucket for row tracking table, "
+                    "it only support bucket = -1",
+                ):
+                    manager.create_table(self._schema({
+                        "row-tracking.enabled": "true",
+                        "bucket": bucket,
+                    }))
+        self.assertIsNone(manager.latest())
+
+    def test_create_rejects_row_tracking_with_primary_key(self):
+        manager = SchemaManager(self.file_io, self.table_path)
+        with self.assertRaisesRegex(
+            ValueError, "Cannot define primary-key for row tracking table"
+        ):
+            manager.create_table(self._schema(
+                {"row-tracking.enabled": "true"}, primary_keys=["id"]))
+        self.assertIsNone(manager.latest())
+
+    def test_create_allows_row_tracking_with_unaware_bucket(self):
+        for options in [
+            {"row-tracking.enabled": "true"},
+            {"row-tracking.enabled": "true", "bucket": "-1"},
+            {"row-tracking.enabled": "true", "data-evolution.enabled": "true"},
+        ]:
+            with self.subTest(options=options):
+                temp_dir = tempfile.mkdtemp(dir=self.temp_dir)
+                manager = SchemaManager(self.file_io, f"{temp_dir}/t")
+                manager.create_table(self._schema(options))
+                self.assertEqual(manager.latest().id, 0)
+
+    def test_create_rejects_data_evolution_without_row_tracking(self):
+        manager = SchemaManager(self.file_io, self.table_path)
+        for options in [
+            {"data-evolution.enabled": "true"},
+            {"data-evolution.enabled": "true", "row-tracking.enabled": "false"},
+        ]:
+            with self.subTest(options=options):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "Data evolution config must enabled with row-tracking.enabled",
+                ):
+                    manager.create_table(self._schema(options))
+        self.assertIsNone(manager.latest())
+
+    def test_create_allows_fixed_bucket_without_row_tracking(self):
+        manager = SchemaManager(self.file_io, self.table_path)
+        manager.create_table(self._schema({"bucket": "4"}, primary_keys=["id"]))
+        self.assertEqual(manager.latest().id, 0)
+
+    def test_alter_rejects_enabling_row_tracking_on_fixed_bucket_table(self):
+        manager = SchemaManager(self.file_io, self.table_path)
+        manager.create_table(self._schema({"bucket": "4"}, primary_keys=["id"]))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot define primary-key for row tracking table"
+        ):
+            manager.commit_changes([SetOption("row-tracking.enabled", "true")])
+
+        self.assertEqual(manager.latest().id, 0)
+        self.assertNotIn("row-tracking.enabled", manager.latest().options)
+
+
 if __name__ == '__main__':
     unittest.main()
