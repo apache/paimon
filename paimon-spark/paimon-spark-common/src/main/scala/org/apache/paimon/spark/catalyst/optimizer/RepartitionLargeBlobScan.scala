@@ -34,7 +34,7 @@ import org.apache.spark.sql.internal.SQLConf
 import scala.collection.JavaConverters._
 
 /** Redistributes oversized scan partitions for downstream operators, preserving the scan itself. */
-object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
+object RepartitionLargeBlobScan extends Rule[LogicalPlan] {
 
   // injectOptimizerRule runs before V2 scan pushdown. The final user-provided optimizer batch
   // runs after it, so register there as well when Spark initializes its optimizer rules.
@@ -48,7 +48,7 @@ object RepartitionLargePaimonScan extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     if (
       !OptionUtils
-        .getOptionString(SparkConnectorOptions.READ_REPARTITION_LARGE_SCAN_ENABLED)
+        .getOptionString(SparkConnectorOptions.READ_REPARTITION_LARGE_BLOB_SCAN_ENABLED)
         .toBoolean
     ) {
       return plan

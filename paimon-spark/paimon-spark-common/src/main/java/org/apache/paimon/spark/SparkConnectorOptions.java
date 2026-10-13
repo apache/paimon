@@ -168,8 +168,8 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to allow full scan when reading a partitioned table.");
 
-    public static final ConfigOption<Boolean> READ_REPARTITION_LARGE_SCAN_ENABLED =
-            key("read.repartition-large-scan.enabled")
+    public static final ConfigOption<Boolean> READ_REPARTITION_LARGE_BLOB_SCAN_ENABLED =
+            key("read.repartition-large-blob-scan.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(

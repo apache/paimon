@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.manifest.FileSource
-import org.apache.paimon.spark.catalyst.optimizer.RepartitionLargePaimonScan
+import org.apache.paimon.spark.catalyst.optimizer.RepartitionLargeBlobScan
 import org.apache.paimon.table.InnerTable
 import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.types.{DataField, DataType, DataTypes, RowType}
@@ -39,10 +39,10 @@ import java.util.Collections
 import scala.collection.JavaConverters._
 
 /** Rule tests with synthetic metadata and query regressions for file context and runtime pruning. */
-class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
+class RepartitionLargeBlobScanTest extends PaimonSparkTestBase {
 
   private val enabledKey =
-    s"spark.paimon.${SparkConnectorOptions.READ_REPARTITION_LARGE_SCAN_ENABLED.key()}"
+    s"spark.paimon.${SparkConnectorOptions.READ_REPARTITION_LARGE_BLOB_SCAN_ENABLED.key()}"
 
   test("input-file expressions in projections and filters skip scan planning") {
     withSplitConf {
@@ -50,11 +50,11 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
         expression =>
           val scan = relation(Seq(Seq(120L)), failOnPlanning = true)
           val projection = Project(Seq(Alias(expression, "file_info")()), scan)
-          assert(RepartitionLargePaimonScan(projection) eq projection)
+          assert(RepartitionLargeBlobScan(projection) eq projection)
           val filter = Filter(IsNotNull(expression), scan)
-          assert(RepartitionLargePaimonScan(filter) eq filter)
+          assert(RepartitionLargeBlobScan(filter) eq filter)
           val aliasProjection = Project(projection.output, projection)
-          assert(RepartitionLargePaimonScan(aliasProjection) == aliasProjection)
+          assert(RepartitionLargeBlobScan(aliasProjection) == aliasProjection)
       }
     }
   }
@@ -65,14 +65,14 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
       val filter = Filter(
         And(DynamicPruningExpression(Literal(true)), GreaterThan(scan.output.head, Literal(0))),
         scan)
-      val result = RepartitionLargePaimonScan(filter).asInstanceOf[Repartition]
+      val result = RepartitionLargeBlobScan(filter).asInstanceOf[Repartition]
       assert(result.numPartitions == 3)
       assert(result.child eq filter)
-      assert(RepartitionLargePaimonScan(result) eq result)
+      assert(RepartitionLargeBlobScan(result) eq result)
 
       val fileProjection = Project(Seq(Alias(InputFileName(), "file_name")()), scan)
       val fileFilter = Filter(DynamicPruningExpression(Literal(true)), fileProjection)
-      assert(RepartitionLargePaimonScan(fileFilter) eq fileFilter)
+      assert(RepartitionLargeBlobScan(fileFilter) eq fileFilter)
     }
   }
 
@@ -163,7 +163,7 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
       Seq(None, Some(DataTypes.BYTES())).foreach {
         blobType =>
           val scan = relation(Seq(Seq(120L)), failOnPlanning = true, blobType = blobType)
-          assert(RepartitionLargePaimonScan(scan) eq scan)
+          assert(RepartitionLargeBlobScan(scan) eq scan)
       }
     }
   }
@@ -177,7 +177,7 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
         blobType =>
           val scan = relation(Seq(Seq(120L), Seq(30L)), blobType = Some(blobType))
           assert(scan.scan.readSchema().fieldNames.toSeq == Seq("a"))
-          assert(RepartitionLargePaimonScan(scan).asInstanceOf[Repartition].numPartitions == 3)
+          assert(RepartitionLargeBlobScan(scan).asInstanceOf[Repartition].numPartitions == 3)
       }
     }
   }
@@ -185,36 +185,36 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
   test("disabled by default without planning scan partitions") {
     assert(spark.conf.getOption(enabledKey).isEmpty)
     val scan = relation(Seq(Seq(120L)), failOnPlanning = true)
-    assert(RepartitionLargePaimonScan(scan) eq scan)
+    assert(RepartitionLargeBlobScan(scan) eq scan)
   }
 
   test("explicitly disabling the rule avoids planning scan partitions") {
     withSplitConf {
       withSparkSQLConf(enabledKey -> "false") {
         val scan = relation(Seq(Seq(120L)), failOnPlanning = true)
-        assert(RepartitionLargePaimonScan(scan) eq scan)
+        assert(RepartitionLargeBlobScan(scan) eq scan)
       }
       val enabled = relation(Seq(Seq(120L), Seq(30L)))
-      assert(RepartitionLargePaimonScan(enabled).asInstanceOf[Repartition].numPartitions == 3)
+      assert(RepartitionLargeBlobScan(enabled).asInstanceOf[Repartition].numPartitions == 3)
     }
   }
 
   test("partition size includes all splits and exact threshold does not trigger") {
     withSplitConf {
       val fits = relation(Seq(Seq(50L, 50L), Seq(80L)))
-      assert(RepartitionLargePaimonScan(fits) eq fits)
+      assert(RepartitionLargeBlobScan(fits) eq fits)
       val oversized = relation(Seq(Seq(60L, 60L), Seq(30L)))
-      val result = RepartitionLargePaimonScan(oversized).asInstanceOf[Repartition]
+      val result = RepartitionLargeBlobScan(oversized).asInstanceOf[Repartition]
       assert(result.numPartitions == 3)
       assert(result.shuffle)
       assert(result.child eq oversized)
-      assert(RepartitionLargePaimonScan(result) eq result)
+      assert(RepartitionLargeBlobScan(result) eq result)
     }
   }
 
   test("repartition count includes small partitions and rounds up") {
     withSplitConf {
-      val result = RepartitionLargePaimonScan(relation(Seq(Seq(101L), Seq(25L), Seq(25L))))
+      val result = RepartitionLargeBlobScan(relation(Seq(Seq(101L), Seq(25L), Seq(25L))))
       assert(result.asInstanceOf[Repartition].numPartitions == 4)
     }
   }
@@ -225,7 +225,7 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
         "spark.sql.files.maxPartitionBytes" -> "1000b",
         "spark.sql.files.minPartitionNum" -> "4") {
         val scan = relation(Seq(Seq(80L), Seq(20L)))
-        assert(RepartitionLargePaimonScan(scan) eq scan)
+        assert(RepartitionLargeBlobScan(scan) eq scan)
       }
     }
   }
@@ -238,7 +238,7 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
         Map("source.split.target-size" -> "64kb"))
       // The oversized partition triggers the size check, but ceil(262164 / 65536) = 5
       // would reduce the existing 21 input partitions. Preserve the scan without a shuffle.
-      assert(RepartitionLargePaimonScan(scan) eq scan)
+      assert(RepartitionLargeBlobScan(scan) eq scan)
     }
   }
 
@@ -247,7 +247,7 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
       val scan = relation(
         Seq(Seq(256L * 1024)) ++ Seq.fill(4)(Seq(1L)),
         Map("source.split.target-size" -> "64kb"))
-      assert(RepartitionLargePaimonScan(scan) eq scan)
+      assert(RepartitionLargeBlobScan(scan) eq scan)
     }
   }
 
@@ -257,8 +257,8 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
         "spark.sql.files.openCostInBytes" -> "1000b",
         "spark.sql.files.minPartitionNum" -> "10") {
         val fits = relation(Seq(Seq(80L), Seq(20L)))
-        assert(RepartitionLargePaimonScan(fits) eq fits)
-        val result = RepartitionLargePaimonScan(relation(Seq(Seq(101L), Seq(50L))))
+        assert(RepartitionLargeBlobScan(fits) eq fits)
+        val result = RepartitionLargeBlobScan(relation(Seq(Seq(101L), Seq(50L))))
         assert(result.asInstanceOf[Repartition].numPartitions == 4)
       }
     }
@@ -269,16 +269,16 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
       val scan = relation(
         Seq(Seq(80L), Seq(20L)),
         Map("source.split.target-size" -> "25b", "source.split.open-file-cost" -> "0b"))
-      assert(RepartitionLargePaimonScan(scan).asInstanceOf[Repartition].numPartitions == 4)
+      assert(RepartitionLargeBlobScan(scan).asInstanceOf[Repartition].numPartitions == 4)
     }
   }
 
   test("preserve an existing shuffle and leave empty scans unchanged") {
     withSplitConf {
       val existing = Repartition(7, shuffle = true, relation(Seq(Seq(120L))))
-      assert(RepartitionLargePaimonScan(existing) eq existing)
+      assert(RepartitionLargeBlobScan(existing) eq existing)
       val empty = relation(Seq.empty)
-      assert(RepartitionLargePaimonScan(empty) eq empty)
+      assert(RepartitionLargeBlobScan(empty) eq empty)
     }
   }
 
@@ -286,9 +286,9 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
     withSplitConf {
       withSparkSQLConf("spark.sql.files.maxPartitionBytes" -> s"${Long.MaxValue}b") {
         val fits = relation(Seq(Seq(Long.MaxValue, Long.MaxValue)))
-        assert(RepartitionLargePaimonScan(fits) eq fits)
+        assert(RepartitionLargeBlobScan(fits) eq fits)
         val oversized = relation(Seq(Seq(Long.MaxValue, Long.MaxValue, Long.MaxValue)))
-        assert(RepartitionLargePaimonScan(oversized).asInstanceOf[Repartition].numPartitions == 3)
+        assert(RepartitionLargeBlobScan(oversized).asInstanceOf[Repartition].numPartitions == 3)
       }
     }
   }
@@ -297,7 +297,7 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
     withSplitConf {
       withSparkSQLConf("spark.sql.files.maxPartitionBytes" -> "1b") {
         val error = intercept[IllegalArgumentException] {
-          RepartitionLargePaimonScan(relation(Seq(Seq(Long.MaxValue))))
+          RepartitionLargeBlobScan(relation(Seq(Seq(Long.MaxValue))))
         }
         assert(error.getMessage.contains("exceeds"))
       }
@@ -309,14 +309,14 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
     val pushdownIndex = batches.indexWhere(_.name == "Early Filter and Projection Push-Down")
     val lateIndex = batches.indexWhere {
       batch =>
-        batch.rules.contains(RepartitionLargePaimonScan) &&
+        batch.rules.contains(RepartitionLargeBlobScan) &&
         batch.name == "User Provided Optimizers"
     }
     assert(pushdownIndex >= 0)
     assert(lateIndex > pushdownIndex)
-    RepartitionLargePaimonScan.register(spark)
-    RepartitionLargePaimonScan.register(spark)
-    assert(spark.experimental.extraOptimizations.count(_ == RepartitionLargePaimonScan) == 1)
+    RepartitionLargeBlobScan.register(spark)
+    RepartitionLargeBlobScan.register(spark)
+    assert(spark.experimental.extraOptimizations.count(_ == RepartitionLargeBlobScan) == 1)
     withSplitConf {
       val scan = relation(Seq(Seq(120L), Seq(30L)))
       val result = batches(lateIndex).rules.foldLeft(
@@ -328,7 +328,7 @@ class RepartitionLargePaimonScanTest extends PaimonSparkTestBase {
   test("non-Paimon plans are unchanged") {
     withSplitConf {
       val plan = spark.range(10).queryExecution.optimizedPlan
-      assert(RepartitionLargePaimonScan(plan) eq plan)
+      assert(RepartitionLargeBlobScan(plan) eq plan)
     }
   }
 

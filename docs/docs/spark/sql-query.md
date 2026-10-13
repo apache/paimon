@@ -172,10 +172,10 @@ To inspect row kinds, including deletes, query the [`audit_log` system table](..
 This optimization is disabled by default. Enable it for the Spark session with:
 
 ```sql
-SET spark.paimon.read.repartition-large-scan.enabled = true;
+SET spark.paimon.read.repartition-large-blob-scan.enabled = true;
 ```
 
-Set it to `false` to disable `RepartitionLargePaimonScan`. When disabled, the rule
+Set it to `false` to disable `RepartitionLargeBlobScan`. When disabled, the rule
 returns the plan unchanged without planning scan splits or input partitions.
 
 This rule only applies to tables whose full schema contains a `BLOB`, `ARRAY<BLOB>`,
