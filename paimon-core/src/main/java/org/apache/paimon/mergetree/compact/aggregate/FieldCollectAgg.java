@@ -33,8 +33,8 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.function.BiFunction;
 
@@ -46,12 +46,14 @@ public class FieldCollectAgg extends FieldAggregator {
     private static final long serialVersionUID = 1L;
 
     private final boolean distinct;
+    private final int countLimit;
     private final InternalArray.ElementGetter elementGetter;
     @Nullable private final BiFunction<Object, Object, Boolean> equaliser;
 
-    public FieldCollectAgg(String name, ArrayType dataType, boolean distinct) {
+    public FieldCollectAgg(String name, ArrayType dataType, boolean distinct, int countLimit) {
         super(name, dataType);
         this.distinct = distinct;
+        this.countLimit = countLimit;
         this.elementGetter = InternalArray.createElementGetter(dataType.getElementType());
 
         // The equaliser is built from the element type alone: retract() needs it whether or not
@@ -95,69 +97,82 @@ public class FieldCollectAgg extends FieldAggregator {
 
     @Override
     public Object aggReversed(Object accumulator, Object inputField) {
-        // we don't need to actually do the reverse here for this agg
-        // because accumulator has been distinct, just let accumulator be accumulator will speed up
-        // distinct process
-        return agg(accumulator, inputField);
+        if (countLimit != Integer.MAX_VALUE) {
+            // order is important with limit
+            return agg(inputField, accumulator, true);
+        } else {
+            // we don't need to actually do the reverse here for this agg
+            // because accumulator has been distinct, just let accumulator be accumulator will speed
+            // up
+            // distinct process
+            return agg(accumulator, inputField, false);
+        }
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null && inputField == null) {
+        return agg(accumulator, inputField, false);
+    }
+
+    private Object agg(Object accumulator, Object inputField, boolean accumulatorHasDuplicate) {
+        InternalArray accumulatorArray = (InternalArray) accumulator;
+        InternalArray inputArray = (InternalArray) inputField;
+
+        if (accumulatorArray == null && inputArray == null) {
             return null;
+        } else if (inputArray == null
+                && !distinct
+                && accumulatorArray.size() <= Math.abs(countLimit)) {
+            return accumulatorArray;
+        } else if (accumulatorArray == null
+                && !distinct
+                && inputArray.size() <= Math.abs(countLimit)) {
+            return inputArray;
         }
 
-        if ((accumulator == null || inputField == null) && !distinct) {
-            return accumulator == null ? inputField : accumulator;
-        }
-
-        if (distinct && equaliser != null) {
-            List<Object> collection = new ArrayList<>();
-            // do not need to distinct accumulator, because the accumulator is always distinct, no
-            // need to distinct it every time
-            collect(collection, accumulator);
-            collectWithEqualiser(collection, inputField);
+        boolean removeDuplicate = distinct && equaliser != null;
+        Collection<Object> collection =
+                distinct && equaliser == null ? new LinkedHashSet<>() : new ArrayList<>();
+        if (countLimit >= 0) {
+            collect(collection, accumulatorArray, removeDuplicate && accumulatorHasDuplicate);
+            collect(collection, inputArray, removeDuplicate);
             return new GenericArray(collection.toArray());
         } else {
-            Collection<Object> collection = distinct ? new HashSet<>() : new ArrayList<>();
-            collect(collection, accumulator);
-            collect(collection, inputField);
-            return new GenericArray(collection.toArray());
+            collect(collection, inputArray, removeDuplicate);
+            collect(collection, accumulatorArray, removeDuplicate);
+            List<Object> result =
+                    collection instanceof List
+                            ? (List<Object>) collection
+                            : new ArrayList<>(collection);
+            Collections.reverse(result);
+            return new GenericArray(result.toArray());
         }
     }
 
-    private void collect(Collection<Object> collection, @Nullable Object data) {
-        if (data == null) {
+    private void collect(
+            Collection<Object> collection, @Nullable InternalArray array, boolean removeDuplicate) {
+        if (array == null) {
             return;
         }
 
-        InternalArray array = (InternalArray) data;
-        for (int i = 0; i < array.size(); i++) {
-            collection.add(elementGetter.getElementOrNull(array, i));
-        }
-    }
-
-    private void collectWithEqualiser(List<Object> list, Object data) {
-        if (data == null) {
-            return;
-        }
-
-        InternalArray array = (InternalArray) data;
-        for (int i = 0; i < array.size(); i++) {
-            Object element = elementGetter.getElementOrNull(array, i);
-            if (!contains(list, element)) {
-                list.add(element);
+        int limit = Math.abs(countLimit);
+        for (int i = 0; i < array.size() && collection.size() < limit; i++) {
+            Object element =
+                    elementGetter.getElementOrNull(
+                            array, countLimit < 0 ? array.size() - 1 - i : i);
+            if (!(removeDuplicate && contains(collection, element))) {
+                collection.add(element);
             }
         }
     }
 
-    private boolean contains(List<Object> list, @Nullable Object element) {
+    private boolean contains(Collection<Object> list, @Nullable Object element) {
         if (element == null) {
             return list.contains(null);
         }
 
         for (Object o : list) {
-            if (equaliser.apply(o, element)) {
+            if (equals(o, element)) {
                 return true;
             }
         }

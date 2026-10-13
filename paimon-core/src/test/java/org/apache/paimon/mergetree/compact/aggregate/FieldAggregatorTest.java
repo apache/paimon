@@ -2140,6 +2140,50 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldCollectAggWithCountLimit() {
+        DataType[] elementTypes = {DataTypes.INT(), RowType.of(DataTypes.INT())};
+        for (DataType elementType : elementTypes) {
+            assertCollectCountLimit(elementType, false, 3, 2, 1, 2);
+            assertCollectCountLimit(elementType, true, 3, 2, 1, 3);
+            assertCollectCountLimit(elementType, false, -3, 3, 3, 1);
+            assertCollectCountLimit(elementType, true, -3, 2, 3, 1);
+            assertCollectCountLimit(elementType, false, 0);
+            assertCollectCountLimit(elementType, true, 0);
+        }
+    }
+
+    private void assertCollectCountLimit(
+            DataType elementType, boolean distinct, int countLimit, int... expected) {
+        Map<String, String> config = new HashMap<>();
+        config.put("fields.fieldName.distinct", Boolean.toString(distinct));
+        config.put("fields.fieldName.count-limit", Integer.toString(countLimit));
+        CoreOptions options = CoreOptions.fromMap(config);
+        ArrayType arrayType = DataTypes.ARRAY(elementType);
+        FieldCollectAgg agg = new FieldCollectAggFactory().create(arrayType, options, "fieldName");
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(elementType);
+        Object[] expectedElements = makeArray(elementType, expected).toObjectArray();
+
+        InternalArray input = makeArray(elementType, 2, 1, 2, 3, 3, 1);
+        InternalArray single = (InternalArray) agg.agg(null, input);
+        assertThat(unnest(single, elementGetter)).containsExactly(expectedElements);
+
+        InternalArray older = makeArray(elementType, 2, 1, 2);
+        InternalArray newer = makeArray(elementType, 3, 3, 1);
+        InternalArray forward = (InternalArray) agg.agg(older, newer);
+        InternalArray reversed = (InternalArray) agg.aggReversed(newer, older);
+        assertThat(unnest(forward, elementGetter)).containsExactly(expectedElements);
+        assertThat(unnest(reversed, elementGetter)).containsExactly(expectedElements);
+    }
+
+    private GenericArray makeArray(DataType elementType, int... values) {
+        Object[] elements = new Object[values.length];
+        for (int i = 0; i < values.length; i++) {
+            elements[i] = elementType instanceof RowType ? GenericRow.of(values[i]) : values[i];
+        }
+        return new GenericArray(elements);
+    }
+
+    @Test
     public void testFieldCollectAggWithDistinct() {
         FieldCollectAgg agg =
                 new FieldCollectAggFactory()
