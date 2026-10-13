@@ -48,7 +48,7 @@ from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 ])
 def test_write_builder_creates_row_id_updater_with_commit_identity(
         stream, commit_identifier):
-    table = mock.Mock()
+    table = mock.Mock(is_primary_key_table=False)
     table.options.commit_user_prefix.return_value = None
     files_info = mock.Mock(
         snapshot_id=42,

@@ -276,6 +276,12 @@ class MapType(DataType):
         return "MAP<{}, {}>{}".format(self.key, self.value, null_suffix)
 
 
+def is_floating_type(data_type: DataType) -> bool:
+    """Recognize FLOAT/DOUBLE case-insensitively, including NOT NULL type strings."""
+    return (isinstance(data_type, AtomicType)
+            and data_type.type.upper().split('(')[0].split(' ')[0] in ('FLOAT', 'DOUBLE'))
+
+
 def is_blob_type(data_type: DataType) -> bool:
     return isinstance(data_type, AtomicType) and data_type.type.upper() == 'BLOB'
 

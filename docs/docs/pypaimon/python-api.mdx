@@ -24,6 +24,8 @@ under the License.
 
 # Python API
 
+Existing tables whose primary keys, excluding partition columns, include FLOAT or DOUBLE require an explicit ordering acknowledgement before Python reads or writes. New Python tables set it automatically. See [Floating primary-key upgrades](./floating-key-migration.md).
+
 Use the Python API to manage catalogs and control table reads, writes, and commits. Start with the [quick start](./quick-start) for a runnable example. For a compact interface to text, vector, and BLOB data, see the [Multimodal API](./multimodal-api).
 
 | Task | Guide |

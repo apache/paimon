@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 class WriteBuilder(ABC):
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.common.floating_key_order import check_floating_key_order
 
+        check_floating_key_order(table)
         self.table: FileStoreTable = table
         self.commit_user = self._create_commit_user()
         self.restore_snapshot_id = None

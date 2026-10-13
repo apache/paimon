@@ -109,6 +109,17 @@ class NestedKeyNullStrategy(str, Enum):
 class CoreOptions:
     """Core options for Paimon tables."""
 
+    PYTHON_FLOATING_KEY_ORDER: ConfigOption[str] = (
+        ConfigOptions.key("python.floating-key-order")
+        .string_type()
+        .no_default_value()
+        .with_description("Explicit acknowledgement of Java-compatible floating primary-key "
+                          "ordering (java-v1): null < -Infinity < ... < -0.0 < +0.0 < ... "
+                          "< +Infinity < NaN; all NaNs compare equal. New Python tables with "
+                          "FLOAT/DOUBLE primary keys after excluding partition columns set this "
+                          "automatically. Sequence-only and value columns do not require it.")
+    )
+
     # Options that define the table's structure/identity and cannot be changed
     # once the table has snapshots. Mirrors the @Immutable annotated options in
     # the Java org.apache.paimon.CoreOptions (IMMUTABLE_OPTIONS).

@@ -153,7 +153,9 @@ class TableRead:
     ):
         from pypaimon.read.merge_engine_support import check_supported
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.common.floating_key_order import check_floating_key_order
 
+        check_floating_key_order(table)
         # Invalid configurations still fail immediately. Rust supports merge
         # options outside the Python subset; defer only that capability check
         # until a read actually needs the Python implementation.

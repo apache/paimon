@@ -23,7 +23,7 @@ from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
-from pypaimon.schema.data_types import AtomicType, DataField, Keyword
+from pypaimon.schema.data_types import AtomicType, DataField, Keyword, is_floating_type
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.key_value import KeyValue
@@ -220,7 +220,7 @@ def _row_field_comparator(
     FLOAT/DOUBLE fields use Java's NaN and signed-zero ordering.
     """
     comparable_flags = [_base_type_name(fields[idx]) in _COMPARABLE_TYPE_NAMES for idx in indices]
-    floating_flags = [_base_type_name(fields[idx]) in ('FLOAT', 'DOUBLE') for idx in indices]
+    floating_flags = [is_floating_type(fields[idx].type) for idx in indices]
     sign = 1 if ascending else -1
 
     def comparator(row1: InternalRow, row2: InternalRow) -> int:

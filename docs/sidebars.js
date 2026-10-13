@@ -392,6 +392,7 @@ const sidebars = {
           "pypaimon/writing",
           "pypaimon/reading",
           "pypaimon/streaming",
+          "pypaimon/floating-key-migration",
           "pypaimon/data-types",
           "pypaimon/manage-tags",
           "pypaimon/branches"

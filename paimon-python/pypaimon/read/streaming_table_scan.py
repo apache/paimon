@@ -85,6 +85,9 @@ class AsyncStreamingTableScan:
         consumer_id: Optional[str] = None
     ):
         """Initialize the streaming table scan."""
+        from pypaimon.common.floating_key_order import check_floating_key_order
+
+        check_floating_key_order(table)
         self.table = table
         self.predicate = predicate
         self.poll_interval = poll_interval_ms / 1000.0
@@ -474,6 +477,9 @@ class StreamTableScan:
     def __init__(self, table, predicate=None, read_type=None, poll_interval_ms=1000,
                  bucket_filter=None, consumer_id=None):
         from pypaimon.read.native_plan import native_stream_scan
+        from pypaimon.common.floating_key_order import check_floating_key_order
+
+        check_floating_key_order(table)
         self.table = table
         self.poll_interval = poll_interval_ms / 1000.0
         self._scan = native_stream_scan(

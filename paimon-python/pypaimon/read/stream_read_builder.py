@@ -127,6 +127,9 @@ class StreamReadBuilder:
 
     def new_streaming_scan(self) -> Union[AsyncStreamingTableScan, StreamTableScan]:
         """Create a stateful streaming scan using the configured backend."""
+        from pypaimon.common.floating_key_order import check_floating_key_order
+
+        check_floating_key_order(self.table)
         projection = self._projection_builder()
         projection._validate_map_key_filter()
         if (self.table.options.native_plan_enabled()

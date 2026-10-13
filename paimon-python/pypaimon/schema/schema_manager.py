@@ -33,6 +33,7 @@ from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         is_blob_file_type, is_blob_type,
                                         is_map_blob_type, reassign_field_id)
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_options import prepare_schema_for_create, validate_schema_options
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
                                            RenameColumn, SchemaChange,
                                            SetOption, UpdateColumnComment,
@@ -468,21 +469,6 @@ def _validate_blob_fields(
             )
 
 
-def _validate_options(options: dict):
-    core_options = CoreOptions(Options(options))
-    target_file_row_num = core_options.target_file_row_num()
-    max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
-    if target_file_row_num < 1:
-        raise ValueError(
-            f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} should be at least 1"
-        )
-    if target_file_row_num > max_value:
-        raise ValueError(
-            f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} "
-            f"should be at most {max_value}"
-        )
-
-
 def _contains_blob_type(data_type: DataType) -> bool:
     if is_blob_type(data_type):
         return True
@@ -661,13 +647,13 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
-            table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
+            table_schema = TableSchema.from_schema(schema_id=0, schema=prepare_schema_for_create(schema))
             success = self.commit(table_schema)
             if success:
                 return table_schema
 
     def commit(self, new_schema: TableSchema) -> bool:
-        _validate_options(new_schema.options)
+        validate_schema_options(new_schema.options)
         _validate_blob_fields(
             new_schema.fields,
             new_schema.options,

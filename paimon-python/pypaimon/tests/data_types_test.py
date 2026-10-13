@@ -21,10 +21,26 @@ import pyarrow as pa
 
 from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, MultisetType, MapType,
                                         RowType, VectorType, PyarrowFieldParser, DataTypeParser,
-                                        is_blob_file_type)
+                                        is_blob_file_type, is_floating_type)
 
 
 class DataTypesTest(unittest.TestCase):
+    @parameterized.expand([
+        'FLOAT', 'DOUBLE', 'float', 'double', 'FlOaT', 'DoUbLe',
+        'FLOAT NOT NULL', 'DOUBLE NOT NULL', 'float not null', 'double not null',
+        'FlOaT NoT NuLl', 'DoUbLe NoT NuLl',
+    ])
+    def test_is_floating_type_case_and_nullability(self, type_name: str) -> None:
+        for nullable in (True, False):
+            with self.subTest(nullable=nullable):
+                self.assertTrue(is_floating_type(AtomicType(type_name, nullable)))
+
+    def test_is_floating_type_rejects_other_types(self) -> None:
+        for data_type in (AtomicType('int'), AtomicType('decimal(10,2)'),
+                          AtomicType('VARIANT'), ArrayType(True, AtomicType('FLOAT'))):
+            with self.subTest(data_type=data_type):
+                self.assertFalse(is_floating_type(data_type))
+
     def test_large_string_schema_preserves_field_contract(self):
         from pypaimon.schema.schema import Schema
 

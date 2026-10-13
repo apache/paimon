@@ -54,7 +54,9 @@ class TableScan:
         partition_predicate: Optional[Predicate] = None,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.common.floating_key_order import check_floating_key_order
 
+        check_floating_key_order(table)
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit

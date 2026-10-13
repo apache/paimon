@@ -275,10 +275,12 @@ class RESTCatalog(Catalog):
         return sys_table
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
+        from pypaimon.schema.schema_options import prepare_schema_for_create
+
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            self.rest_api.create_table(identifier, schema)
+            self.rest_api.create_table(identifier, prepare_schema_for_create(schema))
         except AlreadyExistsException as e:
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
