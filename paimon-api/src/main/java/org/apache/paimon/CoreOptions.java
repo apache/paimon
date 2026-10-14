@@ -3500,6 +3500,13 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
+    public int fieldCollectAggCountLimit(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + COUNT_LIMIT)
+                        .intType()
+                        .defaultValue(Integer.MAX_VALUE));
+    }
+
     public String fieldListAggDelimiter(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER)
