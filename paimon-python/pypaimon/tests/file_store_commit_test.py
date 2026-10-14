@@ -395,6 +395,45 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
         )
 
+    def test_legacy_snapshot_identity_includes_manifest_references(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        """Without uuids, the commit fields alone do not identify a snapshot.
+
+        commit_user/identifier/kind can be reused by a replay and time_millis
+        is wall-clock, so a replaced snapshot can match all four while
+        referencing entirely different manifests. The manifest list names are
+        generated per commit and persisted in the snapshot, so they are the
+        durable content identity the legacy comparison must include.
+        """
+        file_store_commit = self._create_file_store_commit()
+
+        def legacy_snapshot(**overrides):
+            fields = dict(
+                id=3, uuid=None, commit_user='u', commit_identifier=11,
+                commit_kind='APPEND', time_millis=123,
+                base_manifest_list='manifest-list-aaa-0',
+                delta_manifest_list='manifest-list-aaa-1',
+            )
+            fields.update(overrides)
+            return Mock(**fields)
+
+        observed = legacy_snapshot()
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            legacy_snapshot())
+        self.assertEqual(
+            'same',
+            file_store_commit._observed_snapshot_identity(observed))
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            legacy_snapshot(base_manifest_list='manifest-list-bbb-0',
+                            delta_manifest_list='manifest-list-bbb-1'))
+        self.assertEqual(
+            'different',
+            file_store_commit._observed_snapshot_identity(observed),
+            'a snapshot with the same commit fields but different manifest '
+            'references was treated as the one previously read')
+
     def test_conflict_rollback_retry_skips_history_and_rescans_base(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         file_store_commit = self._create_file_store_commit()
@@ -461,14 +500,15 @@ class TestFileStoreCommit(unittest.TestCase):
         """
         file_store_commit = self._create_file_store_commit()
         file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = None
+        latest_snapshot = Mock(id=3, uuid='latest-snapshot-uuid')
         # The rescans re-read LATEST to widen the window; nothing new lands.
         file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
-            Mock(id=3))
+            latest_snapshot)
 
         with self.assertRaises(DedupEvidenceMissing):
             file_store_commit._is_duplicate_commit(
                 CommitFailRetryResult(None),
-                Mock(id=3),
+                latest_snapshot,
                 11,
                 "APPEND",
             )

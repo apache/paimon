@@ -580,7 +580,13 @@ def write_paimon(
             the returned snapshot id being the table's latest rather than
             this write's own. Actor mode is append-only and rejects
             ``overwrite``, ``hash_fixed_precluster="map_groups"`` and
-            postpone-bucket tables.
+            postpone-bucket tables. Rolling back the target table while an
+            actor-mode write is active -- including while Ray is still
+            retrying its tasks or the committer actor -- is unsupported,
+            and a commit that detects the rollback fails rather than
+            continuing over the changed history. Follow the same recovery
+            order as Paimon's Flink guidance: stop the write first, roll
+            back the table, then restart the write from a clean state.
         options: Optional dynamic table options applied for this write
             only, e.g. ``{"target-file-size": "256mb"}``.
 

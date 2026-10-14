@@ -253,10 +253,10 @@ class TestTableCommit(unittest.TestCase):
             snapshot_properties={"checkpoint": "42"},
         )
 
-    def test_native_commit_warns_when_first_attempt_dedup_requested(self):
-        """The native committer has no dedup scan, so a replayed commit would
-        publish the same files twice. The commit still goes ahead -- the scan
-        is not implemented on that path -- but the caller is told."""
+    def test_native_commit_raises_when_first_attempt_dedup_requested(self):
+        """actor mode + native commit is unsupported: the native committer
+        has no dedup scan, so a replayed commit would publish the same files
+        twice. Initialising the commit must raise NotImplementedError."""
         from pypaimon.write.file_store_commit import CommitDedup
 
         table = Mock()
@@ -264,20 +264,16 @@ class TestTableCommit(unittest.TestCase):
         table.new_snapshot_commit.return_value = Mock()
         table.options.native_commit_enabled.return_value = True
 
-        with self.assertLogs(
-                'pypaimon.write.table_commit', level='WARNING') as logs:
-            commit = BatchTableCommit(
+        with self.assertRaises(NotImplementedError) as ctx:
+            BatchTableCommit(
                 table, 'stable-user', None,
                 dedup=CommitDedup(on_first_attempt=True))
 
-        self.assertEqual(commit.file_store_commit.table, table)
-        self.assertTrue(any(
-            'commit.native.enabled' in line and 'stable-user' in line
-            for line in logs.output), logs.output)
+        self.assertIn('commit.native.enabled', str(ctx.exception))
+        self.assertIn("commit_mode='actor'", str(ctx.exception))
 
-    def test_native_commit_does_not_warn_without_first_attempt_dedup(self):
-        import logging as _logging
-        from unittest.mock import patch
+    def test_native_commit_does_not_raise_without_first_attempt_dedup(self):
+        """native commit without actor-mode dedup is fine."""
         from pypaimon.write.file_store_commit import CommitDedup
 
         table = Mock()
@@ -285,12 +281,8 @@ class TestTableCommit(unittest.TestCase):
         table.new_snapshot_commit.return_value = Mock()
         table.options.native_commit_enabled.return_value = True
 
-        # assertNoLogs is 3.10+; patch warning explicitly so older
-        # interpreters keep working too.
-        logger = _logging.getLogger('pypaimon.write.table_commit')
-        with patch.object(logger, 'warning') as warn:
-            BatchTableCommit(
-                table, 'stable-user', None,
-                dedup=CommitDedup(on_first_attempt=False))
-            BatchTableCommit(table, 'stable-user', None, dedup=None)
-            warn.assert_not_called()
+        # Neither of these combinations should raise.
+        BatchTableCommit(
+            table, 'stable-user', None,
+            dedup=CommitDedup(on_first_attempt=False))
+        BatchTableCommit(table, 'stable-user', None, dedup=None)

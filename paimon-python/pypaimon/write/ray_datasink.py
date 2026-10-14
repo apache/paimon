@@ -45,6 +45,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _reject_native_commit_for_actor_mode(table) -> None:
+    """Refuse actor mode when the table's effective options enable native commit.
+
+    The native committer has no duplicate-commit scan, so an ordinary Ray
+    task or actor retry would publish the same files a second time. Checked
+    against the *effective* configuration (catalog options plus every dynamic
+    option applied for this write) at initialization, before anything is
+    written or committed: the per-commit check in TableCommit only runs when
+    a commit happens to request the first-attempt scan, which a vouching
+    actor legitimately skips.
+    """
+    if table.options.native_commit_enabled():
+        from pypaimon.write.table_commit import \
+            native_commit_unsupported_message
+        raise NotImplementedError(
+            native_commit_unsupported_message(table.identifier))
+
+
 @dataclass(frozen=True)
 class PaimonWriteResult:
     """Metadata reported by the exact coordinator commit."""
@@ -761,6 +779,10 @@ class PaimonCommitterActor:
         self._table = catalog.get_table(table_identifier)
         self._options = options
         self._table_identifier = table_identifier
+        # The datasink-side check cannot see configuration that only exists in
+        # the catalog this actor reloads the table from, so the actor verifies
+        # its own effective configuration too.
+        _reject_native_commit_for_actor_mode(self._target_table())
         # commit_users whose commit this instance has started. Only ever used to
         # withhold the claim below -- never to answer "already committed", which
         # would be a memory of the table that a rollback can silently outdate.
@@ -976,7 +998,18 @@ class PaimonActorDatasink(_DatasinkBase):
         self.table = table
         self._catalog_options = catalog_options
         self._table_identifier = table_identifier
-        self._options = options
+        # The committer actor reloads the table from the catalog, so any dynamic
+        # options already applied to `table` via table.copy() calls before
+        # write_paimon was called would be lost unless we re-supply them. The
+        # table tracks the cumulative delta in _applied_dynamic_options (set by
+        # FileStoreTable._copy); start from that, then let the explicit `options`
+        # argument override, matching Flink's StoreMultiCommitter.getDynamicOptions
+        # approach of separating the dynamic increment from the base schema.
+        table_dynamic = getattr(table, '_applied_dynamic_options', {}) or {}
+        effective_options = {**table_dynamic, **(options or {})}
+        self._options = effective_options if effective_options else None
+        _reject_native_commit_for_actor_mode(
+            table.copy(self._options) if self._options else table)
         self._postpone_bucket_plan = postpone_bucket_plan
         self._table_name = table.identifier.get_full_name()
         # Unique per datasink instance: two write_paimon calls in one job
@@ -1185,34 +1218,38 @@ class PaimonActorDatasink(_DatasinkBase):
         else:
             write_returns = []
 
-        # Set commit_result for compatibility with write_paimon_dataset return value
-        # Actor mode commits incrementally, so we report the final state.
-        # Read through _target_table: with options like branch, self.table
-        # resolves to a different snapshot directory than the one just written,
-        # and the reported snapshot id would be some other branch's.
-        latest_snapshot = self._target_table().snapshot_manager().get_latest_snapshot()
+        # A task only returns an entry after its actor commit succeeded; a task
+        # with nothing to commit returns []. So "no entries" means this write
+        # committed nothing, and the table's latest snapshot -- which may well
+        # exist -- is some other write's. Reporting it here would violate the
+        # write_paimon contract (None when no data/snapshot was committed).
+        committed_entries = []
+        for task_result in write_returns:
+            if isinstance(task_result, list):
+                committed_entries.extend(task_result)
+            elif task_result is not None:
+                committed_entries.append(task_result)
 
-        if latest_snapshot:
-            # Extract row_count from write_returns
-            # write_returns is a list of lists, where each inner list contains dicts
+        if committed_entries:
             total_rows = 0
-            for task_result in write_returns:
-                if isinstance(task_result, list):
-                    # Each task returns a list with a single dict
-                    for r in task_result:
-                        if isinstance(r, dict):
-                            total_rows += r.get('row_count', 0)
-                        else:
-                            total_rows += getattr(r, 'row_count', 0)
-                elif isinstance(task_result, dict):
-                    total_rows += task_result.get('row_count', 0)
+            for r in committed_entries:
+                if isinstance(r, dict):
+                    total_rows += r.get('row_count', 0)
                 else:
-                    total_rows += getattr(task_result, 'row_count', 0)
+                    total_rows += getattr(r, 'row_count', 0)
 
-            self.commit_result = PaimonWriteResult(
-                row_count=total_rows,
-                snapshot_id=latest_snapshot.id
-            )
+            # Actor mode commits incrementally, so report the final state.
+            # Read through _target_table: with options like branch, self.table
+            # resolves to a different snapshot directory than the one just
+            # written, and the reported snapshot id would be some other
+            # branch's.
+            latest_snapshot = (
+                self._target_table().snapshot_manager().get_latest_snapshot())
+            self.commit_result = (
+                PaimonWriteResult(
+                    row_count=total_rows,
+                    snapshot_id=latest_snapshot.id,
+                ) if latest_snapshot else None)
         else:
             self.commit_result = None
 

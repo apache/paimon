@@ -26,7 +26,10 @@ import pyarrow as pa
 import ray
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
+from pypaimon.write.file_store_commit import (CommitDedup,
+                                              DedupEvidenceMissing,
+                                              FileStoreCommit)
 from pypaimon.write.ray_datasink import (PaimonActorDatasink,
                                          PaimonCommitterActor,
                                          write_paimon_dataset)
@@ -133,6 +136,34 @@ class RayActorCommitTest(unittest.TestCase):
         rows = sorted(zip(arrow.column('id').to_pylist(),
                           arrow.column('value').to_pylist()))
         self.assertEqual(rows, [(1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')])
+
+    def test_actor_mode_empty_write_to_populated_table_returns_none(self):
+        """No task committed, so the write reports None.
+
+        The table already holding a snapshot is not evidence that *this* write
+        committed anything: reporting that snapshot as the write's result
+        violates the write_paimon contract (None when no data/snapshot was
+        committed) and attributes another write's snapshot to this one.
+        """
+        table = self._create_append_table('test_actor_empty_write')
+        seeded = write_paimon_dataset(
+            ray.data.from_arrow(
+                pa.Table.from_pydict(
+                    {'id': [1], 'value': ['a']}, schema=SCHEMA)
+            ),
+            table, commit_mode='actor',
+        )
+        self.assertIsNotNone(seeded)
+
+        empty = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [], 'value': []}, schema=SCHEMA))
+        result = write_paimon_dataset(empty, table, commit_mode='actor')
+
+        self.assertIsNone(result)
+        # The seeded snapshot is untouched.
+        self.assertEqual(
+            table.snapshot_manager().get_latest_snapshot().id,
+            seeded.snapshot_id)
 
     def test_actor_mode_multiple_batches(self):
         """Several write tasks commit through the actor without losing or
@@ -612,14 +643,16 @@ class RayActorCommitTest(unittest.TestCase):
         table.file_io.overwrite_file_utf8(
             snapshot_manager.latest_file, str(snapshot_id))
 
-    def test_dedup_does_not_trust_a_bound_whose_snapshot_was_rolled_back(self):
-        """A bound is an id *and* the mtime of that id's file, because a
-        rollback hands the id out again.
+    def test_commit_refuses_a_bound_whose_snapshot_was_rolled_back(self):
+        """A rollback under an in-flight write must fail the commit outright.
 
-        Bound at snapshot 3, rolled back to 1, a different commit then takes id
-        2. Trusting the bare id 3 makes the scan range (3, 2] empty, so the
-        replay is not found and lands a second time. The mtime no longer
-        matching is what tells the scan the id line changed under it.
+        A bound is an id *and* the mtime of that id's file, because a rollback
+        hands the id out again. Bound at snapshot 3, rolled back to 1: the
+        bound's file is gone and the id line now runs below it, so the files
+        this write (or its replays) rely on may have been deleted. Probing for
+        a new scan window would let the write continue over a history that
+        changed under it; instead the commit is refused, consistent with the
+        documented recovery procedure (stop writers before rolling back).
         """
         name = 'test_actor_rollback_bound'
         table = self._create_append_table(name)
@@ -642,21 +675,647 @@ class RayActorCommitTest(unittest.TestCase):
         self._rollback_to(table, 1)
         self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 1)
 
-        # A task of the bounded write commits, taking the freed id 2.
         messages = self._prepare_commit_messages(
             table, {'id': [42], 'value': ['task']}
         )
-        committer.commit(messages, commit_user='task-0', dedup_base=stale_base)
-        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 2)
+        with self.assertRaises(RuntimeError) as ctx:
+            committer.commit(
+                messages, commit_user='task-0', dedup_base=stale_base)
+        self.assertIn('rollback', str(ctx.exception).lower())
 
-        committer.commit(messages, commit_user='task-0', dedup_base=stale_base)
+        # Nothing landed: the table still holds only the rolled-back state.
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 1)
         self.assertEqual(
-            table.snapshot_manager().get_latest_snapshot().id, 2,
-            'the replay was committed again: the bound was trusted on its '
-            'snapshot id alone, after a rollback re-used that id',
+            sorted(self._read_all(table).column('id').to_pylist()), [1])
+
+    def test_commit_refuses_a_pinned_bound_after_table_reset(self):
+        """A reset to empty under a pinned bound must fail, not re-publish.
+
+        The duplicate scan is skipped on an empty table -- nothing on it can
+        be a duplicate -- but a bound pinned at id >= 1 proves the table was
+        NOT empty when this write started, so emptiness here means the
+        history was reset. The replayed messages reference files a reset
+        deletes; committing them publishes a snapshot whose reads then fail
+        with FileNotFoundError. The bound's validity must be checked on every
+        commit, independent of whether a duplicate scan is needed.
+        """
+        name = 'test_actor_reset_bound'
+        table = self._create_append_table(name)
+        committer = PaimonCommitterActor(
+            catalog_options={'warehouse': self.warehouse},
+            table_identifier=f'default.{name}',
         )
+        messages = self._prepare_commit_messages(
+            table, {'id': [1], 'value': ['a']}
+        )
+        committer.commit(
+            messages, commit_user='task-0',
+            dedup_base={'snapshot_id': 0, 'file_millis': None},
+        )
+        stale_base = committer.dedup_base()
+        self.assertEqual(stale_base['snapshot_id'], 1)
+
+        # Reset: every snapshot and the LATEST pointer are gone, as after
+        # dropping and recreating the table in place.
+        snapshot_manager = table.snapshot_manager()
+        table.file_io.delete(snapshot_manager.get_snapshot_path(1))
+        table.file_io.delete(snapshot_manager.latest_file)
+        self.assertIsNone(snapshot_manager.get_latest_snapshot())
+
+        with self.assertRaises(RuntimeError) as ctx:
+            committer.commit(
+                messages, commit_user='task-0', dedup_base=stale_base)
+        self.assertIn('rollback', str(ctx.exception).lower())
+        # Nothing was published over the reset history.
+        self.assertIsNone(snapshot_manager.get_latest_snapshot())
+
+    def test_vouched_commit_still_validates_the_pinned_bound(self):
+        """Vouching skips the duplicate scan, never the history check.
+
+        An actor that has seen every commit of this write may skip the scan
+        for a commit_user it has never attempted -- there is nothing to find.
+        But the pinned bound names a history, and a rollback below it means
+        the files this write relies on may be gone. That check must run even
+        when the scan is skipped.
+        """
+        name = 'test_actor_vouch_rollback'
+        table = self._create_append_table(name)
+        committer = PaimonCommitterActor(
+            catalog_options={'warehouse': self.warehouse},
+            table_identifier=f'default.{name}',
+        )
+        committer._sees_every_commit = True
+        for i in (1, 2, 3):
+            committer.commit(
+                self._prepare_commit_messages(
+                    table, {'id': [i], 'value': [f'v{i}']}
+                ),
+                commit_user=f'seed-{i}',
+                dedup_base={'snapshot_id': 0, 'file_millis': None},
+            )
+        stale_base = committer.dedup_base()
+        self.assertEqual(stale_base['snapshot_id'], 3)
+
+        self._rollback_to(table, 1)
+
+        messages = self._prepare_commit_messages(
+            table, {'id': [42], 'value': ['task']}
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            committer.commit(
+                messages, commit_user='task-9', dedup_base=stale_base)
+        self.assertIn('rollback', str(ctx.exception).lower())
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 1)
         self.assertEqual(
-            sorted(self._read_all(table).column('id').to_pylist()), [1, 42])
+            sorted(self._read_all(table).column('id').to_pylist()), [1])
+
+    def test_cas_retry_refuses_an_observed_latest_regression(self):
+        """A retry must notice the latest id falling below what it saw.
+
+        The pinned base only proves history down at the base; the failed
+        attempt's own observation of the latest snapshot is a second, higher
+        boundary. Expiry removes the oldest snapshots, never the latest, so
+        the latest id regressing below an id this very process observed is
+        unambiguous rollback -- even when the rollback stops above the base,
+        leaving the base's file and mtime intact. Without this check the
+        retry treats (observed, current] as a trustworthy empty dedup window
+        and re-publishes messages whose files the rollback deleted.
+        """
+        name = 'test_actor_cas_retry_regression'
+        table = self._create_append_table(name)
+        committer = PaimonCommitterActor(
+            catalog_options={'warehouse': self.warehouse},
+            table_identifier=f'default.{name}',
+        )
+        committer.commit(
+            self._prepare_commit_messages(table, {'id': [1], 'value': ['a']}),
+            commit_user='seed-1',
+            dedup_base={'snapshot_id': 0, 'file_millis': None},
+        )
+        # Base pinned at 1 -- the rollback below will stop here, so the
+        # anchor's file and mtime survive unchanged.
+        pinned_base = committer.dedup_base()
+        self.assertEqual(pinned_base['snapshot_id'], 1)
+        for i in (2, 3):
+            committer.commit(
+                self._prepare_commit_messages(
+                    table, {'id': [i], 'value': [f'v{i}']}
+                ),
+                commit_user=f'seed-{i}', dedup_base=pinned_base,
+            )
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 3)
+
+        builder = table.new_batch_write_builder()
+        builder.commit_user = 'task-0'
+        commit = builder.new_commit(dedup=CommitDedup(
+            on_first_attempt=True,
+            base_snapshot_id=pinned_base['snapshot_id'],
+            base_file_millis=pinned_base['file_millis'],
+        ))
+        fsc = commit.file_store_commit
+        original_cas = fsc.snapshot_commit.commit
+        state = {'failed_once': False}
+        test = self
+
+        def cas_publishes_then_loses_the_ack(base_uuid, snapshot, statistics):
+            ok = original_cas(base_uuid, snapshot, statistics)
+            if not state['failed_once']:
+                state['failed_once'] = True
+                # The commit landed (snapshot 4), but before the ack reaches
+                # the committer the table is rolled back to 1 and the ack is
+                # lost, so the committer retries with an uncertain result.
+                test._rollback_to(table, 1)
+                raise RuntimeError('ack lost')
+            return ok
+
+        fsc.snapshot_commit.commit = cas_publishes_then_loses_the_ack
+        messages = self._prepare_commit_messages(
+            table, {'id': [42], 'value': ['task']}
+        )
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                commit.commit(messages)
+        finally:
+            commit.close()
+        self.assertIn('rollback', str(ctx.exception).lower())
+        # Nothing was re-published over the rolled-back history.
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 1)
+        self.assertEqual(
+            sorted(self._read_all(table).column('id').to_pylist()), [1])
+
+    def test_cas_retry_refuses_a_regrown_history(self):
+        """A regrown id line is a different history, not a recovered one.
+
+        Same lost-ACK scenario as above, except other writers push the
+        latest id back to -- or past -- what the failed attempt observed
+        before the retry runs. Every numeric comparison then passes: the
+        pinned base's file is untouched and current >= observed. What
+        changed is the *identity* of the observed snapshot: the file at that
+        id now holds a different snapshot (different uuid) than the one this
+        process read moments ago, which only a rollback-and-regrow can
+        produce. The retry must compare identity, not ids, and refuse.
+        """
+        for regrow in (2, 3):  # latest becomes 3 (== observed) and 4 (>)
+            with self.subTest(regrow=regrow):
+                name = f'test_actor_cas_regrow_{regrow}'
+                table = self._create_append_table(name)
+                committer = PaimonCommitterActor(
+                    catalog_options={'warehouse': self.warehouse},
+                    table_identifier=f'default.{name}',
+                )
+                committer.commit(
+                    self._prepare_commit_messages(
+                        table, {'id': [1], 'value': ['a']}),
+                    commit_user='seed-1',
+                    dedup_base={'snapshot_id': 0, 'file_millis': None},
+                )
+                pinned_base = committer.dedup_base()
+                for i in (2, 3):
+                    committer.commit(
+                        self._prepare_commit_messages(
+                            table, {'id': [i], 'value': [f'v{i}']}
+                        ),
+                        commit_user=f'seed-{i}', dedup_base=pinned_base,
+                    )
+
+                builder = table.new_batch_write_builder()
+                builder.commit_user = 'task-0'
+                commit = builder.new_commit(dedup=CommitDedup(
+                    on_first_attempt=True,
+                    base_snapshot_id=pinned_base['snapshot_id'],
+                    base_file_millis=pinned_base['file_millis'],
+                ))
+                fsc = commit.file_store_commit
+                original_cas = fsc.snapshot_commit.commit
+                state = {'failed_once': False}
+                test = self
+
+                def cas_rolls_back_and_regrows(base_uuid, snapshot,
+                                               statistics,
+                                               _original=original_cas,
+                                               _state=state,
+                                               _table=table,
+                                               _regrow=regrow):
+                    ok = _original(base_uuid, snapshot, statistics)
+                    if not _state['failed_once']:
+                        _state['failed_once'] = True
+                        # Snapshot 4 lands, the table is rolled back to 1,
+                        # then other writers regrow the id line before the
+                        # lost ACK forces a retry here.
+                        test._rollback_to(_table, 1)
+                        regrower = PaimonCommitterActor(
+                            catalog_options={
+                                'warehouse': test.warehouse},
+                            table_identifier=(
+                                f'default.{_table.identifier.object}'),
+                        )
+                        for j in range(_regrow):
+                            regrower.commit(
+                                test._prepare_commit_messages(
+                                    _table,
+                                    {'id': [90 + j], 'value': [f'r{j}']}
+                                ),
+                                commit_user=f'regrow-{j}',
+                                dedup_base={'snapshot_id': 0,
+                                            'file_millis': None},
+                            )
+                        raise RuntimeError('ack lost')
+                    return ok
+
+                fsc.snapshot_commit.commit = cas_rolls_back_and_regrows
+                messages = self._prepare_commit_messages(
+                    table, {'id': [42], 'value': ['task']}
+                )
+                try:
+                    with self.assertRaises(RuntimeError) as ctx:
+                        commit.commit(messages)
+                finally:
+                    commit.close()
+                self.assertIn('rollback', str(ctx.exception).lower())
+                # Only the regrown history remains; nothing was re-published
+                # over it.
+                self.assertEqual(
+                    table.snapshot_manager().get_latest_snapshot().id,
+                    1 + regrow)
+                ids = sorted(self._read_all(table).column('id').to_pylist())
+                self.assertNotIn(42, ids)
+
+    def test_dedup_rescan_refuses_a_history_replaced_mid_scan(self):
+        """A rescan that reads a replaced history must not keep the old one.
+
+        The scan hits a transient FileNotFoundError on the observed latest;
+        during that window the table is rolled back below it and other
+        writers regrow the id line. The rescan then *reads* the new snapshot
+        at the observed id -- same id, different uuid -- so the replacement
+        is observed, not hypothetical. Keeping only the numeric upper bound
+        and declaring "not a duplicate" lets _try_commit_once build the
+        commit on the stale snapshot and publish over the regrown history,
+        referencing files the rollback deleted. The identity the rescan read
+        must be honored: refuse instead.
+        """
+        name = 'test_actor_rescan_race'
+        table = self._create_append_table(name)
+        committer = PaimonCommitterActor(
+            catalog_options={'warehouse': self.warehouse},
+            table_identifier=f'default.{name}',
+        )
+        committer.commit(
+            self._prepare_commit_messages(table, {'id': [1], 'value': ['a']}),
+            commit_user='seed-1',
+            dedup_base={'snapshot_id': 0, 'file_millis': None},
+        )
+        pinned_base = committer.dedup_base()
+        for i in (2, 3):
+            committer.commit(
+                self._prepare_commit_messages(
+                    table, {'id': [i], 'value': [f'v{i}']}
+                ),
+                commit_user=f'seed-{i}', dedup_base=pinned_base,
+            )
+
+        builder = table.new_batch_write_builder()
+        builder.commit_user = 'task-0'
+        commit = builder.new_commit(dedup=CommitDedup(
+            on_first_attempt=True,
+            base_snapshot_id=pinned_base['snapshot_id'],
+            base_file_millis=pinned_base['file_millis'],
+        ))
+        fsc = commit.file_store_commit
+        manager = fsc.snapshot_manager
+        original_get = manager.get_snapshot_by_id
+        state = {'raced': False}
+        test = self
+
+        def get_races_with_rollback_and_regrow(snapshot_id):
+            if snapshot_id == 3 and not state['raced']:
+                state['raced'] = True
+                test._rollback_to(table, 1)
+                regrower = PaimonCommitterActor(
+                    catalog_options={'warehouse': test.warehouse},
+                    table_identifier=f'default.{name}',
+                )
+                for j in (2, 3):
+                    regrower.commit(
+                        test._prepare_commit_messages(
+                            table, {'id': [90 + j], 'value': [f'r{j}']}
+                        ),
+                        commit_user=f'regrow-{j}',
+                        dedup_base={'snapshot_id': 0, 'file_millis': None},
+                    )
+                raise FileNotFoundError('expired mid-read')
+            return original_get(snapshot_id)
+
+        manager.get_snapshot_by_id = get_races_with_rollback_and_regrow
+        messages = self._prepare_commit_messages(
+            table, {'id': [42], 'value': ['task']}
+        )
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                commit.commit(messages)
+        finally:
+            commit.close()
+        self.assertIn('rollback', str(ctx.exception).lower())
+        # Only the regrown history remains; nothing was published on top of
+        # the stale snapshot.
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 3)
+        ids = sorted(self._read_all(table).column('id').to_pylist())
+        self.assertNotIn(42, ids)
+
+    def test_authorization_rechecks_a_missing_latest(self):
+        for permanent in (True, False):
+            with self.subTest(permanent=permanent):
+                name = 'authorization_missing_' + str(permanent).lower()
+                table = self._create_append_table(name)
+                actor = PaimonCommitterActor(
+                    {'warehouse': self.warehouse}, 'default.' + name)
+                actor.commit(
+                    self._prepare_commit_messages(
+                        table, {'id': [1], 'value': ['seed']}),
+                    commit_user='seed',
+                    dedup_base={'snapshot_id': 0, 'file_millis': None})
+                pinned = actor.dedup_base()
+                builder = table.new_batch_write_builder()
+                builder.commit_user = 'task'
+                commit = builder.new_commit(dedup=CommitDedup(
+                    on_first_attempt=True,
+                    base_snapshot_id=pinned['snapshot_id'],
+                    base_file_millis=pinned['file_millis']))
+                manager = commit.file_store_commit.snapshot_manager
+                original_read = manager.file_io.read_file_utf8
+                snapshot_path = manager.get_snapshot_path(1)
+                reads = []
+
+                def read_with_disappearing_snapshot(path):
+                    if path == snapshot_path:
+                        reads.append(path)
+                        if len(reads) == 2:
+                            if permanent:
+                                table.file_io.delete(snapshot_path)
+                                table.file_io.delete(manager.latest_file)
+                            raise FileNotFoundError('snapshot disappeared')
+                    return original_read(path)
+
+                messages = self._prepare_commit_messages(
+                    table, {'id': [42], 'value': ['task']})
+                try:
+                    with patch.object(manager.file_io, 'read_file_utf8',
+                                      side_effect=read_with_disappearing_snapshot):
+                        if permanent:
+                            with self.assertRaises(RuntimeError):
+                                commit.commit(messages)
+                        else:
+                            commit.commit(messages)
+                finally:
+                    commit.close()
+                if permanent:
+                    self.assertIsNone(manager.get_latest_snapshot())
+                else:
+                    self.assertGreaterEqual(len(reads), 3)
+                    self.assertEqual(
+                        sorted(self._read_all(table).column('id').to_pylist()),
+                        [1, 42])
+
+    def test_missing_authorization_observation_never_reaches_publication(self):
+        table = self._create_append_table('authorization_expired_observation')
+        actor = PaimonCommitterActor(
+            {'warehouse': self.warehouse},
+            'default.authorization_expired_observation')
+        actor.commit(
+            self._prepare_commit_messages(table, {'id': [1], 'value': ['seed']}),
+            commit_user='seed',
+            dedup_base={'snapshot_id': 0, 'file_millis': None})
+        builder = table.new_batch_write_builder()
+        builder.commit_user = 'task'
+        commit = builder.new_commit(dedup=CommitDedup(on_first_attempt=True))
+        manager = commit.file_store_commit.snapshot_manager
+        original_read = manager.file_io.read_file_utf8
+        original_cas = commit.file_store_commit.snapshot_commit.commit
+        snapshot_path = manager.get_snapshot_path(1)
+        reads = []
+
+        def expire_observation_before_authorization(path):
+            if path == snapshot_path:
+                reads.append(path)
+                if len(reads) == 3:
+                    actor.commit(
+                        self._prepare_commit_messages(
+                            table, {'id': [99], 'value': ['other']}),
+                        commit_user='other',
+                        dedup_base={'snapshot_id': 0, 'file_millis': None})
+                    table.file_io.delete(snapshot_path)
+                    raise FileNotFoundError('latest advanced and observation expired')
+            return original_read(path)
+
+        messages = self._prepare_commit_messages(
+            table, {'id': [42], 'value': ['task']})
+        try:
+            with patch.object(manager.file_io, 'read_file_utf8',
+                              side_effect=expire_observation_before_authorization):
+                with patch.object(commit.file_store_commit.snapshot_commit,
+                                  'commit', wraps=original_cas) as publish:
+                    with self.assertRaises(DedupEvidenceMissing):
+                        commit.commit(messages)
+                    publish.assert_not_called()
+        finally:
+            commit.close()
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 2)
+        self.assertEqual(
+            sorted(self._read_all(table).column('id').to_pylist()), [1, 99])
+
+    def test_recovery_checks_files_after_duplicate_filtering(self):
+        for already_committed in (True, False):
+            with self.subTest(already_committed=already_committed):
+                name = 'recovery_files_' + str(already_committed).lower()
+                table = self._create_append_table(name)
+                actor = PaimonCommitterActor(
+                    {'warehouse': self.warehouse}, 'default.' + name)
+                actor._sees_every_commit = False
+                pinned = actor.dedup_base()
+                messages = self._prepare_commit_messages(
+                    table, {'id': [42], 'value': ['task']})
+                if already_committed:
+                    actor.commit(messages, commit_user='task', dedup_base=pinned)
+                for message in messages:
+                    for data_file in message.new_files:
+                        table.file_io.delete(canonical_data_file_path(
+                            table, message.partition, message.bucket,
+                            data_file.file_name))
+                if already_committed:
+                    actor.commit(messages, commit_user='task', dedup_base=pinned)
+                    self.assertEqual(
+                        table.snapshot_manager().get_latest_snapshot().id, 1)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'missing|deleted'):
+                        actor.commit(messages, commit_user='task', dedup_base=pinned)
+                    self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
+    def test_cas_retry_checks_uncommitted_files(self):
+        table = self._create_append_table('retry_missing_files')
+        messages = self._prepare_commit_messages(
+            table, {'id': [42], 'value': ['task']})
+        commit = table.new_batch_write_builder().new_commit()
+        original_cas = commit.file_store_commit.snapshot_commit.commit
+        attempts = []
+
+        def fail_before_publication(base_uuid, snapshot, statistics):
+            attempts.append(snapshot.id)
+            if len(attempts) == 1:
+                for message in messages:
+                    for data_file in message.new_files:
+                        table.file_io.delete(canonical_data_file_path(
+                            table, message.partition, message.bucket,
+                            data_file.file_name))
+                raise OSError('publication response unavailable')
+            return original_cas(base_uuid, snapshot, statistics)
+
+        try:
+            with patch.object(commit.file_store_commit.snapshot_commit, 'commit',
+                              side_effect=fail_before_publication):
+                with self.assertRaisesRegex(RuntimeError, 'missing|deleted'):
+                    commit.commit(messages)
+        finally:
+            commit.close()
+        self.assertEqual(attempts, [1])
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
+    def test_expired_retry_observation_requires_positive_commit_evidence(self):
+        for landed in (True, False):
+            with self.subTest(landed=landed):
+                name = 'expired_retry_observation_' + str(landed).lower()
+                table = self._create_append_table(name)
+                actor = PaimonCommitterActor(
+                    {'warehouse': self.warehouse}, 'default.' + name)
+                for identifier in (1, 2):
+                    actor.commit(
+                        self._prepare_commit_messages(
+                            table, {'id': [identifier], 'value': ['seed']}),
+                        commit_user='seed-%d' % identifier,
+                        dedup_base={'snapshot_id': 0, 'file_millis': None})
+                builder = table.new_batch_write_builder()
+                builder.commit_user = 'task'
+                commit = builder.new_commit(dedup=CommitDedup(on_first_attempt=True))
+                original_cas = commit.file_store_commit.snapshot_commit.commit
+                attempts = []
+
+                def lose_ack_after_expiry(base_uuid, snapshot, statistics):
+                    attempts.append(snapshot.id)
+                    self.assertEqual(len(attempts), 1)
+                    if landed:
+                        self.assertTrue(original_cas(base_uuid, snapshot, statistics))
+                    else:
+                        actor.commit(
+                            self._prepare_commit_messages(
+                                table, {'id': [99], 'value': ['other']}),
+                            commit_user='other',
+                            dedup_base={'snapshot_id': 0, 'file_millis': None})
+                    manager = table.snapshot_manager()
+                    for expired_id in (1, 2):
+                        table.file_io.delete(manager.get_snapshot_path(expired_id))
+                    raise OSError('ack lost after expiry')
+
+                messages = self._prepare_commit_messages(
+                    table, {'id': [42], 'value': ['task']})
+                try:
+                    with patch.object(commit.file_store_commit.snapshot_commit, 'commit',
+                                      side_effect=lose_ack_after_expiry):
+                        if landed:
+                            commit.commit(messages)
+                        else:
+                            with self.assertRaises(DedupEvidenceMissing):
+                                commit.commit(messages)
+                finally:
+                    commit.close()
+                self.assertEqual(attempts, [3])
+                self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 3)
+                self.assertEqual(
+                    sorted(self._read_all(table).column('id').to_pylist()),
+                    [1, 2, 42] if landed else [1, 2, 99])
+
+    def test_dedup_treats_a_missing_anchor_as_unknown_history(self):
+        """A missing anchor with the id line above it proves nothing.
+
+        Benign expiry of the bound's snapshot and a rollback below the bound
+        whose recreated anchor file was *itself* expired leave identical
+        on-disk state: anchor file gone, latest id at or above the bound. The
+        mtime comparison can only catch a recreated file that still exists.
+        Under the rolled-back history, ids above the bound were reused by
+        other commits, so a scan of (bound, latest] that finds nothing does
+        not prove this replay never landed -- its commit can sit at a reused
+        id *below* the bound with its files still live. The scan may still
+        succeed by finding its own commit, but an empty scan must refuse
+        rather than publish the same rows a second time.
+        """
+        name = 'test_actor_missing_anchor'
+        table = self._create_append_table(name)
+        committer = PaimonCommitterActor(
+            catalog_options={'warehouse': self.warehouse},
+            table_identifier=f'default.{name}',
+        )
+        for i in (1, 2, 3):
+            committer.commit(
+                self._prepare_commit_messages(
+                    table, {'id': [i], 'value': [f'v{i}']}
+                ),
+                commit_user=f'seed-{i}',
+                dedup_base={'snapshot_id': 0, 'file_millis': None},
+            )
+        stale_base = committer.dedup_base()
+        self.assertEqual(stale_base['snapshot_id'], 3)
+
+        # History changes under the pinned bound: rollback to 1, then a
+        # post-rollback job legitimately re-pins its own bound and commits
+        # the task's rows at reused id 2, with unrelated commits regrowing
+        # the id line to 4.
+        self._rollback_to(table, 1)
+        post_rollback = PaimonCommitterActor(
+            catalog_options={'warehouse': self.warehouse},
+            table_identifier=f'default.{name}',
+        )
+        fresh_base = post_rollback.dedup_base()
+        self.assertEqual(fresh_base['snapshot_id'], 1)
+        post_rollback.commit(
+            self._prepare_commit_messages(
+                table, {'id': [42], 'value': ['task']}
+            ),
+            commit_user='task-0', dedup_base=fresh_base,
+        )
+        for i in (3, 4):
+            post_rollback.commit(
+                self._prepare_commit_messages(
+                    table, {'id': [i], 'value': [f'post{i}']}
+                ),
+                commit_user=f'other-{i}', dedup_base=fresh_base,
+            )
+        snapshot_manager = table.snapshot_manager()
+        self.assertEqual(snapshot_manager.get_latest_snapshot().id, 4)
+
+        # Retention trims snapshots 1..3 -- including the recreated anchor at
+        # id 3 -- while the task's files stay live through snapshot 4's
+        # manifests. The stale bound now sees: anchor gone, latest above it.
+        for snapshot_id in (1, 2, 3):
+            table.file_io.delete(
+                snapshot_manager.get_snapshot_path(snapshot_id))
+
+        # A zombie replay of the pre-rollback job arrives with fresh files,
+        # the same commit_user and the stale bound. Its rows are already live
+        # at reused id 2, which lies outside (3, 4] -- the scan cannot find
+        # it, so it must refuse instead of committing a second copy.
+        replay = PaimonCommitterActor(
+            catalog_options={'warehouse': self.warehouse},
+            table_identifier=f'default.{name}',
+        )
+        replay_messages = self._prepare_commit_messages(
+            table, {'id': [42], 'value': ['task']}
+        )
+        with self.assertRaises(DedupEvidenceMissing):
+            replay.commit(
+                replay_messages, commit_user='task-0', dedup_base=stale_base)
+
+        # Row 42 appears exactly once.
+        self.assertEqual(snapshot_manager.get_latest_snapshot().id, 4)
+        self.assertEqual(
+            sorted(self._read_all(table).column('id').to_pylist()),
+            [1, 3, 4, 42])
 
     def test_dedup_tolerates_an_unreadable_unrelated_snapshot(self):
         """An id the scan cannot read is only fatal when the answer depends on
@@ -857,6 +1516,53 @@ class RayActorCommitTest(unittest.TestCase):
     # ------------------------------------------------------------------
     # Rejections
     # ------------------------------------------------------------------
+
+    def test_actor_mode_rejects_native_commit_table_option(self):
+        """The native committer has no duplicate-commit scan, so actor mode
+        must refuse it at initialization -- before any task writes or
+        commits -- not merely when a commit happens to request the scan."""
+        table = self._create_append_table(
+            'test_actor_native_table_opt',
+            options={'commit.native.enabled': 'true'})
+        ds = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [1], 'value': ['a']}, schema=SCHEMA)
+        )
+
+        with self.assertRaises(NotImplementedError) as ctx:
+            write_paimon_dataset(ds, table, commit_mode='actor')
+        self.assertIn('commit.native.enabled', str(ctx.exception))
+        # Nothing was committed.
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
+    def test_actor_mode_rejects_native_commit_dynamic_option(self):
+        """The rejection reads the final effective configuration, so a
+        dynamic option enabling native commit is caught too."""
+        table = self._create_append_table('test_actor_native_dyn_opt')
+        ds = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [1], 'value': ['a']}, schema=SCHEMA)
+        )
+
+        with self.assertRaises(NotImplementedError) as ctx:
+            write_paimon_dataset(
+                ds, table, commit_mode='actor',
+                options={'commit.native.enabled': 'true'})
+        self.assertIn('commit.native.enabled', str(ctx.exception))
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
+    def test_committer_actor_rejects_native_commit(self):
+        """The actor itself refuses a native-commit table at construction:
+        it reloads the table from the catalog, so the datasink-side check
+        cannot see configuration that only exists there."""
+        self._create_append_table(
+            'test_actor_native_committer',
+            options={'commit.native.enabled': 'true'})
+
+        with self.assertRaises(NotImplementedError) as ctx:
+            PaimonCommitterActor(
+                catalog_options={'warehouse': self.warehouse},
+                table_identifier='default.test_actor_native_committer',
+            )
+        self.assertIn('commit.native.enabled', str(ctx.exception))
 
     def test_actor_mode_rejects_overwrite(self):
         table = self._create_append_table('test_actor_overwrite')

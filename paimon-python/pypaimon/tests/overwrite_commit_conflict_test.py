@@ -30,6 +30,7 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.write.file_store_commit import DedupEvidenceMissing
 
 
 class OverwriteCommitConflictTest(unittest.TestCase):
@@ -211,7 +212,10 @@ class OverwriteCommitConflictTest(unittest.TestCase):
 
     def test_fails_when_intermediate_snapshot_missing(self):
         # Match Java SnapshotManager.snapshot: duplicate detection cannot skip
-        # an unavailable snapshot in the retry history.
+        # an unavailable snapshot in the retry history. The duplicate-commit
+        # scan walks exactly that history, so it is what refuses: the id it
+        # cannot read could hold this commit, and stepping over it would risk
+        # committing a second time.
         K = 1
         missing_id = self.table.snapshot_manager().get_latest_snapshot().id + 1
 
@@ -267,8 +271,8 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         fsc.snapshot_commit.commit = patched_cas
 
         with self.assertRaisesRegex(
-                RuntimeError,
-                "snapshot {} cannot be found".format(missing_id)):
+                DedupEvidenceMissing,
+                r"unreadable ids: \[{}\]".format(missing_id)):
             c.commit(messages)
         c.close()
 

@@ -27,6 +27,22 @@ from pypaimon.write.file_store_commit import CommitDedup, FileStoreCommit
 logger = logging.getLogger(__name__)
 
 
+def native_commit_unsupported_message(table_identifier) -> str:
+    """Why actor mode and native commit cannot be combined.
+
+    Shared by every place that rejects the combination (the Ray datasink and
+    committer actor at initialization, TableCommit as defense in depth), so
+    the user sees the same explanation wherever the rejection fires.
+    """
+    key = CoreOptions.COMMIT_NATIVE_ENABLED.key()
+    return (
+        f"commit_mode='actor' is not supported with {key}=true on table "
+        f"{table_identifier}. The native committer does not implement the "
+        f"duplicate-commit scan that actor mode relies on for replay "
+        f"safety. Disable {key} or use commit_mode='two_phase'."
+    )
+
+
 class TableCommit:
     """Common base for batch and stream table commits.
 
@@ -61,18 +77,12 @@ class TableCommit:
             commit_callbacks=self._commit_callbacks, dedup=dedup)
         if (dedup is not None and dedup.on_first_attempt
                 and table.options.native_commit_enabled()):
-            # The native committer has no duplicate-commit scan, and _commit
-            # returns as soon as it publishes, so the Python dedup below is
-            # never reached. A caller only asks for first-attempt dedup because
-            # it may re-issue this commit with the same commit_user, and on the
-            # native path that re-issue commits the files a second time.
-            logger.warning(
-                "Table %s has %s enabled while this commit requests "
-                "first-attempt duplicate detection. The native committer does "
-                "not implement that scan, so a re-issued commit with "
-                "commit_user %s can publish the same files twice.",
-                table.identifier, CoreOptions.COMMIT_NATIVE_ENABLED.key(),
-                commit_user)
+            # The native committer has no duplicate-commit scan. A re-issued
+            # actor commit with the same commit_user would publish the same
+            # files a second time, so the combination is unsupported. Fail
+            # early rather than silently allowing data duplication.
+            raise NotImplementedError(
+                native_commit_unsupported_message(table.identifier))
 
     def add_commit_callback(self, callback: CommitCallback) -> None:
         """Register a callback to be invoked after each successful commit."""
