@@ -27,23 +27,19 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.table.row.offset_row import OffsetRow
-from pypaimon.utils.arrow_utils import zero_column_batch
+from pypaimon.utils.arrow_utils import row_kind_column_index, row_kind_field, with_no_row_kind, zero_column_batch
 
 
 class RecordReaderToBatchAdapter(RecordBatchReader):
 
     def __init__(self, inner, schema: pa.Schema, chunk_size: int = 65536, include_row_kind: bool = False):
         self._inner = inner
-        self._schema = schema
+        self._schema = schema if include_row_kind else with_no_row_kind(schema)
         self._chunk_size = chunk_size
         self._exhausted = False
         self._pending_iterator = None
         self._include_row_kind = include_row_kind
-        self.file_io = getattr(inner, 'file_io', None)
-        self.blob_field_indices = getattr(inner, 'blob_field_indices', None)
-        self.descriptor_field_indices = getattr(inner, 'descriptor_field_indices', None)
-        self.blob_view_lookup = getattr(inner, 'blob_view_lookup', None)
-        self.vector_field_indices = getattr(inner, 'vector_field_indices', None)
+        self._adopt_blob_metadata(inner)
 
     def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
         if self._exhausted:
@@ -84,8 +80,8 @@ class RecordReaderToBatchAdapter(RecordBatchReader):
                  else zero_column_batch(len(row_tuples), self._schema.metadata))
         if row_kinds:
             row_kind_array = pa.array(row_kinds, type=pa.string())
-            row_kind_field = pa.field("_row_kind", pa.string())
-            new_schema = pa.schema([row_kind_field] + list(batch.schema))
+            new_schema = pa.schema([row_kind_field(batch.schema)] + list(batch.schema),
+                                   metadata=batch.schema.metadata)
             columns = [row_kind_array] + [batch.column(i) for i in range(batch.num_columns)]
             batch = pa.RecordBatch.from_arrays(columns, schema=new_schema)
         return batch
@@ -99,11 +95,7 @@ class BatchToRecordReaderAdapter(RecordReader):
 
     def __init__(self, inner: RecordBatchReader):
         self._inner = inner
-        self.file_io = getattr(inner, 'file_io', None)
-        self.blob_field_indices = getattr(inner, 'blob_field_indices', None)
-        self.descriptor_field_indices = getattr(inner, 'descriptor_field_indices', None)
-        self.blob_view_lookup = getattr(inner, 'blob_view_lookup', None)
-        self.vector_field_indices = getattr(inner, 'vector_field_indices', None)
+        self._adopt_blob_metadata(inner)
 
     def read_batch(self):
         batch = self._inner.read_arrow_batch()
@@ -117,6 +109,8 @@ class BatchToRecordReaderAdapter(RecordReader):
             descriptor_field_indices=self.descriptor_field_indices,
             blob_view_lookup=self.blob_view_lookup,
             vector_field_indices=self.vector_field_indices,
+            resolved_blob_field_indices=self.resolved_blob_field_indices,
+            blob_base_path=self.blob_base_path,
         )
 
     def close(self):
@@ -128,12 +122,13 @@ class _ArrowBatchIterator(RecordIterator):
     def __init__(self, batch: pa.RecordBatch,
                  file_io=None, blob_field_indices=None,
                  descriptor_field_indices=None, blob_view_lookup=None,
-                 vector_field_indices=None):
+                 vector_field_indices=None, resolved_blob_field_indices=None,
+                 blob_base_path=None):
         self._batch = batch
         self._idx = 0
-        self._has_rk = "_row_kind" in batch.schema.names
+        self._rk_idx = row_kind_column_index(batch.schema)
+        self._has_rk = self._rk_idx >= 0
         if self._has_rk:
-            self._rk_idx = batch.schema.get_field_index("_row_kind")
             self._data_cols = [j for j in range(batch.num_columns) if j != self._rk_idx]
         else:
             self._rk_idx = -1
@@ -143,6 +138,8 @@ class _ArrowBatchIterator(RecordIterator):
         self._descriptor_field_indices = descriptor_field_indices
         self._blob_view_lookup = blob_view_lookup
         self._vector_field_indices = vector_field_indices
+        self._resolved_blob_field_indices = resolved_blob_field_indices
+        self._blob_base_path = blob_base_path
 
     def next(self):
         if self._idx >= self._batch.num_rows:
@@ -157,7 +154,9 @@ class _ArrowBatchIterator(RecordIterator):
             blob_field_indices=self._blob_field_indices,
             descriptor_field_indices=self._descriptor_field_indices,
             blob_view_lookup=self._blob_view_lookup,
-            vector_field_indices=self._vector_field_indices)
+            vector_field_indices=self._vector_field_indices,
+            resolved_blob_field_indices=self._resolved_blob_field_indices,
+            blob_base_path=self._blob_base_path)
         if self._has_rk:
             from pypaimon.table.row.row_kind import RowKind
             kind_str = self._batch.column(self._rk_idx)[self._idx].as_py()
@@ -249,10 +248,18 @@ class AuthMaskingReader(RecordBatchReader):
 
 class ColumnProjectReader(RecordBatchReader):
 
-    def __init__(self, inner_reader: RecordBatchReader, columns: List[str]):
+    def __init__(self, inner_reader: RecordBatchReader, columns: List[str], source_fields=None):
         self._inner = inner_reader
         self._columns = columns
         self._adopt_metadata(inner_reader)
+        if source_fields is not None:
+            source_indices = {field.name: i for i, field in enumerate(source_fields)}
+            for attr in ('blob_field_indices', 'descriptor_field_indices',
+                         'resolved_blob_field_indices', 'vector_field_indices'):
+                indices = getattr(self, attr)
+                if indices is not None:
+                    setattr(self, attr, {i for i, name in enumerate(columns)
+                                         if source_indices[name] in indices})
 
     def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
         batch = self._inner.read_arrow_batch()
@@ -260,8 +267,11 @@ class ColumnProjectReader(RecordBatchReader):
             return None
         self._refresh_blob_view_lookup(self._inner)
         columns = self._columns
-        if "_row_kind" in batch.schema.names and "_row_kind" not in columns:
-            columns = ["_row_kind"] + list(columns)
+        row_kind_index = row_kind_column_index(batch.schema)
+        if row_kind_index >= 0:
+            name = batch.schema.field(row_kind_index).name
+            if name not in columns:
+                columns = [name] + list(columns)
         if not columns:
             return zero_column_batch(batch.num_rows, batch.schema.metadata)
         return pa.RecordBatch.from_arrays(

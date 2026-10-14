@@ -59,6 +59,20 @@ def boolean_query(queries):
     return json.dumps({"boolean": {"queries": queries}}, separators=(",", ":"))
 
 
+def arrow_table_rows(table):
+    """Row dicts with the same values as ``Table.to_pylist``.
+
+    ``Table.to_pylist`` is absent on PyArrow 6, the version used by Python 3.6.
+    ``Table.to_pydict`` is present there and returns each column via ``as_py``.
+    """
+    columns = table.to_pydict()
+    names = list(columns)
+    return [
+        {name: columns[name][index] for name in names}
+        for index in range(table.num_rows)
+    ]
+
+
 class JavaPyReadWriteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -141,6 +155,48 @@ class JavaPyReadWriteTest(unittest.TestCase):
         commit.commit(writer.prepare_commit())
         writer.close()
         commit.close()
+
+    def test_py_write_managed_blob(self):
+        table_name = 'default.managed_blob_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        arrow_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('payload', pa.large_binary()),
+            ('items', pa.list_(pa.large_binary())),
+            ('mapping', pa.map_(pa.string(), pa.large_binary())),
+        ])
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            arrow_schema, primary_keys=['id'], options={
+                'bucket': '1', 'file.format': 'parquet',
+                'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+                'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
+            }), False)
+        table = self.catalog.get_table(table_name)
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': [1], 'payload': [b'python-payload'],
+                'items': [[b'python-item']], 'mapping': [[('k', b'python-map')]],
+            }, schema=arrow_schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        self._check_python_managed_blob()
+
+    def test_read_python_managed_blob_after_java_gc(self):
+        self._check_python_managed_blob()
+
+    def _check_python_managed_blob(self):
+        table = self.catalog.get_table('default.managed_blob_python_to_java')
+        builder = table.new_read_builder()
+        rows = arrow_table_rows(builder.new_read().to_arrow(
+            builder.new_scan().plan().splits()))
+        self.assertEqual(rows, [{
+            'id': 1, 'payload': b'python-payload',
+            'items': [b'python-item'], 'mapping': [('k', b'python-map')],
+        }])
 
     @parameterized.expand([
         (type_name, order, grouping)

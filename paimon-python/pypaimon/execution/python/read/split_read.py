@@ -40,6 +40,7 @@ from pypaimon.read.blob_read_support import deferred_blob_field_names
 from pypaimon.execution.python.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import (
+    exclude_predicate_with_fields,
     predicate_field_names,
     predicate_for_physical_fields,
     predicate_matches_physical_names,
@@ -167,17 +168,36 @@ class SplitRead(ABC):
         # len(read_type) and whose coordinate space is read_type — that is
         # the space FilterRecordReader actually evaluates against.
         read_type_names = {f.name for f in read_type}
+        reader_predicate = self._predicate_without_managed_blobs(self.predicate)
         if (
-                self.predicate is not None
-                and predicate_field_names(self.predicate).issubset(read_type_names)
-                and predicate_matches_physical_names(self.predicate)
+                reader_predicate is not None
+                and predicate_field_names(reader_predicate).issubset(read_type_names)
+                and predicate_matches_physical_names(reader_predicate)
         ):
             self.predicate_for_reader = rewrite_predicate_indices(
-                self.predicate, read_type
+                reader_predicate, read_type
             )
         else:
             self.predicate_for_reader = None
         self._blob_view_prescan = False
+
+    def _predicate_without_managed_blobs(self, predicate):
+        """Drop predicates on primary-key managed BLOB columns.
+
+        Those columns store descriptors. Comparing them with payload bytes
+        drops rows that would match after the descriptor is resolved.
+        """
+        if predicate is None or not self.table.is_primary_key_table:
+            return predicate
+        if CoreOptions.blob_as_descriptor(self.table.options):
+            return predicate
+        from pypaimon.schema.data_types import managed_blob_field_names
+        inline = (CoreOptions.blob_descriptor_fields(self.table.options)
+                  | CoreOptions.blob_view_fields(self.table.options))
+        managed = managed_blob_field_names(self.table.fields, inline)
+        if not managed:
+            return predicate
+        return exclude_predicate_with_fields(predicate, managed)
 
     def _needs_blob_inline_convert(self) -> bool:
         return needs_blob_inline_convert(self.table)
@@ -191,6 +211,7 @@ class SplitRead(ABC):
             self.table,
             prescan_reader_factory=lambda names: self._create_blob_view_prescan_reader(names),
             blob_parallelism=self._blob_parallelism,
+            field_names=[field.name for field in self.read_fields],
         )
 
     def _blob_view_prescan_limit(self) -> Optional[int]:
@@ -1066,6 +1087,7 @@ class RawFileSplitRead(SplitRead):
             descriptor_field_indices=descriptor_field_indices_for_table(
                 self.table, self.read_fields),
             vector_field_indices=vector_field_indices(self.read_fields))
+        concat_reader.blob_base_path = str(self.table.table_path)
         reader = concat_reader
         if (self.predicate_for_reader
                 and (self.table.is_primary_key_table
@@ -1465,6 +1487,7 @@ class DataEvolutionSplitRead(SplitRead):
             descriptor_field_indices=descriptor_field_indices_for_table(
                 self.table, self.read_fields),
             vector_field_indices=vector_field_indices(self.read_fields))
+        merge_reader.blob_base_path = str(self.table.table_path)
         if self.predicate_for_reader is not None:
             reader = FilterRecordBatchReader(
                 merge_reader,
