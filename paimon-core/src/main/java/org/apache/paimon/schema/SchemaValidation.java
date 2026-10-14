@@ -104,6 +104,8 @@ import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOption;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOptionCandidate;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupSortOrderOption;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.parseSequenceGroupSortOrders;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupOrderingFields;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupProtectedFields;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
@@ -191,6 +193,8 @@ public class SchemaValidation {
         validateSequenceField(schema, options);
 
         validateSequenceGroupOrderingFields(schema, options);
+
+        validateSequenceGroupSortOrder(schema, options);
 
         validateMergeFunction(schema);
 
@@ -942,8 +946,13 @@ public class SchemaValidation {
                                 // PAIMON-6471: dot paths into a ROW field's members
                                 // (e.g. fields.row.inner.aggregate-function) are silently
                                 // dropped today and produce wrong results. This check
-                                // rejects them.
-                                if (segments.length > 3 && fields.length == 1) {
+                                // rejects them, except for the top-level sequence-group.sort-order
+                                // option, whose suffix itself contains a dot.
+                                boolean sequenceGroupSortOrder =
+                                        segments.length == 4 && isSequenceGroupSortOrderOption(k);
+                                if (segments.length > 3
+                                        && fields.length == 1
+                                        && !sequenceGroupSortOrder) {
                                     String parent = fields[0];
                                     schema.fields().stream()
                                             .filter(f -> f.name().equals(parent))
@@ -958,6 +967,17 @@ public class SchemaValidation {
                                 }
                             }
                         });
+    }
+
+    private static void validateSequenceGroupSortOrder(TableSchema schema, CoreOptions options) {
+        if (options.toMap().keySet().stream()
+                .anyMatch(optionKey -> isSequenceGroupSortOrderOption(optionKey))) {
+            checkArgument(
+                    !schema.primaryKeys().isEmpty()
+                            && options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
+                    "Sequence group sort-order options are only supported by primary-key tables with the partial-update merge engine.");
+            parseSequenceGroupSortOrders(options.toConfiguration());
+        }
     }
 
     private static void validateMergeFunction(TableSchema schema) {

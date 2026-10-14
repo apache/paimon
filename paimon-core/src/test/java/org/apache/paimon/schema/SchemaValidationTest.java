@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataTypes;
 import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDateTime;
@@ -72,6 +73,70 @@ class SchemaValidationTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Option 'primary-key.nullable' can only be enabled for a table with primary keys.");
+    }
+
+    @Test
+    public void testSequenceGroupSortOrderValidation() {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("fields.f2.sequence-group", "f3");
+        options.put("fields.f2.sequence-group.sort-order", "descending");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+        options.put("fields.f2.sequence-group.sort-order", "invalid");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("Could not parse value 'invalid'");
+        options.put("fields.f2.sequence-group.sort-order", "descending");
+        options.remove("fields.f2.sequence-group");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("without defining corresponding sequence group");
+        options.put("fields.f2.sequence-group", "f3");
+        options.put("merge-engine", "deduplicate");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "only supported by primary-key tables with the partial-update merge engine");
+        options.put("merge-engine", "partial-update");
+        TableSchema appendSchema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "f2", DataTypes.INT()),
+                                new DataField(1, "f3", DataTypes.STRING())),
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        options,
+                        "");
+        assertThatThrownBy(() -> validateTableSchema(appendSchema))
+                .hasMessageContaining(
+                        "only supported by primary-key tables with the partial-update merge engine");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "ascending", "descending"})
+    public void testRowSequenceGroupSortOrder(String sortOrder) {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("fields.seq.sequence-group", "payload");
+        if (!sortOrder.isEmpty()) {
+            options.put("fields.seq.sequence-group.sort-order", sortOrder);
+        }
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "payload", DataTypes.STRING()),
+                                new DataField(
+                                        2,
+                                        "seq",
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(3, "version", DataTypes.INT())))),
+                        3,
+                        emptyList(),
+                        singletonList("id"),
+                        options,
+                        "");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
     }
 
     private void validateTableSchemaExec(Map<String, String> options) {
@@ -904,8 +969,12 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
 
-    @Test
-    public void testNestedRowAggregateOptionRejected() {
+    @ParameterizedTest
+    @CsvSource({
+        "aggregation, fields.data.num.aggregate-function, sum",
+        "partial-update, fields.data.num.sequence-group.sort-order, descending"
+    })
+    public void testNestedRowOptionRejected(String mergeEngine, String optionKey, String value) {
         // PAIMON-6471: nested-path agg config was silently ignored, leaving the parent ROW
         // on the default aggregator and producing wrong results without any error.
         List<DataField> fields =
@@ -919,8 +988,8 @@ class SchemaValidationTest {
                                         DataTypes.FIELD(3, "info", DataTypes.STRING()))));
 
         Map<String, String> options = new HashMap<>();
-        options.put("merge-engine", "aggregation");
-        options.put("fields.data.num.aggregate-function", "sum");
+        options.put("merge-engine", mergeEngine);
+        options.put(optionKey, value);
         options.put("fields.data.sequence-group", "data");
         options.put(BUCKET.key(), "1");
 
@@ -929,7 +998,7 @@ class SchemaValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining("Nested-field path is not supported on ROW field 'data'")
-                .hasMessageContaining("fields.data.num.aggregate-function");
+                .hasMessageContaining(optionKey);
     }
 
     @Test
