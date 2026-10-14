@@ -67,14 +67,14 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Atomic visibility of primary-key data, compaction indexes and changelog. */
-class AtomicCommitRecoveryTest {
+/** Recovery of primary-key data, compaction indexes and changelog. */
+class FullCompactionRecoveryTest {
 
     @TempDir java.nio.file.Path directory;
 
     @ParameterizedTest
     @MethodSource("scenarios")
-    void atomicCommitPreservesDataAndChangelogAcrossPublicationFailure(
+    void commitPreservesDataAndChangelogAcrossPublicationFailure(
             String producer, boolean deletionVectors, CrashPoint crash, boolean reuseCommit)
             throws Exception {
         Path root = new Path(directory.toUri());
@@ -191,12 +191,13 @@ class AtomicCommitRecoveryTest {
                         recovered.filterAndCommit(pending);
                     }
                 }
-            } else if (crash == CrashPoint.BEFORE_PUBLICATION) {
-                io.beforeAppend = true;
+            } else if (crash == CrashPoint.BEFORE_PUBLICATION || crash == CrashPoint.AFTER_APPEND) {
+                io.beforeAppend = crash == CrashPoint.BEFORE_PUBLICATION;
                 io.appendSnapshot.set(table.snapshotManager().snapshotPath(previousSnapshot + 1));
                 assertThatThrownBy(() -> commit.commit(2, messages)).isInstanceOf(Exception.class);
                 assertThat(io.injected.get()).isTrue();
-                assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(previousSnapshot);
+                assertThat(table.snapshotManager().latestSnapshotId())
+                        .isEqualTo(previousSnapshot + (crash == CrashPoint.AFTER_APPEND ? 1 : 0));
                 if (reuseCommit) {
                     commit.filterAndCommit(pending);
                 } else {
@@ -207,30 +208,22 @@ class AtomicCommitRecoveryTest {
             } else {
                 if (crash == CrashPoint.AFTER_COMPACT) {
                     io.compactSnapshot.set(
-                            table.snapshotManager().snapshotPath(previousSnapshot + 1));
+                            table.snapshotManager().snapshotPath(previousSnapshot + 2));
                 }
                 commit.commit(2, messages);
             }
             assertThat(table.snapshotManager().latestSnapshotId())
-                    .isEqualTo(
-                            previousSnapshot
-                                    + (crash == CrashPoint.LEGACY_INDEX_ONLY
-                                            ? 3
-                                            : (crash == CrashPoint.LEGACY_APPEND
-                                                            || crash
-                                                                    == CrashPoint
-                                                                            .LEGACY_EXPIRED_APPEND)
-                                                    ? 2
-                                                    : 1));
+                    .isEqualTo(previousSnapshot + (crash == CrashPoint.LEGACY_INDEX_ONLY ? 4 : 2));
             if (crash != CrashPoint.LEGACY_APPEND
                     && crash != CrashPoint.LEGACY_INDEX_ONLY
                     && crash != CrashPoint.LEGACY_EXPIRED_APPEND) {
                 assertThat(table.snapshotManager().latestSnapshot().properties())
-                        .containsEntry("paimon.commit.compact-protocol", "atomic-v1");
+                        .containsEntry("paimon.commit.compact-protocol", "recoverable-v1");
             }
             assertThat(io.injected.get())
                     .isEqualTo(
                             crash == CrashPoint.BEFORE_PUBLICATION
+                                    || crash == CrashPoint.AFTER_APPEND
                                     || crash == CrashPoint.AFTER_COMPACT);
             if (crash == CrashPoint.LEGACY_INDEX_ONLY) {
                 IndexFileHandler handler = table.store().newIndexFileHandler();
@@ -267,7 +260,7 @@ class AtomicCommitRecoveryTest {
     @ParameterizedTest
     @CsvSource({"false,true", "false,false", "true,true"})
     void competingCompactionRecoversRequiredChangelogWithoutDuplicates(
-            boolean atomicAppend, boolean otherFull) throws Exception {
+            boolean appendPending, boolean otherFull) throws Exception {
         Path root = new Path(directory.toUri());
         LocalFileIO io = LocalFileIO.create();
         new FileSystemSchemaManager(io, root)
@@ -307,7 +300,7 @@ class AtomicCommitRecoveryTest {
                                                         CompactIncrement.emptyIncrement());
                                     })
                             .collect(Collectors.toList());
-            if (!atomicAppend) {
+            if (!appendPending) {
                 commit.commit(2, appendOnly);
             }
             try (TableWriteImpl<?> other = table.newWrite("other").withIOManager(disk);
@@ -347,7 +340,7 @@ class AtomicCommitRecoveryTest {
                 }
                 otherCommit.commit(1, otherMessages);
             }
-            if (atomicAppend) {
+            if (appendPending) {
                 assertThat(streamRows(table, scan)).containsExactly("+I 2|30");
                 assertThatThrownBy(() -> commit.commit(2, pending))
                         .isInstanceOf(RuntimeException.class)
@@ -605,6 +598,7 @@ class AtomicCommitRecoveryTest {
     private enum CrashPoint {
         NONE,
         BEFORE_PUBLICATION,
+        AFTER_APPEND,
         AFTER_COMPACT,
         LEGACY_APPEND,
         LEGACY_INDEX_ONLY,

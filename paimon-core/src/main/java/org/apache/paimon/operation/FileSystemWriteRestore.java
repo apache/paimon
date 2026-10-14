@@ -86,12 +86,13 @@ public class FileSystemWriteRestore implements WriteRestore {
     }
 
     @Override
-    public long latestAtomicCommitIdentifier(String user) {
+    public long latestCompletedCompactionIdentifier(String user) {
         Optional<Snapshot> snapshot = snapshotManager.latestSnapshotOfUserFromFilesystem(user);
         while (snapshot.isPresent()) {
             Snapshot current = snapshot.get();
-            if (current.properties() != null
-                    && "atomic-v1"
+            if (current.commitKind() == Snapshot.CommitKind.COMPACT
+                    && current.properties() != null
+                    && "recoverable-v1"
                             .equals(current.properties().get("paimon.commit.compact-protocol"))) {
                 return current.commitIdentifier();
             }

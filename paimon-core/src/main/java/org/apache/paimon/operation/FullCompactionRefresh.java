@@ -38,7 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-/** Reprepares stale compaction against a pinned snapshot and the uncommitted raw files. */
+/** Reprepares stale compaction against a pinned committed snapshot. */
 public final class FullCompactionRefresh {
     private final CoreOptions options;
     private final SnapshotManager snapshots;

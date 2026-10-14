@@ -327,12 +327,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 boolean pendingCompact =
                         committable.identifier() == durable.commitIdentifier()
                                 && durable.commitKind() == CommitKind.APPEND
-                                && (durable.properties() == null
-                                        || !"atomic-v1"
-                                                .equals(
-                                                        durable.properties()
-                                                                .get(
-                                                                        "paimon.commit.compact-protocol")))
                                 && committable.fileCommittables().stream()
                                         .map(message -> (CommitMessageImpl) message)
                                         .anyMatch(
@@ -379,37 +373,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         ManifestEntryChanges changes = collectChanges(commitMessages);
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
-            if (!incompleteAppends.contains(committable.identifier())
-                    && !options.dataEvolutionEnabled()
-                    && (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
-                            || options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP)
-                    && (!changes.compactChangelog.isEmpty()
-                            || !changes.compactIndexFiles.isEmpty())) {
-                Map<String, String> properties = new HashMap<>(committable.properties());
-                properties.put("paimon.commit.compact-protocol", "atomic-v1");
-                AtomicBoolean refreshedCompaction = new AtomicBoolean();
-                attempts +=
-                        tryCommit(
-                                atomicChangelogChanges(
-                                        changes,
-                                        commitMessages,
-                                        committable.identifier(),
-                                        refreshedCompaction),
-                                committable.identifier(),
-                                committable.watermark(),
-                                properties,
-                                CommitKind.APPEND,
-                                false,
-                                true,
-                                null);
-                generatedSnapshot = 1;
-                if (refreshedCompaction.get()) {
-                    throw new RuntimeException(
-                            "Data and changelog were committed, but the physical compaction was "
-                                    + "refreshed; refresh the writer before continuing.");
-                }
-                return generatedSnapshot;
-            }
             List<SimpleFileEntry> appendSimpleEntries =
                     SimpleFileEntry.from(changes.appendTableFiles);
             if (!incompleteAppends.contains(committable.identifier())
@@ -460,7 +423,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (!changes.compactTableFiles.isEmpty()
                     || !changes.compactChangelog.isEmpty()
                     || !changes.compactIndexFiles.isEmpty()) {
-                AtomicBoolean refreshedLegacy = new AtomicBoolean();
+                AtomicBoolean refreshedCompaction = new AtomicBoolean();
                 CommitChangesProvider compactProvider =
                         compactChangesProvider(
                                 new CommitChanges(
@@ -469,8 +432,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         changes.compactIndexFiles),
                                 materializedBuckets);
                 Map<String, String> compactProperties = committable.properties();
-                if (incompleteAppends.contains(committable.identifier())
-                        && fullCompactionRefresh != null
+                if (!options.dataEvolutionEnabled()
+                        && (options.changelogProducer()
+                                        == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                                || options.changelogProducer()
+                                        == CoreOptions.ChangelogProducer.LOOKUP)) {
+                    compactProperties = new HashMap<>(committable.properties());
+                    compactProperties.put("paimon.commit.compact-protocol", "recoverable-v1");
+                }
+                if (fullCompactionRefresh != null
+                        && options.changelogProducer()
+                                == CoreOptions.ChangelogProducer.FULL_COMPACTION
                         && changes.compactIndexFiles.isEmpty()) {
                     List<CommitMessage> remaining =
                             commitMessages.stream()
@@ -489,13 +461,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                             })
                                     .collect(Collectors.toList());
                     compactProvider =
-                            atomicChangelogChanges(
+                            requiredCompactionChanges(
                                     collectChanges(remaining),
                                     remaining,
                                     committable.identifier(),
-                                    refreshedLegacy);
-                    compactProperties = new HashMap<>(committable.properties());
-                    compactProperties.put("paimon.commit.compact-protocol", "atomic-v1");
+                                    refreshedCompaction);
                 }
                 attempts +=
                         tryCommit(
@@ -508,9 +478,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 true,
                                 null);
                 generatedSnapshot += 1;
-                if (refreshedLegacy.get()) {
+                if (refreshedCompaction.get()) {
                     throw new RuntimeException(
-                            "Legacy data and changelog are committed; refresh the writer before continuing.");
+                            "Compaction and changelog are committed; refresh the writer before continuing.");
                 }
             }
             incompleteAppends.remove(committable.identifier());
@@ -535,7 +505,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return generatedSnapshot;
     }
 
-    private CommitChangesProvider atomicChangelogChanges(
+    private CommitChangesProvider requiredCompactionChanges(
             ManifestEntryChanges changes,
             List<CommitMessage> messages,
             long identifier,

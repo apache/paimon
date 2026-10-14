@@ -263,7 +263,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             super.restore(states);
             return;
         }
-        long completed = restore.latestAtomicCommitIdentifier(commitUser);
+        long completed = restore.latestCompletedCompactionIdentifier(commitUser);
         List<State<KeyValue>> reconciled = new ArrayList<>();
         for (State<KeyValue> state : states) {
             if (completed == Long.MIN_VALUE

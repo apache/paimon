@@ -32,7 +32,7 @@ public interface WriteRestore {
     long latestCommittedIdentifier(String user);
 
     /** Latest retained identifier whose data and required compaction work are complete. */
-    default long latestAtomicCommitIdentifier(String user) {
+    default long latestCompletedCompactionIdentifier(String user) {
         return Long.MIN_VALUE;
     }
 
