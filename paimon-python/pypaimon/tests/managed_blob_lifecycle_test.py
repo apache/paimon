@@ -16,8 +16,9 @@
 # under the License.
 
 import unittest
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
+from pypaimon.blob.managed_blob_reference_file import ManagedBlobReferenceFile, Reference
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
@@ -45,6 +46,7 @@ class ManagedBlobLifecycleTest(unittest.TestCase):
 
     def test_commit_abort_deletes_sidecars_and_unpreserved_packs(self):
         file_io = Mock()
+        file_io.list_status.return_value = []
         commit = FileStoreCommit.__new__(FileStoreCommit)
         commit.table = Mock(file_io=file_io)
 
@@ -69,6 +71,7 @@ class ManagedBlobLifecycleTest(unittest.TestCase):
 
     def test_commit_abort_deletes_blob_packs(self):
         file_io = Mock()
+        file_io.list_status.return_value = []
         commit = FileStoreCommit.__new__(FileStoreCommit)
         commit.table = Mock(file_io=file_io)
 
@@ -92,6 +95,38 @@ class ManagedBlobLifecycleTest(unittest.TestCase):
             call("/warehouse/table/bucket-0/payload.blob"),
         ], any_order=True)
 
+    def test_commit_abort_discovers_packs_from_sidecars(self):
+        for listing_fails in (False, True):
+            with self.subTest(listing_fails=listing_fails):
+                file_io = Mock()
+                file_io.list_status.return_value = []
+                if listing_fails:
+                    file_io.list_status.side_effect = OSError('injected')
+                commit = FileStoreCommit.__new__(FileStoreCommit)
+                commit.table = Mock(file_io=file_io, table_path='/warehouse/table')
+                data_file = _file(
+                    '/warehouse/table/bucket-0/data.avro', ['data.avro.blobref'])
+                reference = Reference('bucket-0', 'pack.managed.blob')
+                with patch.object(ManagedBlobReferenceFile, 'read', return_value=[reference]):
+                    commit.abort([CommitMessage((), 0, [data_file])])
+                deleted = {args[0] for args, _kwargs in file_io.delete_quietly.call_args_list}
+                self.assertIn('/warehouse/table/bucket-0/data.avro', deleted)
+                self.assertIn('/warehouse/table/bucket-0/data.avro.blobref', deleted)
+                self.assertEqual(
+                    '/warehouse/table/bucket-0/pack.managed.blob' in deleted, not listing_fails)
+
+    def test_commit_abort_keeps_pack_when_surviving_sidecar_is_unreadable(self):
+        file_io = Mock()
+        file_io.list_status.return_value = [Mock(base_name='committed.avro.blobref')]
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.table = Mock(file_io=file_io, table_path='/warehouse/table')
+        data_file = _file('/warehouse/table/bucket-0/data.avro', ['data.avro.blobref'])
+        with patch.object(ManagedBlobReferenceFile, 'read', side_effect=[
+                [Reference('bucket-0', 'pack.managed.blob')], OSError('injected')]):
+            commit.abort([CommitMessage((), 0, [data_file])])
+        deleted = {args[0] for args, _kwargs in file_io.delete_quietly.call_args_list}
+        self.assertNotIn('/warehouse/table/bucket-0/pack.managed.blob', deleted)
+
     def test_commit_abort_deletes_resolved_data_file_when_extras_fail(self):
         file_io = Mock()
         commit = FileStoreCommit.__new__(FileStoreCommit)
@@ -114,6 +149,28 @@ class ManagedBlobLifecycleTest(unittest.TestCase):
 
         file_io.delete_quietly.assert_called_once_with(
             "/warehouse/table/bucket-0/data.avro")
+
+    def test_commit_abort_keeps_packs_when_listing_fails(self):
+        file_io = Mock()
+        file_io.list_status.side_effect = OSError("injected")
+        commit = FileStoreCommit.__new__(FileStoreCommit)
+        commit.table = Mock(file_io=file_io)
+        data_file = _file(
+            "/warehouse/table/bucket-0/data.avro",
+            ["data.avro.blobref", "pack.managed.blob"],
+        )
+        message = CommitMessage(
+            partition=(),
+            bucket=0,
+            new_files=[data_file],
+        )
+
+        commit.abort([message])
+
+        deleted = [args[0] for args, _kwargs in file_io.delete_quietly.call_args_list]
+        self.assertIn("/warehouse/table/bucket-0/data.avro", deleted)
+        self.assertIn("/warehouse/table/bucket-0/data.avro.blobref", deleted)
+        self.assertNotIn("/warehouse/table/bucket-0/pack.managed.blob", deleted)
 
 
 if __name__ == "__main__":

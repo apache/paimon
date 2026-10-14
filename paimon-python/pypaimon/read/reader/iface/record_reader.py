@@ -42,6 +42,7 @@ class RecordReader(Generic[T], ABC):
 
     def _adopt_blob_metadata(self, reader) -> None:
         self.file_io = getattr(reader, 'file_io', None)
+        self.blob_base_path = getattr(reader, 'blob_base_path', None)
         self.blob_field_indices = getattr(reader, 'blob_field_indices', None)
         self.descriptor_field_indices = getattr(reader, 'descriptor_field_indices', None)
         self.blob_view_lookup = getattr(reader, 'blob_view_lookup', None)

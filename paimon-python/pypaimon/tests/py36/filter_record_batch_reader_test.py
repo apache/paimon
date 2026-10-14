@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -62,3 +63,14 @@ class FilterRecordBatchReaderTest(unittest.TestCase):
             self.assertIsNone(reader.read_arrow_batch())
         finally:
             reader.close()
+
+    def test_large_filter_without_concat_batches(self):
+        count = 140000
+        batch = pa.RecordBatch.from_arrays([pa.array(range(count))], names=['id'])
+        reader = FilterRecordBatchReader(
+            _Batches([batch]), Predicate('greaterOrEqual', 0, 'id', [0]))
+        with patch.object(pa, 'concat_batches', None, create=True):
+            result = reader.read_arrow_batch()
+        self.assertEqual(result.num_rows, count)
+        self.assertEqual(result.column(0).to_pylist(), list(range(count)))
+        self.assertIsNone(reader.read_arrow_batch())

@@ -151,7 +151,7 @@ class FilterRecordBatchReader(RecordBatchReader):
         if concat_batches is not None:
             return concat_batches(batches)
         return pa.RecordBatch.from_arrays(
-            [result.column(i) for i in range(result.num_columns)],
+            [result.column(i).combine_chunks() for i in range(result.num_columns)],
             schema=result.schema,
         )
 

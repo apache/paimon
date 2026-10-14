@@ -59,6 +59,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.LocalManagedBlobOrphanFilesClean;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -70,6 +71,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -104,6 +106,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -116,6 +119,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -670,6 +674,64 @@ public class JavaPyE2ETest {
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "hello-java, 42, java-new", "python-only, 7, python-only");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonManagedBlobAndClean() throws Exception {
+        java.nio.file.Path tablePath =
+                tempDir.resolve("warehouse/default.db/managed_blob_python_to_java");
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), new Path(tablePath.toString()));
+        assertPythonManagedBlobRows(table);
+        Long snapshotId = table.snapshotManager().latestSnapshotId();
+
+        List<java.nio.file.Path> packs;
+        try (Stream<java.nio.file.Path> files = Files.walk(tablePath)) {
+            packs =
+                    files.filter(path -> path.toString().endsWith(".managed.blob"))
+                            .collect(Collectors.toList());
+        }
+        assertThat(packs).hasSize(3);
+        long now = System.currentTimeMillis();
+        FileTime oldTime = FileTime.fromMillis(now - TimeUnit.HOURS.toMillis(72));
+        for (java.nio.file.Path pack : packs) {
+            Files.setLastModifiedTime(pack, oldTime);
+        }
+        java.nio.file.Path orphan = packs.get(0).resolveSibling("orphan.managed.blob");
+        Files.copy(packs.get(0), orphan);
+        Files.setLastModifiedTime(orphan, oldTime);
+
+        try (LocalManagedBlobOrphanFilesClean cleaner =
+                new LocalManagedBlobOrphanFilesClean(
+                        table, now - TimeUnit.HOURS.toMillis(24), false)) {
+            assertThat(cleaner.clean().getDeletedFileCount()).isEqualTo(1);
+        }
+        assertThat(Files.exists(orphan)).isFalse();
+        for (java.nio.file.Path pack : packs) {
+            assertThat(Files.exists(pack)).isTrue();
+        }
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
+        assertPythonManagedBlobRows(table);
+    }
+
+    private void assertPythonManagedBlobRows(FileStoreTable table) throws Exception {
+        List<String> rows =
+                getResult(
+                        table.newRead(),
+                        table.newScan().plan().splits(),
+                        row -> {
+                            assertThat(row.getBlob(1).toData())
+                                    .isEqualTo("python-payload".getBytes(StandardCharsets.UTF_8));
+                            assertThat(row.getArray(2).getBlob(0).toData())
+                                    .isEqualTo("python-item".getBytes(StandardCharsets.UTF_8));
+                            InternalMap map = row.getMap(3);
+                            assertThat(map.keyArray().getString(0).toString()).isEqualTo("k");
+                            assertThat(map.valueArray().getBlob(0).toData())
+                                    .isEqualTo("python-map".getBytes(StandardCharsets.UTF_8));
+                            return Integer.toString(row.getInt(0));
+                        });
+        assertThat(rows).containsExactly("1");
     }
 
     private int assignDynamicBucket(FileStoreTable table, InternalRow row) {

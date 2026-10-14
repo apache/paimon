@@ -83,6 +83,7 @@ class RecordBatchReader(RecordReader):
     """
 
     file_io = None
+    blob_base_path = None
     blob_field_indices = None
     descriptor_field_indices = None
     blob_view_lookup = None
@@ -90,6 +91,7 @@ class RecordBatchReader(RecordReader):
 
     def _adopt_metadata(self, reader: "RecordBatchReader") -> None:
         self.file_io = reader.file_io
+        self.blob_base_path = getattr(reader, 'blob_base_path', None)
         self.blob_field_indices = reader.blob_field_indices
         self.descriptor_field_indices = getattr(
             reader, 'descriptor_field_indices', None)
@@ -127,7 +129,8 @@ class RecordBatchReader(RecordReader):
         return InternalRowWrapperIterator(
             self._iter_df_rows(df), df.width, self.file_io,
             self.blob_field_indices, self.vector_field_indices,
-            self.descriptor_field_indices, self.blob_view_lookup)
+            self.descriptor_field_indices, self.blob_view_lookup,
+            getattr(self, 'blob_base_path', None))
 
     @staticmethod
     def _iter_df_rows(df) -> Iterator[tuple]:
@@ -143,14 +146,16 @@ class InternalRowWrapperIterator(RecordIterator[InternalRow]):
                  file_io=None, blob_field_indices=None,
                  vector_field_indices=None,
                  descriptor_field_indices=None,
-                 blob_view_lookup=None):
+                 blob_view_lookup=None,
+                 blob_base_path=None):
         self._iterator = iterator
         self._reused_row = OffsetRow(None, 0, width,
                                      file_io=file_io,
                                      blob_field_indices=blob_field_indices,
                                      vector_field_indices=vector_field_indices,
                                      descriptor_field_indices=descriptor_field_indices,
-                                     blob_view_lookup=blob_view_lookup)
+                                     blob_view_lookup=blob_view_lookup,
+                                     blob_base_path=blob_base_path)
 
     def next(self) -> Optional[InternalRow]:
         row_tuple = next(self._iterator, None)

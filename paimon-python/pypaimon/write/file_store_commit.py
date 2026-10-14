@@ -21,6 +21,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from pypaimon.blob.managed_blob_cleanup import managed_blob_deletion_paths
 from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -1034,6 +1035,7 @@ class FileStoreCommit:
         Never call after a commit whose outcome is unknown. Internal error
         paths must preserve prepared files instead of calling this method.
         """
+        collected = []
         for message in commit_messages:
             for file in (list(message.new_files) + list(message.changelog_files)
                          + list(message.compact_after)
@@ -1060,7 +1062,7 @@ class FileStoreCommit:
                         error,
                     )
                     continue
-                _delete_abort_paths(self.table, paths)
+                collected.append(paths)
             for entry in message.index_adds + message.compact_index_adds:
                 file_name = None
                 try:
@@ -1083,6 +1085,8 @@ class FileStoreCommit:
                         file_name,
                         error,
                     )
+        deleting = [path for paths in collected for path in paths]
+        _delete_abort_paths(self.table, managed_blob_deletion_paths(self.table, deleting))
 
     def close(self):
         """Close the FileStoreCommit and release resources."""

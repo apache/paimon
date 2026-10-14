@@ -142,6 +142,47 @@ class JavaPyReadWriteTest(unittest.TestCase):
         writer.close()
         commit.close()
 
+    def test_py_write_managed_blob(self):
+        table_name = 'default.managed_blob_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        arrow_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('payload', pa.large_binary()),
+            ('items', pa.list_(pa.large_binary())),
+            ('mapping', pa.map_(pa.string(), pa.large_binary())),
+        ])
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            arrow_schema, primary_keys=['id'], options={
+                'bucket': '1', 'file.format': 'parquet',
+                'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+                'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
+            }), False)
+        table = self.catalog.get_table(table_name)
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': [1], 'payload': [b'python-payload'],
+                'items': [[b'python-item']], 'mapping': [[('k', b'python-map')]],
+            }, schema=arrow_schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        self._check_python_managed_blob()
+
+    def test_read_python_managed_blob_after_java_gc(self):
+        self._check_python_managed_blob()
+
+    def _check_python_managed_blob(self):
+        table = self.catalog.get_table('default.managed_blob_python_to_java')
+        builder = table.new_read_builder()
+        rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(rows, [{
+            'id': 1, 'payload': b'python-payload',
+            'items': [b'python-item'], 'mapping': [('k', b'python-map')],
+        }])
+
     @parameterized.expand([
         (type_name, order, grouping)
         for type_name in ('float', 'double')

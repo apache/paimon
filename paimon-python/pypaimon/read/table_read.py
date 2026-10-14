@@ -25,8 +25,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.blob.managed_blob_payload import managed_blob_output_specs
 from pypaimon.casting.schema_evolution import read_arrow_schema
-
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_json_parser import (
@@ -41,6 +41,7 @@ from pypaimon.read.reader.auth_masking_reader import (
     apply_auth_masking, compile_auth_masking_rules)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
+from pypaimon.read.reader.managed_blob_record_batch_reader import ManagedBlobRecordBatchReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.variant_read_type import has_variant_extractions
@@ -1637,6 +1638,49 @@ class TableRead:
                 limit=effective_limit,
             )
 
+    def _managed_blob_specs(self, fields):
+        return managed_blob_output_specs(
+            self.table, fields, self._blob_as_descriptor)
+
+    def _resolve_managed_blob_reader(self, reader, fields):
+        specs = self._managed_blob_specs(fields)
+        if not specs:
+            return reader
+        if not isinstance(reader, RecordBatchReader):
+            reader = RecordReaderToBatchAdapter(
+                reader, read_arrow_schema(fields), include_row_kind=True)
+            from pypaimon.read.reader.field_indices import (
+                blob_field_indices, descriptor_field_indices_for_table, vector_field_indices)
+            if reader.blob_field_indices is None:
+                reader.blob_field_indices = blob_field_indices(fields)
+            # An empty set means the inner reader already resolved descriptors.
+            if reader.descriptor_field_indices is None:
+                reader.descriptor_field_indices = descriptor_field_indices_for_table(self.table, fields)
+            if reader.vector_field_indices is None:
+                reader.vector_field_indices = vector_field_indices(fields)
+        return ManagedBlobRecordBatchReader(
+            reader, specs, self.table.file_io, self.table.table_path)
+
+    def _managed_blob_reader(self, split, blob_parallelism, limit):
+        fields = self._scan_read_type
+        managed_fields = {name for _index, name, _kind in self._managed_blob_specs(fields)}
+        post_filter = bool(predicate_field_names(self.predicate) & managed_fields) if self.predicate else False
+        reader = self._create_split_read(
+            split, blob_parallelism=blob_parallelism, read_type=fields,
+            limit=limit, push_down_limit=not post_filter,
+            predicate=exclude_predicate_with_fields(self.predicate, managed_fields),
+        ).create_reader()
+        needs_convert_back = not isinstance(reader, RecordBatchReader)
+        reader = self._resolve_managed_blob_reader(reader, fields)
+        if post_filter:
+            reader = FilterRecordBatchReader(
+                reader, rewrite_predicate_indices(self.predicate, fields), schema_fields=fields)
+        if self._predicate_extra_fields:
+            reader = ColumnProjectReader(reader, self._output_column_names)
+        if needs_convert_back or not self._adapter_read_type:
+            reader = BatchToRecordReaderAdapter(reader)
+        return reader
+
     def _serialize_blob_views_as_descriptors(self, batch: pyarrow.RecordBatch, reader) -> pyarrow.RecordBatch:
         if not self._blob_as_descriptor or not self._blob_view_output_indices:
             return batch
@@ -1819,6 +1863,8 @@ class TableRead:
         if auth_result is not None:
             return self.__authed_reader(
                 split, auth_result, blob_parallelism, limit)
+        if self._managed_blob_specs(self._scan_read_type):
+            return self._managed_blob_reader(split, blob_parallelism, limit)
         if limit is None:
             return self._create_split_read(
                 split, blob_parallelism=blob_parallelism).create_reader()
@@ -1854,6 +1900,8 @@ class TableRead:
         effective_read_type = filter_read_fields + extra_fields
 
         filter_fn = auth_result.extract_row_filter()
+        managed_fields = {
+            name for _index, name, _kind in self._managed_blob_specs(effective_read_type)}
         effective_limit = self.limit if limit is None else limit
         auth_fields = (
             self._auth_filter_field_names(auth_result, effective_read_type)
@@ -1889,8 +1937,8 @@ class TableRead:
             post_merge_filter=filter_fn if embed_filter else None,
             eager_blob_fields=eager_blob_fields,
             post_filter_after_inline=post_filter_after_inline,
-            # push down conjuncts without masked columns
-            predicate=exclude_predicate_with_fields(post_filter, masked_fields),
+            # Managed BLOB predicates need resolved payloads, and masks apply after the read.
+            predicate=exclude_predicate_with_fields(post_filter, masked_fields | managed_fields),
             defer_blob_resolution=post_filter is not None,
         )
         reader = split_read.create_reader()
@@ -1910,6 +1958,7 @@ class TableRead:
                 reader.vector_field_indices = vector_field_indices(effective_read_type)
             needs_convert_back = True
 
+        reader = self._resolve_managed_blob_reader(reader, effective_read_type)
         if filter_fn and not embed_filter:
             reader = AuthFilterReader(reader, filter_fn)
 
