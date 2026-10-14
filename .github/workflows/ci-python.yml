@@ -239,7 +239,8 @@ jobs:
             TZ="$zone" python -m pytest -q \
               paimon-python/pypaimon/tests/native_cast_completion_test.py \
               paimon-python/pypaimon/tests/native_temporal_zone_cast_test.py \
-              -k 'TIMESTAMP_LTZ or temporal'
+              paimon-python/pypaimon/tests/native_schema_cast_test.py \
+              -k 'TIMESTAMP or temporal'
           done
 
   torch:
