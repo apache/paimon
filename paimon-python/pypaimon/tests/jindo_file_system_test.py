@@ -404,7 +404,7 @@ class JindoKeepAliveTest(unittest.TestCase):
         with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
                 mock.patch.object(jindo_module, "jfs", fake_jfs), \
                 mock.patch.object(jindo_module, "jutil",
-                                   types.SimpleNamespace(Config=_RecordingConfig)):
+                                  types.SimpleNamespace(Config=_RecordingConfig)):
             handler = JindoFileSystemHandler("oss://bucket/", options)
         return handler, weakref.ref(fake_fs), weakref.ref(handler)
 
