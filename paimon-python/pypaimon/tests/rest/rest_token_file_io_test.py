@@ -18,10 +18,12 @@
 import gc
 import os
 import pickle
+import signal
 import tempfile
 import threading
 import time
 import unittest
+import warnings
 import weakref
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
@@ -220,6 +222,84 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.assertEqual(threads_count, len(results))
         self.assertTrue(all(r is results[0] for r in results))
         self.assertEqual(1, get_io.call_count)
+
+    @staticmethod
+    def _run_in_forked_child(action):
+        with warnings.catch_warnings():
+            # Python 3.12+ warns about forking with other threads alive, which these tests do on purpose.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            pid = os.fork()
+        if pid == 0:
+            code = 1
+            try:
+                signal.alarm(10)
+                action()
+                code = 0
+            finally:
+                os._exit(code)
+        return os.waitpid(pid, 0)[1]
+
+    def _assert_child_succeeded(self, status):
+        self.assertFalse(os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGALRM,
+                         "the forked child blocked on a lock held by a parent thread")
+        self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
+
+    @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
+    def test_fork_while_another_thread_creates_file_io(self):
+        token = self._valid_token("shared")
+        creating = threading.Event()
+
+        def slow_file_io(path, options):
+            if path.endswith("/slow"):
+                creating.set()
+                time.sleep(0.3)
+            return _FakeFileIO(path, options)
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=slow_file_io) as get_io:
+            other = self._file_io_with_token("oss://bucket/db.db/other", Options({}), token)
+            slow = self._file_io_with_token("oss://bucket/db.db/slow", Options({}), token)
+
+            def in_child():
+                other.file_io()
+                # The fork waited for the creation, so the child finds that FileIO cached.
+                slow.file_io()
+                assert get_io.call_count == 2, get_io.call_count
+
+            creator = threading.Thread(target=slow.file_io)
+            creator.start()
+            self.assertTrue(creating.wait(5))
+            status = self._run_in_forked_child(in_child)
+            creator.join()
+        self._assert_child_succeeded(status)
+
+    @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
+    def test_fork_while_another_thread_refreshes_token(self):
+        table_path = "oss://bucket/db.db/t"
+        refreshing, release = threading.Event(), threading.Event()
+        holders = []
+
+        def refresh(file_io):
+            if threading.current_thread() in holders:
+                refreshing.set()
+                release.wait(10)
+            file_io.token = self._valid_token("refreshed")
+
+        self.addCleanup(RESTTokenFileIO._TOKEN_CACHE.pop, 'fork-test', None)
+        with patch.object(RESTTokenFileIO, '_build_cache_key', return_value='fork-test'), \
+                patch.object(RESTTokenFileIO, 'refresh_token', autospec=True, side_effect=refresh), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            file_io = RESTTokenFileIO(self.identifier, table_path, Options({}))
+            holders.append(threading.Thread(target=file_io.file_io))
+            holders[0].start()
+            self.assertTrue(refreshing.wait(5))
+            # The child uses the object whose locks are held, and another object of that table.
+            status = self._run_in_forked_child(lambda: (
+                file_io.file_io(),
+                RESTTokenFileIO(self.identifier, table_path, Options({})).file_io()))
+            release.set()
+            holders[0].join()
+        self._assert_child_succeeded(status)
 
     def test_existing_valid_token_does_not_refresh_or_read_shared_cache(self):
         file_io = RESTTokenFileIO(self.identifier, self.warehouse_path)

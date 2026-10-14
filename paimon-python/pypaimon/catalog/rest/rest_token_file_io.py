@@ -16,8 +16,10 @@
 # under the License.
 
 import logging
+import os
 import threading
 import time
+import weakref
 from datetime import timedelta
 from typing import Optional, Union
 
@@ -52,6 +54,9 @@ class RESTTokenFileIO(FileIO):
     _TOKEN_LOCKS: dict = {}
     _TOKEN_LOCKS_LOCK = threading.Lock()
 
+    # Objects whose lock a forked child resets.
+    _INSTANCES = weakref.WeakSet()
+
     def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[Union[dict, Options]] = None):
         self.identifier = identifier
@@ -70,6 +75,7 @@ class RESTTokenFileIO(FileIO):
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
         self._file_io_scope: Optional[str] = None
         self._token_lock = threading.Lock()
+        self._register_for_fork()
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -88,6 +94,29 @@ class RESTTokenFileIO(FileIO):
         self.api_instance = None
         self._file_io_scope = None
         self._token_lock = threading.Lock()
+        self._register_for_fork()
+
+    def _register_for_fork(self):
+        # The cache lock is held across fork, so a child never sees the set mid-update.
+        with self._FILE_IO_CACHE_LOCK:
+            RESTTokenFileIO._INSTANCES.add(self)
+
+    @classmethod
+    def _before_fork(cls):
+        cls._FILE_IO_CACHE_LOCK.acquire()
+
+    @classmethod
+    def _after_fork_in_parent(cls):
+        cls._FILE_IO_CACHE_LOCK.release()
+
+    @classmethod
+    def _after_fork_in_child(cls):
+        # Parent threads that held these locks do not exist in the child.
+        cls._FILE_IO_CACHE_LOCK = threading.Lock()
+        cls._TOKEN_LOCKS_LOCK = threading.Lock()
+        cls._TOKEN_LOCKS = {}
+        for file_io in list(cls._INSTANCES):
+            file_io._token_lock = threading.Lock()
 
     def file_io(self) -> FileIO:
         return self._file_io_with_token()[0]
@@ -346,3 +375,10 @@ class RESTTokenFileIO(FileIO):
 
     def close(self):
         pass
+
+
+if hasattr(os, "register_at_fork"):
+    # Like logging: a fork waits for the cache lock, and the child starts with free locks.
+    os.register_at_fork(before=RESTTokenFileIO._before_fork,
+                        after_in_parent=RESTTokenFileIO._after_fork_in_parent,
+                        after_in_child=RESTTokenFileIO._after_fork_in_child)
