@@ -107,8 +107,9 @@ public class ArrowFieldWriters {
                 if (columnVector.isNullAt(row)) {
                     varCharVector.setNull(i);
                 } else {
-                    byte[] value = ((BytesColumnVector) columnVector).getBytes(row).getBytes();
-                    varCharVector.setSafe(i, value);
+                    BytesColumnVector.Bytes value =
+                            ((BytesColumnVector) columnVector).getBytes(row);
+                    varCharVector.setSafe(i, value.data, value.offset, value.len);
                 }
             }
         }

@@ -20,6 +20,7 @@ import io
 import os
 import pickle
 import threading
+import time
 import types
 import unittest
 import uuid
@@ -29,10 +30,14 @@ from unittest import mock
 import pyarrow.fs as pafs
 
 from pyarrow.fs import PyFileSystem
+from pypaimon.catalog.rest.rest_token import RESTToken
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import jindo_file_system_handler as jindo_module
 from pypaimon.filesystem import oss_user_agent
+from pypaimon.filesystem import pyarrow_file_io as pyarrow_file_io_module
 from pypaimon.filesystem.jindo_file_system_handler import (
     JindoFileSystemHandler,
     JindoInputFile,
@@ -387,9 +392,8 @@ class _EvictionRecordingNativeStream:
 
 
 class JindoKeepAliveTest(unittest.TestCase):
-    """Streams must keep the native store alive across FileIO eviction
-    (RESTTokenFileIO token refresh) and must close before the store is
-    released, without relying on attribute dealloc order."""
+    """Streams keep the native store alive across a FileIO cache eviction and close
+    before the store is released, without relying on attribute dealloc order."""
 
     @staticmethod
     def _handler_with_recording_fs(events):
@@ -404,7 +408,7 @@ class JindoKeepAliveTest(unittest.TestCase):
         with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
                 mock.patch.object(jindo_module, "jfs", fake_jfs), \
                 mock.patch.object(jindo_module, "jutil",
-                                   types.SimpleNamespace(Config=_RecordingConfig)):
+                                  types.SimpleNamespace(Config=_RecordingConfig)):
             handler = JindoFileSystemHandler("oss://bucket/", options)
         return handler, weakref.ref(fake_fs), weakref.ref(handler)
 
@@ -413,8 +417,8 @@ class JindoKeepAliveTest(unittest.TestCase):
         handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
         input_file = handler.open_input_file('object')
 
-        # TTLCache eviction on token refresh drops the handler chain: the
-        # handler (and its credentials) must die, the native store must not.
+        # A FileIO cache eviction drops the handler chain: the handler (and its
+        # credentials) must die, the native store must not.
         del handler
         gc.collect()
         self.assertIsNone(
@@ -486,6 +490,61 @@ class JindoKeepAliveTest(unittest.TestCase):
             JindoInputFile(_RecordingInputStream())
         with self.assertRaises(TypeError):
             JindoOutputFile(_RecordingInputStream())
+
+
+class JindoTokenRefreshTest(unittest.TestCase):
+    """RESTTokenFileIO over the Jindo backend across a data token refresh."""
+
+    def setUp(self):
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
+        self.addCleanup(RESTTokenFileIO._FILE_IO_CACHE.clear)
+
+    @staticmethod
+    def _token(security_token, expire_at_millis):
+        return RESTToken({
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "STS.test-ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "test-sk",
+            OssOptions.OSS_SECURITY_TOKEN.key(): security_token,
+        }, expire_at_millis)
+
+    def test_token_refresh_keeps_previous_jindo_handler(self):
+        events = []
+        connected = []
+
+        def connect(*args, **kwargs):
+            fs = _EvictionRecordingFileSystem(events)
+            connected.append(weakref.ref(fs))
+            return fs
+
+        table_path = "oss://bucket/db.db/t"
+        expire_at_millis = int(time.time() * 1000) + 7_200_000
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(pyarrow_file_io_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(connect=connect)), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)), \
+                mock.patch.object(RESTTokenFileIO, "try_to_refresh_token"):
+            readers = [RESTTokenFileIO(Identifier.create("db", "t"), table_path,
+                                       Options({OssOptions.OSS_IMPL.key(): "jindo"}))
+                       for _ in range(2)]
+            for reader in readers:
+                reader.token = self._token("sts-1", expire_at_millis)
+            stream = readers[0].new_input_stream(table_path + "/bucket-0/data.blob")
+            handler_ref = weakref.ref(readers[0].filesystem.handler)
+            self.assertIs(readers[0].file_io(), readers[1].file_io())
+            self.assertEqual(1, len(connected))
+
+            for reader in readers:
+                reader.token = self._token("sts-2", expire_at_millis + 1)
+            self.assertIs(readers[0].file_io(), readers[1].file_io())
+            gc.collect()
+
+            self.assertEqual(2, len(connected))
+            self.assertIsNotNone(handler_ref(), "token refresh released the previous handler")
+            self.assertEqual(b"x", stream.read(1))
+            stream.close()
+            self.assertEqual(["stream-closed"], events)
 
 
 class JindoFileSystemTest(unittest.TestCase):
