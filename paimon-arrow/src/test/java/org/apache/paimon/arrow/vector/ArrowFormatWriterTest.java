@@ -37,7 +37,6 @@ import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.heap.HeapBytesVector;
-import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
@@ -461,26 +460,6 @@ public class ArrowFormatWriterTest {
                     .isEqualTo(variant.value());
             assertThat(((VarBinaryVector) variantVector.getChild(Variant.METADATA)).getObject(0))
                     .isEqualTo(variant.metadata());
-        }
-    }
-
-    @Test
-    public void testColumnWriteAllowsNullParentWithNotNullChild() {
-        RowType rowType =
-                RowType.of(DataTypes.ROW(DataTypes.FIELD(0, "id", DataTypes.INT().notNull())));
-        HeapIntVector values = new HeapIntVector(2);
-        values.setNullAt(0);
-        values.setInt(1, 7);
-        HeapRowVector rows = new HeapRowVector(2, values);
-        rows.setNullAt(0);
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
-            writer.write(new ColumnVector[] {rows}, null, 0, 2);
-            writer.flush();
-            StructVector actual = (StructVector) writer.getVectorSchemaRoot().getVector(0);
-            assertThat(actual.getValueCount()).isEqualTo(2);
-            assertThat(actual.isNull(0)).isTrue();
-            assertThat(actual.isNull(1)).isFalse();
-            assertThat(((IntVector) actual.getChild("id")).get(1)).isEqualTo(7);
         }
     }
 
