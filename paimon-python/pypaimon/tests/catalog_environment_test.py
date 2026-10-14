@@ -36,6 +36,74 @@ class CatalogEnvironmentTest(unittest.TestCase):
 
     _READ_VIA_OPTION = RESTApi.HEADER_PREFIX + RESTApi.READ_VIA_HEADER
 
+    def test_copy_preserves_uuid_only_for_same_identifier(self):
+        main = Identifier.create("db", "table")
+        explicit_main = Identifier.create("db", "table", branch="main")
+        dev = Identifier.create("db", "table", branch="dev")
+        cases = [
+            (main, main, "source-uuid"),
+            (main, explicit_main, "source-uuid"),
+            (explicit_main, main, "source-uuid"),
+            (dev, dev, "source-uuid"),
+            (main, dev, None),
+            (dev, main, None),
+            (dev, Identifier.create("db", "table", branch="release"), None),
+            (main, Identifier.create("db", "other"), None),
+            (main, Identifier.create("other_db", "table"), None),
+        ]
+        loader = mock.Mock()
+        for source, target, expected_uuid in cases:
+            with self.subTest(source=source, target=target):
+                environment = CatalogEnvironment(
+                    identifier=source, uuid="source-uuid", catalog_loader=loader,
+                    supports_version_management=True)
+
+                copied = environment.copy(target)
+
+                self.assertIsNot(copied, environment)
+                self.assertEqual(copied.identifier, target)
+                self.assertEqual(copied.uuid, expected_uuid)
+                self.assertIs(copied.catalog_loader, loader)
+                self.assertTrue(copied.supports_version_management)
+                self.assertEqual(environment.identifier, source)
+                self.assertEqual(environment.uuid, "source-uuid")
+
+    def test_copy_does_not_restore_unknown_uuid(self):
+        main = Identifier.create("db", "table")
+        dev = Identifier.create("db", "table", branch="dev")
+        environment = CatalogEnvironment(identifier=main, uuid="source-uuid")
+
+        self.assertIsNone(environment.copy(dev).copy(main).uuid)
+        unknown = CatalogEnvironment(identifier=main)
+        self.assertIsNone(unknown.copy(main).uuid)
+        self.assertIsNone(unknown.copy(dev).uuid)
+
+    def test_catalog_table_rollback_captures_view_uuid(self):
+        catalog = mock.Mock()
+        identifier = Identifier.create("db", "table", branch="dev")
+        environment = CatalogEnvironment(
+            identifier=identifier, uuid="loaded-uuid",
+            catalog_loader=mock.Mock(load=mock.Mock(return_value=catalog)),
+            supports_version_management=True)
+        rollback = environment.catalog_table_rollback()
+        environment.uuid = "replacement-uuid"
+        instant = mock.sentinel.instant
+
+        rollback.rollback_to(instant, 2)
+
+        catalog.rollback_to.assert_called_once_with(
+            identifier, instant, 2, table_uuid="loaded-uuid")
+
+    def test_snapshot_commit_uses_copied_identity(self):
+        main = Identifier.create("db", "table")
+        environment = CatalogEnvironment(
+            identifier=main, uuid="loaded-uuid", catalog_loader=mock.Mock(),
+            supports_version_management=True)
+        dev = Identifier.create("db", "table", branch="dev")
+
+        self.assertEqual(environment.copy(main).snapshot_commit(None).uuid, "loaded-uuid")
+        self.assertIsNone(environment.copy(dev).snapshot_commit(None).uuid)
+
     def test_dependency_read_context_for_rest_catalog(self):
         root = Identifier.create("db", "root", branch="dev")
         options = Options({"other-option": "value"})
