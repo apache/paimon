@@ -26,7 +26,7 @@ from pypaimon.casting.temporal_utils import (
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
 
-def cast_temporal(array, target, source_type=None, target_type=None, strict=False):
+def cast_temporal(array, target, source_type=None, target_type=None):
     timestamp = pa.types.is_timestamp(array.type)
     source_name = str(source_type).upper() if source_type is not None else ''
     ltz = timestamp and (array.type.tz is not None if source_type is None else
@@ -87,11 +87,6 @@ def cast_temporal(array, target, source_type=None, target_type=None, strict=Fals
                 value = millis * 1000 + sub_milli // 1000
             else:
                 value = millis * 1000000 + sub_milli
-            if strict:
-                quantum = {'s': 1000000000, 'ms': 1000000, 'us': 1000, 'ns': 1}[target.unit]
-                if (millis * 1000000 + sub_milli != value * quantum
-                        or not -(1 << 63) <= value < (1 << 63)):
-                    raise ValueError('Java timestamp result cannot be represented by the Arrow target')
             if not -(1 << 63) <= value < (1 << 63):
                 value = None
         values.append(value)

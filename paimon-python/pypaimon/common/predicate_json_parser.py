@@ -23,8 +23,6 @@ from typing import Callable
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.casting.cast_executor import cast_array
-
 # utf8_slice_codeunits needs an explicit integer stop on pyarrow 6
 _MAX_STOP = 2 ** 31 - 1
 
@@ -156,7 +154,30 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
 
     elif name == "CAST":
         col = batch.column(transform["fieldRef"]["name"])
-        return cast_array(col, transform['fieldRef']['type'], transform['type'])
+        target = transform['type']
+        width = re.fullmatch(r"\s*(CHAR|VARCHAR|BINARY|VARBINARY)(?=\s|\(|\Z)"
+                             r"(?:\s*\(\s*([0-9]+)\s*\))?"
+                             r"(?:\s*(?:NOT\s+)?NULL)?\s*", target, flags=re.IGNORECASE)
+        if width is not None:
+            kind, length = width.group(1).upper(), int(width.group(2) or 1)
+            if length < 1 or length > _INT_MAX:
+                raise ValueError('Cast width must be between 1 and 2147483647')
+            target_type = pa.string() if kind in ('CHAR', 'VARCHAR') else pa.binary()
+        else:
+            target_type = _paimon_type_to_arrow(target)
+        stored = _paimon_type_to_arrow(transform['fieldRef']['type'])
+        col = _cast_input_for_java_executor(col, stored, target_type)
+        result = pc.cast(col, target_type, safe=False)
+        # Java CastTransform enforces widths; Arrow uses unbounded arrays.
+        if width is not None:
+            pad = kind in ('CHAR', 'BINARY')
+            padding = ' ' if kind == 'CHAR' else b'\x00'
+            result = pa.array([
+                None if value is None else
+                (value[:length] + padding * max(0, length - len(value)) if pad else value[:length])
+                for value in result.to_pylist()
+            ], type=target_type)
+        return result
 
     elif name == "UPPER":
         input_col = _resolve_transform_input(transform["inputs"][0], batch)
@@ -218,6 +239,43 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
         return _pad(transform["inputs"], transform.get("direction"), batch)
 
     raise ValueError(f"Unknown transform type: {name}")
+
+
+def _cast_input_for_java_executor(col, stored, target):
+    # copyWithNewInputs retains Java's original executor. Character, Boolean
+    # and byte executors require their original runtime value class.
+    needs_class = (((pa.types.is_string(stored) or pa.types.is_large_string(stored)) and
+                    not (pa.types.is_string(col.type) or pa.types.is_large_string(col.type))) or
+                   (pa.types.is_boolean(stored) and not pa.types.is_boolean(col.type)) or
+                   ((pa.types.is_binary(stored) or pa.types.is_large_binary(stored)) and
+                    not (pa.types.is_binary(col.type) or pa.types.is_large_binary(col.type))))
+    if needs_class:
+        if col.null_count != len(col):
+            raise ValueError('CAST source no longer has the runtime type its Java executor expects')
+        return pa.nulls(len(col), type=target)
+
+    numeric = pa.types.is_integer(stored) or pa.types.is_floating(stored) or pa.types.is_decimal(stored)
+    if numeric and pa.types.is_string(target) and col.type != stored:
+        # NumericToString accepts Object. DATE and TIME getters return Integer,
+        # so this executor prints epoch days / milliseconds, not calendar text.
+        if pa.types.is_date(col.type):
+            return col.cast(pa.date32(), safe=False).cast(pa.int32())
+        if pa.types.is_time(col.type):
+            return col.cast(pa.time32('ms'), safe=False).cast(pa.int32())
+        if pa.types.is_decimal(col.type):
+            # Paimon Decimal.toString uses BigDecimal.toPlainString. Arrow may
+            # emit an exponent for a small scaled decimal, including zero.
+            return pa.array([None if value is None else format(value, 'f') for value in col.to_pylist()],
+                            type=pa.string())
+        if not (pa.types.is_integer(col.type) or pa.types.is_decimal(col.type) or
+                pa.types.is_boolean(col.type) or pa.types.is_string(col.type) or pa.types.is_large_string(col.type)):
+            # Timestamp.toString uses LocalDateTime text, and other objects
+            # have their own formatting. An Arrow cast would authorize other
+            # rows; refuse the unsupported rebound instead.
+            if col.null_count != len(col):
+                raise ValueError('CAST rebound source requires its original Java executor formatting')
+            return pa.nulls(len(col), type=target)
+    return col
 
 
 def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array:
@@ -814,10 +872,9 @@ def _convert_literal(literal, target_type: pa.DataType):
 
 def _paimon_type_to_arrow(paimon_type: str) -> pa.DataType:
     type_str = paimon_type.strip().upper()
-    type_str = re.sub(r"(?<=\))\s*(?:NOT\s+)?NULL$|\s+(?:NOT\s+)?NULL$", "", type_str).strip()
 
     ltz_match = re.match(
-        r"^TIMESTAMP\s*\(([0-9]+)\)\s+WITH\s+LOCAL\s+TIME\s+ZONE$", type_str)
+        r"^TIMESTAMP\s*\((\d+)\)\s+WITH\s+LOCAL\s+TIME\s+ZONE", type_str)
     if ltz_match:
         precision = int(ltz_match.group(1))
         return pa.timestamp(_timestamp_precision_to_unit(precision), tz="UTC")
@@ -827,8 +884,6 @@ def _paimon_type_to_arrow(paimon_type: str) -> pa.DataType:
         raise ValueError(f"Cannot parse Paimon type: '{paimon_type}'")
     base_type = m.group(1).strip()
     params = m.group(2)
-    if params is not None and re.fullmatch(r"[0-9]+(?:\s*,\s*[0-9]+)?", params.strip()) is None:
-        raise ValueError("Invalid Java type parameters: %s" % paimon_type)
 
     simple_mapping = {
         "INT": pa.int32(),
@@ -843,15 +898,13 @@ def _paimon_type_to_arrow(paimon_type: str) -> pa.DataType:
         "DATE": pa.date32(),
     }
     if base_type in simple_mapping:
-        if params is not None:
-            raise ValueError("Type does not take parameters: %s" % paimon_type)
         return simple_mapping[base_type]
 
-    if base_type in ("VARCHAR", "CHAR", "VARBINARY", "BINARY"):
-        length = int(params) if params is not None else 1
-        if not 1 <= length <= (1 << 31) - 1:
-            raise ValueError("Cast width must be between 1 and 2147483647")
-        return pa.string() if base_type in ("VARCHAR", "CHAR") else pa.binary()
+    if base_type in ("VARCHAR", "CHAR"):
+        return pa.string()
+
+    if base_type in ("VARBINARY", "BINARY"):
+        return pa.binary()
 
     if base_type == "TIMESTAMP":
         precision = int(params) if params else 6
@@ -864,17 +917,15 @@ def _paimon_type_to_arrow(paimon_type: str) -> pa.DataType:
         return pa.timestamp(unit, tz="UTC")
 
     if base_type == "TIME":
-        _timestamp_precision_to_unit(int(params) if params else 0)
-        return pa.time32("ms")
+        precision = int(params) if params else 6
+        unit = _timestamp_precision_to_unit(precision)
+        return pa.time64(unit) if unit in ("us", "ns") else pa.time32(unit)
 
     if base_type == "DECIMAL":
         if params:
             parts = [x.strip() for x in params.split(",")]
             if len(parts) == 2:
-                precision, scale = int(parts[0]), int(parts[1])
-                if not 1 <= precision <= 38 or not 0 <= scale <= precision:
-                    raise ValueError("Invalid Java DECIMAL precision/scale: %s" % paimon_type)
-                return pa.decimal128(precision, scale)
+                return pa.decimal128(int(parts[0]), int(parts[1]))
         raise ValueError(f"DECIMAL type requires (precision, scale): '{paimon_type}'")
 
     raise ValueError(
@@ -886,8 +937,6 @@ def _paimon_type_to_arrow(paimon_type: str) -> pa.DataType:
 
 
 def _timestamp_precision_to_unit(precision: int) -> str:
-    if not 0 <= precision <= 9:
-        raise ValueError("Timestamp precision must be between 0 and 9")
     if precision == 0:
         return "s"
     elif precision <= 3:

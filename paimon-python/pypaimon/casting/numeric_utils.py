@@ -22,24 +22,6 @@ import struct
 from decimal import Decimal
 
 
-# Java Character.digit scans UTF-16 chars, so supplementary digits do not
-# participate.
-_DECIMAL_ZEROES = (
-    0x0030, 0x0660, 0x06f0, 0x07c0, 0x0966, 0x09e6, 0x0a66, 0x0ae6, 0x0b66, 0x0be6, 0x0c66,
-    0x0ce6, 0x0d66, 0x0de6, 0x0e50, 0x0ed0, 0x0f20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946,
-    0x19d0, 0x1a80, 0x1a90, 0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0,
-    0xa9f0, 0xaa50, 0xabf0, 0xff10,
-)
-
-
-def java_decimal_digit(character):
-    code = ord(character)
-    for zero in _DECIMAL_ZEROES:
-        if zero <= code < zero + 10:
-            return code - zero
-    return None
-
-
 def java_floating_string(value, single_precision=False) -> str:
     # Java's JDK 19+ contract selects a shortest round-tripping form with at
     # least two significant digits before applying its notation thresholds.
@@ -83,30 +65,6 @@ def java_double_decimal_text(value):
     Use integer arithmetic over IEEE-754 components to preserve those choices.
     The emitted coefficient/exponent is numeric text, not a display format.
     """
-    return _floating_decimal_text(value, False)
-
-
-def java_number_string(value, single_precision=False):
-    """Java 8/11/17 Number.toString; FLOAT uses its own rounding interval."""
-    if not math.isfinite(value) or value == 0:
-        return java_floating_string(value)
-    text = _floating_decimal_text(value, single_precision)
-    coefficient, exponent = text.split('e')
-    sign = '-' if coefficient.startswith('-') else ''
-    digits = coefficient.lstrip('-')
-    adjusted = int(exponent) + len(digits) - 1
-    digits = digits.rstrip('0')
-    if adjusted < -3 or adjusted >= 7:
-        return sign + digits[0] + '.' + (digits[1:] or '0') + 'E' + str(adjusted)
-    point = adjusted + 1
-    if point <= 0:
-        return sign + '0.' + '0' * (-point) + digits
-    if point >= len(digits):
-        return sign + digits + '0' * (point - len(digits)) + '.0'
-    return sign + digits[:point] + '.' + digits[point:]
-
-
-def _floating_decimal_text(value, single_precision):
     if not math.isfinite(value):
         return java_floating_string(value)
     if value == 0:
@@ -123,9 +81,6 @@ def _floating_decimal_text(value, single_precision):
     else:
         significant = 53
         mantissa |= 1 << 52
-    if single_precision:
-        bits = struct.unpack('>I', struct.pack('>f', value))[0]
-        significant = (bits & 0x007fffff).bit_length() if bits & 0x7f800000 == 0 else 24
     trailing = (mantissa & -mantissa).bit_length() - 1
     width = 53 - trailing
     tiny = max(0, width - exponent - 1)

@@ -17,12 +17,45 @@
 
 """Java cast rules shared by old-file readers."""
 
+import math
+
 import pyarrow as pa
 
-from pypaimon.casting.numeric_cast import _narrow_integer, cast_numeric
+from pypaimon.casting.decimal_cast import cast_decimal
 from pypaimon.casting.temporal_cast import cast_temporal
 from pypaimon.casting.temporal_string import temporal_to_string
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
+
+
+def _narrow_integer(value, bits):
+    half = 1 << (bits - 1)
+    return (value + half) % (half * 2) - half
+
+
+def _numeric_to_integer(array, target_type):
+    bits = target_type.bit_width
+    floating = pa.types.is_floating(array.type)
+    intermediate_bits = 64 if bits == 64 else 32
+    lower = -(1 << (intermediate_bits - 1))
+    upper = (1 << (intermediate_bits - 1)) - 1
+    values = []
+    for value in array.to_pylist():
+        if value is None:
+            values.append(None)
+            continue
+        # Number.byteValue/shortValue first convert floats to int; Java's
+        # float-to-int/long conversion saturates before the final narrowing.
+        if floating:
+            # Java's floating-point narrowing maps NaN to zero.
+            if math.isnan(value):
+                value = 0
+            else:
+                value = lower if value <= lower else upper if value >= upper else int(value)
+        else:
+            # BigDecimal.longValue truncates towards zero and retains low bits.
+            value = int(value)
+        values.append(_narrow_integer(value, bits))
+    return pa.array(values, type=target_type)
 
 
 def _truncate_timestamp(array, target_type, source_paimon_type, target_paimon_type):
@@ -105,18 +138,15 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
         return timestamp
     if array.type == target_type:
         return array
-    if pa.types.is_signed_integer(array.type) and pa.types.is_decimal(target_type):
-        required = {8: 3, 16: 5, 32: 10, 64: 19}[array.type.bit_width] + target_type.scale
-        if target_type.precision < required:
-            # Preserve PyPaimon's existing ALTER TABLE capability boundary.
-            # Authorization CASTs separately use Java's per-value NULL overflow.
-            return array.cast(target_type, safe=False)
-    numeric = cast_numeric(array, target_type, target_paimon_type)
-    if numeric is not None:
-        return numeric
+    decimals = cast_decimal(array, target_type)
+    if decimals is not None:
+        return decimals
     if pa.types.is_timestamp(array.type) and target_type == pa.int64():
         return _timestamp_to_bigint(array)
     if (array.type in (pa.int32(), pa.int64())
             and pa.types.is_timestamp(target_type) and target_type.tz is None):
         return _integer_to_timestamp(array, target_type)
+    if (pa.types.is_signed_integer(target_type)
+            and (pa.types.is_floating(array.type) or pa.types.is_decimal(array.type))):
+        return _numeric_to_integer(array, target_type)
     return array.cast(target_type, safe=False)

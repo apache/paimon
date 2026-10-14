@@ -109,14 +109,11 @@ def test_large_utf8_old_parquet_reads_as_integer_without_native_fallback(rest_ca
             pq.write_table(physical, path)
             meta.file_size = os.stat(path).st_size
             assert pq.read_schema(path).field('v').type == pa.large_string()
-    for native in (False, True):
-        reader = table.copy({'read.native.enabled': str(native).lower()}).new_read_builder().new_read()
-        with ExitStack() as stack:
-            if native:
-                stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                          side_effect=AssertionError('Native read fell back')))
-            result = reader.to_arrow(splits).sort_by([('id', 'ascending')])
-        assert result.column('v').to_pylist() == [1, -2, None]
+    reader = table.copy({'read.native.enabled': 'true'}).new_read_builder().new_read()
+    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+               side_effect=AssertionError('Native read fell back')):
+        result = reader.to_arrow(splits).sort_by([('id', 'ascending')])
+    assert result.column('v').to_pylist() == [1, -2, None]
 
 
 _TEMPORAL_STRING_CASES = [
