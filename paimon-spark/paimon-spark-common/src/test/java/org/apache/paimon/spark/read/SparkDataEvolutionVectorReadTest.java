@@ -181,11 +181,24 @@ public class SparkDataEvolutionVectorReadTest {
         assertThat(result.results()).contains(splitCount - 1L);
     }
 
+    @Test
+    public void testDistributedIndexKeepsEveryIndexedField() throws Exception {
+        FileStoreTable table = createMultiFieldTable();
+        MultiFieldSparkVectorRead read = new MultiFieldSparkVectorRead(table);
+
+        read.readIndexSplitsInSpark(multiFieldSplits(table, 4), null);
+
+        assertThat(read.indexerNames)
+                .isNotEmpty()
+                .allMatch(name -> name.equals("TestMultiFieldVectorGlobalIndexer"));
+    }
+
     private FileStoreTable createTable() throws Exception {
         Path tablePath = new Path(tempDir.toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         options.set(CoreOptions.GLOBAL_INDEX_THREAD_NUM, 1);
+        options.set(CoreOptions.FILE_FORMAT, "avro");
         Schema schema =
                 Schema.newBuilder()
                         .column("vec", new ArrayType(DataTypes.FLOAT()))
@@ -195,6 +208,57 @@ public class SparkDataEvolutionVectorReadTest {
                 SchemaUtils.forceCommit(
                         new FileSystemSchemaManager(LocalFileIO.create(), tablePath), schema);
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    private FileStoreTable createMultiFieldTable() throws Exception {
+        Path tablePath = new Path(tempDir.resolve("multi-field").toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.GLOBAL_INDEX_THREAD_NUM, 1);
+        options.set(CoreOptions.FILE_FORMAT, "avro");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("vec", new ArrayType(DataTypes.FLOAT()))
+                        .column("label", DataTypes.INT())
+                        .options(options.toMap())
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath), schema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    private static List<IndexVectorSearchSplit> multiFieldSplits(FileStoreTable table, int count) {
+        DataField vectorField = table.rowType().getField("vec");
+        int[] extraFieldIds = new int[] {table.rowType().getField("label").id()};
+        List<IndexVectorSearchSplit> splits = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            GlobalIndexMeta vectorMeta =
+                    new GlobalIndexMeta(i, i, vectorField.id(), extraFieldIds, null);
+            GlobalIndexMeta scalarMeta =
+                    new GlobalIndexMeta(i, i, vectorField.id(), extraFieldIds, new byte[] {1});
+            splits.add(
+                    new IndexVectorSearchSplit(
+                            i,
+                            i,
+                            Arrays.asList(
+                                    new IndexFileMeta(
+                                            "test-vector-ann",
+                                            "vector-" + i,
+                                            1L,
+                                            1L,
+                                            vectorMeta,
+                                            null),
+                                    new IndexFileMeta(
+                                            "test-vector-ann",
+                                            "scalar-" + i,
+                                            1L,
+                                            1L,
+                                            scalarMeta,
+                                            null)),
+                            Collections.emptyList()));
+        }
+        return splits;
     }
 
     private static List<IndexVectorSearchSplit> indexSplits(String indexType, int count) {
@@ -285,8 +349,12 @@ public class SparkDataEvolutionVectorReadTest {
             try {
                 GlobalIndexResultSerializer serializer = new GlobalIndexResultSerializer();
                 return Arrays.asList(
-                        uncheckedCast(serializer.serialize(scoredResult(2L, 100.0f))),
-                        uncheckedCast(serializer.serialize(scoredResult(0L, 1.0f))));
+                        uncheckedCast(
+                                new SparkVectorSearchSupport.SingleIndexGroupResult(
+                                        serializer.serialize(scoredResult(2L, 100.0f)), null)),
+                        uncheckedCast(
+                                new SparkVectorSearchSupport.SingleIndexGroupResult(
+                                        serializer.serialize(scoredResult(0L, 1.0f)), null)));
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -315,7 +383,7 @@ public class SparkDataEvolutionVectorReadTest {
         }
 
         @SuppressWarnings("unchecked")
-        private <O> O uncheckedCast(byte[] value) {
+        private <O> O uncheckedCast(Object value) {
             return (O) value;
         }
 
@@ -428,6 +496,56 @@ public class SparkDataEvolutionVectorReadTest {
                 rows.addRange(range);
             }
             return ScoredGlobalIndexResult.create(rows, rowId -> scoreBase + (float) rowId);
+        }
+    }
+
+    private static class MultiFieldSparkVectorRead extends SparkDataEvolutionVectorRead {
+
+        private final List<String> indexerNames = new ArrayList<>();
+
+        private MultiFieldSparkVectorRead(FileStoreTable table) {
+            super(
+                    table,
+                    null,
+                    null,
+                    1,
+                    table.rowType().getField("vec"),
+                    new float[] {1.0f, 0.0f},
+                    null);
+        }
+
+        @Override
+        protected int sparkParallelism() {
+            return 2;
+        }
+
+        @Override
+        protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        protected <I, O> List<O> mapInSpark(
+                List<I> data, SerializableFunction<I, O> func, int parallelism) {
+            return data.stream().map(func::apply).collect(Collectors.toList());
+        }
+
+        @Override
+        protected CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
+                GlobalIndexer globalIndexer,
+                IndexPathFactory indexPathFactory,
+                long rowRangeStart,
+                long rowRangeEnd,
+                List<IndexFileMeta> vectorIndexFiles,
+                float[] vector,
+                int searchLimit,
+                @Nullable RoaringNavigableMap64 includeRowIds,
+                ExecutorService executor) {
+            indexerNames.add(globalIndexer.getClass().getSimpleName());
+            RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+            rows.add(rowRangeStart);
+            return CompletableFuture.completedFuture(
+                    Optional.of(ScoredGlobalIndexResult.create(rows, rowId -> 1.0f)));
         }
     }
 

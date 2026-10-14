@@ -86,8 +86,19 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
                         ? emptyScoredResults(n)
                         : readIndexedBatch(indexSplits, globalIndexer);
 
+        return combineWithRaw(indexedResults, rawSplits, globalIndexer, rawPreFilter(rawSplits));
+    }
+
+    /**
+     * Merges each query's indexed hits with the raw-search hits for rows the index does not cover.
+     */
+    protected List<GlobalIndexResult> combineWithRaw(
+            ScoredGlobalIndexResult[] indexedResults,
+            List<RawVectorSearchSplit> rawSplits,
+            @Nullable GlobalIndexer globalIndexer,
+            @Nullable RoaringNavigableMap64 rawPreFilter) {
+        int n = vectors.length;
         List<GlobalIndexResult> results = new ArrayList<>(n);
-        RoaringNavigableMap64 rawPreFilter = rawPreFilter(rawSplits);
         for (int i = 0; i < n; i++) {
             results.add(
                     withRawSearch(
