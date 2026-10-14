@@ -42,11 +42,13 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.CloseableIterator;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -65,6 +67,67 @@ class PrimaryKeyDeletionVectorCompactionTest {
 
     @TempDir java.nio.file.Path tempDir;
 
+    /**
+     * Reproduces a stale bucket DV overwrite with deletion vectors enabled and clustering disabled.
+     *
+     * <p>Write (1,10), (2,20), and (3,30) into one L2 file, then delete id=3 to create the existing
+     * DV D0. A and B both restore D0 before either commits: A updates id=1 to 11, and B updates
+     * id=2 to 21. Each compacts its own L0 file to L1 and uses lookup to mark its old L2 row
+     * deleted. Their L1 key ranges are disjoint, so the existing LSM overlap check cannot detect
+     * the conflict.
+     *
+     * <p>A commits first, replacing D0 with DA, which marks id=1 and id=3 deleted. B must then fail
+     * its COMPACT commit because its recorded baseline D0 differs from the current DA. The default
+     * DV read, which excludes unmerged L0 files, must return exactly (1,11) and (2,20).
+     *
+     * <p>Without the DV baseline check, B would replace DA with its stale DB, which only marks id=2
+     * and id=3 deleted. The old (1,10) would become visible again alongside (1,11) and (2,21),
+     * producing three rows for two primary keys.
+     */
+    @Test
+    void testMinimalStaleDvCommit() throws Exception {
+        try (Catalog catalog =
+                        CatalogFactory.createCatalog(
+                                CatalogContext.create(new Path(tempDir.toString())));
+                IOManager ioManager = IOManager.create(tempDir.toString())) {
+            FileStoreTable table = createTable(catalog, 3);
+            writeRows(
+                    table,
+                    ioManager,
+                    Arrays.asList(
+                            GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30)));
+            // Create D0 by deleting id=3, leaving id=1 and id=2 in the same L2 file.
+            writeRows(
+                    table,
+                    ioManager,
+                    Collections.singletonList(GenericRow.ofKind(RowKind.DELETE, 3, 30)));
+
+            BatchWriteBuilder first = table.newBatchWriteBuilder();
+            BatchWriteBuilder second = table.newBatchWriteBuilder();
+            try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
+                    BatchTableWrite b = second.newWrite().withIOManager(ioManager);
+                    BatchTableCommit commitA = first.newCommit();
+                    BatchTableCommit commitB = second.newCommit()) {
+                a.write(GenericRow.of(1, 11));
+                b.write(GenericRow.of(2, 21));
+                List<CommitMessage> preparedA = a.prepareCommit();
+                List<CommitMessage> preparedB = b.prepareCommit();
+                CompactIncrement incrementA = assertLookupCompaction(preparedA, 1, 1);
+                CompactIncrement incrementB = assertLookupCompaction(preparedB, 2, 1);
+                assertThat(incrementA.expectedDeletionVectorFile())
+                        .isNotNull()
+                        .isEqualTo(incrementB.expectedDeletionVectorFile());
+
+                // A replaces D0 with DA; B must not overwrite DA with its stale DB.
+                commitA.commit(preparedA);
+                assertThatThrownBy(() -> commitB.commit(preparedB))
+                        .hasMessageContaining("Deletion vector conflict");
+                assertThat(readRows(table))
+                        .containsExactlyInAnyOrder(GenericRow.of(1, 11), GenericRow.of(2, 20));
+            }
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testConcurrentCompactionRejectsStaleDvWithDisjointKeys(boolean existingDv)
@@ -79,6 +142,12 @@ class PrimaryKeyDeletionVectorCompactionTest {
         testConcurrentCompactionRejectsStaleDv(existingDv, true);
     }
 
+    /**
+     * Rejects stale L5 compaction that would duplicate a primary key already updated in L4.
+     *
+     * @param existingDv whether to delete a seed row to create a DV before both writers restore;
+     *     false starts with a known-empty DV baseline while keeping deletion vectors enabled
+     */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testConcurrentCompactionRejectsStaleDvWithSameKeyAcrossLevels(boolean existingDv)
@@ -172,6 +241,14 @@ class PrimaryKeyDeletionVectorCompactionTest {
         }
     }
 
+    /**
+     * Rejects stale bucket DVs for disjoint-key updates in the same or different data files.
+     *
+     * @param existingDv whether to delete a seed row to create a DV before both writers restore;
+     *     false starts with a known-empty DV baseline while keeping deletion vectors enabled
+     * @param differentFiles whether A and B update keys in different L2 files in the same bucket;
+     *     false updates id=1 and id=2 in one file, while true updates id=1 in X and id=21 in Y
+     */
     private void testConcurrentCompactionRejectsStaleDv(boolean existingDv, boolean differentFiles)
             throws Exception {
         try (Catalog catalog =
