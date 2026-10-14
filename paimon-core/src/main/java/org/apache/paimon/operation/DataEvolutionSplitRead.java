@@ -344,22 +344,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             needMergeFiles,
                                             dataFilePathFactory,
                                             metadataCache);
-                            // Row ranges skip the consistency checks of createUnionReader, which
-                            // the files of a group with candidates satisfy: they share one row id
-                            // range, hence the first row id and the row count.
-                            List<Range> groupRowRanges = rowRanges;
+                            // Candidates restrict the group selection, not the row ranges of the
+                            // split, which also decide whether a row sidecar is read instead.
                             if (candidates != null) {
-                                groupRowRanges =
-                                        rowRanges == null
-                                                ? candidates
-                                                : Range.and(
-                                                        Range.sortAndMergeOverlap(rowRanges, true),
-                                                        candidates);
-                                if (groupRowRanges.isEmpty()
-                                        || isSelectionEmpty(
-                                                needMergeFiles.get(0),
-                                                groupRowRanges,
-                                                groupSelection)) {
+                                if (candidates.isEmpty()) {
+                                    return new EmptyFileRecordReader<>();
+                                }
+                                groupSelection =
+                                        restrictToCandidates(
+                                                groupSelection, needMergeFiles.get(0), candidates);
+                                if (isSelectionEmpty(
+                                        needMergeFiles.get(0), rowRanges, groupSelection)) {
                                     return new EmptyFileRecordReader<>();
                                 }
                             }
@@ -370,7 +365,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         needMergeFiles,
                                         partition,
                                         dataFilePathFactory,
-                                        groupRowRanges,
+                                        rowRanges,
                                         readRowType,
                                         deletionVector,
                                         groupSelection);
@@ -1151,8 +1146,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      *
      * <p>Each filter is evaluated against the metadata of the single file winning all of its
      * fields, such as Parquet row group statistics and page indexes: an older copy of a field is
-     * stale and would exclude rows that do match. The ranges of the files are intersected, and
-     * every file of the group then reads only these rows, which keeps the readers aligned.
+     * stale and would exclude rows that do match. The ranges of the files are intersected and added
+     * to the selection shared by all files of the group, see {@link #restrictToCandidates}, so
+     * every file reads only these rows, which keeps the readers aligned.
      *
      * <p>Only a group of normal files sharing one row id range qualifies. Its readers are created
      * right away by {@link #createUnionReader}, so the file metadata read here is handed to them
@@ -1335,6 +1331,25 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
         return selection;
+    }
+
+    /**
+     * Restricts the selection shared by the files of a merged group to its candidate rows. The
+     * files share one row id range, so a row has the same position in all of them.
+     */
+    private static BitmapIndexResult restrictToCandidates(
+            @Nullable BitmapIndexResult selection, DataFileMeta file, List<Range> candidates) {
+        long firstRowId = file.nonNullFirstRowId();
+        RoaringBitmap32 positions = new RoaringBitmap32();
+        for (Range range : candidates) {
+            positions.or(
+                    RoaringBitmap32.bitmapOfRange(
+                            range.from - firstRowId, range.to - firstRowId + 1));
+        }
+        BitmapIndexResult candidateSelection = new BitmapIndexResult(() -> positions);
+        return selection == null
+                ? candidateSelection
+                : (BitmapIndexResult) selection.and(candidateSelection);
     }
 
     /** Returns whether exact bitmap candidates and the requested row ranges are disjoint. */

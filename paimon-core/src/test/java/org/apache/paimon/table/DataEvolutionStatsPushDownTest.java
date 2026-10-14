@@ -50,8 +50,11 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -236,6 +239,89 @@ public class DataEvolutionStatsPushDownTest extends TableTestBase {
         Result result = assertMatchesModel(table, builder(table).lessThan(1, 100));
         assertThat(result.matched).hasSize(100);
         assertThat(result.returned).isLessThan(ROWS / 10);
+    }
+
+    /**
+     * The row sidecar of a table of these widths needs a wider null header once the row tracking
+     * fields are appended to its schema, so reads with candidate rows must not select it.
+     */
+    @ParameterizedTest
+    @ValueSource(ints = {6, 7, 8, 9, 15, 16})
+    public void testWideTableWithRowSidecar(int width) throws Exception {
+        String name = "wide_" + width;
+        Schema.Builder schema = Schema.newBuilder();
+        for (int c = 0; c < width; c++) {
+            schema.column("c" + c, DataTypes.INT());
+        }
+        schema.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                .option(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true")
+                .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                .option("parquet.block.size", String.valueOf(ROWS * 2))
+                .option("parquet.page.size", String.valueOf(1024));
+        catalog.createTable(identifier(name), schema.build(), false);
+
+        FileStoreTable table = getTable(identifier(name));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < ROWS; i++) {
+                Object[] values = new Object[width];
+                values[0] = i;
+                values[1] = i;
+                for (int c = 2; c < width; c++) {
+                    values[c] = i + c;
+                }
+                write.write(GenericRow.of(values));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(
+                                        table.rowType().project(Collections.singletonList("c1")));
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < ROWS; i++) {
+                write.write(GenericRow.of(ROWS - 1 - i));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages);
+            commit.commit(messages);
+        }
+
+        table = getTable(identifier(name));
+        RowType readType = table.rowType().project(Arrays.asList("c0", "c1"));
+        Predicate filter = new PredicateBuilder(table.rowType()).lessThan(1, 100);
+        List<String> expected = new ArrayList<>();
+        for (int i = ROWS - 100; i < ROWS; i++) {
+            expected.add(i + ":" + (ROWS - 1 - i));
+        }
+        for (boolean enabled : new boolean[] {true, false}) {
+            ReadBuilder read =
+                    withPushDown(table, enabled)
+                            .newReadBuilder()
+                            .withReadType(readType)
+                            .withFilter(filter);
+            List<String> matched = new ArrayList<>();
+            long[] returned = new long[1];
+            try (RecordReader<InternalRow> reader =
+                    read.newRead().createReader(read.newScan().plan().splits())) {
+                reader.forEachRemaining(
+                        row -> {
+                            returned[0]++;
+                            if (row.getInt(1) < 100) {
+                                matched.add(row.getInt(0) + ":" + row.getInt(1));
+                            }
+                        });
+            }
+            assertThat(matched)
+                    .as("width %s, pushdown %s", width, enabled)
+                    .containsExactlyInAnyOrderElementsOf(expected);
+            if (enabled) {
+                assertThat(returned[0]).isLessThan(ROWS / 10);
+            }
+        }
     }
 
     private Path updateFilePath(FileStoreTable table) {
@@ -437,13 +523,18 @@ public class DataEvolutionStatsPushDownTest extends TableTestBase {
                 write.write(GenericRow.of(fields));
             }
             List<CommitMessage> messages = write.prepareCommit();
-            for (CommitMessage message : messages) {
-                CommitMessageImpl impl = (CommitMessageImpl) message;
-                List<DataFileMeta> files = new ArrayList<>(impl.newFilesIncrement().newFiles());
-                impl.newFilesIncrement().newFiles().clear();
-                files.forEach(f -> impl.newFilesIncrement().newFiles().add(f.assignFirstRowId(0)));
-            }
+            assignFirstRowId(messages);
             commit.commit(messages);
+        }
+    }
+
+    /** Updates cover the row id range of the single base file, which starts at 0. */
+    private static void assignFirstRowId(List<CommitMessage> messages) {
+        for (CommitMessage message : messages) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            List<DataFileMeta> files = new ArrayList<>(impl.newFilesIncrement().newFiles());
+            impl.newFilesIncrement().newFiles().clear();
+            files.forEach(f -> impl.newFilesIncrement().newFiles().add(f.assignFirstRowId(0)));
         }
     }
 
