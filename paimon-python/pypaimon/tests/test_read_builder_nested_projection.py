@@ -98,7 +98,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         self.assertEqual([('id', ['id'])], builder._output_projection.columns)
 
     def test_variant_read_type_is_shared_by_batch_stream_and_ray_providers(self):
-        table = Mock()
+        table = Mock(is_primary_key_table=False)
         table.fields = [
             DataField(0, 'id', AtomicType('INT')),
             DataField(1, 'payload', AtomicType('VARIANT')),

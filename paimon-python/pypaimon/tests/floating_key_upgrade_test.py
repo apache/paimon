@@ -57,6 +57,33 @@ def _read(table: FileStoreTable) -> List[Dict[str, Any]]:
     return [] if arrow is None else arrow.to_pylist()
 
 
+@pytest.mark.parametrize('value_type', [pa.float32(), pa.float64()])
+def test_floating_columns_without_primary_keys(catalog: Catalog, value_type: pa.DataType) -> None:
+    arrow_schema = pa.schema([('value', value_type)])
+    schema = Schema.from_pyarrow_schema(arrow_schema, options={'file.format': 'parquet'})
+    catalog.create_table('default.append_only', schema, False)
+    table = _table(catalog, 'default.append_only')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pylist(
+            [{'value': 1.5}, {'value': 1.5}, {'value': None}], schema=arrow_schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+
+    table = _table(catalog, 'default.append_only')
+    assert table.primary_keys == []
+    assert table.is_primary_key_table is False
+    assert table.trimmed_primary_keys_fields == []
+    assert OPTION not in table.table_schema.options
+    values = [row['value'] for row in _read(table)]
+    assert len(values) == 3 and values.count(1.5) == 2 and values.count(None) == 1
+    table.new_stream_read_builder().new_streaming_scan()
+    table.new_stream_write_builder()
+
+
 @pytest.mark.parametrize('key_type,partition,marked', [
     (pa.float32(), False, True), (pa.float64(), False, True),
     (pa.int64(), False, False), (pa.float64(), True, False),
