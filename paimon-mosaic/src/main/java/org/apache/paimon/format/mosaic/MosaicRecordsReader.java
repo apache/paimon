@@ -22,12 +22,18 @@ import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.mosaic.ColumnStatistics;
 import org.apache.paimon.mosaic.MosaicReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -49,7 +55,6 @@ import java.io.InterruptedIOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,6 +65,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** File reader for Mosaic format. */
 public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
@@ -88,8 +94,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     private int nextRowGroupToSchedule;
     private long scheduledRowCount;
 
-    private long returnedPosition = -1;
-    private VectorSchemaRoot currentVsr;
+    private final Object batchLock = new Object();
+    private final List<BatchRecycler> activeBatches = new ArrayList<>();
 
     private static final Logger LOG = LoggerFactory.getLogger(MosaicRecordsReader.class);
 
@@ -299,73 +305,47 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     @Nullable
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
-        releaseCurrentVsr();
-
-        RowGroupBatch batch = nextRowGroup();
-        if (batch == null) {
-            return null;
-        }
-        // Rows of skipped row groups still count towards the file position.
-        returnedPosition = batch.startPosition - 1;
-        rowsReturned += batch.numRows;
-
-        if (allProjectedColumnsMissing) {
-            return allNullIterator(batch.numRows);
-        }
-
-        Iterator<InternalRow> rows = arrowBatchReader.readBatch(currentVsr).iterator();
-
-        return new FileRecordIterator<InternalRow>() {
-            @Override
-            public long returnedPosition() {
-                return returnedPosition;
-            }
-
-            @Override
-            public Path filePath() {
-                return filePath;
-            }
-
-            @Nullable
-            @Override
-            public InternalRow next() {
-                if (rows.hasNext()) {
-                    returnedPosition++;
-                    return rows.next();
-                }
-                return null;
-            }
-
-            @Override
-            public void releaseBatch() {
-                releaseCurrentVsr();
-            }
-        };
-    }
-
-    /** Returns the next matching row group with its data ready, or null at end of file. */
-    @Nullable
-    private RowGroupBatch nextRowGroup() throws IOException {
         if (pending.isEmpty()) {
             fillPrefetchQueue(Math.max(1, prefetchDepth), true);
         }
-        RowGroupBatch head = pending.peek();
-        if (head == null) {
+        RowGroupBatch batch = pending.peek();
+        if (batch == null) {
             return null;
         }
-        // The head stays queued until its data has arrived, so close() can still wait for it.
+        // Leave a failed or interrupted read queued so close() waits for it.
         long waitStart = System.nanoTime();
-        VectorSchemaRoot vsr = head.await();
+        VectorSchemaRoot vsr = batch.await();
         openNanos += System.nanoTime() - waitStart;
         openedRowGroups++;
         pending.poll();
-        pendingBytes -= head.bytes;
-        currentVsr = vsr;
-        if (prefetchDepth > 0) {
-            // currentVsr is owned by this reader, so a failure here leaves nothing unreleased.
-            fillPrefetchQueue(prefetchDepth, false);
+        pendingBytes -= batch.bytes;
+        rowsReturned += batch.numRows;
+
+        // Register the borrowed batch before refilling, which can fail while scheduling a read.
+        BatchRecycler recycler = vsr == null ? null : recycler(vsr);
+        try {
+            if (prefetchDepth > 0) {
+                fillPrefetchQueue(prefetchDepth, false);
+            }
+            if (allProjectedColumnsMissing) {
+                return allNullIterator(batch.startPosition, batch.numRows);
+            }
+            return new MosaicVectorizedRecordIterator(
+                    filePath,
+                    batch.startPosition,
+                    arrowBatchReader.readVectorizedBatch(vsr),
+                    recycler);
+        } catch (Throwable t) {
+            try {
+                if (recycler != null) {
+                    recycler.run();
+                }
+            } catch (Throwable closeFailure) {
+                t.addSuppressed(closeFailure);
+            }
+            rethrow(t);
+            return null;
         }
-        return head;
     }
 
     /** Schedules matching row groups until {@code wanted} are queued or the byte budget is used. */
@@ -494,14 +474,18 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         }
     }
 
-    private FileRecordIterator<InternalRow> allNullIterator(int numRows) {
+    private FileRecordIterator<InternalRow> allNullIterator(long batchStartPosition, int numRows) {
         GenericRow row = new GenericRow(projectedFieldCount);
         return new FileRecordIterator<InternalRow>() {
             private int position;
+            private long batchReturnedPosition = -1;
 
             @Override
             public long returnedPosition() {
-                return returnedPosition;
+                if (batchReturnedPosition < 0) {
+                    throw new IllegalStateException("returnedPosition() is called before next()");
+                }
+                return batchReturnedPosition;
             }
 
             @Override
@@ -513,8 +497,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             @Override
             public InternalRow next() {
                 if (position < numRows) {
+                    batchReturnedPosition = batchStartPosition + position;
                     position++;
-                    returnedPosition++;
                     return row;
                 }
                 return null;
@@ -566,10 +550,37 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         return true;
     }
 
-    private void releaseCurrentVsr() {
-        if (currentVsr != null) {
-            currentVsr.close();
-            currentVsr = null;
+    private BatchRecycler recycler(VectorSchemaRoot vsr) {
+        try {
+            BatchRecycler recycler = new BatchRecycler(vsr);
+            synchronized (batchLock) {
+                activeBatches.add(recycler);
+            }
+            return recycler;
+        } catch (Throwable t) {
+            try {
+                vsr.close();
+            } catch (Throwable closeFailure) {
+                t.addSuppressed(closeFailure);
+            }
+            throw rethrowUnchecked(t);
+        }
+    }
+
+    private void releaseActiveBatches() {
+        Throwable failure = null;
+        synchronized (batchLock) {
+            while (!activeBatches.isEmpty()) {
+                BatchRecycler recycler = activeBatches.get(activeBatches.size() - 1);
+                try {
+                    recycler.releaseLocked();
+                } catch (Throwable t) {
+                    failure = addSuppressed(failure, t);
+                }
+            }
+        }
+        if (failure != null) {
+            throw rethrowUnchecked(failure);
         }
     }
 
@@ -578,7 +589,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         Throwable throwable = null;
 
         try {
-            releaseCurrentVsr();
+            releaseActiveBatches();
         } catch (Throwable t) {
             throwable = t;
         }
@@ -602,10 +613,12 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             throwable = addSuppressed(throwable, t);
         }
 
-        try {
-            allocator.close();
-        } catch (Throwable t) {
-            throwable = addSuppressed(throwable, t);
+        synchronized (batchLock) {
+            try {
+                allocator.close();
+            } catch (Throwable t) {
+                throwable = addSuppressed(throwable, t);
+            }
         }
 
         try {
@@ -695,6 +708,81 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     interface NativeReaderOpener {
 
         MosaicReader open(
-                MosaicInputFileAdapter inputFileAdapter, long fileSize, BufferAllocator allocator);
+                MosaicInputFileAdapter inputFileAdapter, long fileSize, BufferAllocator allocator)
+                throws IOException;
+    }
+
+    private class BatchRecycler implements Runnable {
+
+        private final VectorSchemaRoot vsr;
+        private boolean released;
+
+        private BatchRecycler(VectorSchemaRoot vsr) {
+            this.vsr = vsr;
+        }
+
+        @Override
+        public void run() {
+            synchronized (batchLock) {
+                releaseLocked();
+            }
+        }
+
+        private void releaseLocked() {
+            if (released) {
+                return;
+            }
+
+            released = true;
+            activeBatches.remove(this);
+            vsr.close();
+        }
+    }
+
+    private static class MosaicVectorizedRecordIterator extends VectorizedRowIterator {
+
+        private final BatchRecycler batchRecycler;
+        private final long startPosition;
+
+        private MosaicVectorizedRecordIterator(
+                Path filePath,
+                long startPosition,
+                VectorizedColumnBatch batch,
+                BatchRecycler recycler) {
+            super(filePath, new ColumnarRow(batch), recycler);
+            this.batchRecycler = recycler;
+            this.startPosition = startPosition;
+            reset(startPosition);
+        }
+
+        @Override
+        public MosaicVectorizedRecordIterator copy(ColumnVector[] vectors) {
+            checkArgument(returnedPositionIndex == 0, "copy() should not be called after next()");
+            // Projection must retain the format's tracking fallback and batch ownership.
+            MosaicVectorizedRecordIterator copied =
+                    new MosaicVectorizedRecordIterator(
+                            filePath, startPosition, batch().copy(vectors), batchRecycler);
+            copied.reset(positionIterator);
+            return copied;
+        }
+
+        @Override
+        public ColumnarRowIterator assignRowTracking(
+                Long firstRowId, Long snapshotId, Map<String, Integer> meta) {
+            ColumnVector[] columns = batch().columns.clone();
+            VectorizedColumnBatch copiedBatch = batch().copy(columns);
+            ColumnarRowIterator fallback;
+            if (firstRowId != null && meta.containsKey(SpecialFields.ROW_ID.name())) {
+                fallback =
+                        new ColumnarRowIterator(
+                                filePath, new ColumnarRow(copiedBatch), batchRecycler);
+            } else {
+                fallback =
+                        new VectorizedRowIterator(
+                                filePath, new ColumnarRow(copiedBatch), batchRecycler);
+            }
+            fallback.reset(startPosition);
+            return fallback.assignRowTracking(firstRowId, snapshotId, meta);
+        }
     }
 }

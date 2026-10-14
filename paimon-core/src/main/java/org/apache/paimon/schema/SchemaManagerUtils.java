@@ -91,6 +91,7 @@ import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP_SORT_ORDER;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.parseAddColumnComment;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
@@ -673,11 +674,15 @@ final class SchemaManagerUtils {
             }
         }
 
-        // case 3: both option key and option value may contain field names
+        // case 3: option keys may contain multiple field names, as may their values
         for (String key : options.keySet()) {
             if (key.startsWith(FIELDS_PREFIX)) {
                 String matchedSuffix = null;
-                if (key.endsWith(SEQUENCE_GROUP)) {
+                boolean valueContainsFieldNames = true;
+                if (key.endsWith(SEQUENCE_GROUP_SORT_ORDER)) {
+                    matchedSuffix = SEQUENCE_GROUP_SORT_ORDER;
+                    valueContainsFieldNames = false;
+                } else if (key.endsWith(SEQUENCE_GROUP)) {
                     matchedSuffix = SEQUENCE_GROUP;
                 } else if (key.endsWith(NESTED_KEY)) {
                     matchedSuffix = NESTED_KEY;
@@ -695,17 +700,22 @@ final class SchemaManagerUtils {
                     List<String> newKeyFields =
                             applyNotNestedColumnRename(keyFields, renameMappings);
 
-                    String valueFieldsStr = newOptions.remove(key);
-                    List<String> valueFields = Arrays.asList(valueFieldsStr.split(","));
-                    List<String> newValueFields =
-                            applyNotNestedColumnRename(valueFields, renameMappings);
+                    String newValue = newOptions.remove(key);
+                    if (valueContainsFieldNames) {
+                        newValue =
+                                String.join(
+                                        ",",
+                                        applyNotNestedColumnRename(
+                                                Arrays.asList(newValue.split(",")),
+                                                renameMappings));
+                    }
                     newOptions.put(
                             FIELDS_PREFIX
                                     + "."
                                     + String.join(",", newKeyFields)
                                     + "."
                                     + matchedSuffix,
-                            String.join(",", newValueFields));
+                            newValue);
                 }
             }
         }

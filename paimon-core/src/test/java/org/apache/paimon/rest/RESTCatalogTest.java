@@ -2377,9 +2377,23 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
 
         // rollback to snapshot 2 from snapshot
-        assertThatThrownBy(() -> catalog.rollbackTo(identifier, Instant.snapshot(2L), 4L))
+        assertThatThrownBy(
+                        () ->
+                                catalog.rollbackTo(
+                                        identifier,
+                                        null,
+                                        Instant.snapshot(2L),
+                                        3L,
+                                        "stale-head-uuid",
+                                        "writer"))
+                .hasMessageContaining("Latest snapshot UUID changed");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(3);
+        assertThatThrownBy(
+                        () ->
+                                catalog.rollbackTo(
+                                        identifier, null, Instant.snapshot(2L), 4L, null, null))
                 .hasMessageContaining("Latest snapshot 3 is not 4");
-        catalog.rollbackTo(identifier, Instant.snapshot(2L), 3L);
+        catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 3L, null, null);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
     }
 

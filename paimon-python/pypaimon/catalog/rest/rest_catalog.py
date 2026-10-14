@@ -414,7 +414,8 @@ class RESTCatalog(Catalog):
             raise TableNoPermissionException(identifier) from e
 
     def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
-                    from_snapshot: Optional[int] = None) -> None:
+                    from_snapshot: Optional[int] = None, *,
+                    table_uuid: Optional[str] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -422,6 +423,7 @@ class RESTCatalog(Catalog):
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
+            table_uuid: Expected table or branch UUID from the loaded table view.
 
         Raises:
             TableNotExistException: If the table does not exist.
@@ -430,7 +432,8 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            self.rest_api.rollback_to(identifier, instant, from_snapshot)
+            self.rest_api.rollback_to(
+                identifier, instant, from_snapshot, table_uuid=table_uuid)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 raise ValueError(
@@ -625,6 +628,24 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def rename_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                   target_tag_name: str) -> None:
+        # The REST API has create, get, list, and delete only. Renaming the
+        # tag file through FileStoreTable would leave the server registry
+        # pointing at a name whose file is gone.
+        raise NotImplementedError(
+            "REST catalog does not support rename_tag. "
+            "The REST API has no rename endpoint."
+        )
+
+    def replace_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                    snapshot_id: Optional[int] = None,
+                    time_retained: Optional[str] = None) -> None:
+        raise NotImplementedError(
+            "REST catalog does not support replace_tag. "
+            "The REST API has no replace endpoint."
+        )
 
     # Branch CRUD: mirrors Java RESTCatalog branch handlers.
     def create_branch(self, identifier: Union[str, Identifier], branch_name: str,

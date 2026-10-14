@@ -54,13 +54,8 @@ _TRIM_OPS = {
     "TRAILING": (pc.utf8_rtrim, str.rstrip),
 }
 
-# Calendar-field extractions on a DATE / TIMESTAMP field, mirroring Java's
-# DateExtractTransform subclasses (name -> the Arrow kernel over a timestamp).
-# QUARTER matches (month - 1) / 3 + 1; the day-of-week variants match Java's
-# java.time numbering: WEEKDAY is Monday=0..Sunday=6, ISO_DAY_OF_WEEK is
-# Monday=1..Sunday=7, DAY_OF_WEEK is Sunday=1..Saturday=7. WEEK / YEAR_OF_WEEK
-# are the ISO week-of-week-based-year and the ISO week-based year. The rest map
-# one to one.
+# Java DateExtractTransform names. LTZ is excluded because a calendar field
+# would depend on a session time zone, which authorization rules do not carry.
 _DATE_EXTRACT = {
     "YEAR": pc.year,
     "MONTH": pc.month,
@@ -80,22 +75,39 @@ _DATE_EXTRACT = {
 
 def parse_predicate_to_batch_filter(json_str: str) -> Callable[[pa.RecordBatch], pa.Array]:
     data = json.loads(json_str)
-    return _build_filter(data)
+    execute = _build_filter(data)
+    validate = _build_filter(data, short_circuit=False)
+    validated_schema = None
+
+    def filter_fn(batch):
+        nonlocal validated_schema
+        # Java deserializes every child before row evaluation. Validate all
+        # definitions on typed empty arrays even if short-circuiting skips them.
+        if validated_schema != batch.schema:
+            validate(batch.slice(0, 0))
+            validated_schema = batch.schema
+        return execute(batch)
+
+    return filter_fn
 
 
-def _build_filter(data: dict) -> Callable[[pa.RecordBatch], pa.Array]:
+def _build_filter(data: dict, short_circuit=True) -> Callable[[pa.RecordBatch], pa.Array]:
     kind = data["kind"]
     if kind == "LEAF":
         return _build_leaf_filter(data)
     elif kind == "COMPOUND":
-        return _build_compound_filter(data)
+        return _build_compound_filter(data, short_circuit)
     raise ValueError(f"Unknown predicate kind: {kind}")
 
 
 def _build_leaf_filter(data: dict) -> Callable:
     transform = data["transform"]
     function = data["function"]
-    literals = data.get("literals", [])
+    literals = data.get("literals")
+    if literals is None and function in ('TRUE', 'FALSE', 'IS_NULL', 'IS_NOT_NULL', 'IS_NAN'):
+        literals = []
+    if not isinstance(literals, list):
+        raise ValueError(f"{function} needs a literal list")
 
     def filter_fn(batch: pa.RecordBatch) -> pa.Array:
         value_array = _apply_predicate_transform(transform, batch)
@@ -104,22 +116,31 @@ def _build_leaf_filter(data: dict) -> Callable:
     return filter_fn
 
 
-def _build_compound_filter(data: dict) -> Callable:
+def _build_compound_filter(data: dict, short_circuit=True) -> Callable:
     function = data["function"]
-    child_filters = [_build_filter(child) for child in data["children"]]
+    if function not in ('AND', 'OR'):
+        raise ValueError(f"Unknown compound function: {function}")
+    children = data['children']
+    if not children:
+        raise ValueError('Compound predicate needs children')
+    child_filters = [_build_filter(child, short_circuit) for child in children]
 
     def filter_fn(batch: pa.RecordBatch) -> pa.Array:
-        if function == "AND":
-            result = child_filters[0](batch)
-            for cf in child_filters[1:]:
-                result = pc.and_(result, cf(batch))
-            return result
-        elif function == "OR":
-            result = child_filters[0](batch)
-            for cf in child_filters[1:]:
-                result = pc.or_(result, cf(batch))
-            return result
-        raise ValueError(f"Unknown compound function: {function}")
+        result = child_filters[0](batch)
+        for cf in child_filters[1:]:
+            if not short_circuit:
+                result = pc.and_(result, cf(batch)) if function == 'AND' else pc.or_(result, cf(batch))
+                continue
+            # Java evaluates each later child only for undecided rows. Retain
+            # their original positions so nested compounds keep row order.
+            pending = result if function == 'AND' else pc.invert(result)
+            if not pc.any(pending).as_py():
+                break
+            if pc.all(pending).as_py():
+                result = cf(batch)
+                continue
+            result = pc.replace_with_mask(result, pending, cf(batch.filter(pending)))
+        return result
 
     return filter_fn
 
@@ -133,8 +154,30 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
 
     elif name == "CAST":
         col = batch.column(transform["fieldRef"]["name"])
-        target_type = _paimon_type_to_arrow(transform["type"])
-        return pc.cast(col, target_type, safe=False)
+        target = transform['type']
+        width = re.fullmatch(r"\s*(CHAR|VARCHAR|BINARY|VARBINARY)(?=\s|\(|\Z)"
+                             r"(?:\s*\(\s*([0-9]+)\s*\))?"
+                             r"(?:\s*(?:NOT\s+)?NULL)?\s*", target, flags=re.IGNORECASE)
+        if width is not None:
+            kind, length = width.group(1).upper(), int(width.group(2) or 1)
+            if length < 1 or length > _INT_MAX:
+                raise ValueError('Cast width must be between 1 and 2147483647')
+            target_type = pa.string() if kind in ('CHAR', 'VARCHAR') else pa.binary()
+        else:
+            target_type = _paimon_type_to_arrow(target)
+        stored = _paimon_type_to_arrow(transform['fieldRef']['type'])
+        col = _cast_input_for_java_executor(col, stored, target_type)
+        result = pc.cast(col, target_type, safe=False)
+        # Java CastTransform enforces widths; Arrow uses unbounded arrays.
+        if width is not None:
+            pad = kind in ('CHAR', 'BINARY')
+            padding = ' ' if kind == 'CHAR' else b'\x00'
+            result = pa.array([
+                None if value is None else
+                (value[:length] + padding * max(0, length - len(value)) if pad else value[:length])
+                for value in result.to_pylist()
+            ], type=target_type)
+        return result
 
     elif name == "UPPER":
         input_col = _resolve_transform_input(transform["inputs"][0], batch)
@@ -147,7 +190,7 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     elif name == "CONCAT":
         resolved = [_resolve_transform_input(inp, batch) for inp in transform["inputs"]]
         if not resolved:
-            return pa.nulls(len(batch), type=pa.string())
+            return pa.array([''] * len(batch), type=pa.string())
         return pc.binary_join_element_wise(*resolved, "")
 
     elif name == "CONCAT_WS":
@@ -172,14 +215,14 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     elif name in _DATE_EXTRACT:
         return _date_extract(name, transform["fieldRef"], batch)
     elif name == "LENGTH":
-        _check_string_input("LENGTH input", transform["inputs"][0], batch)
+        _check_string_input("LENGTH input", transform["inputs"][0], batch, stored=True)
         source = _resolve_transform_input(transform["inputs"][0], batch)
         return pa.array(
             [None if v is None else len(v) for v in source.to_pylist()],
             type=pa.int32())
 
     elif name == "BIT_LENGTH":
-        _check_string_input("BIT_LENGTH input", transform["inputs"][0], batch)
+        _check_string_input("BIT_LENGTH input", transform["inputs"][0], batch, stored=True)
         source = _resolve_transform_input(transform["inputs"][0], batch)
         return pa.array(
             [None if v is None else len(v.encode("utf-8")) * 8
@@ -198,17 +241,131 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     raise ValueError(f"Unknown transform type: {name}")
 
 
-def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array:
-    """Extract a calendar field from a DATE / TIMESTAMP column, as INT.
+def _cast_input_for_java_executor(col, stored, target):
+    # copyWithNewInputs retains Java's original executor. Character, Boolean
+    # and byte executors require their original runtime value class.
+    needs_class = (((pa.types.is_string(stored) or pa.types.is_large_string(stored)) and
+                    not (pa.types.is_string(col.type) or pa.types.is_large_string(col.type))) or
+                   (pa.types.is_boolean(stored) and not pa.types.is_boolean(col.type)) or
+                   ((pa.types.is_binary(stored) or pa.types.is_large_binary(stored)) and
+                    not (pa.types.is_binary(col.type) or pa.types.is_large_binary(col.type))))
+    if needs_class:
+        if col.null_count != len(col):
+            raise ValueError('CAST source no longer has the runtime type its Java executor expects')
+        return pa.nulls(len(col), type=target)
 
-    A DATE is read at the start of its day (Java's LocalDate.atStartOfDay),
-    so it is cast to a timestamp first and HOUR/MINUTE/SECOND come out as 0.
-    Nulls propagate. Mirrors Java DateExtractTransform.
+    numeric = pa.types.is_integer(stored) or pa.types.is_floating(stored) or pa.types.is_decimal(stored)
+    if numeric and pa.types.is_string(target) and col.type != stored:
+        # NumericToString accepts Object. DATE and TIME getters return Integer,
+        # so this executor prints epoch days / milliseconds, not calendar text.
+        if pa.types.is_date(col.type):
+            return col.cast(pa.date32(), safe=False).cast(pa.int32())
+        if pa.types.is_time(col.type):
+            return col.cast(pa.time32('ms'), safe=False).cast(pa.int32())
+        if pa.types.is_decimal(col.type):
+            # Paimon Decimal.toString uses BigDecimal.toPlainString. Arrow may
+            # emit an exponent for a small scaled decimal, including zero.
+            return pa.array([None if value is None else format(value, 'f') for value in col.to_pylist()],
+                            type=pa.string())
+        if not (pa.types.is_integer(col.type) or pa.types.is_decimal(col.type) or
+                pa.types.is_boolean(col.type) or pa.types.is_string(col.type) or pa.types.is_large_string(col.type)):
+            # Timestamp.toString uses LocalDateTime text, and other objects
+            # have their own formatting. An Arrow cast would authorize other
+            # rows; refuse the unsupported rebound instead.
+            if col.null_count != len(col):
+                raise ValueError('CAST rebound source requires its original Java executor formatting')
+            return pa.nulls(len(col), type=target)
+    return col
+
+
+def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array:
+    """Java calendar extraction on DATE days or Timestamp milliseconds.
+
+    Timestamp.toLocalDateTime narrows the epoch day to a signed int. Work on
+    that representation directly, including DATE32 values which cannot be
+    cast to an Arrow microsecond timestamp or a Python datetime.
     """
+    from pypaimon.casting.temporal_utils import _signed
+    stored = field_ref.get('type')
+    if not isinstance(stored, str):
+        raise ValueError("Calendar transform field needs a DATE or TIMESTAMP type")
+    # Validate the complete stored SQL spelling before schema-name rebinding.
+    match = re.fullmatch(r"\s*(DATE(?=\s|\Z)|TIMESTAMP(?=\s|\(|\Z)(?:\s*\(\s*([0-9]+)\s*\))?"
+                         r"(?:\s*WITHOUT\s+TIME\s+ZONE(?=\s|\Z))?)"
+                         r"(?:\s*(?:NOT\s+)?NULL)?\s*", stored, flags=re.IGNORECASE)
+    if match is None or (match.group(2) is not None and int(match.group(2)) > 9):
+        raise ValueError("Calendar transforms require DATE or TIMESTAMP without time zone")
     column = _field_column(field_ref, batch)
-    if pa.types.is_date(column.type):
-        column = pc.cast(column, pa.timestamp("us"))
-    return pc.cast(_DATE_EXTRACT[name](column), pa.int32())
+    date = pa.types.is_date32(column.type)
+    timestamp = pa.types.is_timestamp(column.type) and column.type.tz is None
+    if not date and not timestamp:
+        raise ValueError("Calendar transforms require DATE or TIMESTAMP without time zone")
+    raw = column.cast(pa.int32() if date else pa.int64())
+    unit = column.type.unit if timestamp else None
+    # Arrow calendar kernels agree with Java within years 1..9999. Keep their
+    # vectorized execution for ordinary batches; outside this range use Java's
+    # epoch-day arithmetic, avoiding Arrow's bounded calendar representation.
+    bounds = pc.min_max(raw).as_py()
+    ticks_per_day = 1 if date else 86400 * {'s': 1, 'ms': 1000, 'us': 1000000, 'ns': 1000000000}[unit]
+    if (bounds['min'] is None or
+            (-719162 * ticks_per_day <= bounds['min'] and
+             bounds['max'] < 2932897 * ticks_per_day)):
+        source = column.cast(pa.timestamp('us')) if date else column
+        return _DATE_EXTRACT[name](source).cast(pa.int32())
+    values = raw.to_pylist()
+    results = []
+    for value in values:
+        if value is None:
+            results.append(None)
+            continue
+        if date:
+            day, millis = value, 0
+        else:
+            if unit == 's':
+                millis = _signed(value * 1000, 64)
+            elif unit == 'ms':
+                millis = value
+            else:
+                millis = value // (1000 if unit == 'us' else 1000000)
+            day, millis = _signed(millis // 86400000, 32), millis % 86400000
+        results.append(_calendar_field(name, day, millis))
+    return pa.array(results, type=pa.int32())
+
+
+def _calendar_field(name, day, millis):
+    from pypaimon.casting.temporal_utils import _epoch_day_to_date
+    year, month, date = _epoch_day_to_date(day)
+    weekday = (day + 3) % 7
+    if name == 'YEAR':
+        return year
+    if name == 'MONTH':
+        return month
+    if name == 'DAY':
+        return date
+    if name == 'HOUR':
+        return millis // 3600000
+    if name == 'MINUTE':
+        return millis // 60000 % 60
+    if name == 'SECOND':
+        return millis // 1000 % 60
+    if name == 'QUARTER':
+        return (month - 1) // 3 + 1
+    if name == 'DAY_OF_YEAR':
+        return day - _january_first(year) + 1
+    if name == 'WEEKDAY':
+        return weekday
+    if name == 'ISO_DAY_OF_WEEK':
+        return weekday + 1
+    if name == 'DAY_OF_WEEK':
+        return (weekday + 1) % 7 + 1
+    thursday = day + 3 - weekday
+    week_year = _epoch_day_to_date(thursday)[0]
+    return week_year if name == 'YEAR_OF_WEEK' else (thursday - _january_first(week_year)) // 7 + 1
+
+
+def _january_first(year):
+    era, yoe = divmod(year - 1, 400)
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + 306 - 719468
 
 
 def _substring(inputs, batch: pa.RecordBatch) -> pa.Array:
@@ -318,6 +475,24 @@ def _check_string_input(slot: str, value, batch: pa.RecordBatch, stored: bool = 
     column = _field_column(value, batch)
     if not pa.types.is_string(column.type) and not pa.types.is_large_string(column.type):
         raise ValueError(f"{slot} field must be a string: {column.type}")
+
+
+_INTEGER_TYPE = re.compile(
+    r"\s*(?:TINYINT|SMALLINT|INT|INTEGER|BIGINT)(?=\s|\Z)"
+    r"(?:\s*(?:NOT\s+)?NULL)?\s*\Z", re.IGNORECASE)
+
+
+def _check_integer_input(slot, value, batch):
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return
+    if not isinstance(value, dict):
+        raise ValueError(f"{slot} must be an integer or a field: {value!r}")
+    stored = value.get("type")
+    if not isinstance(stored, str) or _INTEGER_TYPE.match(stored) is None:
+        raise ValueError(f"{slot} field must be an integer: {stored!r}")
+    column = _field_column(value, batch)
+    if not pa.types.is_integer(column.type):
+        raise ValueError(f"{slot} field must be an integer: {column.type}")
 
 
 class _Positions:
@@ -432,8 +607,9 @@ def _pad(inputs, direction, batch: pa.RecordBatch) -> pa.Array:
         raise ValueError(f"PAD takes 3 inputs, got {inputs!r}")
     if direction not in ("LEFT", "RIGHT"):
         raise ValueError(f"PAD direction must be LEFT or RIGHT: {direction!r}")
-    _check_string_input("PAD input", inputs[0], batch)
-    _check_string_input("PAD string", inputs[2], batch)
+    _check_string_input("PAD input", inputs[0], batch, stored=True)
+    _check_string_input("PAD string", inputs[2], batch, stored=True)
+    _check_integer_input("PAD length", inputs[1], batch)
     source = _resolve_transform_input(inputs[0], batch)
     pad = _resolve_transform_input(inputs[2], batch)
     lengths = _Positions(inputs[1], batch)
@@ -444,10 +620,11 @@ def _pad(inputs, direction, batch: pa.RecordBatch) -> pa.Array:
         value = src_list[i]
         pad_str = pad_list[i]
         raw_len = lengths.value(i)
-        if value is None or raw_len is None or pad_str is None:
+        length = _int_position(raw_len) if raw_len is not None else None
+        if value is None or length is None or pad_str is None:
             result.append(None)
             continue
-        result.append(_pad_one(value, _int_position(raw_len), pad_str, direction))
+        result.append(_pad_one(value, length, pad_str, direction))
     return pa.array(result, type=pa.string())
 
 
@@ -464,9 +641,9 @@ def _pad_one(source, length, pad, direction):
 def _translate(inputs, batch: pa.RecordBatch) -> pa.Array:
     if not isinstance(inputs, list) or len(inputs) != 3:
         raise ValueError(f"TRANSLATE takes 3 inputs, got {inputs!r}")
-    _check_string_input("TRANSLATE source", inputs[0], batch)
-    _check_string_input("TRANSLATE matching", inputs[1], batch)
-    _check_string_input("TRANSLATE replacement", inputs[2], batch)
+    _check_string_input("TRANSLATE source", inputs[0], batch, stored=True)
+    _check_string_input("TRANSLATE matching", inputs[1], batch, stored=True)
+    _check_string_input("TRANSLATE replacement", inputs[2], batch, stored=True)
     source = _resolve_transform_input(inputs[0], batch)
     matching = _resolve_transform_input(inputs[1], batch)
     replacement = _resolve_transform_input(inputs[2], batch)
@@ -499,8 +676,11 @@ def _translate_one(source, matching, replacement):
 def _overlay(inputs, batch: pa.RecordBatch) -> pa.Array:
     if not isinstance(inputs, list) or len(inputs) not in (3, 4):
         raise ValueError(f"OVERLAY takes 3 or 4 inputs, got {inputs!r}")
-    _check_string_input("OVERLAY input", inputs[0], batch)
-    _check_string_input("OVERLAY replacement", inputs[1], batch)
+    _check_string_input("OVERLAY input", inputs[0], batch, stored=True)
+    _check_string_input("OVERLAY replacement", inputs[1], batch, stored=True)
+    _check_integer_input("OVERLAY position", inputs[2], batch)
+    if len(inputs) == 4:
+        _check_integer_input("OVERLAY length", inputs[3], batch)
     source = _resolve_transform_input(inputs[0], batch)
     replacement = _resolve_transform_input(inputs[1], batch)
     positions = _Positions(inputs[2], batch)
@@ -513,15 +693,13 @@ def _overlay(inputs, batch: pa.RecordBatch) -> pa.Array:
         value = src_list[i]
         repl = repl_list[i]
         raw_pos = positions.value(i)
-        # SQL null propagation: any null argument yields a null result
-        if value is None or repl is None or raw_pos is None:
+        # Java evaluates both integer arguments before propagating string NULLs.
+        pos = _int_position(raw_pos) if raw_pos is not None else None
+        raw_length = lengths.value(i) if has_length else None
+        length = _int_position(raw_length) if raw_length is not None else None
+        if value is None or repl is None or pos is None or (has_length and length is None):
             result.append(None)
             continue
-        if has_length and lengths.value(i) is None:
-            result.append(None)
-            continue
-        pos = _int_position(raw_pos)
-        length = _int_position(lengths.value(i)) if has_length else None
         replaced = len(repl) if (length is None or length < 0) else length
         # pos - 1 and pos + replaced are 32-bit int expressions in Java's
         # OverlayTransform; wrap them so a boundary position overflows exactly
@@ -560,7 +738,18 @@ def _apply_leaf_function(function: str, value_array: pa.Array, literals: list, b
     two-valued logic (null → False) so that compound AND/OR behaves
     identically to Java.
     """
-    converted = [_convert_literal(lit, value_array.type) for lit in literals]
+    if (pa.types.is_binary(value_array.type) or pa.types.is_large_binary(value_array.type)) and any(
+            literal is not None for literal in literals):
+        raise ValueError('Java predicates do not support non-null binary literals')
+    converted = []
+    for literal in literals:
+        value = _convert_literal(literal, value_array.type)
+        if value is not None:
+            # Java deserializes every literal using the expression's output
+            # type before evaluation, including unused literals and NULL tests.
+            checked = pa.scalar(value, type=value_array.type)
+            value = checked if isinstance(value, pa.Scalar) else checked.as_py()
+        converted.append(value)
 
     if function == "EQUAL":
         if converted[0] is None:
@@ -778,9 +967,7 @@ def _collect_all_field_refs_from_transform(transform: dict, fields: set = None) 
     if fields is None:
         fields = set()
     name = transform.get("name")
-    if name == "FIELD_REF" and "fieldRef" in transform:
-        fields.add(transform["fieldRef"]["name"])
-    elif name == "CAST" and "fieldRef" in transform:
+    if (name in ("FIELD_REF", "CAST") or name in _DATE_EXTRACT) and "fieldRef" in transform:
         fields.add(transform["fieldRef"]["name"])
     else:
         for inp in transform.get("inputs", []):

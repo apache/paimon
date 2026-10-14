@@ -53,6 +53,7 @@ class TableCommit:
 
         self._commit_callbacks: List[CommitCallback] = []
         self._native_commit = None
+        self._native_callbacks_registered = False
         self.file_store_commit = FileStoreCommit(
             snapshot_commit, table, commit_user,
             commit_callbacks=self._commit_callbacks)
@@ -74,6 +75,8 @@ class TableCommit:
         }
         if snapshot_properties is not None:
             commit_kwargs["snapshot_properties"] = snapshot_properties
+        native_kwargs = ({} if snapshot_properties is None else
+                         {"snapshot_properties": snapshot_properties})
 
         # Never abort files in response to a commit exception. Preserving
         # possible orphan files is safer than deleting files which another
@@ -86,13 +89,12 @@ class TableCommit:
                 "Committing overwrite to table %s, %d non-empty messages",
                 self.table.identifier, len(non_empty_messages)
             )
-            if snapshot_properties is None:
-                prepared = self._prepare_native_commit(non_empty_messages)
-                if prepared is not None:
-                    native, messages = prepared
-                    # Keep publication failures outside the preparation fallback.
-                    native.commit(messages)
-                    return
+            prepared = self._prepare_native_commit(non_empty_messages)
+            if prepared is not None:
+                native, messages = prepared
+                # Keep publication failures outside the preparation fallback.
+                native.commit(messages, **native_kwargs)
+                return
             self.file_store_commit.overwrite(
                 overwrite_partition=self.overwrite_partition,
                 **commit_kwargs)
@@ -104,23 +106,21 @@ class TableCommit:
                 "Committing table %s, %d non-empty messages",
                 self.table.identifier, len(non_empty_messages)
             )
-            if snapshot_properties is None:
-                prepared = self._prepare_native_commit(non_empty_messages)
-                if prepared is not None:
-                    native, messages = prepared
-                    # Mutation is deliberately outside the fallback boundary:
-                    # an exception can mean the snapshot was already published.
-                    native.commit(commit_identifier, messages)
-                    return
+            prepared = self._prepare_native_commit(non_empty_messages)
+            if prepared is not None:
+                native, messages = prepared
+                # Mutation is deliberately outside the fallback boundary:
+                # an exception can mean the snapshot was already published.
+                native.commit(commit_identifier, messages, **native_kwargs)
+                return
             self.file_store_commit.commit(**commit_kwargs)
 
     def _prepare_native_commit(self, messages):
-        if (not self.table.options.native_commit_enabled()
-                or self._commit_callbacks):
+        if not self.table.options.native_commit_enabled():
             return None
         try:
             from pypaimon.write.native_commit import (
-                create_native_commit, native_messages_supported,
+                create_native_commit, native_commit_callback, native_messages_supported,
                 to_native_commit_messages)
             if not native_messages_supported(self.table, messages):
                 return None
@@ -129,7 +129,13 @@ class TableCommit:
                     self.table, self.commit_user, self.overwrite_partition)
             if self._native_commit is None:
                 return None
-            return self._native_commit, to_native_commit_messages(self.table, messages)
+            native_messages = to_native_commit_messages(self.table, messages)
+            # Callbacks may be registered after the native committer is created.
+            # FileStoreCommit owns their close lifecycle in either execution path.
+            if self._commit_callbacks and not self._native_callbacks_registered:
+                self._native_commit.add_commit_callback(native_commit_callback(self.table, self._commit_callbacks))
+                self._native_callbacks_registered = True
+            return self._native_commit, native_messages
         except Exception as error:
             # No native mutation has started. Preserve the normal Python path
             # when the optional runtime, FileIO or wire bridge is unavailable.

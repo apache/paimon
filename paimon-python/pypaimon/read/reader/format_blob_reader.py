@@ -374,13 +374,12 @@ class FormatBlobReader(RecordBatchReader):
             )
             return
 
-        cached_index = self._index_cache.get(self.file_path)
-        if cached_index is not None:
-            blob_lengths, blob_offsets = cached_index
-            self.blob_lengths = list(blob_lengths)
-            self.blob_offsets = list(blob_offsets)
-            return
+        blob_lengths, blob_offsets = self._index_cache.get_or_load(
+            self.file_path, self._load_index)
+        self.blob_lengths = list(blob_lengths)
+        self.blob_offsets = list(blob_offsets)
 
+    def _load_index(self):
         self._input_stream = self._file_io.new_input_stream(self.file_path)
         f = self._input_stream
 
@@ -405,10 +404,7 @@ class FormatBlobReader(RecordBatchReader):
         if len(index_bytes) != index_length:
             raise IOError("Invalid blob file: cannot read index")
 
-        blob_lengths, blob_offsets = _decode_blob_index(index_bytes)
-        self._index_cache.put(self.file_path, blob_lengths, blob_offsets)
-        self.blob_lengths = list(blob_lengths)
-        self.blob_offsets = list(blob_offsets)
+        return _decode_blob_index(index_bytes)
 
     def _apply_row_indices(self, row_indices: Optional[Any]) -> None:
         if row_indices is None:

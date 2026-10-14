@@ -17,9 +17,11 @@
 
 """Optional native row-ID updates for batch data-evolution tables."""
 
+import json
+
 import pyarrow as pa
 
-from pypaimon.schema.data_types import MapType, PyarrowFieldParser, is_blob_file_field
+from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
@@ -32,13 +34,10 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
 
-def _native_row_id_table(table):
-    """Resolve an eligible table before creating a native row-ID writer."""
+def _native_update_table(table):
+    """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
-            or not table.options.data_evolution_enabled()
-            or not table.options.row_tracking_enabled()
-            or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
             or table.options.with_vector_format()
             or table.options.changelog_producer() != ChangelogProducer.NONE
@@ -50,6 +49,16 @@ def _native_row_id_table(table):
             schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
         return None
     return create_native_write_table(table)
+
+
+def _native_row_id_table(table):
+    """Row-level operations additionally require a data-evolution table."""
+    if (type(table) is not FileStoreTable
+            or not table.options.data_evolution_enabled()
+            or not table.options.row_tracking_enabled()
+            or table.is_primary_key_table):
+        return None
+    return _native_update_table(table)
 
 
 def create_native_update(table, commit_user, columns):
@@ -84,6 +93,54 @@ def create_native_update_by_row_id(table, commit_user, commit_identifier):
                   .new_update().new_update_by_row_id(commit_identifier))
     return NativeTableUpdateByRowId(
         table, commit_user, commit_identifier, writer)
+
+
+def create_native_shard_updator(table, commit_user, projection, columns, shard, shard_count, stream=False):
+    """Core owns whole-file sharding, the captured reader and positional updates."""
+    from pypaimon.read.native_plan import native_method_available
+    if not native_method_available('BatchTableUpdate', 'new_shard_updator'):
+        return None
+    if not _native_update_columns_supported(table, columns):
+        return None
+    native_table = _native_row_id_table(table)
+    if native_table is None:
+        return None
+    builder = (native_table.new_stream_write_builder().with_commit_user(commit_user) if stream else
+               native_table.new_batch_write_builder()._with_commit_user(commit_user))
+    update = builder.new_update()
+    read_builder = table.new_read_builder()
+    if projection is not None:
+        read_builder.with_projection(projection)
+    if columns is not None:
+        update.with_update_type(columns)
+    read = read_builder.new_read()
+    writer = update.new_shard_updator(
+        shard, shard_count, read_type=json.dumps(RowType(True, read_builder.read_type()).to_dict()))
+    return NativeShardTableUpdator(table, read, writer)
+
+
+class NativeShardTableUpdator:
+    """Transport Arrow batches and commit messages for a core shard updater."""
+
+    def __init__(self, table, read, writer):
+        self.table = table
+        self.writer = writer
+        self.read = read
+
+    def arrow_reader(self):
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+        schema = self.read._output_arrow_schema()
+        batches = self.read._convert_native_batches(self.writer.arrow_reader(), schema)
+        return _ClosableArrowBatchReader(pa.ipc.RecordBatchReader.from_batches(schema, batches), batches)
+
+    def update_by_arrow_batch(self, data):
+        self.writer.update_by_arrow_batch(data)
+
+    def prepare_commit(self):
+        return from_native_commit_messages(self.table, self.writer.prepare_commit())
+
+    def close(self):
+        self.writer.close()
 
 
 def _supported_upsert_key_type(data_type):
@@ -203,6 +260,25 @@ def native_predicate_row_ids(scan_table, predicate, splits):
         for batch in reader([native_split_from_python(split)]):
             row_ids.extend(batch.column('_ROW_ID').to_pylist())
     return row_ids
+
+
+def create_native_predicate_delete(table, commit_user, predicate):
+    """Delegate matching and partition metadata deletion to the core updater."""
+    from pypaimon.read.native_plan import _predicate_to_native, native_method_available
+    if not native_method_available('BatchTableUpdate', 'delete_by_predicate'):
+        return None
+    # Core selects whole-partition metadata deletes for append/PK tables too;
+    # only the row-level branch requires row tracking and deletion vectors.
+    native_table = _native_update_table(table)
+    if native_table is None:
+        return None
+    native_predicate = None if predicate is None else _predicate_to_native(predicate)
+    if native_predicate is not None:
+        # Resolve all fields/operators before selecting the mutating operation.
+        native_table.new_read_builder().with_filter(native_predicate)
+    writer = (native_table.new_batch_write_builder()
+              ._with_commit_user(commit_user).new_update())
+    return NativePredicateTableUpdate(table, writer, native_predicate)
 
 
 def create_native_delete(table, commit_user):
@@ -340,3 +416,7 @@ class NativePredicateTableUpdate:
             self.table,
             self.writer.update_by_predicate(
                 self.predicate, dict(assignments), list(read_columns or ())))
+
+    def delete(self):
+        return from_native_commit_messages(
+            self.table, self.writer.delete_by_predicate(self.predicate))

@@ -21,6 +21,7 @@ import pickle
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -892,7 +893,7 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
                 window_size=2, columns=["value"],
                 group_key="episode", order_key="step")
 
-    def test_rejects_video_frame_columns_that_would_lose_frame_metadata(self):
+    def test_decodes_video_windows_and_reuses_overlapping_frames(self):
         table = self.conn.create_table(
             "videos",
             schema=pa.schema([
@@ -905,12 +906,106 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
                 "blob-as-descriptor": "true",
             }),
         )
+        video_path = os.path.join(self.temp_dir, "episode-a.mp4")
+        with open(video_path, "wb") as output:
+            output.write(b"encoded-video")
+        table.add_video(
+            pmm.Blob.from_local(video_path),
+            [
+                {"episode": "episode-a", "step": step}
+                for step in range(3)
+            ],
+            first_frame=7,
+        )
+        decoded = []
 
-        with self.assertRaisesRegex(
-                ValueError, "video frame columns.*frame_index"):
-            table.scan().to_contiguous_window_dataset(
+        class Decoder:
+
+            def get_frames_at(self, *, indices):
+                decoded.append(tuple(indices))
+                return SimpleNamespace(data=torch.tensor(indices))
+
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset._open_video_decoder",
+                return_value=Decoder()):
+            dataset = table.scan().to_contiguous_window_dataset(
                 window_size=2, columns=["video"],
                 group_key="episode", order_key="step")
+            try:
+                samples = dataset.__getitems__([0, 1])
+            finally:
+                close = getattr(dataset, "close", None)
+                if close is not None:
+                    close()
+
+        self.assertEqual([(7, 8, 9)], decoded)
+        self.assertEqual(
+            [[7, 8], [8, 9]],
+            [[int(frame) for frame in sample["video"]] for sample in samples],
+        )
+        for sample in samples:
+            for frame in sample["video"]:
+                self.assertEqual(
+                    frame.numel() * frame.element_size(),
+                    frame.untyped_storage().nbytes(),
+                )
+
+    def test_decodes_encoded_video_windows_with_multiple_workers(self):
+        try:
+            import av  # noqa: F401
+            from PIL import Image
+        except ImportError:
+            self.skipTest("PyAV and Pillow are required for video decoding")
+
+        table = self.conn.create_table(
+            "encoded_videos",
+            schema=pa.schema([
+                pa.field("episode", pa.string(), nullable=False),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("video", pa.large_binary()),
+            ]),
+            options=dict(_TABLE_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        table.add_images_as_video(
+            [
+                Image.new("RGB", (8, 6), color)
+                for color in ("red", "green", "blue")
+            ],
+            [
+                {"episode": "episode-a", "step": step}
+                for step in range(3)
+            ],
+            fps=10,
+            codec="mpeg4",
+            pixel_format="yuv420p",
+            gop_size=1,
+            codec_options={"qscale": "3"},
+        )
+        dataset = table.scan().to_contiguous_window_dataset(
+            window_size=2,
+            columns=["video"],
+            group_key="episode",
+            order_key="step",
+            column_transforms={"video": torch.stack},
+            video_backend="pyav",
+        )
+        try:
+            batches = list(torch.utils.data.DataLoader(
+                dataset, batch_size=2, num_workers=2, shuffle=False))
+        finally:
+            dataset.close()
+
+        self.assertEqual(1, len(batches))
+        self.assertEqual((2, 2, 3, 6, 8), tuple(batches[0]["video"].shape))
+        first = batches[0]["video"][0, 0].float().mean(dim=(1, 2))
+        last = batches[0]["video"][1, 1].float().mean(dim=(1, 2))
+        self.assertGreater(first[0], first[1] + 100)
+        self.assertGreater(first[0], first[2] + 100)
+        self.assertGreater(last[2], last[0] + 100)
+        self.assertGreater(last[2], last[1] + 100)
 
     def test_validates_configuration_and_scan_only_contract(self):
         table = self._table()
@@ -948,6 +1043,12 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             table.search("anything", column="episode").to_contiguous_window_dataset(
                 window_size=2, columns=["value"],
                 group_key="episode", order_key="step")
+
+        with self.assertRaisesRegex(ValueError, "video_backend must be"):
+            table.scan().to_contiguous_window_dataset(
+                window_size=2, columns=["value"],
+                group_key="episode", order_key="step",
+                video_backend="unsupported")
 
 
 if __name__ == "__main__":

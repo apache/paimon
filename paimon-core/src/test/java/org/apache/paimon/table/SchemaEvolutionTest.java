@@ -1160,6 +1160,38 @@ public class SchemaEvolutionTest {
     }
 
     @Test
+    public void testRenameSequenceGroupSortOrder() throws Exception {
+        Schema schema =
+                new Schema(
+                        ImmutableList.of(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "s1", DataTypes.INT()),
+                                new DataField(2, "s2", DataTypes.INT()),
+                                new DataField(3, "descending", DataTypes.STRING())),
+                        ImmutableList.of(),
+                        ImmutableList.of("id"),
+                        ImmutableMap.of(
+                                "merge-engine",
+                                "partial-update",
+                                "fields.s1,s2.sequence-group",
+                                "descending",
+                                "fields.s1,s2.sequence-group.sort-order",
+                                "descending"),
+                        "");
+        schemaManager.createTable(schema);
+        TableSchema renamed =
+                schemaManager.commitChanges(
+                        SchemaChange.renameColumn("s1", "new_s1"),
+                        SchemaChange.renameColumn("s2", "new_s2"),
+                        SchemaChange.renameColumn("descending", "payload"));
+        assertThat(renamed.options())
+                .doesNotContainKeys(
+                        "fields.s1,s2.sequence-group", "fields.s1,s2.sequence-group.sort-order")
+                .containsEntry("fields.new_s1,new_s2.sequence-group", "payload")
+                .containsEntry("fields.new_s1,new_s2.sequence-group.sort-order", "descending");
+    }
+
+    @Test
     public void testRenameSeqGroupFields() throws Exception {
         ImmutableMap.Builder<String, String> mapBuilder = ImmutableMap.builder();
 

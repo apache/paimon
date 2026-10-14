@@ -22,8 +22,36 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
+import java.time.Duration;
+
 /** Options for jdbc catalog. */
 public final class JdbcCatalogOptions {
+
+    public static final ConfigOption<Boolean> LOCK_ENABLED =
+            ConfigOptions.key("lock.enabled")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Enable catalog locking. Defaults to enabled on object stores.");
+
+    public static final ConfigOption<String> LOCK_TYPE =
+            ConfigOptions.key("lock.type")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The catalog lock factory identifier. Defaults to the catalog's built-in lock factory.");
+
+    public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
+            ConfigOptions.key("lock-check-max-sleep")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(8))
+                    .withDescription("The maximum sleep time when retrying to check the lock.");
+
+    public static final ConfigOption<Duration> LOCK_ACQUIRE_TIMEOUT =
+            ConfigOptions.key("lock-acquire-timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(8))
+                    .withDescription("The maximum time to wait for acquiring the lock.");
 
     public static final ConfigOption<String> CATALOG_KEY =
             ConfigOptions.key("catalog-key")

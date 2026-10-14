@@ -34,6 +34,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileRecordReader;
+import org.apache.paimon.io.VectorizedBundleRecords;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -41,6 +42,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -73,6 +75,55 @@ class MosaicReaderWriterTest {
     @BeforeAll
     static void checkNativeLibrary() {
         assumeTrue(isNativeAvailable(), "Mosaic native library not available");
+    }
+
+    @Test
+    void testColumnBatchRoundTripThroughPublicWriter() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("name", DataTypes.STRING())
+                        .build();
+        Path sourcePath = newPath();
+        Path targetPath = newPath();
+        writeRows(
+                rowType,
+                sourcePath,
+                GenericRow.of(1, BinaryString.fromString("one")),
+                GenericRow.of(2, null));
+        LocalFileIO fileIO = new LocalFileIO();
+        MosaicFileFormat format = createFormat();
+        try (RecordReader<InternalRow> reader =
+                        format.createReaderFactory(rowType, rowType, null)
+                                .createReader(
+                                        new FormatReaderContext(
+                                                fileIO,
+                                                sourcePath,
+                                                fileIO.getFileSize(sourcePath),
+                                                null,
+                                                null));
+                FormatWriter writer =
+                        format.createWriterFactory(rowType)
+                                .create(fileIO.newOutputStream(targetPath, false), "zstd")) {
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                try {
+                    assertThat(batch).isInstanceOf(VectorizedRecordIterator.class);
+                    ((BundleFormatWriter) writer)
+                            .writeBundle(
+                                    new VectorizedBundleRecords(
+                                            ((VectorizedRecordIterator) batch).batch(), null));
+                } finally {
+                    batch.releaseBatch();
+                }
+            }
+        }
+        List<InternalRow> rows = readAll(rowType, rowType, targetPath, null);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("one");
+        assertThat(rows.get(1).getInt(0)).isEqualTo(2);
+        assertThat(rows.get(1).isNullAt(1)).isTrue();
     }
 
     @Test

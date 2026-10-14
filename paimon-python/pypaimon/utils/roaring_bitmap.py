@@ -54,6 +54,10 @@ class RoaringBitmap64:
         """Return the number of elements in the bitmap."""
         return len(self._data)
 
+    def max(self) -> int:
+        """Return the largest value in a non-empty bitmap."""
+        return self._data.max()
+
     def __iter__(self) -> Iterator[int]:
         """Iterate over all values in the bitmap in sorted order."""
         return iter(self._data)
@@ -126,6 +130,10 @@ class RoaringBitmap64:
     def remove_all_inplace(self, other: 'RoaringBitmap64') -> None:
         """Remove all values contained in ``other`` from this bitmap, in place."""
         self._data -= other._data
+
+    def or_inplace(self, other: 'RoaringBitmap64') -> None:
+        """Add all values from another bitmap in place."""
+        self._data |= other._data
 
     def serialize(self) -> bytes:
         """Serialize the bitmap to bytes."""

@@ -315,9 +315,28 @@ window. These calls preserve their single `is_pad` mask and previous shapes.
 `anchor_columns` and `tail` require `window_size`; do not combine `tail` and
 `boundary`. New applications should use field offsets and per-column masks.
 
-Columns configured by `video-frame-field` are rejected: a window read would drop
-the `frame_index` and other metadata carried by their `VideoFrameDescriptor`
-values. Read those columns with `to_torch()` instead.
+Columns configured by `video-frame-field` keep their descriptors until all rows
+for an item or batch have been selected. The Dataset groups descriptors by
+physical video, decodes each requested frame once, and restores the window
+order. Install `pypaimon[torch,video]` for PyAV, or install TorchCodec
+separately. Use `video_backend="pyav"` or `"torchcodec"` to require one
+backend, or omit it to select an available one:
+
+```python
+video_windows = frames.scan().to_contiguous_window_dataset(
+    columns=["state", "video", "action"],
+    frame_offsets={"video": [-1, 0], "action": list(range(16))},
+    group_key="episode_index",
+    order_key="frame_index",
+    boundary="pad",
+    column_transforms={"video": torch.stack},
+    video_backend="pyav",
+)
+```
+
+Without a video column transform, each window contains a list of `CHW` tensors.
+The `torch.stack` transform above produces `TCHW`; DataLoader adds the batch
+dimension. Decoder sessions and range caches are process-local and bounded.
 
 ### Distributed BLOB processing with Ray
 
