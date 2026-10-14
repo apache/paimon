@@ -869,6 +869,32 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.assertIsNotNone(cached, "file_io_2 should see file_io_1's cached token")
         self.assertEqual(cached.token.get("fs.oss.accessKeyId"), "shared-data-ak")
 
+    def test_token_cache_drops_expired_tokens_of_rotated_identities(self):
+        now = int(time.time() * 1000)
+        live = RESTToken({"fs.oss.accessKeyId": "live"}, now + 7_200_000)
+        expired = RESTToken({"fs.oss.accessKeyId": "expired"}, now - 1)
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_LOCKS', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_CACHE_PRUNE_SIZE', 4):
+            for sts_ak in ("STS.1", "STS.2"):
+                key = sts_ak + ":" + str(self.identifier)
+                file_io._get_global_token_lock(key)
+                file_io._set_cached_token(key, expired)
+            busy = file_io._get_global_token_lock("STS.3:" + str(self.identifier))
+            busy.acquire()
+            self.addCleanup(busy.release)
+            file_io._set_cached_token("STS.3:other", live)
+            self.assertEqual(3, len(RESTTokenFileIO._TOKEN_CACHE))
+
+            file_io._set_cached_token("STS.4:" + str(self.identifier), live)
+
+            self.assertEqual(["STS.3:other", "STS.4:" + str(self.identifier)],
+                             sorted(RESTTokenFileIO._TOKEN_CACHE))
+            # A lock that a refresh still holds stays; idle locks of dropped tokens go.
+            self.assertEqual(["STS.3:" + str(self.identifier)], list(RESTTokenFileIO._TOKEN_LOCKS))
+            self.assertEqual(1024, RESTTokenFileIO._TOKEN_CACHE_PRUNE_SIZE)
+
     def test_refresh_token_strips_system_table_suffix(self):
         """refresh_token() strips $snapshots suffix before requesting token."""
         system_identifier = Identifier.create("db", "my_table", system_table="snapshots")

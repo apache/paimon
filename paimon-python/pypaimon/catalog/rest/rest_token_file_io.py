@@ -53,6 +53,8 @@ class RESTTokenFileIO(FileIO):
     _TOKEN_CACHE: dict = {}
     _TOKEN_LOCKS: dict = {}
     _TOKEN_LOCKS_LOCK = threading.Lock()
+    # Size at which caching a token first drops expired ones; doubles with the live set.
+    _TOKEN_CACHE_PRUNE_SIZE = 1024
 
     # Objects whose lock a forked child resets.
     _INSTANCES = weakref.WeakSet()
@@ -318,6 +320,20 @@ class RESTTokenFileIO(FileIO):
     def _set_cached_token(self, identifier_str: str, token: RESTToken):
         with self._TOKEN_LOCKS_LOCK:
             self._TOKEN_CACHE[identifier_str] = token
+            if len(self._TOKEN_CACHE) >= RESTTokenFileIO._TOKEN_CACHE_PRUNE_SIZE:
+                self._prune_expired_tokens()
+
+    @classmethod
+    def _prune_expired_tokens(cls):
+        # Keys embed the caller's identity, which changes whenever STS credentials rotate.
+        now = int(time.time() * 1000)
+        for key, token in list(cls._TOKEN_CACHE.items()):
+            if token.expire_at_millis <= now:
+                del cls._TOKEN_CACHE[key]
+        for key, lock in list(cls._TOKEN_LOCKS.items()):
+            if key not in cls._TOKEN_CACHE and not lock.locked():
+                del cls._TOKEN_LOCKS[key]
+        RESTTokenFileIO._TOKEN_CACHE_PRUNE_SIZE = max(1024, 2 * len(cls._TOKEN_CACHE))
 
     def _is_token_expired(
             self, token: Optional[RESTToken], minimum_validity_millis: int = 0) -> bool:
