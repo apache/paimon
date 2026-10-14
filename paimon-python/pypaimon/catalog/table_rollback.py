@@ -18,9 +18,10 @@
 class TableRollback:
     """Rollback table to instant by delegating to catalog.rollback_to."""
 
-    def __init__(self, catalog, identifier):
+    def __init__(self, catalog, identifier, table_uuid=None):
         self._catalog = catalog
         self._identifier = identifier
+        self._table_uuid = table_uuid
 
     def rollback_to(self, instant, from_snapshot=None):
         """Rollback table to the given instant via catalog.
@@ -34,7 +35,11 @@ class TableRollback:
             RuntimeError: If the rollback fails.
         """
         try:
-            self._catalog.rollback_to(self._identifier, instant, from_snapshot)
+            if self._table_uuid is None:
+                self._catalog.rollback_to(self._identifier, instant, from_snapshot)
+            else:
+                self._catalog.rollback_to(
+                    self._identifier, instant, from_snapshot, table_uuid=self._table_uuid)
         except Exception as e:
             raise RuntimeError(
                 "Failed to rollback table {}: {}".format(
