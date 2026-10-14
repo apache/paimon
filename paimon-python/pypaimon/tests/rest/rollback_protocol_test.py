@@ -17,6 +17,7 @@
 
 import json
 from types import SimpleNamespace
+from unittest.mock import Mock
 from urllib.parse import unquote_plus, urlsplit
 
 import pyarrow as pa
@@ -34,14 +35,15 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options import Options
 from pypaimon.read.native_plan import _resolved_rest_table_response
+from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.instant import Instant
-from pypaimon.write.commit.commit_rollback import CommitRollback
+from pypaimon.write.file_store_commit import FileStoreCommit
 from pypaimon.write.native_commit import _rest_catalog_supported
 
 
 @pytest.fixture
 def transport(monkeypatch, tmp_path):
-    state = SimpleNamespace(requests=[], uuid='loaded-table-uuid', status=200)
+    state = SimpleNamespace(requests=[], uuid='loaded-table-uuid', status=200, head=None)
     schema = Schema.from_pyarrow_schema(pa.schema([('id', pa.int64())]))
 
     def send(session, request, **kwargs):
@@ -57,9 +59,17 @@ def transport(monkeypatch, tmp_path):
             response.status_code = 200
             response._content = JSON.to_json(metadata).encode('utf-8')
         else:
-            response.status_code = state.status
-            response._content = (b'' if state.status == 200 else json.dumps({
-                'code': state.status, 'message': 'table UUID mismatch',
+            status = state.status
+            message = 'table UUID mismatch'
+            if state.head is not None:
+                expected = json.loads(request.body)
+                if (expected.get('fromSnapshot'), expected.get('fromSnapshotUuid')) != (
+                        state.head.id, state.head.uuid):
+                    status = 409
+                    message = 'head UUID mismatch'
+            response.status_code = status
+            response._content = (b'' if status == 200 else json.dumps({
+                'code': status, 'message': message,
             }).encode('utf-8'))
         return response
 
@@ -83,16 +93,33 @@ def table(catalog, transport):
     return loaded
 
 
+@pytest.fixture
+def compact_head():
+    return Snapshot(
+        version=3, id=3, schema_id=0, base_manifest_list='base-list',
+        delta_manifest_list='delta-list', total_record_count=0, delta_record_count=0,
+        commit_user='snapshot-author', commit_identifier=1, commit_kind='COMPACT',
+        time_millis=0, uuid='observed-head-uuid')
+
+
 def request_body(request):
     return json.loads(request.body)
 
 
 @pytest.mark.parametrize('table_uuid', [None, 'loaded-table-uuid'])
-def test_request_serialization(table_uuid):
-    request = RollbackTableRequest(Instant.snapshot(1), 2, table_id=table_uuid)
+@pytest.mark.parametrize('snapshot_uuid', [None, 'observed-head-uuid'])
+@pytest.mark.parametrize('commit_user', [None, 'current-writer'])
+def test_request_serialization(table_uuid, snapshot_uuid, commit_user):
+    request = RollbackTableRequest(
+        Instant.snapshot(1), 2, table_id=table_uuid,
+        from_snapshot_uuid=snapshot_uuid, commit_user=commit_user)
     expected = {'instant': {'type': 'snapshot', 'snapshotId': 1}, 'fromSnapshot': 2}
     if table_uuid is not None:
         expected['tableId'] = table_uuid
+    if snapshot_uuid is not None:
+        expected['fromSnapshotUuid'] = snapshot_uuid
+    if commit_user is not None:
+        expected['commitUser'] = commit_user
 
     assert json.loads(JSON.to_json(request)) == expected
 
@@ -108,6 +135,7 @@ def test_legacy_request_constructor():
     ('v1', {'type': 'tag', 'tagName': 'v1'}),
 ])
 def test_table_rollback_transmits_loaded_uuid(table, transport, target, instant):
+    FileStoreCommit(Mock(), table, 'current-writer')
     table.rollback_to(target)
 
     assert len(transport.requests) == 1
@@ -117,29 +145,69 @@ def test_table_rollback_transmits_loaded_uuid(table, transport, target, instant)
     }
 
 
-def test_compact_rollback_transmits_uuid_and_expected_head(table, transport):
-    rollback = CommitRollback(table.catalog_environment.catalog_table_rollback())
+@pytest.mark.parametrize('branch', [None, 'dev / blue'])
+def test_compact_rollback_transmits_snapshot_and_writer_identity(catalog, transport, compact_head, branch):
+    identifier = Identifier('db', 'table', branch=branch)
+    table = catalog.get_table(identifier)
+    transport.requests.clear()
+    transport.head = compact_head
+    commit = FileStoreCommit(Mock(), table, 'current-writer')
 
-    assert rollback.try_to_rollback(SimpleNamespace(commit_kind='COMPACT', id=3))
+    assert commit.commit_user != compact_head.commit_user
+    assert commit.rollback.try_to_rollback(compact_head)
 
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0]) == {
         'instant': {'type': 'snapshot', 'snapshotId': 2},
         'fromSnapshot': 3, 'tableId': 'loaded-table-uuid',
+        'fromSnapshotUuid': 'observed-head-uuid', 'commitUser': 'current-writer',
     }
+    object_name = unquote_plus(urlsplit(transport.requests[0].url).path.split('/')[-2])
+    assert object_name == identifier.get_object_name()
+
+
+@pytest.mark.parametrize('uuid_value', ['missing', None])
+def test_compact_without_snapshot_uuid_is_not_rolled_back(table, transport, compact_head, uuid_value):
+    payload = json.loads(JSON.to_json(compact_head))
+    if uuid_value == 'missing':
+        payload.pop('uuid')
+    else:
+        payload['uuid'] = uuid_value
+    legacy_head = JSON.from_json(json.dumps(payload), Snapshot)
+    commit = FileStoreCommit(Mock(), table, 'current-writer')
+
+    assert legacy_head.uuid is None
+    assert not commit.rollback.try_to_rollback(legacy_head)
+    assert transport.requests == []
+
+
+@pytest.mark.parametrize('commit_kind', ['APPEND', 'OVERWRITE'])
+def test_non_compact_head_is_not_rolled_back(table, transport, compact_head, commit_kind):
+    compact_head.commit_kind = commit_kind
+    commit = FileStoreCommit(Mock(), table, 'current-writer')
+
+    assert not commit.rollback.try_to_rollback(compact_head)
+    assert transport.requests == []
 
 
 @pytest.mark.parametrize('entrypoint', ['catalog', 'api'])
-def test_direct_rollback_accepts_optional_uuid(catalog, transport, entrypoint):
+@pytest.mark.parametrize('writer_context', [False, True])
+def test_direct_rollback_accepts_optional_identity(catalog, transport, entrypoint, writer_context):
     delegate = catalog if entrypoint == 'catalog' else catalog.rest_api
+    context = ({'from_snapshot_uuid': 'observed-head-uuid', 'commit_user': 'current-writer'}
+               if writer_context else {})
 
-    delegate.rollback_to(Identifier('db', 'table'), Instant.snapshot(1), 2, table_uuid='expected-uuid')
+    delegate.rollback_to(
+        Identifier('db', 'table'), Instant.snapshot(1), 2, table_uuid='expected-uuid', **context)
 
     assert len(transport.requests) == 1
-    assert request_body(transport.requests[0]) == {
+    expected = {
         'instant': {'type': 'snapshot', 'snapshotId': 1},
         'fromSnapshot': 2, 'tableId': 'expected-uuid',
     }
+    if writer_context:
+        expected.update(fromSnapshotUuid='observed-head-uuid', commitUser='current-writer')
+    assert request_body(transport.requests[0]) == expected
 
 
 def test_existing_calls_and_encoded_branch_url(catalog, transport):
@@ -200,19 +268,34 @@ def test_replaced_table_does_not_refresh_retry_or_clean_locally(table, transport
     assert request_body(transport.requests[0])['tableId'] == 'loaded-table-uuid'
 
 
-def test_compact_rollback_rejection_preserves_identity(table, transport):
-    transport.status = 400
-    rollback = CommitRollback(table.catalog_environment.catalog_table_rollback())
+@pytest.mark.parametrize('mismatch', ['table', 'snapshot'])
+def test_compact_rollback_rejection_preserves_identity(table, transport, compact_head, monkeypatch, mismatch):
+    if mismatch == 'table':
+        transport.status = 400
+    else:
+        transport.head = SimpleNamespace(id=compact_head.id, uuid='replacement-head-uuid')
+    commit = FileStoreCommit(Mock(), table, 'current-writer')
 
-    assert not rollback.try_to_rollback(SimpleNamespace(commit_kind='COMPACT', id=3))
+    def unexpected_cleanup():
+        pytest.fail('Catalog rejection must not trigger local cleanup')
+
+    monkeypatch.setattr(table, 'rollback_helper', unexpected_cleanup)
+    assert not commit.rollback.try_to_rollback(compact_head)
 
     assert len(transport.requests) == 1
-    assert request_body(transport.requests[0])['tableId'] == 'loaded-table-uuid'
-    assert request_body(transport.requests[0])['fromSnapshot'] == 3
+    assert transport.requests[0].method == 'POST'
+    assert request_body(transport.requests[0]) == {
+        'instant': {'type': 'snapshot', 'snapshotId': 2},
+        'tableId': 'loaded-table-uuid', 'fromSnapshot': 3,
+        'fromSnapshotUuid': 'observed-head-uuid', 'commitUser': 'current-writer',
+    }
 
 
-@pytest.mark.parametrize('table_uuid', [None, 'known-uuid'])
-def test_legacy_catalog_override_never_discards_known_uuid(table_uuid):
+@pytest.mark.parametrize('table_uuid,snapshot_uuid,commit_user', [
+    (None, None, None), ('known-uuid', None, None), (None, 'head-uuid', None),
+    (None, None, 'current-writer'), ('known-uuid', 'head-uuid', 'current-writer'),
+])
+def test_legacy_catalog_override_never_discards_known_identity(table_uuid, snapshot_uuid, commit_user):
     calls = []
 
     class LegacyCatalog:
@@ -221,28 +304,37 @@ def test_legacy_catalog_override_never_discards_known_uuid(table_uuid):
 
     identifier = Identifier('db', 'table')
     instant = Instant.snapshot(1)
-    if table_uuid is None:
-        TableRollback(LegacyCatalog(), identifier).rollback_to(instant, 2)
+    rollback = TableRollback(LegacyCatalog(), identifier, table_uuid, commit_user=commit_user)
+    if table_uuid is None and snapshot_uuid is None and commit_user is None:
+        rollback.rollback_to(instant, 2)
         assert calls == [(identifier, instant, 2)]
     else:
         with pytest.raises(RuntimeError) as failure:
-            TableRollback(LegacyCatalog(), identifier, table_uuid).rollback_to(instant, 2)
+            rollback.rollback_to(instant, 2, snapshot_uuid)
         assert isinstance(failure.value.__cause__, TypeError)
         assert calls == []
 
 
 @pytest.mark.parametrize('source,target', [(None, 'dev'), ('dev', None), ('dev', 'release')])
-def test_copied_branch_rollback_omits_source_identity(catalog, transport, source, target):
+@pytest.mark.parametrize('automatic', [False, True])
+def test_copied_branch_rollback_omits_source_identity(catalog, transport, compact_head, source, target, automatic):
     table = catalog.get_table(Identifier('db', 'table', branch=source))
     copied = table.copy({'branch': target})
     transport.requests.clear()
 
-    copied.rollback_to(1)
+    if automatic:
+        commit = FileStoreCommit(Mock(), copied, 'current-writer')
+        assert commit.rollback.try_to_rollback(compact_head)
+    else:
+        copied.rollback_to(1)
 
     assert table.catalog_environment.uuid == 'loaded-table-uuid'
     assert copied.catalog_environment.uuid is None
     assert len(transport.requests) == 1
     assert 'tableId' not in request_body(transport.requests[0])
+    if automatic:
+        assert request_body(transport.requests[0])['fromSnapshotUuid'] == compact_head.uuid
+        assert request_body(transport.requests[0])['commitUser'] == 'current-writer'
     object_name = unquote_plus(urlsplit(transport.requests[0].url).path.split('/')[-2])
     assert object_name == Identifier('db', 'table', branch=target).get_object_name()
 

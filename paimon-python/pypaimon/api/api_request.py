@@ -107,10 +107,14 @@ class RollbackTableRequest(RESTRequest):
     FIELD_INSTANT = "instant"
     FIELD_FROM_SNAPSHOT = "fromSnapshot"
     FIELD_TABLE_ID = "tableId"
+    FIELD_FROM_SNAPSHOT_UUID = "fromSnapshotUuid"
+    FIELD_COMMIT_USER = "commitUser"
 
     instant: Instant = json_field(FIELD_INSTANT)
     from_snapshot: Optional[int] = json_field(FIELD_FROM_SNAPSHOT)
     table_id: Optional[str] = optional_json_field(FIELD_TABLE_ID, "non_null")
+    from_snapshot_uuid: Optional[str] = optional_json_field(FIELD_FROM_SNAPSHOT_UUID, "non_null")
+    commit_user: Optional[str] = optional_json_field(FIELD_COMMIT_USER, "non_null")
 
 
 @dataclass

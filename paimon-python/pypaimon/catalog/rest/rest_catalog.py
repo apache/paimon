@@ -413,7 +413,9 @@ class RESTCatalog(Catalog):
 
     def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
                     from_snapshot: Optional[int] = None, *,
-                    table_uuid: Optional[str] = None) -> None:
+                    table_uuid: Optional[str] = None,
+                    from_snapshot_uuid: Optional[str] = None,
+                    commit_user: Optional[str] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -422,6 +424,8 @@ class RESTCatalog(Catalog):
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
             table_uuid: Expected table or branch UUID from the loaded table view.
+            from_snapshot_uuid: Expected latest snapshot UUID.
+            commit_user: Current writer identity; omitted for manual rollback.
 
         Raises:
             TableNotExistException: If the table does not exist.
@@ -431,7 +435,8 @@ class RESTCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         try:
             self.rest_api.rollback_to(
-                identifier, instant, from_snapshot, table_uuid=table_uuid)
+                identifier, instant, from_snapshot, table_uuid=table_uuid,
+                from_snapshot_uuid=from_snapshot_uuid, commit_user=commit_user)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 raise ValueError(

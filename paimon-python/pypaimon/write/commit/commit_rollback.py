@@ -40,9 +40,9 @@ class CommitRollback:
     def try_to_rollback(self, latest_snapshot):
         """Try to rollback a COMPACT commit to resolve conflicts.
 
-        Only rolls back COMPACT type commits. Delegates to TableRollback
+        Only rolls back COMPACT commits with a UUID. Delegates to TableRollback
         to rollback to the previous snapshot (latest - 1), passing the
-        latest snapshot ID as from_snapshot.
+        observed latest snapshot ID and UUID as the expected head.
 
         Args:
             latest_snapshot: The latest snapshot that may need to be rolled back.
@@ -50,11 +50,11 @@ class CommitRollback:
         Returns:
             True if rollback succeeded, False otherwise.
         """
-        if latest_snapshot.commit_kind == "COMPACT":
+        if latest_snapshot.commit_kind == "COMPACT" and latest_snapshot.uuid is not None:
             latest_id = latest_snapshot.id
             try:
                 self._table_rollback.rollback_to(
-                    Instant.snapshot(latest_id - 1), latest_id)
+                    Instant.snapshot(latest_id - 1), latest_id, latest_snapshot.uuid)
                 return True
             except Exception:
                 pass
