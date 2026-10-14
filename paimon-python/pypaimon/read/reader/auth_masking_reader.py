@@ -221,7 +221,7 @@ def apply_auth_masking(batch: pa.RecordBatch, parsed_rules: Dict[str, dict]):
         original_field = original_batch.schema.field(col_idx)
         batch = batch.set_column(
             col_idx,
-            pa.field(original_field.name, masked_array.type, nullable=True),
+            original_field.with_type(masked_array.type).with_nullable(True),
             masked_array)
     return batch
 
