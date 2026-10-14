@@ -42,6 +42,7 @@ import org.apache.paimon.metastore.VisibilityWaitCallback;
 import org.apache.paimon.operation.ChainTablePartitionExpire;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.FullCompactionRefresh;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.NormalPartitionExpire;
 import org.apache.paimon.operation.PartitionExpire;
@@ -312,26 +313,38 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (tableRollback != null) {
             rollback = new CommitRollback(tableRollback);
         }
-        return new FileStoreCommitImpl(
-                snapshotCommit,
-                fileIO,
-                schemaManager,
-                tableName,
-                commitUser,
-                partitionType,
-                options,
-                pathFactory(),
-                snapshotManager,
-                manifestFileFactory(),
-                manifestListFactory(),
-                indexManifestFileFactory(),
-                this::newScan,
-                newStatsFileHandler(),
-                bucketMode(),
-                createCommitPreCallbacks(table),
-                createCommitCallbacks(commitUser, table),
-                conflictDetectFactory,
-                rollback);
+        FileStoreCommitImpl commit =
+                new FileStoreCommitImpl(
+                        snapshotCommit,
+                        fileIO,
+                        schemaManager,
+                        tableName,
+                        commitUser,
+                        partitionType,
+                        options,
+                        pathFactory(),
+                        snapshotManager,
+                        manifestFileFactory(),
+                        manifestListFactory(),
+                        indexManifestFileFactory(),
+                        this::newScan,
+                        newStatsFileHandler(),
+                        bucketMode(),
+                        createCommitPreCallbacks(table),
+                        createCommitCallbacks(commitUser, table),
+                        conflictDetectFactory,
+                        rollback);
+        if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                && !options.dataEvolutionEnabled()) {
+            commit.withFullCompactionRefresh(
+                    new FullCompactionRefresh(
+                            options,
+                            snapshotManager,
+                            this::newScan,
+                            this::newIndexFileHandler,
+                            () -> newWrite(commitUser)));
+        }
+        return commit;
     }
 
     @Override

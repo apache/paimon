@@ -76,8 +76,11 @@ configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
 Configured catalog locks protect every snapshot publication attempt, including the first attempt.
 The writer acquires the lock before reading the latest snapshot, validating changes and preparing
-manifests. It checks that the lock is still valid immediately before publishing. Each snapshot has
-its own scope: APPEND and COMPACT snapshots produced by the same commit acquire separate locks.
+manifests. It checks that the lock is still valid immediately before publishing. Each published snapshot has
+its own scope. Primary-key full-compaction and lookup commits without data evolution
+publish data and required compact changelog/index work together in one APPEND snapshot.
+Legacy split-pair recovery and other commit paths can still publish separate APPEND
+and COMPACT snapshots, each acquiring its own lock.
 Post-commit callbacks run after the scope ends. Metadata-only manifest replacement validates the
 caller's prepared layout against the current head while holding the lock.
 

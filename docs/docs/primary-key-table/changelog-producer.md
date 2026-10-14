@@ -149,3 +149,24 @@ buckets can produce numerous small changelog files.
 Set `precommit-compact = true` to merge them before commit. This adds a compaction coordinator
 and worker after the writer. The default is `false`. This file-consolidation step is distinct
 from choosing how the changelog records are generated.
+
+## Commit Recovery
+
+For primary-key tables without data evolution, `full-compaction` and `lookup` commits
+that include compact changelog or index work publish that required work together with
+the data in one snapshot. Recovery distinguishes a completed atomic commit from an
+older APPEND snapshot whose matching COMPACT work is still pending. Finding the
+APPEND half alone does not acknowledge the pending changelog or index changes.
+
+When another writer has replaced the input files of a full compaction, the committer
+recomputes the rewrite and its changelog against a pinned committed snapshot plus
+the pending input files. It preserves the before/after records for the current data
+instead of publishing a stale changelog. After this recomputed commit is durable,
+the caller is told to refresh writer state; retry recovery filters the completed
+identifier without publishing the changes twice.
+
+Full-compaction writer checkpoint restoration uses committed files as its base for
+completed atomic identifiers and retains input that has not yet been committed. It
+does not depend on the unused compaction output files originally prepared by the
+writer. Producers `none` and `input`, and data-evolution commits, retain their
+existing publication paths.

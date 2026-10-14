@@ -32,7 +32,9 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RecordLevelExpire;
@@ -58,8 +60,11 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -250,6 +255,75 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.changelogProducer(),
                 restoreIncrement,
                 UserDefinedSeqComparator.create(valueType, options));
+    }
+
+    @Override
+    public void restore(List<State<KeyValue>> states) {
+        if (options.changelogProducer() != CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+            super.restore(states);
+            return;
+        }
+        long completed = restore.latestAtomicCommitIdentifier(commitUser);
+        List<State<KeyValue>> reconciled = new ArrayList<>();
+        for (State<KeyValue> state : states) {
+            if (completed == Long.MIN_VALUE
+                    || state.lastModifiedCommitIdentifier == Long.MIN_VALUE
+                    || state.lastModifiedCommitIdentifier > completed) {
+                reconciled.add(state);
+                continue;
+            }
+            RestoreFiles committed =
+                    restore.restoreFiles(
+                            state.partition,
+                            state.bucket,
+                            state.indexMaintainer != null,
+                            state.deletionVectorsMaintainer != null,
+                            state.primaryKeyIndexMaintainer != null);
+            Map<String, DataFileMeta> files = new LinkedHashMap<>();
+            if (committed.dataFiles() != null) {
+                for (DataFileMeta file : committed.dataFiles()) {
+                    files.put(file.fileName(), file);
+                }
+            }
+            DataIncrement pending = state.commitIncrement.newFilesIncrement();
+            for (DataFileMeta file : pending.deletedFiles()) {
+                files.remove(file.fileName());
+            }
+            for (DataFileMeta file : pending.newFiles()) {
+                files.put(file.fileName(), file);
+            }
+            long maximumSequence = state.maxSequenceNumber;
+            for (DataFileMeta file : files.values()) {
+                maximumSequence = Math.max(maximumSequence, file.maxSequenceNumber());
+            }
+            CompactIncrement original = state.commitIncrement.compactIncrement();
+            CompactIncrement indexes =
+                    new CompactIncrement(
+                            new ArrayList<>(),
+                            new ArrayList<>(),
+                            new ArrayList<>(),
+                            original.newIndexFiles(),
+                            original.deletedIndexFiles());
+            reconciled.add(
+                    new State<>(
+                            state.partition,
+                            state.bucket,
+                            state.totalBuckets,
+                            committed.snapshot() == null
+                                    ? state.baseSnapshotId
+                                    : committed.snapshot().id(),
+                            state.lastModifiedCommitIdentifier,
+                            files.values(),
+                            maximumSequence,
+                            state.indexMaintainer,
+                            state.deletionVectorsMaintainer,
+                            state.primaryKeyIndexMaintainer,
+                            new CommitIncrement(
+                                    pending,
+                                    indexes,
+                                    state.commitIncrement.compactDeletionFile())));
+        }
+        super.restore(reconciled);
     }
 
     @Override
