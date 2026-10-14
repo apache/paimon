@@ -19,7 +19,7 @@
 
 import pyarrow as pa
 
-from pypaimon.casting.temporal_utils import _epoch_day_to_date, _local_offset
+from pypaimon.casting.temporal_utils import _epoch_day_to_date, _local_offset, _signed
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
 
@@ -116,5 +116,32 @@ def temporal_to_string(array, source_type=None, target_type=None):
             text = text[:length]
             if name.startswith('CHAR'):
                 text = text.ljust(length)
+        values.append(text)
+    return pa.array(values, type=pa.string())
+
+
+def timestamp_object_to_string(array):
+    """Java Timestamp.toString: ISO wall time, regardless of the current LTZ zone."""
+    values = []
+    unit = array.type.unit
+    for value in array.cast(pa.int64()).to_pylist():
+        if value is None:
+            values.append(None)
+            continue
+        millis = (_signed(value * 1000, 64) if unit == 's' else value if unit == 'ms'
+                  else value // (1000 if unit == 'us' else 1000000))
+        sub = value % (1000 if unit == 'us' else 1000000) * (1000 if unit == 'us' else 1) if unit in ('us', 'ns') else 0
+        nanos = millis % 1000 * 1000000 + sub
+        day, second_of_day = divmod(millis // 1000, 86400)
+        year, month, day = _epoch_day_to_date(_signed(day, 32))
+        year_text = ('%04d' % year if 0 <= year <= 9999 else '-%04d' % -year if year < 0 else '+%d' % year)
+        hour, second_of_day = divmod(second_of_day, 3600)
+        minute, second = divmod(second_of_day, 60)
+        text = '%s-%02d-%02dT%02d:%02d' % (year_text, month, day, hour, minute)
+        if second or nanos:
+            text += ':%02d' % second
+        if nanos:
+            precision = 3 if nanos % 1000000 == 0 else 6 if nanos % 1000 == 0 else 9
+            text += '.' + ('%09d' % nanos)[:precision]
         values.append(text)
     return pa.array(values, type=pa.string())

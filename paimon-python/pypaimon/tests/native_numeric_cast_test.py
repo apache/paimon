@@ -59,11 +59,12 @@ def table_mode(request):
     return request.param
 
 
-def _create_table(rest_catalog, table_mode, schema, data):
+def _create_table(rest_catalog, table_mode, schema, data, paimon_schema=None):
     catalog, server = rest_catalog
     mode, options = table_mode
-    catalog.create_table('default.numeric', Schema.from_pyarrow_schema(
-        schema, primary_keys=['id'] if mode == 'primary-key' else None, options=options), False)
+    definition = paimon_schema or Schema.from_pyarrow_schema(
+        schema, primary_keys=['id'] if mode == 'primary-key' else None, options=options)
+    catalog.create_table('default.numeric', definition, False)
     table = catalog.get_table('default.numeric')
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()

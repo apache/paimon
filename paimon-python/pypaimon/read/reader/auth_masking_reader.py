@@ -21,6 +21,8 @@ from typing import Callable, Dict, List, Optional
 
 import pyarrow as pa
 
+from pypaimon.casting.mask_output import cast_mask_output
+
 from pypaimon.common.predicate_json_parser import (
     _apply_predicate_transform,
     _collect_all_field_refs_from_transform,
@@ -215,13 +217,14 @@ def apply_auth_masking(batch: pa.RecordBatch, parsed_rules: Dict[str, dict]):
         if col_name in original_batch.schema.names:
             col_idx = original_batch.schema.get_field_index(col_name)
             target_col_type = original_batch.schema.field(col_idx).type
-            masked_columns[col_idx] = _apply_predicate_transform(
-                transform, original_batch, null_type=target_col_type)
+            masked_columns[col_idx] = cast_mask_output(
+                _apply_predicate_transform(transform, original_batch, null_type=target_col_type),
+                target_col_type)
     for col_idx, masked_array in masked_columns.items():
         original_field = original_batch.schema.field(col_idx)
         batch = batch.set_column(
             col_idx,
-            pa.field(original_field.name, masked_array.type, nullable=True),
+            original_field.with_type(masked_array.type).with_nullable(True),
             masked_array)
     return batch
 

@@ -40,7 +40,8 @@ from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.variant_read_type import has_variant_extractions
-from pypaimon.read.read_type import (adapter_output_paths, extract_array, output_schema, reader_adapter)
+from pypaimon.read.read_type import (
+    OutputProjection, adapter_output_paths, extract_array, output_schema, reader_adapter)
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
@@ -294,7 +295,7 @@ class TableRead:
             splits: List[Split],
             blob_parallelism: Optional[int] = None,
             parallelism: Optional[int] = None):
-        schema = self._output_arrow_schema()
+        schema = self._output_arrow_schema(splits)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
         effective = self._effective_parallelism(parallelism, len(splits))
@@ -392,7 +393,7 @@ class TableRead:
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         effective = self._effective_parallelism(parallelism, len(splits))
-        schema = self._output_arrow_schema()
+        schema = self._output_arrow_schema(splits)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
@@ -462,8 +463,23 @@ class TableRead:
         extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
         return projected if predicate_field_names(self.predicate) & extra_names else adapter
 
-    def _output_arrow_schema(self):
-        return output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
+    def _output_arrow_schema(self, splits=None):
+        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        masks = set()
+        if splits:
+            for split in splits:
+                if isinstance(split, QueryAuthSplit) and split.auth_result is not None:
+                    masks.update(split.auth_result.column_masking or {})
+        elif self.table.options.query_auth_enabled:
+            # Before a plan or for an empty plan, the grant is unknown. Masks
+            # may null any top-level column, including a declared NOT NULL one.
+            masks.update(schema.names)
+        if masks:
+            schema = pyarrow.schema([
+                field.with_nullable(True) if field.name in masks else field
+                for field in schema
+            ], metadata=schema.metadata)
+        return output_schema(schema, self.output_projection)
 
     @staticmethod
     def _apply_output_projection_to_schema(schema, projection):
@@ -1646,13 +1662,18 @@ class TableRead:
             _, paths = self._reader_adapter()
             outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
             arrays = [extract_array(batch, path) for _, path in outputs]
-            fields = list(self._output_arrow_schema())
+            # Project the already masked schema, retaining captured nullability.
+            adapted_projection = OutputProjection([(alias, path) for alias, path in outputs])
+            actual = output_schema(batch.schema, adapted_projection)
+            declared = output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
+            fields = [field.with_nullable(actual[i].nullable) for i, field in enumerate(declared)]
             if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
                 arrays.insert(0, batch.column(ROW_KIND_COLUMN))
                 fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
             if not arrays:
                 return batch.select([])
-            return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
+            return pyarrow.RecordBatch.from_arrays(
+                arrays, schema=pyarrow.schema(fields, metadata=batch.schema.metadata))
         if not self._needs_output_projection():
             return batch
         output_names = list(self._output_column_names)

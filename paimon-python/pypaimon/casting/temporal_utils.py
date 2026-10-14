@@ -68,7 +68,7 @@ def _rem(value, divisor):
     return value - _div(value, divisor) * divisor
 
 
-def _java_date_to_epoch_day(date):
+def _java_date_parts(date):
     j = _signed(date + 2440588 + 32044, 32)
     g, dg = _div(j, 146097), _rem(j, 146097)
     c = _div((_div(dg, 36524) + 1) * 3, 4)
@@ -80,10 +80,19 @@ def _java_date_to_epoch_day(date):
     m = _div(da * 5 + 308, 153) - 2
     d = da - _div((m + 4) * 153, 5) + 122
     year, month, day = y - 4800 + _div(m + 2, 12), _rem(m + 2, 12) + 1, d + 1
+    return year, month, day
+
+
+def _java_date_to_epoch_day(date):
+    year, month, day = _java_date_parts(date)
     leap = year % 400 == 0 or year % 4 == 0 and year % 100 != 0
     days = 29 if month == 2 and leap else 28 if month == 2 else 30 if month in (4, 6, 9, 11) else 31
     if not 1 <= month <= 12 or not 1 <= day <= days:
         raise ValueError('Invalid Java DATE conversion: {}-{}-{}'.format(year, month, day))
+    return _ymd_to_epoch_day(year, month, day)
+
+
+def _ymd_to_epoch_day(year, month, day):
     year -= month <= 2
     era, yoe = divmod(year, 400)
     march = month + (-3 if month > 2 else 9)

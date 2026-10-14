@@ -125,43 +125,24 @@ class TestAuthMaskingReaderTransforms(unittest.TestCase):
         self.assertEqual(result.column("age").type, pa.int64())
         self.assertEqual(result.column("age").to_pylist(), [25, 30, 35])
 
-    def test_cast_transform_changes_column_type(self):
-        """CAST transform changes the output column type (matching Java behavior)."""
-        batch = pa.RecordBatch.from_pydict(
-            {"id": pa.array([1, 2, 3], type=pa.int32())},
-            schema=pa.schema([("id", pa.int32())]),
-        )
-        fields = [_FakeField("id")]
-        result = self._apply_masking(
-            {"id": json.dumps({
-                "name": "CAST",
-                "fieldRef": {"index": 0, "name": "id", "type": "INT"},
-                "type": "BIGINT",
-            })},
-            batch=batch,
-            fields=fields,
-        )
-        self.assertEqual(result.column("id").type, pa.int64())
-        self.assertEqual(result.column("id").to_pylist(), [1, 2, 3])
+    def test_cast_mask_rejects_a_different_java_output_class(self):
+        batch = pa.RecordBatch.from_pydict({"id": pa.array([1, 2], type=pa.int32())})
+        for target in ("BIGINT", "STRING"):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                self._apply_masking({"id": json.dumps({
+                    "name": "CAST", "fieldRef": {"name": "id", "type": "INT"}, "type": target,
+                })}, batch=batch, fields=[_FakeField("id")])
 
-    def test_cast_transform_int_to_string(self):
-        """CAST INT to STRING changes column type to string (matching Java)."""
-        batch = pa.RecordBatch.from_pydict(
-            {"id": pa.array([100, 200], type=pa.int32())},
-            schema=pa.schema([("id", pa.int32())]),
-        )
-        fields = [_FakeField("id")]
-        result = self._apply_masking(
-            {"id": json.dumps({
-                "name": "CAST",
-                "fieldRef": {"index": 0, "name": "id", "type": "INT"},
-                "type": "STRING",
-            })},
-            batch=batch,
-            fields=fields,
-        )
-        self.assertEqual(result.column("id").type, pa.string())
-        self.assertEqual(result.column("id").to_pylist(), ["100", "200"])
+    def test_cast_masks_preserve_the_target_columns_java_class(self):
+        for target, arrow_type, expected in [("BIGINT", pa.int64(), [1, 2]), ("STRING", pa.string(), ["1", "2"])]:
+            batch = pa.RecordBatch.from_arrays([
+                pa.array([1, 2], type=pa.int32()), pa.nulls(2, type=arrow_type),
+            ], names=["id", "masked"])
+            result = self._apply_masking({"masked": json.dumps({
+                "name": "CAST", "fieldRef": {"name": "id", "type": "INT"}, "type": target,
+            })}, batch=batch, fields=[_FakeField("id"), _FakeField("masked")])
+            self.assertEqual(result.column("masked").type, arrow_type)
+            self.assertEqual(result.column("masked").to_pylist(), expected)
 
     def test_concat_transform(self):
         result = self._apply_masking({

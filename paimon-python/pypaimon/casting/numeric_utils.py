@@ -83,6 +83,30 @@ def java_double_decimal_text(value):
     Use integer arithmetic over IEEE-754 components to preserve those choices.
     The emitted coefficient/exponent is numeric text, not a display format.
     """
+    return _floating_decimal_text(value, False)
+
+
+def java_number_string(value, single_precision=False):
+    """Java 8/11/17 Number.toString; FLOAT uses its own rounding interval."""
+    if not math.isfinite(value) or value == 0:
+        return java_floating_string(value)
+    text = _floating_decimal_text(value, single_precision)
+    coefficient, exponent = text.split('e')
+    sign = '-' if coefficient.startswith('-') else ''
+    digits = coefficient.lstrip('-')
+    adjusted = int(exponent) + len(digits) - 1
+    digits = digits.rstrip('0')
+    if adjusted < -3 or adjusted >= 7:
+        return sign + digits[0] + '.' + (digits[1:] or '0') + 'E' + str(adjusted)
+    point = adjusted + 1
+    if point <= 0:
+        return sign + '0.' + '0' * (-point) + digits
+    if point >= len(digits):
+        return sign + digits + '0' * (point - len(digits)) + '.0'
+    return sign + digits[:point] + '.' + digits[point:]
+
+
+def _floating_decimal_text(value, single_precision):
     if not math.isfinite(value):
         return java_floating_string(value)
     if value == 0:
@@ -99,6 +123,9 @@ def java_double_decimal_text(value):
     else:
         significant = 53
         mantissa |= 1 << 52
+    if single_precision:
+        bits = struct.unpack('>I', struct.pack('>f', value))[0]
+        significant = (bits & 0x007fffff).bit_length() if bits & 0x7f800000 == 0 else 24
     trailing = (mantissa & -mantissa).bit_length() - 1
     width = 53 - trailing
     tiny = max(0, width - exponent - 1)
