@@ -134,14 +134,8 @@ class JindoInputFile:
     def __init__(self, jindo_stream, file_size=None, *, owner):
         self._stream = jindo_stream
         self._file_size = file_size
-        # Keep-alive back-reference to the owning jindo filesystem: the
-        # stream is a non-owning reference into memory owned by it. Without
-        # it, dropping the FileIO that holds the handler (e.g.
-        # RESTTokenFileIO's TTLCache maxsize=1 eviction on token refresh)
-        # frees the native connection while other threads still read from
-        # this stream. Keyword-only and required so a new open_* path cannot
-        # silently skip it; it pins only the filesystem, not the handler, so
-        # the evicted FileIO's properties do not stay retained.
+        # The stream does not own its native store: pin the jindo filesystem (not the
+        # handler) so evicting the handler's FileIO from a cache cannot free it.
         self._owner = owner
         self._closed = False
 
