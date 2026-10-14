@@ -558,8 +558,11 @@ public class SnapshotManager implements Serializable {
                 } else if (commitWatermark < watermark) {
                     earliest = mid + 1; // Search in the right half
                 } else {
-                    finalSnapshot = snapshot; // Found the exact match
-                    break;
+                    // Lower bound: an exact match is a candidate, but an earlier snapshot may
+                    // carry the same watermark. Watermarks repeat because the commit watermark
+                    // takes the maximum, so stopping here would return the middle of such a run.
+                    finalSnapshot = snapshot;
+                    latest = pos - 1; // Keep searching the left half
                 }
             }
         }

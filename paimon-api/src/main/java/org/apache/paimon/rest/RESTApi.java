@@ -45,6 +45,7 @@ import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
+import org.apache.paimon.rest.requests.CommitLockRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -72,6 +73,7 @@ import org.apache.paimon.rest.requests.UpsertLabelRequest;
 import org.apache.paimon.rest.requests.UpsertSemanticViewRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
+import org.apache.paimon.rest.responses.CommitLockResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
@@ -734,34 +736,50 @@ public class RESTApi {
         return response.isSuccess();
     }
 
-    /**
-     * Rollback instant for table.
-     *
-     * @param identifier database name and table name.
-     * @param instant instant to rollback
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
-     *     or the tag not exists
-     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
-     *     this table
-     */
-    public void rollbackTo(Identifier identifier, Instant instant) {
-        rollbackTo(identifier, instant, null);
+    public CommitLockResponse acquireCommitLock(
+            Identifier identifier, String tableUuid, String commitUser) {
+        return client.post(
+                resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName()),
+                new CommitLockRequest(tableUuid, commitUser),
+                CommitLockResponse.class,
+                restAuthFunction);
+    }
+
+    public CommitLockResponse renewCommitLock(
+            Identifier identifier, String tableUuid, String commitUser) {
+        return client.post(
+                resourcePaths.commitLock(identifier.getDatabaseName(), identifier.getObjectName())
+                        + "/renew",
+                new CommitLockRequest(tableUuid, commitUser),
+                CommitLockResponse.class,
+                restAuthFunction);
     }
 
     /**
      * Rollback instant for table.
      *
      * @param identifier database name and table name.
+     * @param tableUuid expected table incarnation, or null when its UUID is unavailable
      * @param instant instant to rollback
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot.
+     * @param fromSnapshotUuid expected snapshot UUID, checked together with fromSnapshot
+     * @param commitUser writer identity for active-lock admission, or null without a writer
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
      *     or the tag not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
-        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot,
+            @Nullable String fromSnapshotUuid,
+            @Nullable String commitUser) {
+        RollbackTableRequest request =
+                new RollbackTableRequest(
+                        instant, fromSnapshot, fromSnapshotUuid, tableUuid, commitUser);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),

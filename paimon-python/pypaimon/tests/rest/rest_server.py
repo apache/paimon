@@ -22,6 +22,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+import json
 from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -37,8 +38,7 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
                                       RenameBranchRequest,
                                       RenameTableRequest,
                                       RevokePermissionRequest)
-from pypaimon.api.api_response import (AuthTableQueryRequest, AuthTableQueryResponse,
-                                       ConfigResponse, CreatePartitionsResponse,
+from pypaimon.api.api_response import (ConfigResponse, CreatePartitionsResponse,
                                        GetDatabaseResponse,
                                        GetFunctionResponse,
                                        GetTableResponse, GetTagResponse,
@@ -295,6 +295,7 @@ class RESTCatalogServer:
         self.no_permission_databases: List[str] = []
         self.no_permission_tables: List[str] = []
         self.table_token_store: Dict[str, "RESTToken"] = {}
+        self.table_query_auth_store = {}
         self.permission_store: Dict[str, PermissionAssignment] = {}
         self.query_principals: set = set()
 
@@ -637,6 +638,8 @@ class RESTCatalogServer:
                 return self._table_commit_handle(method, data, lookup_identifier, branch_part)
             elif operation == "token":
                 return self._table_token_handle(method, lookup_identifier)
+            elif operation == "auth":
+                return self._table_query_auth_handle(method, data, lookup_identifier)
             elif operation == "rollback":
                 return self._table_rollback_handle(method, data, lookup_identifier)
             elif operation == "snapshot":
@@ -648,8 +651,6 @@ class RESTCatalogServer:
                 return self._tags_handle(method, data, lookup_identifier, parameters)
             elif operation == ResourcePaths.BRANCHES:
                 return self._branches_handle(method, data, lookup_identifier)
-            elif operation == "auth" and method == "POST":
-                return self._table_auth_handle(lookup_identifier, data)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
@@ -780,26 +781,20 @@ class RESTCatalogServer:
                 assignment.get_columns(), assignment.get_expire_time())
             self.permission_store[_assignment_key(renamed)] = renamed
 
-    def _table_auth_handle(self, identifier: Identifier, data: str) -> Tuple[str, int]:
-        metadata = self.table_metadata_store.get(identifier.get_full_name())
-        if metadata is None:
-            raise TableNotExistException(identifier)
+    def _check_column_grants(self, identifier: Identifier, select: Optional[List[str]]) -> None:
+        fields = [field.name for field in self.table_metadata_store[identifier.get_full_name()].schema.fields]
         grants = [grant for grant in self._column_grants(identifier)
                   if grant.get_principal() in self.query_principals and not _expired(grant)]
         if grants:
-            included = {field.name for field in metadata.schema.fields}
+            included = set(fields)
             for grant in grants:
                 columns = set(_granted_columns(grant))
                 if grant.get_columns().get_column_names() is not None:
                     included &= columns
                 else:
                     included -= columns
-            select = JSON.from_json(data, AuthTableQueryRequest).select if data else None
-            if select is None:
-                select = [field.name for field in metadata.schema.fields]
-            if any(column not in included for column in select):
+            if any(column not in included for column in (fields if select is None else select)):
                 raise TableNoPermissionException(identifier)
-        return self._mock_response(AuthTableQueryResponse(None, None), 200)
 
     # ======================= Function Handlers ===============================
 
@@ -1317,6 +1312,19 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _table_query_auth_handle(self, method, data, identifier):
+        if method != "POST":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+        select = json.loads(data).get('select')
+        self._check_column_grants(identifier, select)
+        from pypaimon.api.api_response import AuthTableQueryResponse
+        response = self.table_query_auth_store.get(identifier.get_full_name(), AuthTableQueryResponse())
+        if callable(response):
+            response = response(select)
+        return self._mock_response(response, 200)
 
     def _table_token_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
         if method != "GET":

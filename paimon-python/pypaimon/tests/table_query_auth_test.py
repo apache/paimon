@@ -227,6 +227,21 @@ class TestTableQueryAuthResultExtractRowFilter(unittest.TestCase):
         mask = fn(batch)
         self.assertEqual(mask.to_pylist(), [False, False, False])
 
+    def test_filter_entries_short_circuit_in_server_order(self):
+        first = _simple_filter_json('dept', 'eng')
+        second = json.dumps({
+            'kind': 'LEAF', 'function': 'EQUAL', 'literals': ['a'],
+            'transform': {'name': 'SUBSTRING', 'inputs': [
+                {'name': 's', 'type': 'STRING'}, {'name': 'position', 'type': 'BIGINT'}, 1]},
+        })
+        batch = pa.RecordBatch.from_pydict({
+            'dept': ['eng', 'sales'], 's': ['abc', 'xyz'], 'position': [1, 2147483648]})
+        result = TableQueryAuthResult([first, second], None).extract_row_filter()
+        self.assertEqual(result(batch).to_pylist(), [True, False])
+        # Reversing the response's order executes the throwing transform first.
+        with self.assertRaises(ValueError):
+            TableQueryAuthResult([second, first], None).extract_row_filter()(batch)
+
 
 class TestTableQueryAuthResultExtraFields(unittest.TestCase):
 

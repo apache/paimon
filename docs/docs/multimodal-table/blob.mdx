@@ -537,6 +537,8 @@ for Python partial writes.
 4. **Append Table Options**: For append tables, `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
 5. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
 6. **Collection Storage Mode**: `ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
+7. **Append Write Buffer**: Writers that write BLOB payload files ignore `write-buffer-for-append`
+   and write directly, because the buffer cannot preserve descriptor source readers.
 
 ## Best Practices
 

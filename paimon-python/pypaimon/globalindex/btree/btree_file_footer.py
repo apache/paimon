@@ -47,6 +47,7 @@ class BTreeFileFooter:
     
     MAGIC_NUMBER = 0x50425449
     VERSION_1 = 1
+    VERSION_2 = 2
     CURRENT_VERSION = VERSION_1
     ENCODED_LENGTH = 52
 

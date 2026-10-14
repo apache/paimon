@@ -225,7 +225,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
      * can emit the right number of NULL-filled rows.
      *
      * <p>If Deletion-Vector is enabled, we always keep the oldest normal file for each group as the
-     * anchor file to lookup corresponding Deletion Files.
+     * anchor file to lookup corresponding Deletion Files. Without deletion vectors, the anchor is
+     * still kept when the kept files are all blob/vector-store files, which may cover only part of
+     * the group's row-id range.
      */
     private List<ManifestEntry> pruneByReadType(List<ManifestEntry> group) {
         if (readType == null || group.size() <= 1) {
@@ -281,6 +283,16 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (anchor != null && !kept.contains(anchor)) {
             kept.add(anchor);
         }
+        // Blob and vector-store files may each cover only a sub-range of their group, and the
+        // reader would derive the group's range from them and drop the other rows, so keep the
+        // anchor. An incremental scan can see a group with no normal file at all, which has no
+        // anchor to keep.
+        if (anchor == null
+                && !kept.isEmpty()
+                && kept.stream().allMatch(e -> isDedicatedFile(e.file()))
+                && !group.stream().allMatch(e -> isDedicatedFile(e.file()))) {
+            kept.add(retrieveAnchorFile(group, ManifestEntry::file));
+        }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows. The representative must be a full-range
         // normal file: a blob or vector-store file covers only a sub-range of the group's row
@@ -288,6 +300,10 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         return kept.isEmpty()
                 ? Collections.singletonList(retrieveAnchorFile(group, ManifestEntry::file))
                 : kept;
+    }
+
+    private static boolean isDedicatedFile(DataFileMeta file) {
+        return isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName());
     }
 
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {

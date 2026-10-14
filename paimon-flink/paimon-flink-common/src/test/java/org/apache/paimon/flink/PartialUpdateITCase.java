@@ -217,6 +217,54 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSequenceGroupSortOrder() {
+        sql(
+                "CREATE TABLE user_summary (user_id BIGINT PRIMARY KEY NOT ENFORCED, "
+                        + "status STRING, status_version BIGINT, channel STRING, first_event_time BIGINT) WITH ("
+                        + "'merge-engine'='partial-update', 'bucket'='1', 'write-only'='true', "
+                        + "'fields.status_version.sequence-group'='status', "
+                        + "'fields.first_event_time.sequence-group'='channel', "
+                        + "'fields.first_event_time.sequence-group.sort-order'='descending')");
+        sql("INSERT INTO user_summary VALUES (1, 'active', 200, 'organic', 100)");
+        sql("INSERT INTO user_summary VALUES (1, 'registered', 100, 'referral', 50)");
+        assertThat(sql("SELECT * FROM user_summary"))
+                .containsExactly(Row.of(1L, "active", 200L, "referral", 50L));
+        assertThat(sql("SELECT channel, user_id FROM user_summary"))
+                .containsExactly(Row.of("referral", 1L));
+
+        sql("ALTER TABLE user_summary RENAME first_event_time TO event_time");
+        sql("INSERT INTO user_summary VALUES (1, 'newest', 300, 'later', 75)");
+        assertThat(sql("SELECT * FROM user_summary"))
+                .containsExactly(Row.of(1L, "newest", 300L, "referral", 50L));
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("CALL sys.compact(`table` => 'default.user_summary', compact_strategy => 'full')");
+        assertThat(sql("SELECT * FROM user_summary"))
+                .containsExactly(Row.of(1L, "newest", 300L, "referral", 50L));
+        sql("INSERT INTO user_summary VALUES (1, 'old', 100, 'earliest', 25)");
+        assertThat(sql("SELECT channel, status FROM user_summary"))
+                .containsExactly(Row.of("earliest", "newest"));
+
+        sql(
+                "INSERT INTO user_summary VALUES (1, 'ignored', CAST(NULL AS BIGINT), "
+                        + "'earlier', 20)");
+        assertThat(sql("SELECT status, channel FROM user_summary"))
+                .containsExactly(Row.of("newest", "earlier"));
+
+        sql(
+                "INSERT INTO user_summary VALUES (1, 'newest2', 400, 'ignored', "
+                        + "CAST(NULL AS BIGINT))");
+        assertThat(sql("SELECT status, channel FROM user_summary"))
+                .containsExactly(Row.of("newest2", "earlier"));
+
+        sql(
+                "INSERT INTO user_summary VALUES (1, 'ignored', CAST(NULL AS BIGINT), "
+                        + "'ignored', CAST(NULL AS BIGINT))");
+        assertThat(sql("SELECT status, channel FROM user_summary"))
+                .containsExactly(Row.of("newest2", "earlier"));
+    }
+
+    @Test
     public void testMultiFieldsSequenceGroup() {
         sql(
                 "CREATE TABLE SG ("

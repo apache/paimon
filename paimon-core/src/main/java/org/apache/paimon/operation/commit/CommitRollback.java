@@ -32,10 +32,12 @@ public class CommitRollback {
     }
 
     public boolean tryToRollback(Snapshot latestSnapshot) {
-        if (latestSnapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+        if (latestSnapshot.commitKind() == Snapshot.CommitKind.COMPACT
+                && latestSnapshot.uuid() != null) {
             long latest = latestSnapshot.id();
             try {
-                tableRollback.rollbackTo(Instant.snapshot(latest - 1), latest);
+                tableRollback.rollbackTo(
+                        Instant.snapshot(latest - 1), latest, latestSnapshot.uuid());
                 return true;
             } catch (Exception ignored) {
             }

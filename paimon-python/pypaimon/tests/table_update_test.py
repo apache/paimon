@@ -73,6 +73,36 @@ def test_write_builder_creates_row_id_updater_with_commit_identity(
     table.new_read_builder.assert_not_called()
 
 
+@pytest.mark.parametrize('missing_method,option', [
+    ('data_evolution_enabled', 'data-evolution.enabled'),
+    ('row_tracking_enabled', 'row-tracking.enabled'),
+    ('deletion_vectors_enabled', 'deletion-vectors.enabled'),
+])
+def test_python_row_id_delete_reports_unsupported_table_capabilities(missing_method, option):
+    from pypaimon.write.table_delete import TableDeleteByRowId
+
+    table = mock.Mock()
+    table.options.data_evolution_enabled.return_value = True
+    table.options.row_tracking_enabled.return_value = True
+    table.options.deletion_vectors_enabled.return_value = True
+    getattr(table.options, missing_method).return_value = False
+    with pytest.raises(NotImplementedError, match=option):
+        TableDeleteByRowId(table).delete([])
+    table.snapshot_manager.assert_not_called()
+
+
+def test_python_row_id_delete_keeps_invalid_input_as_value_error():
+    from pypaimon.write.table_delete import TableDeleteByRowId
+
+    table = mock.Mock()
+    table.options.data_evolution_enabled.return_value = True
+    table.options.row_tracking_enabled.return_value = True
+    table.options.deletion_vectors_enabled.return_value = True
+    with pytest.raises(ValueError, match='_ROW_ID value must not be null'):
+        TableDeleteByRowId(table).delete([None])
+    table.snapshot_manager.assert_not_called()
+
+
 def test_batch_row_id_update_batches_reuse_file_index():
     table = mock.MagicMock()
     table.field_names = ["value"]
@@ -922,7 +952,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(NotImplementedError) as ctx:
             self._do_delete_by_predicate(table, pb.equal('id', 1))
 
         self.assertIn('deletion-vectors.enabled', str(ctx.exception))
@@ -940,7 +970,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
     def test_delete_by_row_id_requires_deletion_vectors(self):
         table = self._create_seeded_table()
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(NotImplementedError) as ctx:
             self._do_delete_by_row_id(table, [0])
 
         self.assertIn('deletion-vectors.enabled', str(ctx.exception))
@@ -1037,7 +1067,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['city'].to_pylist(),
         )
 
-    def test_delete_by_partition_predicate_conflicts_when_partition_changes(self):
+    def test_delete_by_partition_predicate_preserves_concurrent_appends(self):
         table = self._create_seeded_table(partition_keys=['city'])
         wb = self._make_write_builder(table)
         tu = wb.new_update()
@@ -1053,10 +1083,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }, schema=self.pa_schema))
 
         tc = wb.new_commit()
-        with self.assertRaises(RuntimeError) as ctx:
-            self._apply_commit(tc, msgs, cid)
+        self._apply_commit(tc, msgs, cid)
         tc.close()
-        self.assertIn('Overwrite conflict', str(ctx.exception))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5, 6], result['id'].to_pylist())
 
     def test_delete_by_mixed_partition_predicate_still_requires_dv(self):
         table = self._create_seeded_table(partition_keys=['city'])
@@ -1066,7 +1096,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             pb.equal('age', 30),
         ])
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(NotImplementedError) as ctx:
             self._do_delete_by_predicate(table, predicate)
 
         self.assertIn('deletion-vectors.enabled', str(ctx.exception))

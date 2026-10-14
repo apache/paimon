@@ -114,8 +114,8 @@ public class PostgresqlCatalogTest {
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "user", USER);
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", PASSWORD);
         properties.put(CatalogOptions.WAREHOUSE.key(), warehouse);
-        properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
-        properties.put(CatalogOptions.LOCK_TYPE.key(), "jdbc");
+        properties.put(JdbcCatalogOptions.LOCK_ENABLED.key(), "true");
+        properties.put(JdbcCatalogOptions.LOCK_TYPE.key(), "jdbc");
         properties.putAll(props);
         JdbcCatalog catalog =
                 new JdbcCatalog(

@@ -689,7 +689,7 @@ class FileStoreCommit:
             snapshot_data = Snapshot(
                 version=3,
                 id=new_snapshot_id,
-                schema_id=self.table.table_schema.id,
+                schema_id=self.table.schema_manager.latest().id,
                 base_manifest_list=base_manifest_list,
                 base_manifest_list_size=base_manifest_list_size,
                 delta_manifest_list=delta_manifest_list,

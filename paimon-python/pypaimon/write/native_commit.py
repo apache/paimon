@@ -184,3 +184,25 @@ def from_native_commit_messages(table, messages):
             file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
                 table, message.partition, message.bucket, file.file_name)
     return decoded
+
+
+def native_commit_callback(table, callbacks):
+    """Translate the native notification into the existing Python context."""
+    from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+    from pypaimon.snapshot.snapshot import Snapshot
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.write.commit_callback import CommitCallbackContext
+
+    def notify(native_context):
+        entries = []
+        for entry in native_context.commit_entries:
+            message = from_native_commit_messages(table, [entry._to_commit_message()])[0]
+            entries.append(ManifestEntry(
+                entry.kind, GenericRow(list(message.partition), table.partition_keys_fields),
+                entry.bucket, entry.total_buckets, message.new_files[0]))
+        context = CommitCallbackContext(
+            JSON.from_json(native_context._snapshot_json(), Snapshot), entries, native_context.identifier)
+        for callback in callbacks:
+            callback.call(context)
+
+    return notify
