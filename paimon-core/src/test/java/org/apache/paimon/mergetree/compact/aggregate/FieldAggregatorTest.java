@@ -2169,8 +2169,9 @@ public class FieldAggregatorTest {
 
         InternalArray older = makeArray(elementType, 2, 1, 2);
         InternalArray newer = makeArray(elementType, 3, 3, 1);
-        InternalArray forward = (InternalArray) agg.agg(older, newer);
-        InternalArray reversed = (InternalArray) agg.aggReversed(newer, older);
+        InternalArray forward = (InternalArray) agg.agg(agg.agg(null, older), newer);
+        InternalArray reversed =
+                (InternalArray) agg.aggReversed(agg.aggReversed(null, newer), older);
         assertThat(unnest(forward, elementGetter)).containsExactly(expectedElements);
         assertThat(unnest(reversed, elementGetter)).containsExactly(expectedElements);
     }

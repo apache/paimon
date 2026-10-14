@@ -155,7 +155,7 @@ public class FieldCollectAgg extends FieldAggregator {
             return;
         }
 
-        int limit = Math.abs(countLimit);
+        long limit = Math.abs((long) countLimit);
         for (int i = 0; i < array.size() && collection.size() < limit; i++) {
             Object element =
                     elementGetter.getElementOrNull(
