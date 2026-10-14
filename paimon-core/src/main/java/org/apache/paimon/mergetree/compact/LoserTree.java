@@ -246,17 +246,30 @@ public class LoserTree<T> implements Closeable {
 
     @Override
     public void close() throws IOException {
-        IOException exception = null;
+        Throwable exception = null;
         for (LeafIterator<T> iterator : leaves) {
             try {
                 iterator.close();
-            } catch (IOException e) {
+            } catch (Throwable e) {
                 exception = ExceptionUtils.firstOrSuppressed(e, exception);
             }
         }
         if (exception != null) {
-            throw exception;
+            rethrowCloseFailure(exception);
         }
+    }
+
+    private static void rethrowCloseFailure(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        throw new IOException(failure);
     }
 
     /** Leaf node, used to manage {@link RecordReader}. */
@@ -326,11 +339,24 @@ public class LoserTree<T> implements Closeable {
 
         @Override
         public void close() throws IOException {
-            if (this.iterator != null) {
-                this.iterator.releaseBatch();
-                this.iterator = null;
+            Throwable failure = null;
+            RecordReader.RecordIterator<T> batch = this.iterator;
+            this.iterator = null;
+            try {
+                if (batch != null) {
+                    batch.releaseBatch();
+                }
+            } catch (Throwable error) {
+                failure = error;
             }
-            this.reader.close();
+            try {
+                this.reader.close();
+            } catch (Throwable error) {
+                failure = ExceptionUtils.firstOrSuppressed(error, failure);
+            }
+            if (failure != null) {
+                rethrowCloseFailure(failure);
+            }
         }
     }
 
