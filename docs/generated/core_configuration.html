@@ -1946,10 +1946,34 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td>Whether to process distributed vector search.</td>
         </tr>
         <tr>
+            <td><h5>vector-search.distribute.lateral-max-limit</h5></td>
+            <td style="word-wrap: break-word;">128</td>
+            <td>Integer</td>
+            <td>Maximum topK accepted by a distributed LATERAL vector search. Result rows retained on the driver are bounded by this value multiplied by vector-search.distribute.lateral-max-queries.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-search.distribute.lateral-max-queries</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Maximum number of query vectors a distributed LATERAL vector search may collect on the driver. Collection reads one extra vector and fails when the left side is larger. vector-search.lateral-join.batch-size only controls how many vectors one readBatch receives. At most ceil(query count / batch size) * 2 distributed search jobs are submitted, because indexed search and raw search can each submit one job per batch.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-search.distribute.lateral-max-query-bytes</h5></td>
+            <td style="word-wrap: break-word;">64 kb</td>
+            <td>MemorySize</td>
+            <td>Maximum serialized bytes per query collected by a distributed LATERAL vector search, including the complete outer row and a separate float query vector. Checked on executors before collection. Together with lateral-max-queries (plus one overflow query), this bounds collected input payload, excluding JVM object and Spark transport overhead.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-search.distribute.lateral-max-result-bytes</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>Maximum number of joined-row bytes a distributed LATERAL vector search retains on the driver. Each row is checked before being copied into the retained results. If it would exceed this limit, the query fails and no further search batch is submitted. This does not include temporary row decoding, JVM object or Spark transport overhead.</td>
+        </tr>
+        <tr>
             <td><h5>vector-search.lateral-join.batch-size</h5></td>
             <td style="word-wrap: break-word;">256</td>
             <td>Integer</td>
-            <td>The batch size for lateral vector search. Each batch executes vector topK search and table lookup for multiple query vectors.</td>
+            <td>Number of query vectors passed to one lateral vector-search readBatch. This does not cap the total number of query vectors. Distributed LATERAL search uses vector-search.distribute.lateral-max-queries for that cap.</td>
         </tr>
         <tr>
             <td><h5>vector.file.format</h5></td>

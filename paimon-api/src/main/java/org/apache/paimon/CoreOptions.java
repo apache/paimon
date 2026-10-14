@@ -3118,13 +3118,61 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to process distributed vector search.");
 
+    public static final ConfigOption<Integer> VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_LIMIT =
+            key("vector-search.distribute.lateral-max-limit")
+                    .intType()
+                    .defaultValue(128)
+                    .withDescription(
+                            "Maximum topK accepted by a distributed LATERAL vector search. "
+                                    + "Result rows retained on the driver are bounded by this value "
+                                    + "multiplied by vector-search.distribute.lateral-max-queries.");
+
+    public static final ConfigOption<Integer> VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERIES =
+            key("vector-search.distribute.lateral-max-queries")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription(
+                            "Maximum number of query vectors a distributed LATERAL vector search "
+                                    + "may collect on the driver. Collection reads one extra vector and "
+                                    + "fails when the left side is larger. "
+                                    + "vector-search.lateral-join.batch-size only controls how many "
+                                    + "vectors one readBatch receives. At most ceil(query count / batch "
+                                    + "size) * 2 distributed search jobs are submitted, because indexed "
+                                    + "search and raw search can each submit one job per batch.");
+
+    public static final ConfigOption<MemorySize> VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERY_BYTES =
+            key("vector-search.distribute.lateral-max-query-bytes")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("64 kb"))
+                    .withDescription(
+                            "Maximum serialized bytes per query collected by a distributed LATERAL "
+                                    + "vector search, including the complete outer row and a separate "
+                                    + "float query vector. Checked on executors before collection. "
+                                    + "Together with lateral-max-queries (plus one overflow query), "
+                                    + "this bounds collected input payload, excluding JVM object and "
+                                    + "Spark transport overhead.");
+
+    public static final ConfigOption<MemorySize> VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_RESULT_BYTES =
+            key("vector-search.distribute.lateral-max-result-bytes")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("64 mb"))
+                    .withDescription(
+                            "Maximum number of joined-row bytes a distributed LATERAL vector "
+                                    + "search retains on the driver. Each row is checked before being "
+                                    + "copied into the retained results. If it would exceed this limit, "
+                                    + "the query fails and no further search batch is submitted. "
+                                    + "This does not include temporary row decoding, JVM object or "
+                                    + "Spark transport overhead.");
+
     public static final ConfigOption<Integer> VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE =
             key("vector-search.lateral-join.batch-size")
                     .intType()
                     .defaultValue(256)
                     .withDescription(
-                            "The batch size for lateral vector search. Each batch executes vector "
-                                    + "topK search and table lookup for multiple query vectors.");
+                            "Number of query vectors passed to one lateral vector-search readBatch. "
+                                    + "This does not cap the total number of query vectors. Distributed "
+                                    + "LATERAL search uses vector-search.distribute.lateral-max-queries "
+                                    + "for that cap.");
 
     public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMNS =
             key("pk-vector.index.columns")
@@ -4913,6 +4961,22 @@ public class CoreOptions implements Serializable {
 
     public boolean vectorSearchDistributeEnabled() {
         return options.get(VECTOR_SEARCH_DISTRIBUTE_ENABLED);
+    }
+
+    public int vectorSearchDistributeLateralMaxQueries() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERIES);
+    }
+
+    public int vectorSearchDistributeLateralMaxLimit() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_LIMIT);
+    }
+
+    public long vectorSearchDistributeLateralMaxQueryBytes() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERY_BYTES).getBytes();
+    }
+
+    public long vectorSearchDistributeLateralMaxResultBytes() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_RESULT_BYTES).getBytes();
     }
 
     public int vectorSearchLateralJoinBatchSize() {

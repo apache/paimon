@@ -36,8 +36,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
-
 /** Spark-aware {@link PrimaryKeyVectorRead}. */
 public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
 
@@ -79,12 +77,15 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
                 throw new RuntimeException("Failed to serialize primary-key vector split.", e);
             }
         }
-        List<List<byte[]>> groups = splitGroups(serializedSplits, parallelism);
+        List<List<byte[]>> groups =
+                SparkVectorSearchSupport.splitGroups(serializedSplits, parallelism);
         SerializableFunction<List<byte[]>, byte[]> task =
                 group -> {
                     List<BucketVectorSearchSplit> taskSplits = new ArrayList<>(group.size());
                     for (byte[] bytes : group) {
-                        taskSplits.add(deserializeSplit(bytes));
+                        taskSplits.add(
+                                SparkVectorSearchSupport.deserialize(
+                                        bytes, "Failed to deserialize primary-key vector split."));
                     }
                     try {
                         return InstantiationUtil.serializeObject(searchBuckets(taskSplits));
@@ -96,51 +97,24 @@ public class SparkPrimaryKeyVectorRead extends PrimaryKeyVectorRead {
         List<byte[]> groupResults = mapInSpark(groups, task, groups.size());
         List<SearchResult> searchResults = new ArrayList<>(groupResults.size());
         for (byte[] groupResult : groupResults) {
-            searchResults.add(deserializeSearchResult(groupResult));
+            searchResults.add(
+                    SparkVectorSearchSupport.deserialize(
+                            groupResult,
+                            "Failed to deserialize primary-key vector search result."));
         }
         return createResult(primaryKeyPlan, mergeSearchResults(searchResults));
     }
 
     protected int sparkParallelism() {
-        return Math.max(1, table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM));
+        return SparkVectorSearchSupport.parallelism(table);
     }
 
     protected SparkEngineContext createEngineContext() {
-        return new SparkEngineContext();
+        return SparkVectorSearchSupport.engineContext();
     }
 
     protected <I, O> List<O> mapInSpark(
             List<I> data, SerializableFunction<I, O> function, int parallelism) {
         return createEngineContext().map(data, function, parallelism);
-    }
-
-    private List<List<byte[]>> splitGroups(List<byte[]> splits, int parallelism) {
-        List<List<byte[]>> groups = new ArrayList<>(parallelism);
-        int groupSize = (splits.size() + parallelism - 1) / parallelism;
-        for (int start = 0; start < splits.size(); start += groupSize) {
-            groups.add(
-                    new ArrayList<>(
-                            splits.subList(start, Math.min(start + groupSize, splits.size()))));
-        }
-        return groups;
-    }
-
-    private BucketVectorSearchSplit deserializeSplit(byte[] bytes) {
-        try {
-            return InstantiationUtil.deserializeObject(
-                    bytes, Thread.currentThread().getContextClassLoader());
-        } catch (IOException | ClassNotFoundException e) {
-            throw new RuntimeException("Failed to deserialize primary-key vector split.", e);
-        }
-    }
-
-    private SearchResult deserializeSearchResult(byte[] bytes) {
-        try {
-            return InstantiationUtil.deserializeObject(
-                    bytes, Thread.currentThread().getContextClassLoader());
-        } catch (IOException | ClassNotFoundException e) {
-            throw new RuntimeException(
-                    "Failed to deserialize primary-key vector search result.", e);
-        }
     }
 }
