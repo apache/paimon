@@ -384,6 +384,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         changes.appendTableFiles,
                                         changes.appendChangelog,
                                         changes.appendIndexFiles),
+                                emptyList(),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -405,6 +406,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 changes.compactChangelog,
                                                 changes.compactIndexFiles),
                                         materializedBuckets),
+                                commitMessages,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -594,6 +596,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 emptyList(),
                                                 changes.compactIndexFiles),
                                         Collections.emptySet()),
+                                committable.fileCommittables(),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -752,6 +755,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String statsFileName = statsFileHandler.writeStats(stats);
         tryCommit(
                 CommitChangesProvider.provider(emptyList(), emptyList(), emptyList()),
+                emptyList(),
                 commitIdentifier,
                 null,
                 Collections.emptyMap(),
@@ -894,6 +898,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private int tryCommit(
             CommitChangesProvider changesProvider,
+            List<CommitMessage> compactMessages,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -911,6 +916,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryCommitOnce(
                                 retryResult,
                                 changesProvider,
+                                compactMessages,
                                 identifier,
                                 watermark,
                                 properties,
@@ -1015,6 +1021,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return tryCommit(
                 scanner.overwriteChangesProvider(
                         options.bucket(), changes, indexFiles, partitionFilter),
+                emptyList(),
                 identifier,
                 watermark,
                 properties,
@@ -1053,6 +1060,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 tryCommitOnce(
                         retryResult,
                         CommitChangesProvider.provider(deltaFiles, changelogFiles, indexFiles),
+                        emptyList(),
                         identifier,
                         watermark,
                         properties,
@@ -1068,6 +1076,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnce(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
+            List<CommitMessage> compactMessages,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1083,6 +1092,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             tryCommitOnceWithoutLock(
                                     retryResult,
                                     changesProvider,
+                                    compactMessages,
                                     identifier,
                                     watermark,
                                     properties,
@@ -1101,6 +1111,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitResult tryCommitOnceWithoutLock(
             @Nullable RetryCommitResult retryResult,
             CommitChangesProvider changesProvider,
+            List<CommitMessage> compactMessages,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1184,9 +1195,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
-        if (checkConflicts
-                && !conflictDetection.canSkipDataFileConflictDetection(
-                        latestSnapshot, deltaFiles, indexFiles, commitKind)) {
+        boolean checkDataFiles =
+                checkConflicts
+                        && !conflictDetection.canSkipDataFileConflictDetection(
+                                latestSnapshot, deltaFiles, indexFiles, commitKind);
+        RowIdConflictChecker rowIdConflictChecker = null;
+        if (checkDataFiles) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             if (changedPartitions == null) {
@@ -1215,26 +1229,31 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
                                 .collect(Collectors.toList());
             }
-            RowIdConflictChecker rowIdConflictChecker =
+            rowIdConflictChecker =
                     conflictDetection.createRowIdConflictChecker(
                             schemaManager, deltaFiles, commitKind);
-            Optional<RuntimeException> exception =
-                    conflictDetection.checkConflicts(
-                            latestSnapshot,
-                            baseDataFiles,
-                            SimpleFileEntry.from(deltaFiles),
-                            indexFiles,
-                            rowIdConflictChecker,
-                            commitKind);
-            if (exception.isPresent()) {
-                if (allowRollback && rollback != null) {
-                    snapshotCommit.ensureValid();
-                    if (rollback.tryToRollback(latestSnapshot)) {
-                        return RetryCommitResult.forRollback(exception.get());
-                    }
+        }
+        // DV dependencies must be checked on every attempt, even without a base snapshot or when
+        // data-file checks can be skipped. Uncertain successful commits have already returned
+        // above.
+        Optional<RuntimeException> exception =
+                conflictDetection.checkConflicts(
+                        latestSnapshot,
+                        baseDataFiles,
+                        checkDataFiles ? SimpleFileEntry.from(deltaFiles) : emptyList(),
+                        indexFiles,
+                        rowIdConflictChecker,
+                        commitKind,
+                        compactMessages,
+                        checkDataFiles);
+        if (exception.isPresent()) {
+            if (allowRollback && rollback != null) {
+                snapshotCommit.ensureValid();
+                if (rollback.tryToRollback(latestSnapshot)) {
+                    return RetryCommitResult.forRollback(exception.get());
                 }
-                throw exception.get();
             }
+            throw exception.get();
         }
 
         Snapshot newSnapshot;

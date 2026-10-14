@@ -53,7 +53,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    public static final int CURRENT_VERSION = 14;
+    public static final int CURRENT_VERSION = 15;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
@@ -127,6 +127,15 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         if (checkFromSnapshot != null) {
             view.writeLong(checkFromSnapshot);
         }
+        CompactIncrement compactIncrement = message.compactIncrement();
+        view.writeBoolean(compactIncrement.hasDeletionVectorBaseline());
+        if (compactIncrement.hasDeletionVectorBaseline()) {
+            String expectedDv = compactIncrement.expectedDeletionVectorFile();
+            view.writeBoolean(expectedDv != null);
+            if (expectedDv != null) {
+                view.writeUTF(expectedDv);
+            }
+        }
     }
 
     @Override
@@ -167,6 +176,10 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                             indexEntryDeserializer.get(),
                             indexEntryDeserializer.get());
             Long checkFromSnapshot = version >= 14 && view.readBoolean() ? view.readLong() : null;
+            if (version >= 15 && view.readBoolean()) {
+                compactIncrement.setExpectedDeletionVectorFile(
+                        view.readBoolean() ? view.readUTF() : null);
+            }
             return new CommitMessageImpl(
                     partition,
                     bucket,

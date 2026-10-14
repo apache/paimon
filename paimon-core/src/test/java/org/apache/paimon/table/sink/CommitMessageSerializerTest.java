@@ -22,6 +22,11 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -95,13 +100,56 @@ public class CommitMessageSerializerTest {
                                 13,
                                 Arrays.copyOf(
                                         serializedWithoutSnapshot,
-                                        serializedWithoutSnapshot.length - 1));
+                                        serializedWithoutSnapshot.length - 2));
         assertThat(oldVersion.checkFromSnapshot()).isNull();
+        assertThat(oldVersion.compactIncrement().hasDeletionVectorBaseline()).isFalse();
+        assertThat(oldVersion.compactIncrement().expectedDeletionVectorFile()).isNull();
         assertThat(oldVersion.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
+
+        CommitMessageImpl version14 =
+                (CommitMessageImpl)
+                        serializer.deserialize(
+                                14,
+                                Arrays.copyOf(
+                                        serializedWithoutSnapshot,
+                                        serializedWithoutSnapshot.length - 1));
+        assertThat(version14).isEqualTo(committable);
+        assertThat(version14.compactIncrement().hasDeletionVectorBaseline()).isFalse();
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "dv-1")
+    public void testDeletionVectorBaselineRoundTrip(@Nullable String expected) throws Exception {
+        CommitMessageSerializer serializer = new CommitMessageSerializer();
+        CompactIncrement increment = randomCompactIncrement();
+        increment.setExpectedDeletionVectorFile(expected);
+        CommitMessageImpl message =
+                new CommitMessageImpl(row(0), 1, 2, randomNewFilesIncrement(), increment);
+        CommitMessageImpl restored =
+                (CommitMessageImpl)
+                        serializer.deserialize(
+                                serializer.getVersion(), serializer.serialize(message));
+        assertThat(restored).isEqualTo(message);
+        assertThat(restored.compactIncrement().hasDeletionVectorBaseline()).isTrue();
+        assertThat(restored.compactIncrement().expectedDeletionVectorFile()).isEqualTo(expected);
     }
 
     @Test
-    public void testJavaSerializationPreservesCheckFromSnapshot() throws Exception {
+    public void testUnknownAndEmptyDeletionVectorBaselinesAreDifferent() {
+        CompactIncrement unknown = CompactIncrement.emptyIncrement();
+        CompactIncrement empty = CompactIncrement.emptyIncrement();
+        empty.setExpectedDeletionVectorFile(null);
+        assertThat(empty).isNotEqualTo(unknown);
+        assertThat(empty.hasDeletionVectorBaseline()).isTrue();
+        assertThat(unknown.hasDeletionVectorBaseline()).isFalse();
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "dv-1")
+    public void testJavaSerializationPreservesCheckFromSnapshot(@Nullable String expected)
+            throws Exception {
         CommitMessageImpl message =
                 new CommitMessageImpl(
                                 row(0),
@@ -110,6 +158,7 @@ public class CommitMessageSerializerTest {
                                 randomNewFilesIncrement(),
                                 CompactIncrement.emptyIncrement())
                         .withCheckFromSnapshot(42L);
+        message.compactIncrement().setExpectedDeletionVectorFile(expected);
 
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {

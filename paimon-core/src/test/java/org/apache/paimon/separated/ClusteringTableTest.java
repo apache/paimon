@@ -18,6 +18,7 @@
 
 package org.apache.paimon.separated;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -31,6 +32,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -38,9 +40,11 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -52,9 +56,12 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -115,6 +122,102 @@ class ClusteringTableTest {
                         GenericRow.of(2, 23),
                         GenericRow.of(3, 33),
                         GenericRow.of(4, 44));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testConcurrentCompactionRejectsStaleDv(boolean existingDv) throws Exception {
+        writeRows(Collections.singletonList(GenericRow.of(1, 10)));
+        if (existingDv) {
+            writeRows(Collections.singletonList(GenericRow.of(1, 11)));
+        }
+        BatchWriteBuilder first = table.newBatchWriteBuilder();
+        BatchWriteBuilder second = table.newBatchWriteBuilder();
+        try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
+                BatchTableWrite b = second.newWrite().withIOManager(ioManager);
+                BatchTableCommit commitA = first.newCommit();
+                BatchTableCommit commitB = second.newCommit()) {
+            // Both writers restore the same file and DV state before either commits.
+            a.write(GenericRow.of(1, 12));
+            b.write(GenericRow.of(1, 13));
+            List<CommitMessage> preparedA = a.prepareCommit();
+            List<CommitMessage> preparedB = b.prepareCommit();
+            commitA.commit(preparedA);
+            assertThatThrownBy(() -> commitB.commit(preparedB))
+                    .hasMessageContaining("Deletion vector conflict")
+                    .hasMessageContaining("recompute compaction");
+            // B's APPEND may already be committed, but its stale compact/DV must not be visible.
+            assertThat(readRows()).containsExactly(GenericRow.of(1, 12));
+        }
+    }
+
+    @Test
+    public void testOverwriteWithExistingDv() throws Exception {
+        writeRows(Collections.singletonList(GenericRow.of(1, 10)));
+        writeRows(Collections.singletonList(GenericRow.of(1, 20)));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder().withOverwrite();
+        try (BatchTableWrite write = builder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, 30));
+            commit.commit(write.prepareCommit());
+        }
+        assertThat(readRows()).containsExactly(GenericRow.of(1, 30));
+    }
+
+    @Test
+    public void testConsecutiveDvCommitsFromSameWriter() throws Exception {
+        writeRows(Collections.singletonList(GenericRow.of(1, 10)));
+        StreamWriteBuilder builder = table.newStreamWriteBuilder();
+        try (StreamTableWrite write =
+                        (StreamTableWrite) builder.newWrite().withIOManager(ioManager);
+                StreamTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < 4; i++) {
+                write.write(GenericRow.of(1, 20 + i));
+                List<CommitMessage> messages = write.prepareCommit(true, i);
+                commit.commit(i, messages);
+                assertThat(readRows()).containsExactly(GenericRow.of(1, 20 + i));
+            }
+        }
+    }
+
+    @Test
+    public void testCombinedPreparedDvCommits() throws Exception {
+        writeRows(Collections.singletonList(GenericRow.of(1, 10)));
+        StreamWriteBuilder builder = table.newStreamWriteBuilder();
+        try (StreamTableWrite write =
+                        (StreamTableWrite) builder.newWrite().withIOManager(ioManager);
+                StreamTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, 20));
+            List<CommitMessage> messages = new ArrayList<>(write.prepareCommit(true, 0));
+            write.write(GenericRow.of(1, 30));
+            messages.addAll(write.prepareCommit(true, 1));
+            commit.commit(1, messages);
+            assertThat(readRows()).containsExactly(GenericRow.of(1, 30));
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testDvBaselineSurvivesWriterCheckpoint() throws Exception {
+        writeRows(Collections.singletonList(GenericRow.of(1, 10)));
+        StreamWriteBuilder builder = table.newStreamWriteBuilder();
+        List<CommitMessage> pending;
+        List<FileStoreWrite.State<KeyValue>> states;
+        try (TableWriteImpl<KeyValue> write =
+                (TableWriteImpl<KeyValue>) builder.newWrite().withIOManager(ioManager)) {
+            write.write(GenericRow.of(1, 20));
+            pending = write.prepareCommit(true, 0);
+            states = write.checkpoint();
+        }
+        try (TableWriteImpl<KeyValue> restored =
+                        (TableWriteImpl<KeyValue>) builder.newWrite().withIOManager(ioManager);
+                StreamTableCommit commit = builder.newCommit()) {
+            restored.restore(states);
+            commit.commit(0, pending);
+            restored.write(GenericRow.of(1, 30));
+            commit.commit(1, restored.prepareCommit(true, 1));
+            assertThat(readRows()).containsExactly(GenericRow.of(1, 30));
+        }
     }
 
     /** Test duplicate primary keys in one commit are merged by write order. */

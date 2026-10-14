@@ -50,7 +50,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
             "generateManifestCommittableGoldenFiles";
 
     @Test
-    public void testCompatibilityToV5CommitV13AndV14() throws IOException {
+    public void testCompatibilityToV5CommitV13V14AndV15() throws IOException {
         DataFileMeta dataFile =
                 DataFileMeta.create(
                                 "column-sequence-file",
@@ -92,23 +92,12 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         legacyCommittable.properties());
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
-        byte[] current = serializer.serialize(committable);
-        byte[] serialized;
-        if (Boolean.parseBoolean(
-                System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY))) {
-            CompatibilityUtils.writeCompatibilityFile("manifest-committable-v14-v5", current);
-            serialized = current;
-        } else {
-            serialized =
-                    IOUtils.readFully(
-                            ManifestCommittableSerializerCompatibilityTest.class
-                                    .getClassLoader()
-                                    .getResourceAsStream(
-                                            "compatibility/manifest-committable-v14-v5"),
-                            true);
-        }
-
-        assertThat(current).isEqualTo(serialized);
+        byte[] serialized =
+                IOUtils.readFully(
+                        ManifestCommittableSerializerCompatibilityTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/manifest-committable-v14-v5"),
+                        true);
         ManifestCommittable restored = serializer.deserialize(5, serialized);
         assertThat(restored).isEqualTo(committable);
         assertThat(restored.fileCommittables().get(0).checkFromSnapshot()).isEqualTo(3L);
@@ -122,6 +111,26 @@ public class ManifestCommittableSerializerCompatibilityTest {
         ManifestCommittable restoredLegacy = serializer.deserialize(5, legacySerialized);
         assertThat(restoredLegacy).isEqualTo(legacyCommittable);
         assertThat(restoredLegacy.fileCommittables().get(0).checkFromSnapshot()).isNull();
+
+        ((CommitMessageImpl) committable.fileCommittables().get(0))
+                .compactIncrement()
+                .setExpectedDeletionVectorFile("base-dv");
+        byte[] current = serializer.serialize(committable);
+        if (Boolean.parseBoolean(
+                System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY))) {
+            CompatibilityUtils.writeCompatibilityFile("manifest-committable-v15-v5", current);
+            serialized = current;
+        } else {
+            serialized =
+                    IOUtils.readFully(
+                            ManifestCommittableSerializerCompatibilityTest.class
+                                    .getClassLoader()
+                                    .getResourceAsStream(
+                                            "compatibility/manifest-committable-v15-v5"),
+                            true);
+        }
+        assertThat(current).isEqualTo(serialized);
+        assertThat(serializer.deserialize(5, serialized)).isEqualTo(committable);
     }
 
     @Test

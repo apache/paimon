@@ -115,6 +115,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
@@ -2450,6 +2451,189 @@ public class FileStoreCommitTest {
         assertThat(latestSnapshot.commitUser()).isEqualTo(commitUser);
         assertThat(latestSnapshot.commitIdentifier()).isEqualTo(identifier);
         assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testBucketedDvConflictOnCommitRetry(boolean uncertainSuccess) throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        BinaryRow partition = gen.getPartition(gen.next());
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(bucketedDvCommittable(partition, 0, 0, null, "base-dv"), false);
+        }
+        AtomicInteger attempts = new AtomicInteger();
+        SnapshotCommit delegate = new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty());
+        SnapshotCommit publisher =
+                new SnapshotCommit(Lock.empty()) {
+                    @Override
+                    protected boolean commitImpl(
+                            @Nullable String baseSnapshotUuid,
+                            Snapshot snapshot,
+                            String branch,
+                            List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                            throws Exception {
+                        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+                        assertThat(attempts.incrementAndGet()).isEqualTo(1);
+                        if (uncertainSuccess) {
+                            assertThat(
+                                            delegate.commit(
+                                                    baseSnapshotUuid, snapshot, branch, statistics))
+                                    .isTrue();
+                        } else {
+                            // Publish another DV after the first conflict check, forcing a CAS
+                            // retry.
+                            try (FileStoreCommit concurrent = store.newCommit("concurrent", null)) {
+                                concurrent.commit(
+                                        bucketedDvCommittable(
+                                                partition, 0, 1, "base-dv", "concurrent-dv"),
+                                        false);
+                            }
+                        }
+                        return false;
+                    }
+
+                    @Override
+                    protected void closeImpl() throws Exception {
+                        delegate.close();
+                    }
+                };
+        try (FileStoreCommitImpl commit = newCommitWithSnapshotCommit(store, "writer", publisher)) {
+            ManifestCommittable pending =
+                    bucketedDvCommittable(partition, 0, 1, "base-dv", "writer-dv");
+            if (uncertainSuccess) {
+                commit.commit(pending, false);
+            } else {
+                assertThatThrownBy(() -> commit.commit(pending, false))
+                        .hasMessageContaining("Deletion vector conflict");
+            }
+        }
+        assertThat(attempts.get()).isEqualTo(1);
+        assertThat(
+                        store.newIndexFileHandler()
+                                .scan(
+                                        store.snapshotManager().latestSnapshot(),
+                                        DELETION_VECTORS_INDEX,
+                                        partition,
+                                        0))
+                .extracting(IndexFileMeta::fileName)
+                .containsExactly(uncertainSuccess ? "writer-dv" : "concurrent-dv");
+    }
+
+    @Test
+    public void testBucketedDvConflictWithoutBaseSnapshot() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        BinaryRow partition = gen.getPartition(gen.next());
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            bucketedDvCommittable(
+                                                    partition, 0, 0, "missing-dv", "new-dv"),
+                                            false))
+                    .hasMessageContaining("expected DV file missing-dv, current DV file null");
+            assertThat(store.snapshotManager().latestSnapshot()).isNull();
+            // The same committer can publish a result that was prepared against no DV.
+            commit.commit(bucketedDvCommittable(partition, 0, 0, null, "new-dv"), false);
+        }
+        assertThat(store.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+    }
+
+    @Test
+    public void testBucketedDvConflictIgnoresOtherBuckets() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        2,
+                        CoreOptions.ChangelogProducer.NONE,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        BinaryRow partition = gen.getPartition(gen.next());
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(bucketedDvCommittable(partition, 0, 0, null, "dv-0"), false);
+            commit.commit(bucketedDvCommittable(partition, 1, 1, null, "dv-1"), false);
+            commit.commit(bucketedDvCommittable(partition, 0, 2, "dv-0", "dv-0-next"), false);
+            // The bucket-1 baseline is still valid despite changes to bucket 0 and index manifest.
+            commit.commit(bucketedDvCommittable(partition, 1, 3, "dv-1", "dv-1-next"), false);
+        }
+    }
+
+    private ManifestCommittable bucketedDvCommittable(
+            BinaryRow partition,
+            int bucket,
+            long identifier,
+            @Nullable String expected,
+            String added) {
+        CompactIncrement increment =
+                new CompactIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                new IndexFileMeta(
+                                        DELETION_VECTORS_INDEX,
+                                        added,
+                                        1L,
+                                        0L,
+                                        (GlobalIndexMeta) null,
+                                        null)),
+                        Collections.emptyList());
+        increment.setExpectedDeletionVectorFile(expected);
+        ManifestCommittable committable = new ManifestCommittable(identifier);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition, bucket, 2, DataIncrement.emptyIncrement(), increment));
+        return committable;
+    }
+
+    @Test
+    public void testCombinedBucketedDvCommitsThroughEmptyBaseline() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        BinaryRow partition = gen.getPartition(gen.next());
+        ManifestCommittable base = bucketedDvCommittable(partition, 0, 0, null, "base-dv");
+        IndexFileMeta baseDv =
+                ((CommitMessageImpl) base.fileCommittables().get(0))
+                        .compactIncrement()
+                        .newIndexFiles()
+                        .get(0);
+        CompactIncrement removal =
+                new CompactIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(baseDv));
+        removal.setExpectedDeletionVectorFile("base-dv");
+        ManifestCommittable combined = new ManifestCommittable(1);
+        combined.addFileCommittable(
+                new CommitMessageImpl(partition, 0, 1, DataIncrement.emptyIncrement(), removal));
+        combined.addFileCommittable(
+                bucketedDvCommittable(partition, 0, 1, null, "next-dv").fileCommittables().get(0));
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(base, false);
+            commit.commit(combined, false);
+        }
+        assertThat(
+                        store.newIndexFileHandler()
+                                .scan(
+                                        store.snapshotManager().latestSnapshot(),
+                                        DELETION_VECTORS_INDEX,
+                                        partition,
+                                        0))
+                .extracting(IndexFileMeta::fileName)
+                .containsExactly("next-dv");
     }
 
     @ParameterizedTest
