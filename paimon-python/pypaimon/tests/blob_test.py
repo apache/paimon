@@ -2200,6 +2200,67 @@ class BlobTest(unittest.TestCase):
             self.assertEqual(blob.to_data(), v1_shaped_inline)
             reader.close()
 
+    def test_inline_materialized_payloads_preserve_reference_headers(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.execution.python.read.reader.auth_masking_reader import (
+            BatchToRecordReaderAdapter, ColumnProjectReader)
+        from pypaimon.execution.python.read.reader.blob_descriptor_convert_reader import (
+            BlobInlineConvertReader)
+        from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+
+        with tempfile.TemporaryDirectory() as directory:
+            file_io = LocalFileIO.create()
+            target = Path(directory) / 'target'
+            target.write_bytes(b'wrong payload')
+            payloads = [BlobViewStruct('db.payload', 7, 42).serialize(),
+                        BlobDescriptor(str(target), 0, target.stat().st_size).serialize()]
+            fields = [DataField(0, 'id', AtomicType('INT')), DataField(1, 'payload', AtomicType('BLOB'))]
+            for kind in ('descriptor', 'view'):
+                for payload in payloads:
+                    with self.subTest(kind=kind, payload=payload):
+                        source = Path(directory) / 'source'
+                        source.write_bytes(payload)
+                        descriptor = BlobDescriptor(str(source), 0, len(payload))
+                        value = (descriptor.serialize() if kind == 'descriptor'
+                                 else BlobViewStruct('db.source', 1, 2).serialize())
+                        batch = pa.RecordBatch.from_arrays(
+                            [pa.array(['-D']), pa.array([1]),
+                             pa.array([value], type=pa.large_binary())], names=['_row_kind', 'id', 'payload'])
+
+                        class InnerReader(RecordBatchReader):
+                            def __init__(self):
+                                self.file_io = file_io
+                                self.blob_field_indices = {1}
+                                self.descriptor_field_indices = {1}
+                                self.batch = batch
+
+                            def read_arrow_batch(self):
+                                result, self.batch = self.batch, None
+                                return result
+
+                            def close(self):
+                                pass
+
+                        table = MagicMock()
+                        table.file_io = file_io
+                        table.options = CoreOptions(Options({
+                            'blob-as-descriptor': 'false', 'blob-%s-field' % kind: 'payload'}))
+                        reader = BlobInlineConvertReader(
+                            InnerReader(), table, field_names=[field.name for field in fields])
+                        if kind == 'view':
+                            lookup = MagicMock()
+                            lookup.resolve_to_null.return_value = False
+                            lookup.resolve_blob.return_value = Blob.from_bytes(descriptor.serialize(), file_io)
+                            reader._blob_view_lookup = lookup
+                            reader._prescan_done = True
+                        projected = ColumnProjectReader(reader, ['payload', 'id'], fields)
+                        rows = BatchToRecordReaderAdapter(projected)
+                        row = rows.read_batch().next()
+                        self.assertEqual(row.get_row_kind(), RowKind.DELETE)
+                        self.assertIsInstance(row.get_blob(0), BlobData)
+                        self.assertEqual(row.get_blob(0).to_data(), payload)
+                        rows.close()
+
     def test_wrap_record_reader_propagates_blob_metadata_for_get_blob(self):
         from pypaimon.common.options import Options
         from pypaimon.common.options.core_options import CoreOptions

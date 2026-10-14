@@ -15,19 +15,41 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
+import re
 from typing import List, Union
+
+import uuid
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.blob.managed_blob_cleanup import managed_blob_deletion_paths
+from pypaimon.blob.managed_blob_reference_collector import (
+    ManagedBlobReferenceCollector,
+)
+from pypaimon.blob.managed_blob_reference_file import ManagedBlobReferenceFile
+from pypaimon.blob.primary_key_blob_externalizer import PrimaryKeyBlobExternalizer
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.execution.python.read.reader.deduplicate_merge_function import (DeduplicateMergeFunction)
-from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.schema.data_types import managed_blob_field_names
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.execution.python.write.writer.data_writer import DataWriter
 from pypaimon.execution.python.write.writer.write_buffer import WriteBuffer
+from pypaimon.write.row_utils import validate_inline_blob_fields
+
+
+def _qualified_local_path(path):
+    normalized = str(path).replace('\\', '/')
+    if (normalized.startswith('/')
+            or normalized.startswith('file:')
+            or '://' in normalized
+            or re.match(r'^[A-Za-z]:', normalized)):
+        return path
+    return os.path.abspath(path).replace('\\', '/')
 
 
 class KeyValueDataWriter(DataWriter):
@@ -44,7 +66,7 @@ class KeyValueDataWriter(DataWriter):
 
     def __init__(self, table, partition, bucket, max_seq_number,
                  options=None, write_cols=None, merge_function=None,
-                 changelog_producer=ChangelogProducer.NONE):
+                 changelog_producer=ChangelogProducer.NONE, blob_uri_reader_factory=None):
         super().__init__(table, partition, bucket, max_seq_number,
                          options, write_cols, changelog_producer)
         # Defaults to deduplicate so direct callers (tests / future code
@@ -58,9 +80,47 @@ class KeyValueDataWriter(DataWriter):
             WriteBuffer(self._merge_data)
             if changelog_producer == ChangelogProducer.INPUT
             and self._writes_changelog_before_merge() else None)
+        inline = (self.options.blob_descriptor_fields()
+                  | self.options.blob_view_fields())
+        self._managed_blob_fields = managed_blob_field_names(self.table.fields, inline)
+        self._blob_externalizer = None
+        if self._managed_blob_fields:
+            self._blob_externalizer = PrimaryKeyBlobExternalizer(
+                self.file_io,
+                self._new_managed_blob_path,
+                self.table.fields,
+                self._managed_blob_fields,
+                self._managed_blob_target_size(),
+                self.options.blob_copy_buffer_size(),
+                uri_reader_factory=(blob_uri_reader_factory if blob_uri_reader_factory is not None
+                                    else getattr(self.file_io, "uri_reader_factory", None)),
+            )
 
     def _writes_changelog_before_merge(self):
         return True
+
+    def write(self, data: pa.RecordBatch):
+        # Inline fields are persisted as-is, so raw payloads would commit
+        # rows that no reader can resolve.
+        validate_inline_blob_fields(
+            data, self.options.blob_descriptor_fields(), self.options.blob_view_fields())
+        super().write(data)
+
+    def _managed_blob_target_size(self) -> int:
+        if self.options.options.contains(CoreOptions.BLOB_TARGET_FILE_SIZE):
+            return self.options.blob_target_file_size()
+        return CoreOptions.BLOB_TARGET_FILE_SIZE.default_value().get_bytes()
+
+    def _new_managed_blob_path(self) -> str:
+        file_name = "%s%s-0%s" % (
+            CoreOptions.data_file_prefix(self.options),
+            uuid.uuid4(),
+            ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX,
+        )
+        # A relative warehouse such as ``./wh`` would otherwise be stored as a
+        # relative pack URI. Readers then join it onto the table path again.
+        # Java opens the published URI directly, so local packs must be absolute.
+        return _qualified_local_path(self._generate_file_path(file_name))
 
     def _process_data(self, data: pa.RecordBatch) -> pa.Table:
         # No sort here: sorting once at flush is strictly cheaper than
@@ -81,6 +141,14 @@ class KeyValueDataWriter(DataWriter):
     def prepare_commit(self) -> List[DataFileMeta]:
         if self._buffer.num_rows > 0 or self._has_pending_input_changelog():
             self._flush_all()
+        if self._blob_externalizer is not None:
+            try:
+                self._blob_externalizer.prepare_commit()
+            except Exception:
+                # Closing the pack already deleted every uncommitted pack, so
+                # the data files that point at them cannot be committed.
+                self.abort()
+                raise
         # ``_flush_all`` empties the buffer, so super's prepare_commit just
         # returns ``committed_files``.
         return super().prepare_commit()
@@ -104,6 +172,8 @@ class KeyValueDataWriter(DataWriter):
         try:
             if self._buffer.num_rows > 0 or self._has_pending_input_changelog():
                 self._flush_all()
+            if self._blob_externalizer is not None:
+                self._blob_externalizer.prepare_commit()
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -114,6 +184,35 @@ class KeyValueDataWriter(DataWriter):
             raise e
         finally:
             self._buffer.reset()
+
+    def _write_data_to_file(self, data: pa.Table):
+        if self._blob_externalizer is not None:
+            data = self._blob_externalizer.externalize_table(data)
+        try:
+            super()._write_data_to_file(data)
+        except Exception:
+            if self._blob_externalizer is not None:
+                self._blob_externalizer.discard_pending_hand_off()
+            raise
+        if self._blob_externalizer is not None:
+            self._blob_externalizer.hand_off_pending()
+
+    def _additional_extra_files(self, file_path: str, data: pa.Table) -> List[str]:
+        if not self._managed_blob_fields:
+            return []
+        collector = ManagedBlobReferenceCollector(
+            self.file_io, file_path, self.table.fields, self._managed_blob_fields)
+        try:
+            collector.collect_table(data)
+            names = [collector.close()]
+            if self._blob_externalizer is not None:
+                # Packs can be shared across data files. Only the sidecar is
+                # exclusively owned and safe for every engine's extra-file cleanup.
+                self._blob_externalizer.take_referenced_pack_names()
+            return names
+        except Exception:
+            collector.abort()
+            raise
 
     def _flush_all(self) -> None:
         """Sort + fold the entire buffer, then roll-write as files.
@@ -163,9 +262,23 @@ class KeyValueDataWriter(DataWriter):
             self._input_changelog_buffer.reset(data if data.num_rows else None)
 
     def abort(self):
+        if self._blob_externalizer is not None:
+            self._blob_externalizer.abort()
         super().abort()
         if self._input_changelog_buffer is not None:
             self._input_changelog_buffer.reset()
+
+    def _delete_committed_files(self, file_metas: List[DataFileMeta]):
+        if not self._managed_blob_fields:
+            return super()._delete_committed_files(file_metas)
+        # Discover shared references before the base writer removes sidecars.
+        paths = [path for meta in file_metas for path in meta.collect_files()]
+        deleting = managed_blob_deletion_paths(self.table, paths)
+        super()._delete_committed_files(file_metas)
+        owned_paths = set(paths)
+        for path in deleting:
+            if path not in owned_paths:
+                self.file_io.delete_quietly(path)
 
     def _roll_write(self, data: pa.Table) -> None:
         """Write ``data`` as one or more files, each <= target_file_size.

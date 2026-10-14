@@ -17,7 +17,7 @@
 
 import unittest
 
-from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.execution.python.write.file_store_write import FileStoreWrite
 
 
 class _KeepingWriter:
@@ -40,9 +40,14 @@ class _KeepingWriter:
 
 def _file_store(writer, blob_consumer=None):
     file_store = object.__new__(FileStoreWrite)
+    file_store.table = type("_Table", (), {"is_primary_key_table": False})()
     file_store.data_writers = {((), 0): writer}
     file_store.commit_identifier = 0
+    file_store.max_seq_numbers = {}
     file_store._runtime_total_buckets = {}
+    file_store._last_modified_commit_identifiers = {}
+    file_store._written_buckets = set()
+    file_store._prepared_writer_lifecycle = None
     file_store.blob_consumer = blob_consumer
     return file_store
 

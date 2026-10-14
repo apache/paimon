@@ -90,6 +90,58 @@ def inline_blob_value(value: Any, descriptor: bool, view: bool) -> Any:
     return value
 
 
+def _inline_reference_bytes(value: Any, option: str, struct_name: str) -> bytes:
+    if hasattr(value, 'as_py'):
+        value = value.as_py()
+    if isinstance(value, str):
+        value = value.encode('utf-8')
+    if not isinstance(value, (bytes, bytearray)):
+        raise ValueError(
+            "%s requires blob field value to be a serialized %s." % (option, struct_name))
+    return bytes(value)
+
+
+def validate_inline_blob_fields(data: pa.RecordBatch, descriptor_fields, view_fields):
+    """Reject raw payloads in fields that store serialized BLOB references inline."""
+    from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
+
+    for field_name in descriptor_fields:
+        if field_name not in data.schema.names:
+            continue
+        for value in data.column(data.schema.get_field_index(field_name)).to_pylist():
+            if value is None:
+                continue
+            descriptor_bytes = _inline_reference_bytes(
+                value, 'blob-descriptor-field', 'BlobDescriptor')
+            # Like Java, schema-declared descriptors use the prefix parser.
+            # Exact wire length is only needed when detecting descriptors
+            # among arbitrary payload bytes.
+            try:
+                BlobDescriptor.deserialize(descriptor_bytes)
+            except Exception as e:
+                raise ValueError(
+                    "blob-descriptor-field requires blob field value to be a serialized "
+                    "BlobDescriptor."
+                ) from e
+
+    for field_name in view_fields:
+        if field_name not in data.schema.names:
+            continue
+        for value in data.column(data.schema.get_field_index(field_name)).to_pylist():
+            if value is None:
+                continue
+            view_bytes = _inline_reference_bytes(value, 'blob-view-field', 'BlobViewStruct')
+            try:
+                view_struct = BlobViewStruct.deserialize(view_bytes)
+                if view_struct.serialize() != view_bytes:
+                    raise ValueError("BlobViewStruct payload contains trailing bytes.")
+            except Exception as e:
+                raise ValueError(
+                    "blob-view-field requires blob field value to be a serialized "
+                    "BlobViewStruct."
+                ) from e
+
+
 def value_for_arrow(value: Any, field: DataField) -> Any:
     if isinstance(value, Vector):
         return value.to_list()
