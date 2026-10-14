@@ -183,7 +183,7 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            build-essential git curl cmake pkg-config libssl-dev libclang-dev \
+            build-essential git curl cmake pkg-config libssl-dev libclang-dev tzdata \
             && rm -rf /var/lib/apt/lists/*
 
       - name: Install Rust toolchain
@@ -226,6 +226,21 @@ jobs:
           PYPAIMON_TEST_NATIVE_COMMIT: '1'
         run: |
           bash paimon-python/dev/lint-python.sh -i pytest
+
+      - name: Verify native temporal casts in non-UTC system zones
+        shell: bash
+        env:
+          PYPAIMON_TEST_NATIVE_PLAN: '1'
+          PYPAIMON_TEST_NATIVE_READ: '1'
+          PYPAIMON_TEST_NATIVE_WRITE: '1'
+          PYPAIMON_TEST_NATIVE_COMMIT: '1'
+        run: |
+          for zone in Asia/Shanghai America/New_York; do
+            TZ="$zone" python -m pytest -q \
+              paimon-python/pypaimon/tests/native_cast_completion_test.py \
+              paimon-python/pypaimon/tests/native_temporal_zone_cast_test.py \
+              -k 'TIMESTAMP_LTZ or temporal'
+          done
 
   torch:
     name: PyTorch / Python 3.10

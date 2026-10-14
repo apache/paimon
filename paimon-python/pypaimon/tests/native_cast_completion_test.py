@@ -22,8 +22,8 @@ CAST capability matrix and generated Java vectors live in paimon-rust.
 """
 
 import json
-import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -47,15 +47,6 @@ pytestmark = native_query_auth_test.pytestmark
 ], ids=lambda mode: mode[0])
 def table_mode(request):
     return request.param
-
-
-@pytest.fixture(autouse=True)
-def utc_zone(monkeypatch):
-    monkeypatch.setenv('TZ', 'UTC')
-    time.tzset()
-    yield
-    monkeypatch.undo()
-    time.tzset()
 
 
 @contextmanager
@@ -102,6 +93,12 @@ def _case(source, target, values, expected, original=None):
 
 # Cover each executor family and original-rule rebinding through actual REST
 # plans and Parquet reads. No Python CAST implementation computes expectations.
+# Keep the process zone unchanged: Rust caches its system-zone lookup, while
+# Python's tzset() would only change libc. These epoch cases have no DST gap or
+# overlap; expectations use the system offset rather than assuming UTC.
+_EPOCH_OFFSET_MS = int(datetime.fromtimestamp(0).astimezone().utcoffset().total_seconds()) * 1000
+_LTZ_INSTANTS = [datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 7, 1, tzinfo=timezone.utc)]
+
 _CASES = [
     _case('BIGINT', 'TINYINT', [128, -129, 4294967297, None], [-128, 127, 1, None]),
     _case('DOUBLE', 'TINYINT', [-129.9, 1e30, None], [127, -1, None]),
@@ -133,13 +130,20 @@ _CASES = [
     _case('DATE', 'TIMESTAMP(3)', [0, -1, None], [0, -86400000, None]),
     _case('BIGINT', 'TIMESTAMP(3)', [1, -1, None], [1000, -1000, None]),
     _case('STRING', 'TIMESTAMP(1)', ['1970-01-01 00:00:00.123456', None], [100, None]),
-    _case('STRING', 'TIMESTAMP_LTZ(3)', ['1970-01-01 00:00:00.001', None], [1, None]),
+    _case('STRING', 'TIMESTAMP_LTZ(3)', ['1970-01-01 00:00:00.001', None], [1 - _EPOCH_OFFSET_MS, None]),
+    _case('DATE', 'TIMESTAMP_LTZ(3)', [0, -1, None], [-_EPOCH_OFFSET_MS, -86400000 - _EPOCH_OFFSET_MS, None]),
+    _case('BIGINT', 'TIMESTAMP_LTZ(3)', [0, 1, -1, None],
+          [_EPOCH_OFFSET_MS, 1000 + _EPOCH_OFFSET_MS, -1000 + _EPOCH_OFFSET_MS, None]),
+    _case('TIMESTAMP_LTZ(3)', 'STRING', [int(value.timestamp()) * 1000 for value in _LTZ_INSTANTS] + [None],
+          [value.astimezone().strftime('%Y-%m-%d %H:%M:%S') + '.000' for value in _LTZ_INSTANTS] + [None]),
     _case('TIMESTAMP(3)', 'DATE', [-1, 86400000, None], [-1, 1, None]),
     _case('TIMESTAMP(3)', 'TIME(0)', [123, -1, None], [123, 86399999, None]),
     _case('TIMESTAMP(3)', 'BIGINT', [1999, -1999, None], [1, -2, None]),
     _case('TIMESTAMP_LTZ(3)', 'BIGINT', [1999, -1999, None], [1, -2, None]),
-    _case('TIMESTAMP(3)', 'TIMESTAMP_LTZ(6)', [1, -1, None], [1000, -1000, None]),
-    _case('TIMESTAMP_LTZ(6)', 'TIMESTAMP(1)', [123456, -1, None], [100, -100, None]),
+    _case('TIMESTAMP(3)', 'TIMESTAMP_LTZ(6)', [1, -1, None],
+          [(1 - _EPOCH_OFFSET_MS) * 1000, (-1 - _EPOCH_OFFSET_MS) * 1000, None]),
+    _case('TIMESTAMP_LTZ(6)', 'TIMESTAMP(1)', [123456, -1, None],
+          [100 + _EPOCH_OFFSET_MS, -100 + _EPOCH_OFFSET_MS, None]),
     _case('DOUBLE', 'DECIMAL(4,2)', [1.9, -1.9, None], [Decimal('1.00'), Decimal('-1.00'), None], 'INT'),
     _case('DOUBLE', 'STRING', [1.0, None], ['1.0', None], 'INT'),
     _case('TIMESTAMP(3)', 'STRING', [0, -1, None],
