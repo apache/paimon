@@ -464,19 +464,28 @@ def test_not_in_with_null_skips_masked_value_conversion(tmp_path, method, with_o
 
 
 @pytest.mark.parametrize('method', ['arrow', 'iterator'])
-@pytest.mark.parametrize('first_arm', ['startswith', 'equal'])
-def test_uncastable_masked_value_keeps_or_short_circuit(tmp_path, method, first_arm):
-    fields = pa.schema([('id', pa.int32()), ('secret', pa.int32()), ('public', pa.string())])
-    # one batch: '100' still compares as INT, 'REDACTED' only matches the first arm
+@pytest.mark.parametrize('case,expected', [
+    ('startswith', [1, 2]), ('equal', [1, 2]), ('null-literal', [3]), ('is-null', [2, 4])])
+def test_masked_values_outside_declared_type_compare_as_null(tmp_path, method, case, expected):
+    fields = pa.schema([('id', pa.int32()), ('score', pa.int32()), ('secret', pa.int32()), ('public', pa.string())])
+    # one batch: secret reads '100' and '7' as INT, 'REDACTED' and 'ALLOW' as NULL
     table = table_from_rows(tmp_path, fields, [
-        {'id': 1, 'secret': 1, 'public': '100'}, {'id': 2, 'secret': 2, 'public': 'REDACTED'}])
-    authorize(table, TableQueryAuthResult(None, {'secret': json.dumps(field_ref('public', 2))}))
-    predicates = PredicateBuilder(table.fields)
-    public = (predicates.startswith('public', 'R') if first_arm == 'startswith'
-              else predicates.equal('public', 'REDACTED'))
-    predicate = PredicateBuilder.or_predicates([public, predicates.greater_than('secret', 50)])
+        {'id': 1, 'score': None, 'secret': 1, 'public': '100'},
+        {'id': 2, 'score': 1, 'secret': 2, 'public': 'REDACTED'},
+        {'id': 3, 'score': None, 'secret': 3, 'public': '7'},
+        {'id': 4, 'score': 4, 'secret': 4, 'public': 'ALLOW'}])
+    authorize(table, TableQueryAuthResult(None, {'secret': json.dumps(field_ref('public', 3))}))
+    p = PredicateBuilder(table.fields)
+    predicate = {
+        'startswith': PredicateBuilder.or_predicates([p.startswith('public', 'R'), p.greater_than('secret', 50)]),
+        'equal': PredicateBuilder.or_predicates([p.equal('public', 'REDACTED'), p.greater_than('secret', 50)]),
+        'null-literal': PredicateBuilder.or_predicates([
+            p.not_equal('score', None), p.less_than('secret', 50),
+            PredicateBuilder.and_predicates([p.equal('public', 'ALLOW'), p.greater_than('secret', 50)])]),
+        'is-null': p.is_null('secret'),
+    }[case]
     rows = read(table, predicate, projection=['id'], method=method)
-    assert rows == ([(1,), (2,)] if method == 'iterator' else [{'id': 1}, {'id': 2}])
+    assert rows == ([(i,) for i in expected] if method == 'iterator' else [{'id': i} for i in expected])
 
 
 def test_nested_filter_alias_authorizes_its_source_column(tmp_path):

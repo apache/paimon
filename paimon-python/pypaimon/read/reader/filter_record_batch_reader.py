@@ -19,6 +19,7 @@ import logging
 from typing import Callable, List, Optional
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.dataset as ds
 import polars
 
@@ -37,6 +38,9 @@ logger = logging.getLogger(__name__)
 def _comparison_fields(predicate):
     if predicate.method in ('and', 'or'):
         return set().union(*(_comparison_fields(child) for child in predicate.literals))
+    if predicate.method in ('isNull', 'isNotNull'):
+        # Null checks see the cast values, so they agree with comparisons.
+        return {predicate.field}
     literals = predicate.literals or []
     # NOT IN with a NULL literal never matches, so skip the cast.
     if predicate.method == 'notIn' and any(value is None for value in literals):
@@ -49,16 +53,21 @@ def _comparison_fields(predicate):
     return set()
 
 
-def _cast_values(rows, types):
-    # Values that fit the declared type compare as it; the others keep their masked value.
-    for row in rows:
-        row = list(row)
-        for index, data_type in types.items():
+def _try_cast(column, data_type):
+    # Like SQL TRY_CAST: values that do not fit the declared type compare as NULL.
+    try:
+        return column.cast(data_type)
+    except pa.ArrowNotImplementedError:
+        return pa.nulls(len(column), data_type)
+    except pa.ArrowInvalid:
+        values = column.unique()
+        cast = []
+        for index in range(len(values)):
             try:
-                row[index] = pa.array([row[index]]).cast(data_type)[0].as_py()
-            except (pa.ArrowInvalid, pa.ArrowNotImplementedError, pa.ArrowTypeError):
-                pass
-        yield tuple(row)
+                cast.append(values.slice(index, 1).cast(data_type))
+            except pa.ArrowInvalid:
+                cast.append(pa.nulls(1, data_type))
+        return pa.concat_arrays(cast).take(pc.index_in(column, value_set=values))
 
 
 class FilterRecordBatchReader(RecordBatchReader):
@@ -104,11 +113,7 @@ class FilterRecordBatchReader(RecordBatchReader):
 
     def _filter_batch(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
         view = batch if self._filter_view is None else self._filter_view(batch)
-        try:
-            filter_batch = self._coerce_comparison_types(view)
-        except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
-            # Some masked values do not fit the declared type; convert the others per row.
-            return self._filter_batch_by_row(batch, view, cast_values=True)
+        filter_batch = self._coerce_comparison_types(view, batch)
         if not self._use_arrow_filter:
             return self._filter_batch_by_row(batch, filter_batch)
         expr = self.predicate.to_arrow(filter_batch.schema)
@@ -140,23 +145,22 @@ class FilterRecordBatchReader(RecordBatchReader):
             schema=result.schema,
         )
 
-    def _coerce_comparison_types(self, batch):
-        # Cast for comparison only; the output is unchanged.
+    def _coerce_comparison_types(self, view, batch):
+        # Cast columns a mask retyped, for the filter only; the output is unchanged.
         columns = None
         for name, data_type in self._comparison_types.items():
-            column = batch.column(name)
-            if column.type != data_type:
+            column = view.column(name)
+            if column.type != data_type and column.type != batch.column(name).type:
                 if columns is None:
-                    columns, fields = list(batch.columns), list(batch.schema)
-                index = batch.schema.get_field_index(name)
-                columns[index] = column.cast(data_type)
+                    columns, fields = list(view.columns), list(view.schema)
+                index = view.schema.get_field_index(name)
+                columns[index] = _try_cast(column, data_type)
                 fields[index] = fields[index].with_type(data_type)
         if columns is None:
-            return batch
-        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields, metadata=batch.schema.metadata))
+            return view
+        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields, metadata=view.schema.metadata))
 
-    def _filter_batch_by_row(self, batch: pa.RecordBatch, filter_batch=None,
-                             cast_values=False) -> Optional[pa.RecordBatch]:
+    def _filter_batch_by_row(self, batch: pa.RecordBatch, filter_batch=None) -> Optional[pa.RecordBatch]:
         filter_batch = batch if filter_batch is None else filter_batch
         # Predicate indices address logical fields. A record-reader adapter
         # may prepend _row_kind, which is metadata rather than an operand.
@@ -164,13 +168,8 @@ class FilterRecordBatchReader(RecordBatchReader):
                    [field.name for field in self.schema_fields] if self.schema_fields is not None else
                    [name for name in filter_batch.schema.names if name != "_row_kind"])
         df = polars.from_arrow(_polars_arrow_table(filter_batch).select(columns))
-        rows = self._iter_df_rows(df)
-        if cast_values:
-            types = {columns.index(name): data_type for name, data_type in self._comparison_types.items()
-                     if name in columns and filter_batch.column(name).type != data_type}
-            rows = _cast_values(rows, types)
         iterator = InternalRowWrapperIterator(
-            rows,
+            self._iter_df_rows(df),
             df.width,
             self.file_io,
             self.blob_field_indices,
