@@ -75,22 +75,39 @@ _DATE_EXTRACT = {
 
 def parse_predicate_to_batch_filter(json_str: str) -> Callable[[pa.RecordBatch], pa.Array]:
     data = json.loads(json_str)
-    return _build_filter(data)
+    execute = _build_filter(data)
+    validate = _build_filter(data, short_circuit=False)
+    validated_schema = None
+
+    def filter_fn(batch):
+        nonlocal validated_schema
+        # Java deserializes every child before row evaluation. Validate all
+        # definitions on typed empty arrays even if short-circuiting skips them.
+        if validated_schema != batch.schema:
+            validate(batch.slice(0, 0))
+            validated_schema = batch.schema
+        return execute(batch)
+
+    return filter_fn
 
 
-def _build_filter(data: dict) -> Callable[[pa.RecordBatch], pa.Array]:
+def _build_filter(data: dict, short_circuit=True) -> Callable[[pa.RecordBatch], pa.Array]:
     kind = data["kind"]
     if kind == "LEAF":
         return _build_leaf_filter(data)
     elif kind == "COMPOUND":
-        return _build_compound_filter(data)
+        return _build_compound_filter(data, short_circuit)
     raise ValueError(f"Unknown predicate kind: {kind}")
 
 
 def _build_leaf_filter(data: dict) -> Callable:
     transform = data["transform"]
     function = data["function"]
-    literals = data.get("literals", [])
+    literals = data.get("literals")
+    if literals is None and function in ('TRUE', 'FALSE', 'IS_NULL', 'IS_NOT_NULL', 'IS_NAN'):
+        literals = []
+    if not isinstance(literals, list):
+        raise ValueError(f"{function} needs a literal list")
 
     def filter_fn(batch: pa.RecordBatch) -> pa.Array:
         value_array = _apply_predicate_transform(transform, batch)
@@ -99,22 +116,31 @@ def _build_leaf_filter(data: dict) -> Callable:
     return filter_fn
 
 
-def _build_compound_filter(data: dict) -> Callable:
+def _build_compound_filter(data: dict, short_circuit=True) -> Callable:
     function = data["function"]
-    child_filters = [_build_filter(child) for child in data["children"]]
+    if function not in ('AND', 'OR'):
+        raise ValueError(f"Unknown compound function: {function}")
+    children = data['children']
+    if not children:
+        raise ValueError('Compound predicate needs children')
+    child_filters = [_build_filter(child, short_circuit) for child in children]
 
     def filter_fn(batch: pa.RecordBatch) -> pa.Array:
-        if function == "AND":
-            result = child_filters[0](batch)
-            for cf in child_filters[1:]:
-                result = pc.and_(result, cf(batch))
-            return result
-        elif function == "OR":
-            result = child_filters[0](batch)
-            for cf in child_filters[1:]:
-                result = pc.or_(result, cf(batch))
-            return result
-        raise ValueError(f"Unknown compound function: {function}")
+        result = child_filters[0](batch)
+        for cf in child_filters[1:]:
+            if not short_circuit:
+                result = pc.and_(result, cf(batch)) if function == 'AND' else pc.or_(result, cf(batch))
+                continue
+            # Java evaluates each later child only for undecided rows. Retain
+            # their original positions so nested compounds keep row order.
+            pending = result if function == 'AND' else pc.invert(result)
+            if not pc.any(pending).as_py():
+                break
+            if pc.all(pending).as_py():
+                result = cf(batch)
+                continue
+            result = pc.replace_with_mask(result, pending, cf(batch.filter(pending)))
+        return result
 
     return filter_fn
 
@@ -128,8 +154,30 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
 
     elif name == "CAST":
         col = batch.column(transform["fieldRef"]["name"])
-        target_type = _paimon_type_to_arrow(transform["type"])
-        return pc.cast(col, target_type, safe=False)
+        target = transform['type']
+        width = re.fullmatch(r"\s*(CHAR|VARCHAR|BINARY|VARBINARY)(?=\s|\(|\Z)"
+                             r"(?:\s*\(\s*([0-9]+)\s*\))?"
+                             r"(?:\s*(?:NOT\s+)?NULL)?\s*", target, flags=re.IGNORECASE)
+        if width is not None:
+            kind, length = width.group(1).upper(), int(width.group(2) or 1)
+            if length < 1 or length > _INT_MAX:
+                raise ValueError('Cast width must be between 1 and 2147483647')
+            target_type = pa.string() if kind in ('CHAR', 'VARCHAR') else pa.binary()
+        else:
+            target_type = _paimon_type_to_arrow(target)
+        stored = _paimon_type_to_arrow(transform['fieldRef']['type'])
+        col = _cast_input_for_java_executor(col, stored, target_type)
+        result = pc.cast(col, target_type, safe=False)
+        # Java CastTransform enforces widths; Arrow uses unbounded arrays.
+        if width is not None:
+            pad = kind in ('CHAR', 'BINARY')
+            padding = ' ' if kind == 'CHAR' else b'\x00'
+            result = pa.array([
+                None if value is None else
+                (value[:length] + padding * max(0, length - len(value)) if pad else value[:length])
+                for value in result.to_pylist()
+            ], type=target_type)
+        return result
 
     elif name == "UPPER":
         input_col = _resolve_transform_input(transform["inputs"][0], batch)
@@ -142,7 +190,7 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     elif name == "CONCAT":
         resolved = [_resolve_transform_input(inp, batch) for inp in transform["inputs"]]
         if not resolved:
-            return pa.nulls(len(batch), type=pa.string())
+            return pa.array([''] * len(batch), type=pa.string())
         return pc.binary_join_element_wise(*resolved, "")
 
     elif name == "CONCAT_WS":
@@ -191,6 +239,43 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
         return _pad(transform["inputs"], transform.get("direction"), batch)
 
     raise ValueError(f"Unknown transform type: {name}")
+
+
+def _cast_input_for_java_executor(col, stored, target):
+    # copyWithNewInputs retains Java's original executor. Character, Boolean
+    # and byte executors require their original runtime value class.
+    needs_class = (((pa.types.is_string(stored) or pa.types.is_large_string(stored)) and
+                    not (pa.types.is_string(col.type) or pa.types.is_large_string(col.type))) or
+                   (pa.types.is_boolean(stored) and not pa.types.is_boolean(col.type)) or
+                   ((pa.types.is_binary(stored) or pa.types.is_large_binary(stored)) and
+                    not (pa.types.is_binary(col.type) or pa.types.is_large_binary(col.type))))
+    if needs_class:
+        if col.null_count != len(col):
+            raise ValueError('CAST source no longer has the runtime type its Java executor expects')
+        return pa.nulls(len(col), type=target)
+
+    numeric = pa.types.is_integer(stored) or pa.types.is_floating(stored) or pa.types.is_decimal(stored)
+    if numeric and pa.types.is_string(target) and col.type != stored:
+        # NumericToString accepts Object. DATE and TIME getters return Integer,
+        # so this executor prints epoch days / milliseconds, not calendar text.
+        if pa.types.is_date(col.type):
+            return col.cast(pa.date32(), safe=False).cast(pa.int32())
+        if pa.types.is_time(col.type):
+            return col.cast(pa.time32('ms'), safe=False).cast(pa.int32())
+        if pa.types.is_decimal(col.type):
+            # Paimon Decimal.toString uses BigDecimal.toPlainString. Arrow may
+            # emit an exponent for a small scaled decimal, including zero.
+            return pa.array([None if value is None else format(value, 'f') for value in col.to_pylist()],
+                            type=pa.string())
+        if not (pa.types.is_integer(col.type) or pa.types.is_decimal(col.type) or
+                pa.types.is_boolean(col.type) or pa.types.is_string(col.type) or pa.types.is_large_string(col.type)):
+            # Timestamp.toString uses LocalDateTime text, and other objects
+            # have their own formatting. An Arrow cast would authorize other
+            # rows; refuse the unsupported rebound instead.
+            if col.null_count != len(col):
+                raise ValueError('CAST rebound source requires its original Java executor formatting')
+            return pa.nulls(len(col), type=target)
+    return col
 
 
 def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array:
@@ -653,7 +738,18 @@ def _apply_leaf_function(function: str, value_array: pa.Array, literals: list, b
     two-valued logic (null → False) so that compound AND/OR behaves
     identically to Java.
     """
-    converted = [_convert_literal(lit, value_array.type) for lit in literals]
+    if (pa.types.is_binary(value_array.type) or pa.types.is_large_binary(value_array.type)) and any(
+            literal is not None for literal in literals):
+        raise ValueError('Java predicates do not support non-null binary literals')
+    converted = []
+    for literal in literals:
+        value = _convert_literal(literal, value_array.type)
+        if value is not None:
+            # Java deserializes every literal using the expression's output
+            # type before evaluation, including unused literals and NULL tests.
+            checked = pa.scalar(value, type=value_array.type)
+            value = checked if isinstance(value, pa.Scalar) else checked.as_py()
+        converted.append(value)
 
     if function == "EQUAL":
         if converted[0] is None:
