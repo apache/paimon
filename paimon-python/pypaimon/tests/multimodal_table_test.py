@@ -29,6 +29,7 @@ import pyarrow as pa
 import pytest
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import source_col
+from pypaimon.common.json_util import JSON
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon import Schema as PaimonSchema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -1189,13 +1190,15 @@ class MultimodalTableTest(unittest.TestCase):
     def test_get_table_rejects_primary_key_table(self):
         self.conn.catalog.create_database("default", ignore_if_exists=True)
         self.conn.catalog.create_table(
-            "default.pk",
-            _raw_schema(
-                options=dict(_PARQUET_OPTIONS, **{"bucket": "1"}),
-                primary_keys=["id"],
-            ),
-            False,
-        )
+            "default.pk", _raw_schema(options=_PARQUET_OPTIONS), False)
+        # Row tracking tables cannot define primary keys, so such a table can
+        # only come from writers that skipped schema validation. Simulate it
+        # by rewriting the committed schema file.
+        table = self.conn.catalog.get_table("default.pk")
+        legacy_schema = replace(table.table_schema, primary_keys=["id"])
+        table.file_io.overwrite_file_utf8(
+            table.schema_manager._to_schema_path(legacy_schema.id),
+            JSON.to_json(legacy_schema, indent=2))
 
         with self.assertRaisesRegex(ValueError, "primary keys"):
             self.conn.get_table("pk")
