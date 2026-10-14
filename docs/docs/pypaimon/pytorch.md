@@ -268,9 +268,13 @@ the sampler's `set_epoch(epoch)` each epoch. Its padding or drop behavior still
 applies when the sample count is not divisible by the number of ranks. Dataset
 version pinning does not save sampler progress or random augmentation state.
 
-Columns configured by `video-frame-field` are rejected: a window read would drop
-the `frame_index` and other metadata carried by their `VideoFrameDescriptor`
-values. Read those columns with `to_torch()` instead.
+Columns configured by `video-frame-field` are decoded after the requested rows
+have been coalesced. Their descriptor metadata remains intact, overlapping
+windows reuse the same decoded rows, and `column_transforms={"video":
+torch.stack}` converts the raw list of `CHW` frames to `TCHW`. Install
+`pypaimon[torch,video]` for PyAV, or install TorchCodec separately. Select the
+backend with `video_backend="pyav"` or `"torchcodec"`; omitting the option
+selects an available backend.
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated
