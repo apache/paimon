@@ -58,7 +58,7 @@ def _try_cast(column, data_type):
     try:
         return column.cast(data_type)
     except pa.ArrowNotImplementedError:
-        return pa.nulls(len(column), data_type)
+        return column  # Arrow cannot convert these types; filter on the masked values
     except pa.ArrowInvalid:
         values = column.unique()
         cast = []
@@ -68,6 +68,16 @@ def _try_cast(column, data_type):
             except pa.ArrowInvalid:
                 cast.append(pa.nulls(1, data_type))
         return pa.concat_arrays(cast).take(pc.index_in(column, value_set=values))
+
+
+def _needs_cast(source, target):
+    # Arrow compares numbers, and times of one kind, directly, and nested columns only take
+    # null checks; casting those could only lose precision or nullness.
+    numeric = (pa.types.is_integer, pa.types.is_floating, pa.types.is_decimal)
+    return not (pa.types.is_nested(target)
+                or any(check(source) for check in numeric) and any(check(target) for check in numeric)
+                or any(check(source) and check(target)
+                       for check in (pa.types.is_timestamp, pa.types.is_date, pa.types.is_time)))
 
 
 class FilterRecordBatchReader(RecordBatchReader):
@@ -150,12 +160,13 @@ class FilterRecordBatchReader(RecordBatchReader):
         columns = None
         for name, data_type in self._comparison_types.items():
             column = view.column(name)
-            if column.type != data_type and column.type != batch.column(name).type:
+            if (column.type != data_type and column.type != batch.column(name).type
+                    and _needs_cast(column.type, data_type)):
                 if columns is None:
                     columns, fields = list(view.columns), list(view.schema)
                 index = view.schema.get_field_index(name)
                 columns[index] = _try_cast(column, data_type)
-                fields[index] = fields[index].with_type(data_type)
+                fields[index] = fields[index].with_type(columns[index].type)
         if columns is None:
             return view
         return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields, metadata=view.schema.metadata))

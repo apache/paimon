@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import datetime
 import json
 
 import pyarrow as pa
@@ -486,6 +487,38 @@ def test_masked_values_outside_declared_type_compare_as_null(tmp_path, method, c
     }[case]
     rows = read(table, predicate, projection=['id'], method=method)
     assert rows == ([(i,) for i in expected] if method == 'iterator' else [{'id': i} for i in expected])
+
+
+@pytest.mark.parametrize('kind', ['ARRAY', 'ROW', 'MAP'])
+def test_null_checks_on_retyped_nested_masks(tmp_path, kind):
+    target, source, values, type_name = {
+        'ARRAY': (pa.list_(pa.int32()), pa.list_(pa.string()), [['1'], ['redacted'], None, ['3']], 'ARRAY<STRING>'),
+        'ROW': (pa.struct([('a', pa.int32())]), pa.struct([('a', pa.string())]),
+                [{'a': '1'}, {'a': 'redacted'}, None, {'a': '3'}], 'ROW<a STRING>'),
+        'MAP': (pa.map_(pa.string(), pa.int32()), pa.map_(pa.string(), pa.string()),
+                [[('k', '1')], [('k', 'redacted')], None, [('k', '3')]], 'MAP<STRING, STRING>'),
+    }[kind]
+    fields = pa.schema([('id', pa.int32()), ('v', target), ('src', source)])
+    table = table_from_rows(tmp_path, fields, [{'id': i + 1, 'v': None, 'src': v} for i, v in enumerate(values)])
+    authorize(table, TableQueryAuthResult(None, {'v': json.dumps(
+        {'name': 'FIELD_REF', 'fieldRef': {'name': 'src', 'index': 2, 'type': type_name}})}))
+    predicates = PredicateBuilder(table.fields)
+    assert read(table, predicates.is_null('v'), projection=['id']) == [{'id': 3}]
+    assert read(table, predicates.is_not_null('v'), projection=['id']) == [{'id': 1}, {'id': 2}, {'id': 4}]
+
+
+@pytest.mark.parametrize('target,source,type_name,values,literal', [
+    (pa.int32(), pa.float64(), 'DOUBLE', [1.5, 0.5], 1),
+    (pa.int32(), pa.int64(), 'BIGINT', [2 ** 40, 1], 5),
+    (pa.timestamp('ms'), pa.timestamp('us'), 'TIMESTAMP(6)', [1500, 500],
+     datetime.datetime(1970, 1, 1, microsecond=1000))])
+def test_numeric_and_timestamp_masks_compare_exactly(tmp_path, target, source, type_name, values, literal):
+    fields = pa.schema([('id', pa.int32()), ('v', target), ('src', source)])
+    table = table_from_rows(tmp_path, fields, [{'id': i + 1, 'v': None, 'src': v} for i, v in enumerate(values)])
+    authorize(table, TableQueryAuthResult(None, {'v': json.dumps(
+        {'name': 'FIELD_REF', 'fieldRef': {'name': 'src', 'index': 2, 'type': type_name}})}))
+    predicate = PredicateBuilder(table.fields).greater_than('v', literal)
+    assert read(table, predicate, projection=['id']) == [{'id': 1}]
 
 
 def test_nested_filter_alias_authorizes_its_source_column(tmp_path):
