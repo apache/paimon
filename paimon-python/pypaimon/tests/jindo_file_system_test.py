@@ -95,6 +95,32 @@ class JindoInputFileTest(unittest.TestCase):
         self.assertEqual([60], stream.reads)
 
 
+class JindoStreamStatsTest(unittest.TestCase):
+
+    def setUp(self):
+        stats = jindo_module._StreamStats
+        for name in ("open", "milestone"):
+            self.addCleanup(setattr, stats, name, getattr(stats, name))
+        stats.open, stats.milestone = 0, 2
+
+    def test_logs_only_when_open_streams_pass_a_power_of_two(self):
+        with self.assertLogs(jindo_module.__name__, level="INFO") as logs:
+            files = [JindoInputFile(_RecordingInputStream(), owner=object()) for _ in range(5)]
+            files.append(JindoOutputFile(_RecordingInputStream(), owner=object()))
+        self.assertEqual(["2 Jindo streams are open", "4 Jindo streams are open"],
+                         [r.getMessage().split(";")[0] for r in logs.records])
+
+        files.pop().close()
+        files.pop(0).close()
+        # Dropping an unclosed stream closes it, so it no longer counts as open.
+        files.pop(0)
+        gc.collect()
+        self.assertEqual(3, jindo_module._StreamStats.open)
+        files[0].close()
+        files[0].close()
+        self.assertEqual(2, jindo_module._StreamStats.open)
+
+
 class JindoConfigTest(unittest.TestCase):
 
     def test_input_file_seek_returns_position(self):

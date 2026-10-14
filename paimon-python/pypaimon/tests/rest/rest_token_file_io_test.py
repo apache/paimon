@@ -244,6 +244,60 @@ class RESTTokenFileIOTest(unittest.TestCase):
                          "the forked child blocked on a lock held by a parent thread")
         self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
 
+    def test_cache_misses_log_one_summary_per_interval(self):
+        cache = TTLCache(maxsize=2, ttl=3600)
+        stats = {"created": 0, "evicted": 0, "warned": False, "next_log": 0.0}
+        open_files = [(10, 1000)]
+        module = 'pypaimon.catalog.rest.rest_token_file_io'
+
+        def touch(name):
+            self._file_io_with_token(
+                self.warehouse_path, self.catalog_options, self._valid_token(name)).exists("x")
+
+        with patch.object(RESTTokenFileIO, '_FILE_IO_CACHE', cache), \
+                patch.object(RESTTokenFileIO, '_FILE_IO_STATS', stats), \
+                patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(module + '._open_files', side_effect=lambda: open_files[0]), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO), \
+                self.assertLogs(module, level='INFO') as logs:
+            for name in ("a", "b", "c", "c"):
+                touch(name)
+            # The first eviction warned without waiting for the interval, a repeat waits.
+            touch("d")
+            # Crowded descriptors warn even without evictions.
+            cache.clear()
+            stats.update(created=0, evicted=0, warned=False, next_log=0.0)
+            open_files[0] = (900, 1000)
+            touch("f")
+
+        self.assertEqual(['INFO', 'WARNING', 'WARNING'], [r.levelname for r in logs.records])
+        messages = [r.getMessage() for r in logs.records]
+        self.assertIn("holds 1/2 FileIOs", messages[0])
+        self.assertIn("1 FileIOs created and 0 evicted", messages[0])
+        self.assertIn("open files 10/1000", messages[0])
+        self.assertIn("holds 2/2 FileIOs", messages[1])
+        self.assertIn("2 FileIOs created and 1 evicted", messages[1])
+        self.assertIn("1 FileIOs created and 0 evicted", messages[2])
+        self.assertIn("open files 900/1000", messages[2])
+
+    def test_short_lived_token_warns_once_per_interval(self):
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        file_io.api_instance = MagicMock()
+        now = int(time.time() * 1000)
+        lifetimes = [7_200_000, 1_800_000, 1_800_000, 1_800_000]
+        responses = [MagicMock(token={'ak': 'test-ak'}, expires_at_millis=now + lifetime)
+                     for lifetime in lifetimes]
+        file_io.api_instance.load_table_token.side_effect = responses
+
+        with patch.object(RESTTokenFileIO, '_SHORT_TOKEN_STATS', {"count": 0, "next_log": 0.0}), \
+                self.assertLogs('pypaimon.catalog.rest.rest_token_file_io', level='WARNING') as logs:
+            for _ in lifetimes:
+                file_io.refresh_token()
+
+        self.assertEqual(1, len(logs.records))
+        self.assertIn("within the 3600 s refresh margin", logs.records[0].getMessage())
+        self.assertIn("1 such tokens", logs.records[0].getMessage())
+
     @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
     def test_fork_while_another_thread_creates_file_io(self):
         token = self._valid_token("shared")

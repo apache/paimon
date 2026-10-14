@@ -57,6 +57,11 @@ class RESTTokenFileIO(FileIO):
     # Objects whose lock a forked child resets.
     _INSTANCES = weakref.WeakSet()
 
+    # Cache misses log a summary at most this often; idle processes log nothing.
+    _STATS_LOG_INTERVAL = 600
+    _FILE_IO_STATS = {"created": 0, "evicted": 0, "warned": False, "next_log": 0.0}
+    _SHORT_TOKEN_STATS = {"count": 0, "next_log": 0.0}
+
     def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[Union[dict, Options]] = None):
         self.identifier = identifier
@@ -144,9 +149,33 @@ class RESTTokenFileIO(FileIO):
                 file_io = cache.get(cache_key)
                 if file_io is None:
                     file_io = FileIO.get(self.path, self._merged_options(token))
+                    self._log_file_io_created(cache)
                 # Re-inserting on every access expires idle entries only, like expireAfterAccess.
                 cache[cache_key] = file_io
             return file_io, token
+
+    def _log_file_io_created(self, cache):
+        # Runs under the cache lock right before the new FileIO is inserted.
+        stats = RESTTokenFileIO._FILE_IO_STATS
+        stats["created"] += 1
+        cache.expire()
+        if len(cache) >= cache.maxsize:
+            stats["evicted"] += 1
+        # Misses are rare unless tokens storm, and then each also costs a token request.
+        fds = _open_files()
+        now = time.monotonic()
+        crowded = stats["evicted"] > 0 or (fds is not None and fds[0] * 5 > fds[1] * 4)
+        # The first sign of trouble is logged at once; anything else waits for the interval.
+        if now < stats["next_log"] and (stats["warned"] or not crowded):
+            return
+        self.log.log(
+            logging.WARNING if crowded else logging.INFO,
+            "RESTTokenFileIO cache holds %d/%d FileIOs and %d tokens; %d FileIOs created and "
+            "%d evicted for size since the last summary; open files %s",
+            min(len(cache) + 1, cache.maxsize), cache.maxsize, len(self._TOKEN_CACHE),
+            stats["created"], stats["evicted"], "unknown" if fds is None else "%d/%d" % fds)
+        stats.update(created=0, evicted=0, warned=crowded,
+                     next_log=now + self._STATS_LOG_INTERVAL)
 
     def _get_file_io_scope(self) -> str:
         # FileIO.get binds its result to the path (e.g. the OSS bucket) and the catalog options.
@@ -363,6 +392,23 @@ class RESTTokenFileIO(FileIO):
         merged_token_dict = self._merge_token_with_catalog_options(response.token)
         new_token = RESTToken(merged_token_dict, response.expires_at_millis)
         self.token = new_token
+        if self._is_token_expired(new_token):
+            self._log_short_token(new_token)
+
+    def _log_short_token(self, token: RESTToken):
+        with self._TOKEN_LOCKS_LOCK:
+            stats = RESTTokenFileIO._SHORT_TOKEN_STATS
+            stats["count"] += 1
+            now = time.monotonic()
+            if now < stats["next_log"]:
+                return
+            count = stats["count"]
+            stats.update(count=0, next_log=now + self._STATS_LOG_INTERVAL)
+        self.log.warning(
+            "Data token for [%s] expires in %d s, within the %d s refresh margin, so every "
+            "access refreshes it; %d such tokens in the last %d s",
+            self.identifier, (token.expire_at_millis - int(time.time() * 1000)) // 1000,
+            RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS // 1000, count, self._STATS_LOG_INTERVAL)
 
     def valid_token(self):
         self.try_to_refresh_token()
@@ -375,6 +421,14 @@ class RESTTokenFileIO(FileIO):
 
     def close(self):
         pass
+
+
+def _open_files():
+    try:
+        import resource
+        return len(os.listdir("/proc/self/fd")), resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    except (ImportError, OSError):
+        return None
 
 
 if hasattr(os, "register_at_fork"):
