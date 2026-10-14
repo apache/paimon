@@ -22,7 +22,7 @@ import re
 
 import pyarrow as pa
 
-from pypaimon.casting.numeric_utils import java_double_decimal_text
+from pypaimon.casting.numeric_utils import java_double_decimal_text, java_decimal_digit
 
 
 _DECIMAL_TEXT = re.compile(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z')
@@ -37,8 +37,9 @@ def cast_decimal(array, target):
     fails the conversion instead of silently becoming NULL.
     """
     floating = pa.types.is_floating(array.type)
-    text = pa.types.is_string(array.type)
-    if not pa.types.is_decimal(target) or not (floating or text or pa.types.is_decimal(array.type)):
+    text = pa.types.is_string(array.type) or pa.types.is_large_string(array.type)
+    integral = pa.types.is_signed_integer(array.type)
+    if not pa.types.is_decimal(target) or not (floating or text or integral or pa.types.is_decimal(array.type)):
         return None
     values = []
     # The caller's rounding traps and exponent limits must not affect reads.
@@ -55,11 +56,21 @@ def cast_decimal(array, target):
                 value = java_double_decimal_text(value)
             if floating or text:
                 if _DECIMAL_TEXT.fullmatch(value) is None:
-                    raise pa.ArrowInvalid('Invalid decimal schema-evolution value: %s' % value)
+                    # BigDecimal accepts BMP decimal digits, unlike the
+                    # ASCII-only BinaryStringUtils integer text parser.
+                    normalized = []
+                    for character in value:
+                        digit = java_decimal_digit(character)
+                        normalized.append(str(digit) if digit is not None else character)
+                    value = ''.join(normalized)
+                    if _DECIMAL_TEXT.fullmatch(value) is None:
+                        raise pa.ArrowInvalid('Invalid decimal schema-evolution value: %s' % value)
                 try:
                     value = Decimal(value)
                 except InvalidOperation as error:
                     raise pa.ArrowInvalid('Invalid decimal schema-evolution value: %s' % value) from error
+            if integral:
+                value = Decimal(value)
             # BigDecimal validates the adjusted input scale, then setScale and
             # BigInteger.TEN.pow check their supported range before precision.
             # Zero bypasses the power check, but still needs a valid input scale.

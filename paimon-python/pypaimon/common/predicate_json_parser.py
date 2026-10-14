@@ -23,6 +23,8 @@ from typing import Callable
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.casting.numeric_cast import cast_numeric, _numeric_to_integer
+
 # utf8_slice_codeunits needs an explicit integer stop on pyarrow 6
 _MAX_STOP = 2 ** 31 - 1
 
@@ -167,7 +169,9 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
             target_type = _paimon_type_to_arrow(target)
         stored = _paimon_type_to_arrow(transform['fieldRef']['type'])
         col = _cast_input_for_java_executor(col, stored, target_type)
-        result = pc.cast(col, target_type, safe=False)
+        result = cast_numeric(col, target_type)
+        if result is None:
+            result = pc.cast(col, target_type, safe=False)
         # Java CastTransform enforces widths; Arrow uses unbounded arrays.
         if width is not None:
             pad = kind in ('CHAR', 'BINARY')
@@ -255,6 +259,37 @@ def _cast_input_for_java_executor(col, stored, target):
         return pa.nulls(len(col), type=target)
 
     numeric = pa.types.is_integer(stored) or pa.types.is_floating(stored) or pa.types.is_decimal(stored)
+    if numeric and pa.types.is_boolean(target):
+        if not pa.types.is_signed_integer(stored):
+            raise ValueError('Java has no FLOAT/DOUBLE/DECIMAL to BOOLEAN cast')
+        if pa.types.is_date(col.type):
+            col = col.cast(pa.date32(), safe=False).cast(pa.int32())
+        elif pa.types.is_time(col.type):
+            col = col.cast(pa.time32('ms'), safe=False).cast(pa.int32())
+        if not (pa.types.is_signed_integer(col.type) or pa.types.is_floating(col.type)):
+            if col.null_count != len(col):
+                raise ValueError('CAST source no longer has the Number class its Java executor expects')
+            return pa.nulls(len(col), type=target)
+        # NumericToBoolean retains Number.longValue, even for a rebound float.
+        return _numeric_to_integer(col, pa.int64())
+    numeric_target = pa.types.is_signed_integer(target) or pa.types.is_floating(target) or pa.types.is_decimal(target)
+    if numeric and numeric_target:
+        decimal = pa.types.is_decimal(stored)
+        primitive = (pa.types.is_signed_integer(col.type) or pa.types.is_floating(col.type) or
+                     pa.types.is_date(col.type) or pa.types.is_time(col.type))
+        if (decimal and not pa.types.is_decimal(col.type)) or (not decimal and not primitive):
+            if col.null_count != len(col):
+                raise ValueError('CAST source no longer has the Number/Decimal class its Java executor expects')
+            return pa.nulls(len(col), type=target)
+        if pa.types.is_date(col.type):
+            col = col.cast(pa.date32(), safe=False).cast(pa.int32())
+        elif pa.types.is_time(col.type):
+            col = col.cast(pa.time32('ms'), safe=False).cast(pa.int32())
+        if pa.types.is_decimal(target) and not decimal:
+            # NumericPrimitiveToDecimal retains longValue or doubleValue based
+            # on the stored source family, even when the actual field changes.
+            col = (_numeric_to_integer(col, pa.int64()) if pa.types.is_signed_integer(stored)
+                   else col.cast(pa.float64(), safe=False))
     if numeric and pa.types.is_string(target) and col.type != stored:
         # NumericToString accepts Object. DATE and TIME getters return Integer,
         # so this executor prints epoch days / milliseconds, not calendar text.
