@@ -463,6 +463,22 @@ def test_not_in_with_null_skips_masked_value_conversion(tmp_path, method, with_o
         assert rows == ([('kept',)] if method == 'iterator' else [{'salt': 'kept'}])
 
 
+@pytest.mark.parametrize('method', ['arrow', 'iterator'])
+@pytest.mark.parametrize('first_arm', ['startswith', 'equal'])
+def test_uncastable_masked_value_keeps_or_short_circuit(tmp_path, method, first_arm):
+    fields = pa.schema([('id', pa.int32()), ('secret', pa.int32()), ('public', pa.string())])
+    # one batch: '100' still compares as INT, 'REDACTED' only matches the first arm
+    table = table_from_rows(tmp_path, fields, [
+        {'id': 1, 'secret': 1, 'public': '100'}, {'id': 2, 'secret': 2, 'public': 'REDACTED'}])
+    authorize(table, TableQueryAuthResult(None, {'secret': json.dumps(field_ref('public', 2))}))
+    predicates = PredicateBuilder(table.fields)
+    public = (predicates.startswith('public', 'R') if first_arm == 'startswith'
+              else predicates.equal('public', 'REDACTED'))
+    predicate = PredicateBuilder.or_predicates([public, predicates.greater_than('secret', 50)])
+    rows = read(table, predicate, projection=['id'], method=method)
+    assert rows == ([(1,), (2,)] if method == 'iterator' else [{'id': 1}, {'id': 2}])
+
+
 def test_nested_filter_alias_authorizes_its_source_column(tmp_path):
     fields = pa.schema([('id', pa.int32()), ('s', pa.struct([('a', pa.string()), ('b', pa.int32())]))])
     table = table_from_rows(tmp_path, fields, [

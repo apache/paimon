@@ -49,6 +49,18 @@ def _comparison_fields(predicate):
     return set()
 
 
+def _cast_values(rows, types):
+    # Values that fit the declared type compare as it; the others keep their masked value.
+    for row in rows:
+        row = list(row)
+        for index, data_type in types.items():
+            try:
+                row[index] = pa.array([row[index]]).cast(data_type)[0].as_py()
+            except (pa.ArrowInvalid, pa.ArrowNotImplementedError, pa.ArrowTypeError):
+                pass
+        yield tuple(row)
+
+
 class FilterRecordBatchReader(RecordBatchReader):
     """
     Wraps a RecordBatchReader and filters each batch by predicate.
@@ -92,7 +104,11 @@ class FilterRecordBatchReader(RecordBatchReader):
 
     def _filter_batch(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
         view = batch if self._filter_view is None else self._filter_view(batch)
-        filter_batch = self._coerce_comparison_types(view)
+        try:
+            filter_batch = self._coerce_comparison_types(view)
+        except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+            # Some masked values do not fit the declared type; convert the others per row.
+            return self._filter_batch_by_row(batch, view, cast_values=True)
         if not self._use_arrow_filter:
             return self._filter_batch_by_row(batch, filter_batch)
         expr = self.predicate.to_arrow(filter_batch.schema)
@@ -139,7 +155,8 @@ class FilterRecordBatchReader(RecordBatchReader):
             return batch
         return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields, metadata=batch.schema.metadata))
 
-    def _filter_batch_by_row(self, batch: pa.RecordBatch, filter_batch=None) -> Optional[pa.RecordBatch]:
+    def _filter_batch_by_row(self, batch: pa.RecordBatch, filter_batch=None,
+                             cast_values=False) -> Optional[pa.RecordBatch]:
         filter_batch = batch if filter_batch is None else filter_batch
         # Predicate indices address logical fields. A record-reader adapter
         # may prepend _row_kind, which is metadata rather than an operand.
@@ -147,8 +164,13 @@ class FilterRecordBatchReader(RecordBatchReader):
                    [field.name for field in self.schema_fields] if self.schema_fields is not None else
                    [name for name in filter_batch.schema.names if name != "_row_kind"])
         df = polars.from_arrow(_polars_arrow_table(filter_batch).select(columns))
+        rows = self._iter_df_rows(df)
+        if cast_values:
+            types = {columns.index(name): data_type for name, data_type in self._comparison_types.items()
+                     if name in columns and filter_batch.column(name).type != data_type}
+            rows = _cast_values(rows, types)
         iterator = InternalRowWrapperIterator(
-            self._iter_df_rows(df),
+            rows,
             df.width,
             self.file_io,
             self.blob_field_indices,
