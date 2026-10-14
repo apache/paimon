@@ -35,8 +35,9 @@ from pypaimon.tests.rest.rest_function_test import _mock_function
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 USERS = Identifier.create('default', 'users')
+MEMBERS = Identifier.create('default', 'members')
 COLUMNS = PermissionResource(ResourceType.COLUMN, 'default', 'users')
-ARROW_SCHEMA = pa.schema([('id', pa.int64()), ('email', pa.string())])
+ARROW_SCHEMA = pa.schema([('id', pa.int64()), ('email', pa.string()), ('phone', pa.string())])
 
 
 def _schema(query_auth=True):
@@ -63,24 +64,40 @@ def _table(name):
     return PermissionResource(ResourceType.TABLE, 'default', name)
 
 
-def _grants(catalog, name):
+def _grants(catalog, name, resource_type=ResourceType.TABLE):
     grants = catalog.permission_management().list_permissions(
-        ListPermissionsRequest(ResourceType.TABLE, 'default', name)).elements
+        ListPermissionsRequest(resource_type, 'default', name)).elements
     return [(grant.get_access(), grant.get_principal()) for grant in grants]
 
 
-def test_table_grants_follow_rename_and_drop(rest):
-    catalog, _ = rest
-    catalog.permission_management().grant_permission(PermissionAssignment(_table('users'), 'SELECT', 'analyst'))
+def _column_grants(catalog, name='users'):
+    grants = catalog.permission_management().list_permissions(
+        ListPermissionsRequest(ResourceType.COLUMN, 'default', name)).elements
+    return [(grant.get_columns().get_column_names(), grant.get_columns().get_excluded_column_names())
+            for grant in grants]
+
+
+def test_table_and_column_grants_follow_rename_and_drop(rest):
+    catalog, server = rest
+    permissions = catalog.permission_management()
+    permissions.grant_permission(PermissionAssignment(_table('users'), 'SELECT', 'analyst'))
+    permissions.grant_permission(PermissionAssignment(
+        COLUMNS, 'SELECT', 'analyst', PermissionColumns(excluded_column_names=['email'])))
+    server.set_query_principals('analyst')
 
     catalog.rename_table('default.users', 'default.members')
     assert _grants(catalog, 'members') == [('SELECT', 'analyst')]
+    assert _column_grants(catalog, 'members') == [(None, ('email',))]
+    with pytest.raises(TableNoPermissionException):
+        catalog.auth_table_query(MEMBERS, ['email'])
     catalog.create_table('default.users', _schema(), False)
-    assert _grants(catalog, 'users') == []
+    assert [_grants(catalog, 'users'), _column_grants(catalog)] == [[], []]
+    catalog.auth_table_query(USERS, ['email'])
 
     catalog.drop_table('default.members')
     catalog.create_table('default.members', _schema(), False)
-    assert _grants(catalog, 'members') == []
+    assert [_grants(catalog, 'members'), _column_grants(catalog, 'members')] == [[], []]
+    catalog.auth_table_query(MEMBERS, ['email'])
 
 
 def test_dropping_a_database_or_function_removes_its_grants(rest):
@@ -122,6 +139,21 @@ def test_column_grants_limit_the_selected_columns_until_they_expire(rest, expire
                 catalog.auth_table_query(USERS, select)
 
 
+@pytest.mark.parametrize('columns', [PermissionColumns(column_names=['id']),
+                                     PermissionColumns(excluded_column_names=['email', 'phone'])])
+def test_column_grants_restrict_only_their_principal(rest, columns):
+    catalog, server = rest
+    catalog.permission_management().grant_permission(PermissionAssignment(COLUMNS, 'SELECT', 'analyst', columns))
+
+    server.set_query_principals('auditor')
+    catalog.auth_table_query(USERS, None)
+    server.set_query_principals('analyst')
+    catalog.auth_table_query(USERS, ['id'])
+    for select in (['email'], ['id', 'phone'], None):
+        with pytest.raises(TableNoPermissionException):
+            catalog.auth_table_query(USERS, select)
+
+
 def test_column_grants_need_query_auth_and_existing_columns(rest):
     catalog, _ = rest
     catalog.create_table('default.plain', _schema(query_auth=False), False)
@@ -131,7 +163,8 @@ def test_column_grants_need_query_auth_and_existing_columns(rest):
             PermissionColumns(column_names=['id'])))
     with pytest.raises(NoSuchResourceException):
         catalog.permission_management().grant_permission(PermissionAssignment(
-            COLUMNS, 'SELECT', 'analyst', PermissionColumns(column_names=['phone'])))
+            COLUMNS, 'SELECT', 'analyst', PermissionColumns(column_names=['id', 'mobile'])))
+    assert [_column_grants(catalog, 'plain'), _column_grants(catalog)] == [[], []]
 
     catalog.create_table('default.flagged', Schema.from_pyarrow_schema(
         ARROW_SCHEMA, options={'query-auth.enabled': True}), False)
@@ -147,12 +180,15 @@ def test_column_grants_follow_column_renames(rest):
 
     catalog.alter_table('default.users', [SchemaChange.rename_column('email', 'contact')])
     catalog.alter_table('default.users', [SchemaChange.drop_column('id')])
-    grants = catalog.permission_management().list_permissions(
-        ListPermissionsRequest(ResourceType.COLUMN, 'default', 'users')).elements
-    assert [grant.get_columns().get_column_names() for grant in grants] == [('contact',)]
     for change in (SchemaChange.drop_column('contact'), SchemaChange.set_option('query-auth.enabled', 'false')):
         with pytest.raises(BadRequestException):
             catalog.alter_table('default.users', [change])
+
+    table = catalog.get_table('default.users')
+    for schema in (table.table_schema, table.schema_manager.latest()):
+        assert [field.name for field in schema.fields] == ['contact', 'phone']
+        assert schema.options['query-auth.enabled'] == 'true'
+    assert _column_grants(catalog) == [(('contact',), None)]
 
 
 def test_permission_listings_are_paged(rest):
@@ -174,6 +210,7 @@ def test_tables_with_branches_cannot_have_column_grants(rest):
     catalog.create_branch(USERS, 'b1')
     with pytest.raises(BadRequestException):
         catalog.permission_management().grant_permission(grant)
+    assert _column_grants(catalog) == []
 
     catalog.drop_table('default.users')
     catalog.create_table('default.users', _schema(), False)
