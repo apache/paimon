@@ -229,6 +229,14 @@ def test_row_authorization_precedes_mask_and_user_filter(table):
     assert read(table, predicate, projection=['id', 'secret']) == [{'id': 2, 'secret': None}]
 
 
+def test_row_only_authorization_with_user_filter(table):
+    row_filter = json.dumps({'kind': 'LEAF', 'transform': field_ref('secret', 1),
+                             'function': 'EQUAL', 'literals': ['beta']})
+    authorize(table, TableQueryAuthResult([row_filter], None))
+    predicate = PredicateBuilder(table.fields).greater_than('id', 1)
+    assert read(table, predicate, projection=['id', 'secret']) == [{'id': 2, 'secret': 'beta'}]
+
+
 def test_unmasked_conjunct_keeps_its_pushdown(table):
     authorize(table, rules())
     predicates = PredicateBuilder(table.fields)
@@ -470,3 +478,27 @@ def test_nested_filter_alias_authorizes_its_source_column(tmp_path):
     builder.with_filter(builder.new_predicate_builder().equal('s_a', 'keep'))
     assert arrow_rows(builder.new_read().to_arrow(builder.new_scan().plan().splits())) == [{'id': 1, 's_a': 'keep'}]
     assert selected == [['id', 's']]
+
+
+def test_unmasked_filter_keeps_unprojected_columns_with_nested_projection(tmp_path):
+    fields = pa.schema([('id', pa.int32()), ('s', pa.struct([('a', pa.string()), ('b', pa.int32())])),
+                        ('secret', pa.string())])
+    table = table_from_rows(tmp_path, fields, [
+        {'id': 1, 's': {'a': 'keep', 'b': 1}, 'secret': 'x'}, {'id': 2, 's': {'a': 'drop', 'b': 2}, 'secret': 'y'},
+        {'id': 3, 's': {'a': 'drop', 'b': 3}, 'secret': 'z'}])
+    authorize(table, rules())
+    builder = table.new_read_builder().with_projection(['s.a', 'secret'])
+    # the nested split read cannot evaluate this OR, since 'id' is not projected
+    builder.with_filter(PredicateBuilder.or_predicates([
+        builder.new_predicate_builder().equal('s_a', 'keep'), PredicateBuilder(table.fields).equal('id', 2)]))
+    rows = arrow_rows(builder.new_read().to_arrow(builder.new_scan().plan().splits()))
+    assert sorted(row['s_a'] for row in rows) == ['drop', 'keep']
+
+
+def test_unmasked_null_comparison_after_merge_matches_no_rows(tmp_path):
+    fields = pa.schema([pa.field('id', pa.int32(), nullable=False), ('score', pa.int32()), ('secret', pa.string())])
+    table = table_from_rows(tmp_path, fields, [
+        {'id': 1, 'score': 10, 'secret': 'x'}, {'id': 2, 'score': None, 'secret': 'y'}], primary_keys=['id'])
+    authorize(table, rules())
+    predicate = PredicateBuilder(table.fields).not_equal('score', None)
+    assert read(table, predicate, projection=['id', 'score']) == []

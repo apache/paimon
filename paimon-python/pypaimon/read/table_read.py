@@ -1835,9 +1835,10 @@ class TableRead:
                 "MAP-key projection with query authorization is not supported")
         table_fields = self.table.fields
         read_fields = self._adapter_read_type
-        masked_fields = set(auth_result.column_masking or {})
-        post_filter = (self.predicate if self.predicate is not None
-                       and predicate_field_names(self.predicate) & masked_fields else None)
+        masks = auth_result.column_masking or {}
+        masked_fields = set(masks)
+        # Split reads may filter loosely (merged rows, nested leaves), so filter exactly before LIMIT.
+        post_filter = self.predicate
         filter_read_fields = self._with_predicate_extra_fields(read_fields) if post_filter is not None else read_fields
         from pypaimon.read.table_scan import latest_auth_fields, validate_auth_rules
         # a split can carry rules without having been planned by a validating scan
@@ -1863,7 +1864,7 @@ class TableRead:
             # Only inputs of the filter and its masks are read eagerly.
             filter_names = predicate_field_names(post_filter)
             filter_masks = compile_auth_masking_rules(
-                {name: rule for name, rule in auth_result.column_masking.items() if name in filter_names},
+                {name: rule for name, rule in masks.items() if name in filter_names},
                 effective_read_type)
             eager_blob_fields.update(filter_names - masked_fields)
             for transform in filter_masks.values():
@@ -1889,8 +1890,7 @@ class TableRead:
             eager_blob_fields=eager_blob_fields,
             post_filter_after_inline=post_filter_after_inline,
             # push down conjuncts without masked columns
-            predicate=(self.predicate if post_filter is None
-                       else exclude_predicate_with_fields(post_filter, masked_fields)),
+            predicate=exclude_predicate_with_fields(post_filter, masked_fields),
             defer_blob_resolution=post_filter is not None,
         )
         reader = split_read.create_reader()
@@ -1926,8 +1926,7 @@ class TableRead:
         if post_filter is not None and isinstance(split_read, DataEvolutionSplitRead):
             # Fetch only payloads output unmasked or read by a mask.
             needed = {f.name for f in read_fields} - masked_fields
-            for transform in compile_auth_masking_rules(
-                    auth_result.column_masking, effective_read_type).values():
+            for transform in compile_auth_masking_rules(masks, effective_read_type).values():
                 needed.update(_collect_all_field_refs_from_transform(transform))
             reader = split_read._resolve_deferred_blobs(
                 reader, {f.name for f in effective_read_type} - needed)
