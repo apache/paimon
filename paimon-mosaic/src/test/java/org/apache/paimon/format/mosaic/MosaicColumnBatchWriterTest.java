@@ -616,10 +616,12 @@ class MosaicColumnBatchWriterTest {
     void testEmptyBatchesDoNotFlushBufferedRows() throws Exception {
         MosaicWriter nativeWriter = mock(MosaicWriter.class);
         try (MosaicRecordsWriter writer =
-                createWriter(RowType.builder().field("a", DataTypes.INT()).build(), nativeWriter)) {
+                createWriter(
+                        RowType.builder().field("a", DataTypes.INT().notNull()).build(),
+                        nativeWriter)) {
             writer.addElement(GenericRow.of(1));
             VectorizedColumnBatch batch =
-                    new VectorizedColumnBatch(new ColumnVector[] {heapInts(2)});
+                    new VectorizedColumnBatch(new ColumnVector[] {AllNullColumnVector.INSTANCE});
             batch.setNumRows(1);
             writer.writeBundle(new VectorizedBundleRecords(batch, new int[0]));
             batch.setNumRows(0);
@@ -661,32 +663,67 @@ class MosaicColumnBatchWriterTest {
 
     @ParameterizedTest
     @CsvSource({"false, false", "false, true", "true, false", "true, true"})
-    void testNativeWriterRejectsNullsInNotNullColumn(boolean selected, boolean allNull)
+    void testColumnWriteRejectsNullsInNotNullColumn(boolean selected, boolean allNull)
             throws Exception {
         RowType type = RowType.builder().field("id", DataTypes.INT().notNull()).build();
-        HeapIntVector values = heapInts(7, 8);
+        HeapIntVector values = heapInts(7, 8, 9);
         values.setNullAt(1);
         VectorizedColumnBatch batch =
                 new VectorizedColumnBatch(
                         new ColumnVector[] {allNull ? AllNullColumnVector.INSTANCE : values});
-        batch.setNumRows(2);
+        batch.setNumRows(3);
         try (MosaicRecordsWriter writer =
                 new MosaicRecordsWriter(
                         new ByteArrayOutputStream(),
                         type,
-                        FORMAT_CONTEXT,
+                        new FileFormatFactory.FormatContext(new Options(), 1024, 1),
                         Collections.emptyList(),
                         null)) {
             assertThatThrownBy(
                             () ->
                                     writer.writeBundle(
                                             new VectorizedBundleRecords(
-                                                    batch, selected ? new int[] {1} : null)))
+                                                    batch, selected ? new int[] {2, 1} : null)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Field 'id' expected not null but found null value");
             assertThatThrownBy(() -> writer.addElement(GenericRow.of(99)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Mosaic writer has failed");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testColumnWriteChecksNullsOnlyInRequestedRows(boolean selected) throws Exception {
+        RowType type = RowType.builder().field("id", DataTypes.INT().notNull()).build();
+        HeapIntVector values = heapInts(7, 8, 9, 10);
+        values.setNullAt(selected ? 0 : 3);
+        values.setNullAt(2);
+        VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {values});
+        batch.setNumRows(selected ? 4 : 2);
+        List<Integer> written = new ArrayList<>();
+        MosaicWriter nativeWriter = mock(MosaicWriter.class);
+        doAnswer(
+                        invocation -> {
+                            VectorSchemaRoot root = invocation.getArgument(0);
+                            assertThat(root.getRowCount()).isEqualTo(1);
+                            written.add(((IntVector) root.getVector("id")).get(0));
+                            return null;
+                        })
+                .when(nativeWriter)
+                .write(any(VectorSchemaRoot.class));
+        try (MosaicRecordsWriter writer =
+                createWriter(
+                        type,
+                        nativeWriter,
+                        new FileFormatFactory.FormatContext(new Options(), 1024, 1))) {
+            writer.writeBundle(
+                    new VectorizedBundleRecords(batch, selected ? new int[] {3, 1, 3} : null));
+        }
+        if (selected) {
+            assertThat(written).containsExactly(10, 8, 10);
+        } else {
+            assertThat(written).containsExactly(7, 8);
         }
     }
 

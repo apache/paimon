@@ -464,55 +464,6 @@ public class ArrowFormatWriterTest {
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testColumnWriteRejectsNullsInNotNullField(boolean allNull) {
-        RowType rowType = RowType.builder().field("id", DataTypes.INT().notNull()).build();
-        HeapIntVector values = new HeapIntVector(3);
-        values.setInt(0, 7);
-        values.setNullAt(1);
-        values.setInt(2, 9);
-        ColumnVector column = allNull ? AllNullColumnVector.INSTANCE : values;
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
-            assertThatThrownBy(
-                            () -> writer.write(new ColumnVector[] {column}, new int[] {2, 1}, 1, 1))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Field 'id' expected not null but found null value");
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testColumnWriteChecksNullsOnlyInRequestedRows(boolean selected) {
-        RowType rowType = RowType.builder().field("id", DataTypes.INT().notNull()).build();
-        HeapIntVector values = new HeapIntVector(4);
-        values.setNullAt(0);
-        values.setInt(1, 7);
-        values.setNullAt(2);
-        values.setInt(3, 9);
-        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
-            writer.write(
-                    new ColumnVector[] {values},
-                    selected ? new int[] {0, 3, 1, 3, 2} : null,
-                    1,
-                    selected ? 3 : 1);
-            writer.flush();
-            IntVector actual = (IntVector) writer.getVectorSchemaRoot().getVector(0);
-            if (selected) {
-                assertThat(actual.getValueCount()).isEqualTo(3);
-                assertThat(Arrays.asList(actual.get(0), actual.get(1), actual.get(2)))
-                        .containsExactly(9, 7, 9);
-            } else {
-                assertThat(actual.getValueCount()).isEqualTo(1);
-                assertThat(actual.get(0)).isEqualTo(7);
-            }
-
-            writer.reset();
-            writer.write(new ColumnVector[] {AllNullColumnVector.INSTANCE}, null, 0, 0);
-            assertThat(writer.empty()).isTrue();
-        }
-    }
-
     @Test
     public void testColumnWriteAllowsNullParentWithNotNullChild() {
         RowType rowType =

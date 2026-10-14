@@ -31,6 +31,7 @@ import org.apache.paimon.mosaic.ColumnStatistics;
 import org.apache.paimon.mosaic.MosaicWriter;
 import org.apache.paimon.mosaic.WriterOptions;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
@@ -62,6 +63,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     private static final int ALLOCATION_HEADROOM_FACTOR = 4;
 
     private final ArrowFormatWriter arrowFormatWriter;
+    private final RowType rowType;
     private final long writeBatchMemory;
     private final long conversionMemoryLimit;
     private final boolean columnBatchSupported;
@@ -96,6 +98,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             @Nullable Integer numBuckets,
             BufferAllocator allocator,
             NativeWriterFactory nativeWriterFactory) {
+        this.rowType = rowType;
         this.statsColumnNames = statsColumnNames;
         this.allocator = allocator;
 
@@ -364,6 +367,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
 
     private long writeWithinAllocationLimit(
             ColumnVector[] columns, @Nullable int[] selected, int startIndex, int batchRows) {
+        validateNotNullColumns(columns, selected, startIndex, batchRows);
         BufferAllocator allocator = arrowFormatWriter.getAllocator();
         long originalLimit = allocator.getLimit();
         try {
@@ -382,6 +386,25 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         } finally {
             // Native writes share this allocator and must retain its original limit.
             allocator.setLimit(originalLimit);
+        }
+    }
+
+    private void validateNotNullColumns(
+            ColumnVector[] columns, @Nullable int[] selected, int startIndex, int batchRows) {
+        // Column writes bypass the NOT NULL checks performed by ArrowFieldWriter's row path.
+        for (int i = 0; i < columns.length; i++) {
+            DataField field = rowType.getFields().get(i);
+            if (!field.type().isNullable()) {
+                for (int j = 0; j < batchRows; j++) {
+                    int row = selected == null ? startIndex + j : selected[startIndex + j];
+                    if (columns[i].isNullAt(row)) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Field '%s' expected not null but found null value.",
+                                        field.name()));
+                    }
+                }
+            }
         }
     }
 

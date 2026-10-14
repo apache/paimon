@@ -261,21 +261,6 @@ public class ArrowFormatWriter implements AutoCloseable {
             ColumnVector[] columns, @Nullable int[] pickedInColumn, int startIndex, int batchRows) {
         Preconditions.checkState(rowId == 0, "rowId must be 0 before writing columns.");
         for (int i = 0; i < columns.length; i++) {
-            DataField field = rowType.getFields().get(i);
-            if (!field.type().isNullable()) {
-                for (int j = 0; j < batchRows; j++) {
-                    int row =
-                            pickedInColumn == null
-                                    ? startIndex + j
-                                    : pickedInColumn[startIndex + j];
-                    if (columns[i].isNullAt(row)) {
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "Field '%s' expected not null but found null value.",
-                                        field.name()));
-                    }
-                }
-            }
             fieldWriters[i].write(columns[i], pickedInColumn, startIndex, batchRows);
         }
         rowId = batchRows;
