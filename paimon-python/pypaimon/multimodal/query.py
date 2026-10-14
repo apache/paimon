@@ -185,7 +185,8 @@ class ScanQuery:
             fps=None,
             tolerance_s=None,
             boundary=None,
-            video_backend=None):
+            video_backend=None,
+            anchor_row_ids=None):
         """Build snapshot-pinned training windows from this single-table scan.
 
         The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
@@ -224,6 +225,11 @@ class ScanQuery:
                 Drop retains only anchors valid for every requested offset.
             video_backend: Decoder for video-frame-field columns: ``pyav``,
                 ``torchcodec``, or ``None`` to select the available backend.
+            anchor_row_ids: Optional iterable of Paimon row IDs selecting
+                anchors within this scan's context. Does not remove history or
+                future frames, change stride, reorder or repeat samples. IDs
+                outside the context raise ValueError. This scan, including its
+                filters and limit, still defines the context's group bounds.
 
         Returns:
             A snapshot-pinned ``ContiguousWindowDataset``. See that class for
@@ -249,6 +255,7 @@ class ScanQuery:
             tolerance_s=tolerance_s,
             boundary=boundary,
             video_backend=video_backend,
+            anchor_row_ids=anchor_row_ids,
         )
 
     def to_ray(
