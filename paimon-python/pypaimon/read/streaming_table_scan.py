@@ -281,7 +281,7 @@ class AsyncStreamingTableScan:
 
     def __auth_query(self):
         from pypaimon.read.table_scan import authorize
-        return authorize(self.table, self._query_auth_fn, self._read_type)
+        return authorize(self.table, self._query_auth_fn, self._read_type, self.predicate)
 
     def _start_prefetch(self, snapshot_id: int) -> None:
         """Start prefetching the next scannable snapshot in a background thread."""

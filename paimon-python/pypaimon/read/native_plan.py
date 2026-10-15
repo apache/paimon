@@ -490,6 +490,26 @@ def native_plan(
     return _from_native_plan(table, scan.plan())
 
 
+def _native_stream_auth_supported(table):
+    """Only reproduce authorization owned by the standard REST environment."""
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment, _TableQueryAuthFn
+
+    environment = table.catalog_environment
+    auth = environment.table_query_auth(table.options, table.identifier)
+    if auth is None:
+        return True
+    if (type(environment) is not CatalogEnvironment
+            or type(auth) is not _TableQueryAuthFn
+            or auth._catalog_loader is not environment.catalog_loader
+            or auth._identifier != table.identifier
+            or not table.options.query_auth_enabled
+            or _catalog_metastore(environment.catalog_loader) != 'rest'):
+        return False
+    context = environment.catalog_loader.context()
+    return not any(getattr(context, attr, None) is not None for attr in (
+        'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'))
+
+
 def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):
     """Create Rust's stateful StreamTableScan with the canonical reader type."""
     builder = _configure_native_read_builder(
