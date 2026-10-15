@@ -214,6 +214,12 @@ jobs:
           source = json.loads(distribution.read_text('direct_url.json'))
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
+          # Fail before the suite when Rust main lacks the required core bridge.
+          from pypaimon_rust.data import (
+              cast_array_for_schema_evolution,
+              normalize_array_for_write,
+              read_arrow_schema,
+          )
           PY
 
       - name: Run Python tests with native planning, reading, writing, updating and committing
