@@ -112,3 +112,6 @@ org.apache.paimon.flink.procedure.VectorSearchProcedure
 org.apache.paimon.flink.procedure.FullTextSearchProcedure
 org.apache.paimon.flink.procedure.DropGlobalIndexProcedure
 org.apache.paimon.flink.procedure.ImportFilesProcedure
+org.apache.paimon.flink.procedure.GrantPermissionProcedure
+org.apache.paimon.flink.procedure.RevokePermissionProcedure
+org.apache.paimon.flink.procedure.ListPermissionsProcedure

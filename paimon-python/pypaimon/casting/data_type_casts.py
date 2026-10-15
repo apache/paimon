@@ -192,7 +192,7 @@ def _equals_ignore_nullable(source_type, target_type) -> bool:
     return source_copy == target_copy
 
 
-# Caches the PyArrow cast-kernel probe per (source, target) pyarrow type so the
+# Caches the read-time cast probe per (source, target) pyarrow type so the
 # alter-time check stays cheap. Keyed by the pyarrow type strings.
 _EXECUTABLE_CAST_CACHE = {}
 
@@ -216,6 +216,11 @@ def can_execute_cast(source_type, target_type) -> bool:
     # Same root: identity, or a same-shape constructed type whose value is
     # rebuilt by the read path's field-id alignment rather than a value cast.
     if source_root == target_root:
+        if source_root == TIME:
+            from pypaimon.table.row.generic_row import _parse_type_precision_scale
+            # Compare parsed precision: TIME and TIME(0) describe the same type.
+            return (_parse_type_precision_scale(source_type.type)[0]
+                    == _parse_type_precision_scale(target_type.type)[0])
         return True
     # Constructed -> character string is rendered by the read path's custom
     # ``_constructed_to_string_array`` (see DataFileBatchReader), not a cast.
@@ -225,12 +230,14 @@ def can_execute_cast(source_type, target_type) -> bool:
     # Any other conversion touching a constructed type has no runtime cast.
     if source_root in CONSTRUCTED or target_root in CONSTRUCTED:
         return False
-    # Leaf-to-leaf: defer to PyArrow's cast-kernel availability, which is the
-    # read path's actual cast executor (``array.cast(target, safe=False)``).
-    return _pyarrow_cast_supported(source_type, target_type)
+    # Leaf-to-leaf: probe the same executor used by old-file readers, including
+    # Java conversions with no direct PyArrow kernel, such as INT -> TIMESTAMP.
+    return _schema_evolution_cast_supported(source_type, target_type)
 
 
-def _pyarrow_cast_supported(source_type, target_type) -> bool:
+def _schema_evolution_cast_supported(source_type, target_type) -> bool:
+    from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
+
     source_pa = PyarrowFieldParser.from_paimon_type(source_type)
     target_pa = PyarrowFieldParser.from_paimon_type(target_type)
     if source_pa == target_pa:
@@ -248,10 +255,11 @@ def _pyarrow_cast_supported(source_type, target_type) -> bool:
     # avoiding per-value parse/overflow errors (which ``safe=False`` -- matching
     # the read path -- tolerates anyway).
     try:
-        pa.nulls(1, type=source_pa).cast(target_pa, safe=False)
+        cast_array_for_schema_evolution(
+            pa.nulls(1, type=source_pa), target_pa, source_type, target_type)
         ok = True
     except (pa.lib.ArrowNotImplementedError, pa.lib.ArrowInvalid,
-            pa.lib.ArrowTypeError):
+            pa.lib.ArrowTypeError, ValueError, NotImplementedError):
         ok = False
     _EXECUTABLE_CAST_CACHE[cache_key] = ok
     return ok

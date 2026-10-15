@@ -32,6 +32,7 @@ public class PostgresqlDistributedLockDialect extends AbstractDistributedLockDia
                 + " TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,"
                 + JdbcUtils.EXPIRE_TIME
                 + " BIGINT DEFAULT 0 NOT NULL,"
+                + "lock_owner VARCHAR(36),"
                 + "PRIMARY KEY ("
                 + JdbcUtils.LOCK_ID
                 + ")"
@@ -62,12 +63,32 @@ public class PostgresqlDistributedLockDialect extends AbstractDistributedLockDia
     public String getTryReleaseTimedOutLock() {
         return "DELETE FROM "
                 + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
-                + " WHERE EXTRACT(EPOCH FROM AGE(NOW(), "
-                + JdbcUtils.ACQUIRED_AT
-                + ")) >"
-                + JdbcUtils.EXPIRE_TIME
+                + " WHERE "
+                + getExpirationCondition()
                 + " and "
                 + JdbcUtils.LOCK_ID
                 + " = ?";
+    }
+
+    @Override
+    protected String getRenewalTime() {
+        // CURRENT_TIMESTAMP is fixed at transaction start, including time waiting for a row lock.
+        return "clock_timestamp()";
+    }
+
+    @Override
+    protected String getOwnedExpirationCondition() {
+        return "EXTRACT(EPOCH FROM (clock_timestamp() - "
+                + JdbcUtils.ACQUIRED_AT
+                + ")) > "
+                + JdbcUtils.EXPIRE_TIME;
+    }
+
+    @Override
+    protected String getExpirationCondition() {
+        return "EXTRACT(EPOCH FROM AGE(NOW(), "
+                + JdbcUtils.ACQUIRED_AT
+                + ")) >"
+                + JdbcUtils.EXPIRE_TIME;
     }
 }

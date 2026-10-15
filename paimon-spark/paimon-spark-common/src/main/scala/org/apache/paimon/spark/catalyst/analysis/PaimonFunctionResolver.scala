@@ -25,10 +25,10 @@ import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.UnresolvedFunction
 import org.apache.spark.sql.catalyst.expressions.{Cast, Expression, Literal}
-import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function
+import org.apache.spark.sql.catalyst.parser.extensions.{UnResolvedPaimonV1Function, UnResolvedPaimonV1Generator}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.trees.TreePattern.UNRESOLVED_FUNCTION
+import org.apache.spark.sql.catalyst.trees.TreePattern.{GENERATOR, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.CatalogPlugin
 import org.apache.spark.sql.paimon.shims.SparkVersionCompat
 import org.apache.spark.sql.types.{BinaryType, DataType, DayTimeIntervalType, LongType, NullType, StringType}
@@ -41,9 +41,9 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
   protected lazy val catalogManager = spark.sessionState.catalogManager
 
   override def apply(plan: LogicalPlan): LogicalPlan =
-    plan.resolveOperatorsUpWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
+    plan.resolveOperatorsUpWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION, GENERATOR)) {
       case l: LogicalPlan =>
-        l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
+        l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION, GENERATOR)) {
           case u: UnresolvedFunction
               if isDescriptorToPresignedUrlFunction(u.nameParts) &&
                 u.arguments.forall(_.resolved) =>
@@ -52,19 +52,29 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
               if isBlobViewFunction(u.nameParts) && u.arguments.forall(_.resolved) =>
             resolveBlobView(u)
           case u: UnResolvedPaimonV1Function if u.arguments.forall(_.resolved) =>
-            u.funcIdent.catalog match {
-              case Some(catalog) =>
-                SparkVersionCompat.catalog(catalogManager, catalog) match {
-                  case v1FunctionCatalog: SupportV1Function =>
-                    v1FunctionCatalog.registerAndResolveV1Function(u)
-                  case _ =>
-                    throw new IllegalArgumentException(
-                      s"Catalog $catalog is not a v1 function catalog")
-                }
-              case None => throw new IllegalArgumentException("Catalog name is not defined")
-            }
+            resolveV1Function(u)
+          case u: UnResolvedPaimonV1Generator if u.childrenResolved =>
+            val function = UnResolvedPaimonV1Function(
+              u.funcIdent,
+              u.arguments,
+              isDistinct = false,
+              func = u.func)
+            u.resolve(resolveV1Function(function))
         }
     }
+
+  private def resolveV1Function(u: UnResolvedPaimonV1Function): Expression = {
+    u.funcIdent.catalog match {
+      case Some(catalog) =>
+        SparkVersionCompat.catalog(catalogManager, catalog) match {
+          case v1FunctionCatalog: SupportV1Function =>
+            v1FunctionCatalog.registerAndResolveV1Function(u)
+          case _ =>
+            throw new IllegalArgumentException(s"Catalog $catalog is not a v1 function catalog")
+        }
+      case None => throw new IllegalArgumentException("Catalog name is not defined")
+    }
+  }
 
   private def resolveBlobView(u: UnresolvedFunction): Expression = {
     if (u.arguments.length != 3) {

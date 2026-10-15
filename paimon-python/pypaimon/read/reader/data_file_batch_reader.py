@@ -15,13 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from decimal import Decimal, localcontext, ROUND_HALF_UP
 from typing import List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
+from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution, read_arrow_schema
 from pypaimon.common.file_io import FileIO
 from pypaimon.utils.arrow_utils import zero_column_batch
 from pypaimon.data.map_shared_shredding import (
@@ -44,32 +44,6 @@ def _is_character_string_type(data_type) -> bool:
     return t == 'STRING' or t.startswith('VARCHAR') or t.startswith('CHAR')
 
 
-def cast_array_for_schema_evolution(array, target_type):
-    """Cast old-file values using Java's DECIMAL rounding and overflow rules.
-
-    PyArrow's unsafe DECIMAL scale reduction truncates and can retain values
-    outside the target precision. Java rounds HALF_UP and returns NULL for
-    values that do not fit after rounding. Other conversions retain the
-    existing unsafe-cast behavior (such as DOUBLE -> INT truncation).
-    """
-    if (pa.types.is_decimal(array.type) and pa.types.is_decimal(target_type)
-            and array.type.scale > target_type.scale):
-        values = []
-        with localcontext() as context:
-            # Rounding a maximal value can carry into one extra digit.
-            context.prec = max(array.type.precision, target_type.precision) + 1
-            quantum = Decimal(1).scaleb(-target_type.scale)
-            for value in array.to_pylist():
-                if value is None:
-                    values.append(None)
-                    continue
-                rounded = value.quantize(quantum, rounding=ROUND_HALF_UP)
-                values.append(rounded if len(rounded.as_tuple().digits)
-                              <= target_type.precision else None)
-        return pa.array(values, type=target_type)
-    return array.cast(target_type, safe=False)
-
-
 def _unslice(array):
     """Re-materialize a sliced array so offsets/buffers start at zero.
 
@@ -86,7 +60,7 @@ def _to_string_values(array, data_type) -> list:
     """Render *array* as a list of per-row strings (None for NULL rows)."""
     if isinstance(data_type, (RowType, ArrayType, MapType)):
         return _constructed_to_string_array(array, data_type).to_pylist()
-    return array.cast(pa.string(), safe=False).to_pylist()
+    return cast_array_for_schema_evolution(array, pa.string(), data_type, AtomicType('STRING')).to_pylist()
 
 
 def _constructed_to_string_array(array, file_type):
@@ -94,6 +68,10 @@ def _constructed_to_string_array(array, file_type):
     ROW -> ``{v1, v2}``, ARRAY -> ``[e1, e2]``, MAP -> ``{k1 -> v1, k2 -> v2}``.
     Sub-values are rendered recursively; a NULL sub-value renders as the
     literal ``null`` while a NULL container row stays NULL."""
+    from pypaimon.casting.schema_evolution import _native_schema_cast
+    native = _native_schema_cast(array, pa.string(), file_type, AtomicType('STRING'))
+    if native is not None:
+        return native
     array = _unslice(array)
     valid = pc.is_valid(array).to_pylist()
     out = []
@@ -198,7 +176,7 @@ class DataFileBatchReader(RecordBatchReader):
         self._file_data_field_map = {
             field.name: field for field in source_fields
         }
-        self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
+        self.schema_map = {field.name: field for field in read_arrow_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
         self.row_id_offsets = row_id_offsets
@@ -290,6 +268,11 @@ class DataFileBatchReader(RecordBatchReader):
         """Return *array* converted to *target_type*, matching ROW sub-fields by
         field id (reorder, pad missing with NULL, follow renames, cast changed
         types) recursively, transparently through ARRAY/MAP wrappers."""
+        from pypaimon.casting.schema_evolution import _native_schema_cast
+        native = _native_schema_cast(
+            array, PyarrowFieldParser.from_paimon_type(target_type), file_type, target_type)
+        if native is not None:
+            return native
         if isinstance(target_type, RowType) and isinstance(file_type, RowType):
             n = len(array)
             file_id_to_pos = {f.id: i for i, f in enumerate(file_type.fields)}
@@ -335,9 +318,7 @@ class DataFileBatchReader(RecordBatchReader):
             return _constructed_to_string_array(array, file_type)
         # Leaf / non-nested: cast to the target type when it differs.
         target_pa_type = PyarrowFieldParser.from_paimon_type(target_type)
-        if array.type != target_pa_type:
-            return cast_array_for_schema_evolution(array, target_pa_type)
-        return array
+        return cast_array_for_schema_evolution(array, target_pa_type, file_type, target_type)
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         if isinstance(self.format_reader, FormatBlobReader):
@@ -423,7 +404,7 @@ class DataFileBatchReader(RecordBatchReader):
         common (non-evolution) path zero-copy.
 
         DECIMAL scale reductions use Java's HALF_UP and overflow-to-NULL
-        semantics; other conversions retain the existing unsafe Arrow cast.
+        semantics; numeric narrowing and timestamp precision also follow Java casts.
         Evolution legality is the writer's concern (``DataTypeCasts``).
         """
         out_arrays = []

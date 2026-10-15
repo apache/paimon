@@ -111,7 +111,7 @@ under the License.
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
-        <testcontainers.version>1.19.1</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
         <parquet.version>1.16.0</parquet.version>
         <orc.version>1.9.8</orc.version>
@@ -678,6 +678,7 @@ under the License.
                         <!-- Binary compatibility fixtures -->
                         <exclude>paimon-common/src/test/resources/fmindex-v1-golden.base64</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
+                        <exclude>paimon-python/pypaimon/tests/resources/calendar_extract_java.jsonl</exclude>
                         <exclude>paimon-python/pypaimon/sample/data/**</exclude>
                         <exclude>**/*.proto</exclude>
                         <exclude>**/Cargo*</exclude>

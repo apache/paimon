@@ -441,16 +441,12 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertIn('data-evolution.enabled', str(ctx.exception))
 
     def test_no_row_tracking_rejected(self):
-        target = self._create_table(options={'data-evolution.enabled': 'true'})
+        # Data evolution requires row tracking. Schema validation now rejects
+        # this combination at table creation (aligned with Java
+        # SchemaValidation#validateRowTracking), so the table can no longer be
+        # created and merge_into never gets a chance to run.
         with self.assertRaises(ValueError) as ctx:
-            merge_into(
-                target=target,
-                source=self._source(),
-                catalog_options=self.catalog_options,
-                on=['id'],
-                when_matched=[WhenMatched.update('*')],
-                num_partitions=_TEST_NUM_PARTITIONS,
-            )
+            self._create_table(options={'data-evolution.enabled': 'true'})
         self.assertIn('row-tracking.enabled', str(ctx.exception))
 
     def test_source_missing_on_col_raises(self):

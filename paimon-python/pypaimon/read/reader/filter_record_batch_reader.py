@@ -92,7 +92,13 @@ class FilterRecordBatchReader(RecordBatchReader):
         )
 
     def _filter_batch_by_row(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
-        df = polars.from_arrow(pa.Table.from_batches([batch]))
+        # Predicate indices address logical fields. A record-reader adapter
+        # may prepend _row_kind, which is metadata rather than an operand.
+        columns = ([field.name for field in self.schema_fields]
+                   if self.schema_fields is not None else
+                   [name for name in batch.schema.names if name != "_row_kind"])
+        # PyArrow 6 has Table.select but not RecordBatch.select.
+        df = polars.from_arrow(pa.Table.from_batches([batch]).select(columns))
         iterator = InternalRowWrapperIterator(
             self._iter_df_rows(df),
             df.width,

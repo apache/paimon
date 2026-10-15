@@ -331,7 +331,7 @@ def _rest_data_token(table):
 
 
 def _native_table(table):
-    """Return the current schema and shared REST FileIO for Native operations."""
+    """Transport the resolved schema, shared FileIO and captured read view."""
     rest_response = _resolved_rest_table_response(table)
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
@@ -365,6 +365,12 @@ def _native_table(table):
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
+    # Only explicitly stored state captures a view; None means a fixed empty view.
+    table_state = vars(table)
+    if '_read_snapshot' in table_state:
+        from pypaimon.common.json_util import JSON
+        snapshot = table_state['_read_snapshot']
+        rt = rt.copy_with_pinned_snapshot(JSON.to_json(snapshot) if snapshot is not None else None)
     return rt
 
 
@@ -445,7 +451,8 @@ def native_plan(
         row_position_slice: Optional[Tuple[int, int]] = None,
         row_position_shard: Optional[Tuple[int, int]] = None,
         chunk_shuffle: Optional[Tuple[int, int]] = None,
-        shard: Optional[Tuple[int, int]] = None) -> Plan:
+        shard: Optional[Tuple[int, int]] = None,
+        partition_predicate: Optional[Predicate] = None) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -458,6 +465,8 @@ def native_plan(
             "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, limit, projection)
+    if partition_predicate is not None:
+        builder = builder.with_partition_filter(_predicate_to_native(partition_predicate))
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
     if incremental_range is None:
@@ -479,6 +488,26 @@ def native_plan(
     if shard is not None:
         scan = scan.with_shard(*shard)
     return _from_native_plan(table, scan.plan())
+
+
+def _native_stream_auth_supported(table):
+    """Only reproduce authorization owned by the standard REST environment."""
+    from pypaimon.catalog.catalog_environment import CatalogEnvironment, _TableQueryAuthFn
+
+    environment = table.catalog_environment
+    auth = environment.table_query_auth(table.options, table.identifier)
+    if auth is None:
+        return True
+    if (type(environment) is not CatalogEnvironment
+            or type(auth) is not _TableQueryAuthFn
+            or auth._catalog_loader is not environment.catalog_loader
+            or auth._identifier != table.identifier
+            or not table.options.query_auth_enabled
+            or _catalog_metastore(environment.catalog_loader) != 'rest'):
+        return False
+    context = environment.catalog_loader.context()
+    return not any(getattr(context, attr, None) is not None for attr in (
+        'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'))
 
 
 def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):

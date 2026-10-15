@@ -288,13 +288,231 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
                 .containsExactly((Float) null);
     }
 
+    @Test
+    public void testPartialUpdateWithMissingVectorRangeWithoutDeletionVectors() throws Exception {
+        // Same partial-vector layout as testPartialUpdateWithMissingVectorRange but without
+        // deletion vectors: embedding_v2 is populated only for rows [2, 3], so projecting it must
+        // still emit rows [0, 1] as NULL.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        write(getTableDefault(), GenericRow.of(0, vector(1)), GenericRow.of(1, vector(1)));
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        write(
+                getTableDefault(),
+                GenericRow.of(2, vector(1), vector(10)),
+                GenericRow.of(3, vector(1), vector(10)));
+        updateVectors(
+                2,
+                Collections.singletonList("embedding_v2"),
+                GenericRow.of(vector(200)),
+                GenericRow.of(vector(200)));
+        compactVectorTable();
+
+        ReadBuilder builder = getTableDefault().newReadBuilder().withProjection(new int[] {2});
+        List<Split> splits = builder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        DataSplit split = (DataSplit) splits.get(0);
+        assertThat(readVectorValues(builder.newRead().createReader(split)))
+                .containsExactly(null, null, 200F, 200F);
+    }
+
+    @Test
+    public void testNewerVectorUpdateOverPartOfTheColumn() throws Exception {
+        // embedding is written for rows [0, 3], then updated for [0, 1] only. Together the two
+        // files cover the group, but the newer one overlaps the older, so the sequential reader
+        // would keep just [0, 1].
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        write(
+                getTableDefault(),
+                GenericRow.of(0, vector(1)),
+                GenericRow.of(1, vector(1)),
+                GenericRow.of(2, vector(1)),
+                GenericRow.of(3, vector(1)));
+        updateVectors(
+                0,
+                Collections.singletonList("embedding"),
+                GenericRow.of(vector(100)),
+                GenericRow.of(vector(100)));
+
+        ReadBuilder builder = getTableDefault().newReadBuilder().withProjection(new int[] {1});
+        assertThat(readVectorValues(builder.newRead().createReader(builder.newScan().plan())))
+                .containsExactly(100F, 100F, 1F, 1F);
+    }
+
+    @Test
+    public void testNewerVectorUpdateOverPartOfTheColumnWithDeletionVectors() throws Exception {
+        catalog.createTable(
+                identifier(),
+                vectorSchema("json")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        write(
+                getTableDefault(),
+                GenericRow.of(0, vector(10)),
+                GenericRow.of(1, vector(11)),
+                GenericRow.of(2, vector(12)),
+                GenericRow.of(3, vector(13)));
+        updateVectors(
+                0,
+                Collections.singletonList("embedding"),
+                GenericRow.of(vector(100)),
+                GenericRow.of(vector(101)));
+
+        ReadBuilder builder = getTableDefault().newReadBuilder().withProjection(new int[] {1});
+        List<Split> splits = builder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        DataSplit split = (DataSplit) splits.get(0);
+
+        // Delete one row from the updated range and one from the original range.
+        DeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(1);
+        deletionVector.delete(2);
+        DeletionVectorsIndexFile indexFile =
+                getTableDefault()
+                        .store()
+                        .newIndexFileHandler()
+                        .dvIndex(split.partition(), split.bucket());
+        String anchor = retrieveAnchorFile(split.dataFiles(), Function.identity()).fileName();
+        Map<String, DeletionFile> deletionFiles =
+                indexFile.toDeletionFiles(
+                        Collections.singletonList(
+                                indexFile.writeSingleFile(
+                                        Collections.singletonMap(anchor, deletionVector))));
+        DataSplit deletedSplit =
+                DataSplit.builder()
+                        .withPartition(split.partition())
+                        .withBucket(split.bucket())
+                        .withBucketPath(split.bucketPath())
+                        .withDataFiles(split.dataFiles())
+                        .withDataDeletionFiles(
+                                split.dataFiles().stream()
+                                        .map(file -> deletionFiles.get(file.fileName()))
+                                        .collect(Collectors.toList()))
+                        .build();
+        assertThat(readVectorValues(builder.newRead().createReader(deletedSplit)))
+                .containsExactly(100F, 13F);
+    }
+
+    @Test
+    public void testOlderVectorUpdateNewerThanTheNextKeptFile() throws Exception {
+        // [0, 9] s1, then [5, 9] s2, [2, 7] s3 and [0, 4] s4. The newest file and [5, 9] tile the
+        // group, but rows [5, 7] must come from [2, 7], which is older than [0, 4] only.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        InternalRow[] rows = new InternalRow[10];
+        for (int i = 0; i < 10; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        updateVectors(5, Collections.singletonList("embedding"), vectorRows(5, 2));
+        updateVectors(2, Collections.singletonList("embedding"), vectorRows(6, 3));
+        updateVectors(0, Collections.singletonList("embedding"), vectorRows(5, 4));
+
+        ReadBuilder builder = getTableDefault().newReadBuilder().withProjection(new int[] {1});
+        assertThat(readVectorValues(builder.newRead().createReader(builder.newScan().plan()), 10))
+                .containsExactly(4F, 4F, 4F, 4F, 4F, 3F, 3F, 3F, 2F, 2F);
+    }
+
+    @Test
+    public void testVectorColumnBackfilledByTwoUpdatesLeavesTailNull() throws Exception {
+        // embedding_v2 is backfilled for [0, 4] and [5, 7] by two updates; [8, 9] stay NULL.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        InternalRow[] rows = new InternalRow[10];
+        for (int i = 0; i < 10; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        updateVectors(0, Collections.singletonList("embedding_v2"), vectorRows(5, 200));
+        updateVectors(5, Collections.singletonList("embedding_v2"), vectorRows(3, 300));
+
+        ReadBuilder builder = getTableDefault().newReadBuilder().withProjection(new int[] {2});
+        assertThat(readVectorValues(builder.newRead().createReader(builder.newScan().plan()), 10))
+                .containsExactly(200F, 200F, 200F, 200F, 200F, 300F, 300F, 300F, null, null);
+
+        // [0, 4] has no selected row and is pruned by the scan; [8, 9] still needs NULL-filling.
+        builder.withRowRanges(Collections.singletonList(new Range(6, 9)));
+        assertThat(readVectorValues(builder.newRead().createReader(builder.newScan().plan())))
+                .containsExactly(300F, 300F, null, null);
+
+        // Every selected row is backfilled.
+        builder.withRowRanges(Arrays.asList(new Range(1, 1), new Range(6, 6)));
+        assertThat(readVectorValues(builder.newRead().createReader(builder.newScan().plan())))
+                .containsExactly(200F, 300F);
+    }
+
+    @Test
+    public void testVectorColumnWithAGapUnderRowRanges() throws Exception {
+        // embedding_v2 is backfilled for [0, 2] and [6, 9]; rows [3, 5] stay NULL.
+        catalog.createTable(identifier(), vectorSchema("json").build(), false);
+        InternalRow[] rows = new InternalRow[10];
+        for (int i = 0; i < 10; i++) {
+            rows[i] = GenericRow.of(i, vector(1));
+        }
+        write(getTableDefault(), rows);
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding_v2", DataTypes.VECTOR(2, DataTypes.FLOAT()))),
+                false);
+        updateVectors(0, Collections.singletonList("embedding_v2"), vectorRows(3, 200));
+        updateVectors(6, Collections.singletonList("embedding_v2"), vectorRows(4, 300));
+
+        ReadBuilder builder = getTableDefault().newReadBuilder().withProjection(new int[] {0, 2});
+        // No selected row is in the gap.
+        builder.withRowRanges(Arrays.asList(new Range(1, 1), new Range(7, 7)));
+        assertThat(readIdAndVector(builder)).containsExactly("1=200.0", "7=300.0");
+        // Row 4 is selected and must be NULL-filled.
+        builder.withRowRanges(Arrays.asList(new Range(1, 1), new Range(4, 4), new Range(7, 7)));
+        assertThat(readIdAndVector(builder)).containsExactly("1=200.0", "4=null", "7=300.0");
+    }
+
+    private static List<String> readIdAndVector(ReadBuilder builder) throws IOException {
+        List<String> actual = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                builder.newRead().createReader(builder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            actual.add(
+                                    row.getInt(0)
+                                            + "="
+                                            + (row.isNullAt(1)
+                                                    ? null
+                                                    : row.getVector(1).toFloatArray()[0])));
+        }
+        return actual;
+    }
+
+    private static InternalRow[] vectorRows(int count, float value) {
+        InternalRow[] rows = new InternalRow[count];
+        for (int i = 0; i < count; i++) {
+            rows[i] = GenericRow.of(vector(value));
+        }
+        return rows;
+    }
+
     private List<Float> readVectorValues(RecordReader<InternalRow> reader) throws IOException {
+        return readVectorValues(reader, 4);
+    }
+
+    private List<Float> readVectorValues(RecordReader<InternalRow> reader, int maxRows)
+            throws IOException {
         List<Float> actual = new ArrayList<>();
         try (RecordReader<InternalRow> closeable = reader) {
             closeable.forEachRemaining(
                     row -> {
                         // Fail promptly if an all-missing projection produces unbounded NULL rows.
-                        assertThat(actual.size()).isLessThan(4);
+                        assertThat(actual.size()).isLessThan(maxRows);
                         actual.add(row.isNullAt(0) ? null : row.getVector(0).toFloatArray()[0]);
                     });
         }

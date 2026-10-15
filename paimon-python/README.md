@@ -789,6 +789,41 @@ falls back to the Python search reader. Distributed Ray searches keep their
 existing scan/read path.
 
 
+# Native local full-text search
+
+For REST Data Evolution tables with row tracking and Parquet files,
+`read.native.enabled=true` delegates local full-text search to Rust core.
+The Python builder and scored result API stay the same:
+
+```python
+import json
+
+native_table = table.copy({'read.native.enabled': 'true'})
+predicate = native_table.new_read_builder().new_predicate_builder().equal('category', 'news')
+result = (native_table.new_full_text_search_builder()
+          .with_query('content', json.dumps({'match': {'query': 'paimon'}}))
+          .with_filter(predicate)
+          .with_limit(10)
+          .execute_local())
+```
+
+Rust selects one snapshot, prunes partitions, evaluates scalar filters before
+ranking, and searches indexed and uncovered rows. Full-text and scalar
+`fast`, `full`, and `detail` search modes follow Java coverage semantics.
+Scalar candidate refinement obeys `global-index.filter.refine-from-data`.
+Search predicates `contains`, `endsWith`, and residual `LIKE` require
+refinement for both BTree and bitmap indexes, as in Java. Simple `LIKE`
+patterns are first rewritten to equality, prefix, suffix or substring
+predicates; equality and prefix retain the underlying index's exactness.
+Filtering keeps the complete shard or raw corpus for BM25 scoring.
+
+A full-text index definition must exist even in `full` or `detail` mode.
+Tables outside the supported route, or Rust versions without the full-text
+builder, use the Python implementation. Once native execution starts,
+errors propagate without retrying the search through Python. PK and distributed
+searches retain their existing Python scan/read path.
+
+
 # Vector index range reads
 
 Native vector indexes (`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`)
@@ -804,6 +839,20 @@ and released when the index reader closes; separate readers have separate
 budgets. This option controls index I/O, not shard search or native compute
 threads.
 
+
+# Native local index builds
+
+With `write.native.enabled=true`, eligible REST data-evolution tables delegate
+local full-text and vector index construction to Rust. Set
+`global-index.build.parallelism` in table options or per-build options to bound
+the number of shards built concurrently; the default is 1. Each shard owns its
+writer and may also use native worker threads, so increase the value
+conservatively. Commit messages retain shard plan order.
+
+`GlobalIndexBuilder.build()` returns unpublished messages for either committer.
+A failed build waits for started shards and cleans its private outputs.
+After messages are returned, the caller owns those files. A failed or uncertain
+commit retains them; use explicit abort only when they will not be committed.
 
 # Native vector index training
 

@@ -73,6 +73,8 @@ independent streams update different columns, give each stream its own sequence 
 stream's version does not determine whether the other stream's update is accepted.
 
 Configure `fields.<ordering-field>.sequence-group` with the columns that the version protects.
+Ordering fields cannot be shared by different sequence groups. If multiple fields use the same
+ordering tuple, list those protected value fields in one group.
 This example separates profile updates from score updates:
 
 ```sql
@@ -103,7 +105,7 @@ SELECT * FROM profiles;
 
 ![Profile and score updates use independent versions: profile version 11 clears city, a null score version skips that group, and a later input updates only the score.](/img/primary-key-sequence-groups.svg)
 
-For fields without aggregation, each group follows these rules:
+For fields without aggregation, each group follows these rules with the default ascending order:
 
 | Incoming ordering value | Effect on the group |
 | --- | --- |
@@ -116,14 +118,60 @@ column cannot be an ordering field or a protected field. Common ordering types i
 `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, `FLOAT`, `DOUBLE`, `DATE`, `TIME`, `TIMESTAMP`, and
 `TIMESTAMP_LTZ`.
 
+### Sort Order
+
+Set `fields.<ordering-fields>.sequence-group.sort-order` to control each group's ordering direction:
+
+- `ascending` (default): prefer larger ordering values.
+- `descending`: prefer smaller ordering values.
+
+For example, keep the latest status and the earliest event's channel, even when updates arrive out of order:
+
+```sql
+CREATE TABLE user_summary (
+    user_id BIGINT PRIMARY KEY NOT ENFORCED,
+    status STRING,
+    status_version BIGINT,
+    channel STRING,
+    first_event_time BIGINT
+) WITH (
+    'merge-engine' = 'partial-update',
+    'fields.status_version.sequence-group' = 'status',
+    'fields.first_event_time.sequence-group' = 'channel',
+    'fields.first_event_time.sequence-group.sort-order' = 'descending'
+);
+
+INSERT INTO user_summary VALUES (1, 'active', 200, 'organic', 100);
+INSERT INTO user_summary VALUES (1, 'registered', 100, 'referral', 50);
+
+SELECT * FROM user_summary;
+-- 1, active, 200, referral, 50
+```
+
+The status group keeps version `200`, while the event group keeps time `50` and its channel.
+Equal ordering values still replace non-aggregated protected fields, including null values.
+Null handling is unchanged: an all-null ordering tuple skips the group, and a non-null ordering
+value takes precedence over null in either direction.
+
+This option requires a corresponding sequence group on a primary-key table using `partial-update`.
+Ordering fields must not overlap between groups. Unlike `sequence.field.sort-order`,
+this option controls an individual group rather than ordering the entire record.
+
+Choose the direction before writing data. Changing it on an existing table cannot recover records
+already discarded by earlier merges. All readers, writers, and compaction jobs must support this
+option before using `descending`; older clients may ignore it and choose the opposite record.
+
 ### Multiple Ordering Fields
 
 Use multiple ordering fields when one version is insufficient to break ties. For example,
 `fields.profile_version,profile_offset.sequence-group = name,city` compares `profile_version`
 first, then `profile_offset`. Both ordering columns must be present in the table schema.
+Set `fields.profile_version,profile_offset.sequence-group.sort-order` to select one direction
+for the entire tuple; that direction applies to every non-null field comparison.
 
 The group is skipped only when **all** its ordering fields are null. Otherwise, the tuple
-participates in comparison, with null sorting before a non-null value:
+participates in comparison, with null sorting before a non-null value in either direction.
+The following examples use the default ascending order:
 
 | Stored tuple | Incoming tuple | Effect on non-aggregated protected fields |
 | --- | --- | --- |
@@ -175,8 +223,9 @@ SELECT * FROM profile_totals;
 -- 1, Bea, 11, 8, 100
 ```
 
-The stored ordering tuple advances on newer or equal versions. With `sum`, an older or equal
-version still adds its contribution: a sequence group does **not** deduplicate repeated events.
+The stored ordering tuple advances on equal or higher-precedence values under the configured
+sort order. With `sum`, lower-precedence or equal values still contribute: a sequence group
+does **not** deduplicate repeated events.
 The same rules apply to groups with multiple ordering fields.
 
 :::warning

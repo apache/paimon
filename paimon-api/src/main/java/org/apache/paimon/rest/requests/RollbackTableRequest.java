@@ -29,6 +29,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
+
 /** Request for rollback table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackTableRequest implements RESTRequest {
@@ -44,12 +46,26 @@ public class RollbackTableRequest implements RESTRequest {
     @Nullable
     private final Long fromSnapshot;
 
+    @JsonProperty("tableId")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    private final String tableId;
+
     @JsonCreator
+    @ConstructorProperties({"instant", "fromSnapshot", "tableId"})
     public RollbackTableRequest(
             @JsonProperty(FIELD_INSTANT) Instant instant,
-            @JsonProperty(FIELD_FROM_SNAPSHOT) @Nullable Long fromSnapshot) {
+            @JsonProperty(FIELD_FROM_SNAPSHOT) @Nullable Long fromSnapshot,
+            @JsonProperty("tableId") @Nullable String tableId) {
         this.instant = instant;
         this.fromSnapshot = fromSnapshot;
+        this.tableId = tableId;
+    }
+
+    @JsonGetter("tableId")
+    @Nullable
+    public String getTableId() {
+        return tableId;
     }
 
     @JsonGetter(FIELD_INSTANT)

@@ -25,29 +25,35 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.casting.schema_evolution import read_arrow_schema
+
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_json_parser import extract_referenced_fields
 from pypaimon.data.map_shared_shredding import map_selected_keys_field
-from pypaimon.read.push_down_utils import predicate_field_names
+from pypaimon.read.push_down_utils import (
+    exclude_predicate_with_fields, predicate_field_names, rewrite_predicate_indices)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.auth_masking_reader import (
     AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
     RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
+from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.variant_read_type import has_variant_extractions
-from pypaimon.read.read_type import (adapter_output_paths, extract_array, output_schema, reader_adapter)
+from pypaimon.read.read_type import (
+    OutputProjection, adapter_output_paths, extract_array, output_schema, reader_adapter)
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import (
-    DataField, MapType, PyarrowFieldParser, is_blob_file_field, is_map_blob_type)
+    DataField, MapType, is_blob_file_field, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.arrow_utils import zero_column_batch
 
 ROW_KIND_COLUMN = "_row_kind"
+_DEFAULT_PREDICATE = object()
 logger = logging.getLogger(__name__)
 _RECORD_BATCH_READER_FROM_STREAM = getattr(
     pyarrow.ipc.RecordBatchReader, "from_stream", None)
@@ -291,7 +297,7 @@ class TableRead:
             splits: List[Split],
             blob_parallelism: Optional[int] = None,
             parallelism: Optional[int] = None):
-        schema = self._output_arrow_schema()
+        schema = self._output_arrow_schema(splits)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
         effective = self._effective_parallelism(parallelism, len(splits))
@@ -389,7 +395,7 @@ class TableRead:
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         effective = self._effective_parallelism(parallelism, len(splits))
-        schema = self._output_arrow_schema()
+        schema = self._output_arrow_schema(splits)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
@@ -459,8 +465,23 @@ class TableRead:
         extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
         return projected if predicate_field_names(self.predicate) & extra_names else adapter
 
-    def _output_arrow_schema(self):
-        return output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
+    def _output_arrow_schema(self, splits=None):
+        schema = read_arrow_schema(self.read_type)
+        masks = set()
+        if splits:
+            for split in splits:
+                if isinstance(split, QueryAuthSplit) and split.auth_result is not None:
+                    masks.update(split.auth_result.column_masking or {})
+        elif self.table.options.query_auth_enabled:
+            # Before a plan or for an empty plan, the grant is unknown. Masks
+            # may null any top-level column, including a declared NOT NULL one.
+            masks.update(schema.names)
+        if masks:
+            schema = pyarrow.schema([
+                field.with_nullable(True) if field.name in masks else field
+                for field in schema
+            ], metadata=schema.metadata)
+        return output_schema(schema, self.output_projection)
 
     @staticmethod
     def _apply_output_projection_to_schema(schema, projection):
@@ -500,11 +521,13 @@ class TableRead:
         if not self._native_blob_view_supported():
             return self._native_fallback(
                 "the table uses an unsupported BLOB view")
-        # Query authorization has additional filtering, masking and projection
-        # semantics which are already implemented by the Python reader.
-        if any(isinstance(split, QueryAuthSplit) for split in splits):
+        # Only an opaque split from Rust's authorized plan retains the live
+        # grant. Python-planned/serialized rules remain on the Python reader;
+        # reconstructing a Rust split cannot mint authorization from bytes.
+        if any(isinstance(split, QueryAuthSplit) and getattr(split, '_native_split', None) is None
+               for split in splits):
             return self._native_fallback(
-                "query authorization requires the Python reader")
+                "query authorization requires the original native plan")
         try:
             from pypaimon.read.native_plan import (
                 _prepare_native_read, _raise_if_native_fork_safety_error,
@@ -830,7 +853,12 @@ class TableRead:
     def _flatten_native_nested_batch(self, batch, schema):
         _, paths = self._reader_adapter()
         arrays = [extract_array(batch, path) for path in paths]
-        fields = list(PyarrowFieldParser.from_paimon_schema(self._adapter_read_type))
+        fields = list(read_arrow_schema(self._adapter_read_type))
+        # Authorization can mask a NOT NULL field. Keep the captured source
+        # nullability when flattening, including whole-parent/MAP projections.
+        projected = output_schema(batch.schema, OutputProjection([
+            (field.name, path) for field, path in zip(fields, paths)]))
+        fields = [field.with_nullable(field.nullable or projected[i].nullable) for i, field in enumerate(fields)]
         if self.include_row_kind:
             arrays.insert(0, batch.column(ROW_KIND_COLUMN))
             fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
@@ -1138,12 +1166,13 @@ class TableRead:
             yield from self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, schema)
             return
-        physical_schema = PyarrowFieldParser.from_paimon_schema(self._adapter_read_type)
+        physical_schema = read_arrow_schema(self._adapter_read_type)
         if self.include_row_kind:
             physical_schema = self._add_row_kind_to_schema(physical_schema)
         for batch in self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, physical_schema):
-            yield self._project_batch_to_output(batch)
+            yield self._try_to_pad_batch_by_schema(
+                self._project_batch_to_output(batch), schema, allow_type_cast=True)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -1457,7 +1486,8 @@ class TableRead:
                            push_down_limit: bool = True,
                            post_merge_filter=None,
                            eager_blob_fields=None,
-                           post_filter_after_inline: bool = False) -> SplitRead:
+                           post_filter_after_inline: bool = False,
+                           predicate=_DEFAULT_PREDICATE) -> SplitRead:
         sr = self._build_split_read(
             split,
             read_type,
@@ -1466,6 +1496,7 @@ class TableRead:
             post_merge_filter,
             eager_blob_fields,
             post_filter_after_inline,
+            predicate,
         )
         sr._blob_parallelism = blob_parallelism
         sr._parquet_row_group_cache = self._parquet_row_group_cache
@@ -1476,7 +1507,9 @@ class TableRead:
                           push_down_limit: bool = True,
                           post_merge_filter=None,
                           eager_blob_fields=None,
-                          post_filter_after_inline: bool = False) -> SplitRead:
+                          post_filter_after_inline: bool = False,
+                          predicate=_DEFAULT_PREDICATE) -> SplitRead:
+        predicate = self.predicate if predicate is _DEFAULT_PREDICATE else predicate
         effective_limit = (
             self.limit if limit is None else limit
         ) if push_down_limit else None
@@ -1529,7 +1562,7 @@ class TableRead:
                 outer_extract_name_paths = self._output_extract_name_paths()
             return MergeFileSplitRead(
                 table=self.table,
-                predicate=self.predicate,
+                predicate=predicate,
                 read_type=inner_read_type,
                 split=split,
                 row_tracking_enabled=False,
@@ -1556,7 +1589,7 @@ class TableRead:
                 outer_extract_name_paths = self._output_extract_name_paths()
             return DataEvolutionSplitRead(
                 table=self.table,
-                predicate=self.predicate,
+                predicate=predicate,
                 read_type=scan_read_type,
                 split=split,
                 row_tracking_enabled=True,
@@ -1588,7 +1621,7 @@ class TableRead:
                 outer_extract_name_paths = self._output_extract_name_paths()
             return RawFileSplitRead(
                 table=self.table,
-                predicate=self.predicate,
+                predicate=predicate,
                 read_type=inner_read_type,
                 split=split,
                 row_tracking_enabled=self.table.options.row_tracking_enabled(),
@@ -1637,13 +1670,18 @@ class TableRead:
             _, paths = self._reader_adapter()
             outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
             arrays = [extract_array(batch, path) for _, path in outputs]
-            fields = list(self._output_arrow_schema())
+            # Project the already masked schema, retaining captured nullability.
+            adapted_projection = OutputProjection([(alias, path) for alias, path in outputs])
+            actual = output_schema(batch.schema, adapted_projection)
+            declared = output_schema(read_arrow_schema(self.read_type), self.output_projection)
+            fields = [field.with_nullable(field.nullable or actual[i].nullable) for i, field in enumerate(declared)]
             if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
                 arrays.insert(0, batch.column(ROW_KIND_COLUMN))
                 fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
             if not arrays:
                 return batch.select([])
-            return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
+            return pyarrow.RecordBatch.from_arrays(
+                arrays, schema=pyarrow.schema(fields, metadata=batch.schema.metadata))
         if not self._needs_output_projection():
             return batch
         output_names = list(self._output_column_names)
@@ -1801,12 +1839,17 @@ class TableRead:
         auth_result.validate_read_type(
             latest_fields, read_fields, self.nested_name_paths, table_fields)
 
-        extra_fields = auth_result.get_extra_fields(read_fields, table_fields)
-        effective_read_type = read_fields
-        if extra_fields:
-            effective_read_type = read_fields + extra_fields
+        # Query filters can reference masked columns absent from the output.
+        # Include them and their mask dependencies before the final projection.
+        filter_fields = self._predicate_extra_fields
+        needed_fields = read_fields + filter_fields
+        auth_extra_fields = auth_result.get_extra_fields(needed_fields, table_fields)
+        extra_fields = filter_fields + auth_extra_fields
+        effective_read_type = read_fields + extra_fields
 
         filter_fn = auth_result.extract_row_filter()
+        raw_predicate = exclude_predicate_with_fields(
+            self.predicate, set(auth_result.column_masking or {}))
         effective_limit = self.limit if limit is None else limit
         auth_fields = (
             self._auth_filter_field_names(auth_result, effective_read_type)
@@ -1828,7 +1871,8 @@ class TableRead:
             blob_parallelism=blob_parallelism,
             read_type=effective_read_type,
             limit=limit,
-            push_down_limit=filter_fn is None or embed_filter,
+            push_down_limit=(filter_fn is None or embed_filter) and self.predicate is None,
+            predicate=raw_predicate,
             post_merge_filter=filter_fn if embed_filter else None,
             eager_blob_fields=auth_fields if embed_filter else None,
             post_filter_after_inline=post_filter_after_inline,
@@ -1837,7 +1881,7 @@ class TableRead:
 
         needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):
-            schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
+            schema = read_arrow_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
             if getattr(reader, 'blob_field_indices', None) is None:
                 from pypaimon.read.reader.field_indices import (
@@ -1852,11 +1896,16 @@ class TableRead:
 
         if filter_fn and not embed_filter:
             reader = AuthFilterReader(reader, filter_fn)
-            if effective_limit is not None:
-                reader = LimitedRecordBatchReader(reader, effective_limit)
 
         if auth_result.column_masking:
             reader = AuthMaskingReader(reader, auth_result.column_masking, effective_read_type)
+
+        if self.predicate is not None:
+            predicate = rewrite_predicate_indices(self.predicate, effective_read_type)
+            reader = FilterRecordBatchReader(
+                reader, predicate, schema_fields=effective_read_type)
+        if effective_limit is not None:
+            reader = LimitedRecordBatchReader(reader, effective_limit)
 
         if extra_fields:
             original_columns = [f.name for f in read_fields]

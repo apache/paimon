@@ -145,7 +145,7 @@ Paimon-managed function definitions require a REST catalog. Choose a definition 
 | Definition | Use it for | Requirement |
 | --- | --- | --- |
 | [Java lambda](#lambda-function) | A small Java expression stored in the catalog | Register metadata and a Spark definition with procedures. |
-| [JAR implementation](#file-function) | Existing Spark or Hive UDF/UDAF classes | Spark 3.4+ and the implementation JAR. |
+| [JAR implementation](#file-function) | Spark or Hive UDF/UDAF classes, or Hive UDTF classes | Spark 3.4+ and the implementation JAR. |
 | [SQL body](#sql-function) | Reusable scalar SQL logic | Spark 4.0+. |
 
 The examples assume the REST catalog and its `default` database are selected.
@@ -177,9 +177,12 @@ CALL sys.drop_function(`function` => 'default.area_func');
 
 ### File Function
 
-Register a Spark or Hive UDF/UDAF implementation packaged in a JAR.
+Register a Spark or Hive UDF/UDAF, or a Hive UDTF, packaged in a JAR.
+See [Spark UDFs](https://spark.apache.org/docs/latest/sql-ref-functions.html#udfs-user-defined-functions).
 
-Currently, supports Spark or Hive implementations of UDFs and UDAFs, see [Spark UDFs](https://spark.apache.org/docs/latest/sql-ref-functions.html#udfs-user-defined-functions)
+Hive UDTFs can be invoked in a `SELECT` list or a `LATERAL VIEW`. In `LATERAL VIEW`,
+use an unqualified function name or `database.function` in the current REST catalog;
+Spark's parser does not accept `catalog.database.function` in this clause.
 
 This feature requires Spark 3.4 or higher.
 

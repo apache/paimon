@@ -173,7 +173,8 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             min_sequence_number=0, max_sequence_number=0,
             schema_id=0, level=1, extra_files=[])
         source = DataSplit([data_file], partition, 3)
-        partition_bytes = repr(tuple(partition.values)).encode("utf-8")
+        from pypaimon.table.row.generic_row import GenericRowSerializer
+        partition_bytes = GenericRowSerializer.to_bytes(partition)
 
         result = PrimaryKeyScoredResult(7, [source], [
             PrimaryKeySearchPosition(partition_bytes, 3, "data.parquet", 1, 0.9),
@@ -186,6 +187,22 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         self.assertEqual([(1, 2), (4, 4)],
                          [(r.from_, r.to) for r in result.splits[0].row_ranges()])
         self.assertEqual([0.9, 0.8, 0.7], result.splits[0].scores())
+
+    def test_search_position_partitions_use_java_binary_row_bytes(self):
+        from pypaimon.table.row.binary_row import BinaryRow
+        from pypaimon.table.row.generic_row import GenericRowSerializer
+        from pypaimon.table.source.primary_key_scored_result import _partition_bytes
+
+        self.assertEqual(bytes(12), _partition_bytes(GenericRow([], [])))
+        fields = [DataField(0, 'pt', AtomicType('INT'))]
+        for value in (None, 2, 10, -1):
+            generic = GenericRow([value], fields)
+            encoded = GenericRowSerializer.to_bytes(generic)
+            self.assertEqual(encoded, _partition_bytes(generic))
+            self.assertEqual(encoded, _partition_bytes(BinaryRow(encoded, fields)))
+        # BinaryRow ordering is the Java physical-position tie breaker.
+        self.assertLess(_partition_bytes(GenericRow([2], fields)),
+                        _partition_bytes(GenericRow([10], fields)))
 
     def test_pk_vector_filter_is_applied_before_top_k(self):
         split = SimpleNamespace(row_ranges_by_file={
@@ -366,7 +383,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         self.assertEqual("from-snapshot", copied_options[0]["scan.mode"])
         self.assertEqual("17", copied_options[0]["scan.snapshot-id"])
         self.assertIsNone(copied_options[0]["scan.tag-name"])
-        self.assertEqual("false", copied_options[0]["scan.native-plan.enabled"])
+        self.assertNotIn("scan.native-plan.enabled", copied_options[0])
 
     def test_pk_index_source_policy_matches_java(self):
         compact = SimpleNamespace(file_source=1, level=1)

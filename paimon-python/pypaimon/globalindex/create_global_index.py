@@ -161,6 +161,7 @@ class GlobalIndexBuilder:
                     "Column '%s' does not exist in table '%s'."
                     % (column, self._table.identifier)
                 )
+        self._validate_unaware_bucket_table()
         if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
             self._validate_generic_index_table()
 
@@ -174,9 +175,9 @@ class GlobalIndexBuilder:
             concurrency, ray_remote_args = validate_build_options(
                 self, concurrency, ray_remote_args)
         partition_filter = self._resolve_partition_filter()
-        if execution == "local" and self._index_type in _SORTED_INDEX_IDENTIFIERS:
-            from pypaimon.globalindex.native_index_build import build_native_sorted_index
-            messages = build_native_sorted_index(self, partition_filter)
+        if execution == "local":
+            from pypaimon.globalindex.native_index_build import build_native_global_index
+            messages = build_native_global_index(self, partition_filter)
             if messages is not None:
                 return messages
         read_builder = self._table.new_read_builder()
@@ -504,14 +505,19 @@ class GlobalIndexBuilder:
             )
         raise ValueError("Unsupported generic global index type: %s" % self._index_type)
 
-    def _validate_generic_index_table(self) -> None:
-        bucket = self._core_options.bucket()
+    def _validate_unaware_bucket_table(self) -> None:
+        # Global index files live in bucket 0 and are keyed by the table-wide
+        # _ROW_ID, so every index type needs an unaware-bucket table. Check the
+        # table options: caller options only tune the index build.
+        bucket = self._table.options.bucket()
         if bucket != -1:
             raise ValueError(
-                "Generic global index only supports unaware-bucket tables "
+                "Global index only supports unaware-bucket tables "
                 "(bucket = -1), but table '%s' has bucket = %s."
                 % (self._table.identifier, bucket)
             )
+
+    def _validate_generic_index_table(self) -> None:
         if (self._core_options.deletion_vectors_enabled()
                 and not (self._index_type in VINDEX_IDENTIFIERS
                          and self._table.options.data_evolution_enabled())):

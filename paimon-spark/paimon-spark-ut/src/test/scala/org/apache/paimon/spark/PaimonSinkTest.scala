@@ -256,7 +256,12 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
             spark.sql("SELECT * FROM T ORDER BY a, b"),
             Row(1, "2023-08-09") :: Row(2, "2023-08-09") :: Nil)
 
-          val inputData = MemoryStream[(Long, Date, Int)]
+          // The primary key column `a` deliberately keeps its INT type: widening a
+          // primary-key column changes its bucket hash and is rejected by the automatic
+          // merge path (see SchemaMergingUtilsTest#testRejectTypeWideningOnPrimaryKeyColumn).
+          // This test focuses on the schema evolution that is allowed — widening a non-key
+          // column (`b`: STRING -> DATE) and adding a new column (`c`).
+          val inputData = MemoryStream[(Int, Date, Int)]
           val stream = inputData
             .toDS()
             .toDF("a", "b", "c")
@@ -271,13 +276,13 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           val query = () => spark.sql("SELECT * FROM T ORDER BY a")
 
           try {
-            inputData.addData((1L, date, 123), (3L, date, 456))
+            inputData.addData((1, date, 123), (3, date, 456))
             stream.processAllAvailable()
 
             checkAnswer(
               query(),
-              Row(1L, date, 123) :: Row(2L, Date.valueOf("2023-08-09"), null) :: Row(
-                3L,
+              Row(1, date, 123) :: Row(2, Date.valueOf("2023-08-09"), null) :: Row(
+                3,
                 date,
                 456) :: Nil)
           } finally {

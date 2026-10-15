@@ -224,7 +224,9 @@ class AbstractVectorSearchReadImpl:
             scanner.close()
 
     def _refine_scalar_result(self, splits, result, snapshot=None):
-        if result is not None and result.is_exact():
+        from pypaimon.table.source.global_index_row_filter import is_exact
+
+        if is_exact(self._filter, result):
             return result.results()
         if not self._table.options.global_index_filter_refine_from_data():
             logging.getLogger(__name__).warning(

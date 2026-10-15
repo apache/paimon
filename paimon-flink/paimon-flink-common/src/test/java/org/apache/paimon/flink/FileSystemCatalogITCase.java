@@ -19,12 +19,13 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.TableEnvironment;
@@ -38,7 +39,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -148,7 +148,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     }
 
     @Test
-    void testCatalogWithLockForSchema() throws Exception {
+    void testCatalogIgnoresBackendLockOptionsForSchema() throws Exception {
         LOCK_COUNT.set(0);
         tEnv.executeSql(
                         String.format(
@@ -165,7 +165,9 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         tEnv.executeSql("CREATE TABLE table2 (a STRING, b STRING, c STRING)").await();
         tEnv.executeSql("CREATE TABLE table3 (a STRING, b STRING, c STRING)").await();
         tEnv.executeSql("DROP TABLE table3").await();
-        assertThat(LOCK_COUNT.get()).isEqualTo(3);
+        assertThat(LOCK_COUNT.get()).isZero();
+        assertThat(collect("SHOW TABLES"))
+                .containsExactlyInAnyOrder(Row.of("table1"), Row.of("table2"));
     }
 
     private void innerTestWriteRead() throws Exception {
@@ -197,13 +199,17 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         }
 
         @Override
-        public CatalogLock createLock(CatalogLockContext context) {
-            return new CatalogLock() {
+        public Lock createLock(
+                CatalogLockContext context,
+                Identifier identifier,
+                String tableUuid,
+                String commitUser,
+                Options tableOptions) {
+            return new Lock() {
                 @Override
-                public <T> T runWithLock(String database, String table, Callable<T> callable)
-                        throws Exception {
+                public AutoCloseable acquire() throws Exception {
                     LOCK_COUNT.incrementAndGet();
-                    return callable.call();
+                    return () -> {};
                 }
 
                 @Override

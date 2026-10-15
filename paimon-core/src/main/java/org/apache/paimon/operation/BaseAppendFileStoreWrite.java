@@ -164,6 +164,12 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             boolean ignorePreviousFiles) {
         DataFilePathFactory dataPathFactory =
                 pathFactory.createDataFilePathFactory(partition, bucket);
+        boolean useWriteBuffer = options.useWriteBufferForAppend() || forceBufferSpill;
+        if (blobContext != null
+                && !fieldNamesInBlobFile(writeType, blobContext.blobInlineFields()).isEmpty()) {
+            // Buffer serialization drops source readers needed to copy descriptor-backed BLOBs.
+            useWriteBuffer = false;
+        }
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -183,7 +189,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.commitForceCompact(),
                 dataPathFactory,
                 restoreIncrement,
-                options.useWriteBufferForAppend() || forceBufferSpill,
+                useWriteBuffer,
                 options.writeBufferSpillable() || forceBufferSpill,
                 options.fileCompression(),
                 options.spillCompressOptions(),

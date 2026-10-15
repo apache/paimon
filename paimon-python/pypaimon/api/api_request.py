@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.json_util import json_field
+from pypaimon.common.json_util import json_field, optional_json_field
 from pypaimon.function.function_change import FunctionChange
 from pypaimon.function.function_definition import FunctionDefinition
 from pypaimon.management.column_mask import ColumnMask
@@ -106,9 +106,11 @@ class AlterTableRequest(RESTRequest):
 class RollbackTableRequest(RESTRequest):
     FIELD_INSTANT = "instant"
     FIELD_FROM_SNAPSHOT = "fromSnapshot"
+    FIELD_TABLE_ID = "tableId"
 
     instant: Instant = json_field(FIELD_INSTANT)
     from_snapshot: Optional[int] = json_field(FIELD_FROM_SNAPSHOT)
+    table_id: Optional[str] = optional_json_field(FIELD_TABLE_ID, "non_null")
 
 
 @dataclass

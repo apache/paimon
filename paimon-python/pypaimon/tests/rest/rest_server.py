@@ -22,6 +22,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+import json
 from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -224,6 +225,7 @@ class RESTCatalogServer:
         self.no_permission_databases: List[str] = []
         self.no_permission_tables: List[str] = []
         self.table_token_store: Dict[str, "RESTToken"] = {}
+        self.table_query_auth_store = {}
 
         # Initialize mock catalog (simplified)
         self.data_path = data_path
@@ -558,6 +560,8 @@ class RESTCatalogServer:
                 return self._table_commit_handle(method, data, lookup_identifier, branch_part)
             elif operation == "token":
                 return self._table_token_handle(method, lookup_identifier)
+            elif operation == "auth":
+                return self._table_query_auth_handle(method, data, lookup_identifier)
             elif operation == "rollback":
                 return self._table_rollback_handle(method, data, lookup_identifier)
             elif operation == "snapshot":
@@ -1095,6 +1099,17 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _table_query_auth_handle(self, method, data, identifier):
+        if method != "POST":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+        from pypaimon.api.api_response import AuthTableQueryResponse
+        response = self.table_query_auth_store.get(identifier.get_full_name(), AuthTableQueryResponse())
+        if callable(response):
+            response = response(json.loads(data).get('select'))
+        return self._mock_response(response, 200)
 
     def _table_token_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
         if method != "GET":

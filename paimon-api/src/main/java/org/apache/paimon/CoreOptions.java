@@ -433,7 +433,15 @@ public class CoreOptions implements Serializable {
             key("file-index.in-manifest-threshold")
                     .memoryType()
                     .defaultValue(MemorySize.parse("500 B"))
-                    .withDescription("The threshold to store file index bytes in manifest.");
+                    .withDescription(
+                            "The threshold to store file index bytes in manifest. Valid range: 0 to 2,147,483,647 bytes.");
+
+    public static final ConfigOption<Integer> FILE_INDEX_FORMAT_VERSION =
+            key("file-index.format.version")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.");
 
     public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
             key("file-index.read.enabled")
@@ -972,6 +980,23 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Specify how to initialize the next sequence number for primary key "
                                     + "table writers.");
+
+    public static final ConfigOption<Boolean> REST_COMMIT_LOCK_ENABLED =
+            key("rest.commit.lock-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable the REST catalog's server-side table commit lease capability. "
+                                    + "Writers acquire a lease only when rest.commit.acquire-lock is enabled.");
+
+    public static final ConfigOption<Boolean> REST_COMMIT_ACQUIRE_LOCK =
+            key("rest.commit.acquire-lock")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether this writer acquires a REST commit lease for each publication "
+                                    + "attempt. Can be set dynamically for a writer and requires "
+                                    + "rest.commit.lock-enabled on the server-side table.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
             key("commit.timeout")
@@ -3483,6 +3508,13 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
+    public int fieldCollectAggCountLimit(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + COUNT_LIMIT)
+                        .intType()
+                        .defaultValue(Integer.MAX_VALUE));
+    }
+
     public String fieldListAggDelimiter(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER)
@@ -3898,6 +3930,14 @@ public class CoreOptions implements Serializable {
 
     public SequenceNumberInitMode writeSequenceNumberInitMode() {
         return options.get(WRITE_SEQUENCE_NUMBER_INIT_MODE);
+    }
+
+    public boolean restCommitLockEnabled() {
+        return options.get(REST_COMMIT_LOCK_ENABLED);
+    }
+
+    public boolean restCommitAcquireLock() {
+        return options.get(REST_COMMIT_ACQUIRE_LOCK);
     }
 
     public long commitTimeout() {
@@ -4532,8 +4572,23 @@ public class CoreOptions implements Serializable {
         return new FileIndexOptions(this);
     }
 
+    public int fileIndexFormatVersion() {
+        int version = options.get(FILE_INDEX_FORMAT_VERSION);
+        if (version != 1 && version != 2) {
+            throw new IllegalArgumentException("file-index.format.version must be 1 or 2");
+        }
+        return version;
+    }
+
     public long fileIndexInManifestThreshold() {
-        return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+        long bytes = options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+        checkArgument(
+                bytes >= 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 0 and %s bytes, but was %s bytes.",
+                FILE_INDEX_IN_MANIFEST_THRESHOLD.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return bytes;
     }
 
     public boolean fileIndexReadEnabled() {

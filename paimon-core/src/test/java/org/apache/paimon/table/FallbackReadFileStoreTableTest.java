@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
@@ -544,6 +545,55 @@ public class FallbackReadFileStoreTableTest {
         assertThat(switchedId.getDatabaseName()).isEqualTo("mydb");
         assertThat(switchedId.getBranchName()).isEqualTo(branchName);
         assertThat(switchedId.getObjectName()).isEqualTo("mytable$branch_bc");
+        assertThat(switched.catalogEnvironment().uuid()).isNull();
+        assertThat(mainTable.catalogEnvironment().uuid()).isEqualTo("uuid-1");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"scan.fallback-branch", "scan.primary-branch"})
+    void testBranchViewsRollbackWithoutSourceUuid(String branchOption) throws Exception {
+        FileStoreTable localTable = createTable();
+        localTable.createBranch("bc");
+        Catalog catalog = Mockito.mock(Catalog.class);
+        Identifier mainId = Identifier.create("mydb", "mytable");
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        mainId, "main-uuid", () -> catalog, null, null, null, true, false);
+        Options options = new Options();
+        options.set(branchOption, "bc");
+        FallbackReadFileStoreTable table =
+                (FallbackReadFileStoreTable)
+                        FileStoreTableFactory.create(
+                                fileIO, tablePath, localTable.schema(), options, environment);
+        Identifier branchId = new Identifier("mydb", "mytable", "bc");
+
+        table.other().rollbackTo(1L);
+        Mockito.verify(catalog)
+                .rollbackTo(
+                        Mockito.eq(branchId),
+                        Mockito.isNull(),
+                        Mockito.argThat(
+                                instant ->
+                                        instant instanceof Instant.SnapshotInstant
+                                                && ((Instant.SnapshotInstant) instant)
+                                                                .getSnapshotId()
+                                                        == 1L),
+                        Mockito.isNull());
+
+        table.switchToBranch("bc").rollbackTo("checkpoint");
+        Mockito.verify(catalog)
+                .rollbackTo(
+                        Mockito.eq(branchId),
+                        Mockito.isNull(),
+                        Mockito.argThat(
+                                instant ->
+                                        instant instanceof Instant.TagInstant
+                                                && "checkpoint"
+                                                        .equals(
+                                                                ((Instant.TagInstant) instant)
+                                                                        .getTagName())),
+                        Mockito.isNull());
+        assertThat(table.catalogEnvironment().uuid()).isEqualTo("main-uuid");
     }
 
     private void writeDataIntoTable(

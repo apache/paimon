@@ -2377,9 +2377,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
 
         // rollback to snapshot 2 from snapshot
-        assertThatThrownBy(() -> catalog.rollbackTo(identifier, Instant.snapshot(2L), 4L))
+        assertThatThrownBy(() -> catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 4L))
                 .hasMessageContaining("Latest snapshot 3 is not 4");
-        catalog.rollbackTo(identifier, Instant.snapshot(2L), 3L);
+        catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 3L);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
     }
 

@@ -37,6 +37,7 @@ import org.apache.paimon.rest.RESTCatalogLoader;
 import org.apache.paimon.rest.RESTUtil;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.tag.SnapshotLoaderImpl;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.SnapshotLoader;
 import org.apache.paimon.utils.SnapshotManager;
@@ -44,7 +45,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Optional;
 import java.util.function.LongConsumer;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
@@ -131,29 +131,70 @@ public class CatalogEnvironment implements Serializable {
         return SchemaModification.create(catalog, identifier);
     }
 
-    @Nullable
-    public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
-        SnapshotCommit snapshotCommit;
-        if (catalogLoader != null && supportsVersionManagement) {
-            snapshotCommit = new CatalogSnapshotCommit(catalogLoader.load(), identifier, uuid);
-        } else {
-            Lock lock =
-                    Optional.ofNullable(lockFactory)
-                            .map(factory -> factory.createLock(lockContext))
-                            .map(l -> Lock.fromCatalog(l, identifier))
-                            .orElseGet(Lock::empty);
-            snapshotCommit = new RenamingSnapshotCommit(snapshotManager, lock);
+    /** Create a publisher owning the writer's lock and its catalog resources. */
+    public SnapshotCommit snapshotCommit(
+            SnapshotManager snapshotManager, CoreOptions options, String commitUser) {
+        Identifier lockIdentifier =
+                identifier == null
+                        ? null
+                        : new Identifier(
+                                identifier.getDatabaseName(),
+                                identifier.getTableName(),
+                                options.branch());
+        if (catalogLoader != null) {
+            Catalog catalog = catalogLoader.load();
+            Lock lock = null;
+            try {
+                lock =
+                        catalog.createLock(
+                                lockIdentifier, uuid, commitUser, options.toConfiguration());
+                if (supportsVersionManagement) {
+                    return new CatalogSnapshotCommit(catalog, identifier, uuid, lock);
+                }
+                return new RenamingSnapshotCommit(snapshotManager, lock) {
+                    @Override
+                    protected void closeImpl() throws Exception {
+                        catalog.close();
+                    }
+                };
+            } catch (RuntimeException e) {
+                IOUtils.closeQuietly(lock);
+                IOUtils.closeQuietly(catalog);
+                throw e;
+            }
         }
-        return snapshotCommit;
+        Lock lock = createFactoryLock(lockIdentifier, commitUser, options.toConfiguration());
+        try {
+            return new RenamingSnapshotCommit(snapshotManager, lock);
+        } catch (RuntimeException e) {
+            IOUtils.closeQuietly(lock);
+            throw e;
+        }
     }
 
+    private Lock createFactoryLock(
+            Identifier lockIdentifier, @Nullable String commitUser, Options tableOptions) {
+        return lockFactory == null
+                ? Lock.empty()
+                : lockFactory.createLock(
+                        lockContext, lockIdentifier, uuid, commitUser, tableOptions);
+    }
+
+    /** Create rollback with the table incarnation and runtime branch. */
     @Nullable
-    public TableRollback catalogTableRollback() {
+    public TableRollback catalogTableRollback(@Nullable String branch) {
         if (catalogLoader != null && supportsVersionManagement) {
             Catalog catalog = catalogLoader.load();
+            Identifier rollbackIdentifier =
+                    branch == null
+                            ? identifier
+                            : new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    branch);
             return (instant, fromSnapshot) -> {
                 try {
-                    catalog.rollbackTo(identifier, instant, fromSnapshot);
+                    catalog.rollbackTo(rollbackIdentifier, uuid, instant, fromSnapshot);
                 } catch (Catalog.TableNotExistException e) {
                     throw new RuntimeException(e);
                 }
@@ -182,7 +223,7 @@ public class CatalogEnvironment implements Serializable {
         if (catalogLoader == null) {
             return null;
         }
-        return new SnapshotLoaderImpl(catalogLoader, identifier);
+        return new SnapshotLoaderImpl(catalogLoader, identifier, uuid);
     }
 
     @Nullable
@@ -247,7 +288,7 @@ public class CatalogEnvironment implements Serializable {
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
-                uuid,
+                identifier.equals(this.identifier) ? uuid : null,
                 catalogLoader,
                 lockFactory,
                 lockContext,

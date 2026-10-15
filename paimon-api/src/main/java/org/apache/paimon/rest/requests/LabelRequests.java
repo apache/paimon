@@ -16,21 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.annotation.Public;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-import java.io.Closeable;
-import java.util.concurrent.Callable;
+/** Shared checks for the label binding identity carried in request bodies. */
+final class LabelRequests {
 
-/**
- * An interface that allows source and sink to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
-@Public
-public interface CatalogLock extends Closeable {
+    private LabelRequests() {}
 
-    /** Run with catalog lock. The caller should tell catalog the database and table name. */
-    <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+    static String requireNonBlank(String value, String field) {
+        checkArgument(value != null && !value.trim().isEmpty(), "%s must not be blank", field);
+        return value;
+    }
 }

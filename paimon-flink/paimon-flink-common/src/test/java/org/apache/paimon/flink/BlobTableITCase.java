@@ -48,6 +48,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.OutputStream;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -665,6 +666,35 @@ public class BlobTableITCase extends CatalogITCaseBase {
         batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
         assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
                 .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWriteBlobDescriptorWithAppendBuffer(boolean streaming) throws Exception {
+        byte[] payload = new byte[] {1, 2, 3};
+        Path source = warehouse.resolve("buffered_blob_source");
+        Files.write(source, payload);
+        tEnv.executeSql(
+                "CREATE TABLE buffered_blob_table (id INT, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture',"
+                        + " 'write-buffer-for-append'='true',"
+                        + " 'write-buffer-spillable'='false',"
+                        + " 'blob-write-null-on-fetch-failure'='true')");
+
+        (streaming ? sEnv : tEnv)
+                .executeSql(
+                        "INSERT INTO buffered_blob_table "
+                                + "/*+ OPTIONS('sink.parallelism'='2') */ "
+                                + "VALUES (1, sys.path_to_descriptor('"
+                                + source.toUri()
+                                + "'))")
+                .await();
+
+        Files.delete(source);
+        assertThat(batchSql("SELECT * FROM buffered_blob_table"))
+                .containsExactly(Row.of(1, payload));
     }
 
     @Test

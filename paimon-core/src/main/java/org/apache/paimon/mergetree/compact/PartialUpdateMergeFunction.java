@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.SortOrder;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -55,6 +56,7 @@ import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE;
 import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP;
+import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -65,6 +67,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     public static final String SEQUENCE_GROUP = "sequence-group";
+    public static final String SEQUENCE_GROUP_SORT_ORDER = SEQUENCE_GROUP + ".sort-order";
     private static final String SEQUENCE_GROUP_PK_ERROR =
             "The sequence-group '%s' contains primary key field '%s', "
                     + "which is not allowed. Primary key columns cannot be put in sequence-group.";
@@ -87,6 +90,38 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 FIELDS_PREFIX.length() + 1,
                                 optionKey.length() - SEQUENCE_GROUP.length() - 1)
                         .split(FIELDS_SEPARATOR));
+    }
+
+    public static boolean isSequenceGroupSortOrderOption(String optionKey) {
+        return optionKey.startsWith(FIELDS_PREFIX + ".")
+                && optionKey.endsWith("." + SEQUENCE_GROUP_SORT_ORDER);
+    }
+
+    /** Parses sequence-group sort orders and validates their configuration. */
+    public static Map<String, SortOrder> parseSequenceGroupSortOrders(Options options) {
+        Map<String, SortOrder> sequenceGroupSortOrders = new HashMap<>();
+        for (String optionKey : options.toMap().keySet()) {
+            if (isSequenceGroupOptionCandidate(optionKey)) {
+                SortOrder order =
+                        options.get(
+                                key(optionKey + ".sort-order")
+                                        .enumType(SortOrder.class)
+                                        .defaultValue(SortOrder.ASCENDING));
+                sequenceGroupSortOrders.put(optionKey, order);
+            }
+        }
+        for (String optionKey : options.toMap().keySet()) {
+            if (isSequenceGroupSortOrderOption(optionKey)) {
+                String groupKey =
+                        optionKey.substring(0, optionKey.length() - ".sort-order".length());
+                checkArgument(
+                        sequenceGroupSortOrders.containsKey(groupKey),
+                        "Can not set '%s' without defining corresponding sequence group '%s'.",
+                        optionKey,
+                        groupKey);
+            }
+        }
+        return sequenceGroupSortOrders;
     }
 
     public static List<String> sequenceGroupProtectedFields(String optionValue) {
@@ -436,6 +471,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             List<String> fieldNames = rowType.getFieldNames();
             this.fieldSeqComparators = new HashMap<>();
             Map<String, Integer> sequenceGroupMap = new HashMap<>();
+            Map<String, String> sequenceGroupByOrderingField = new HashMap<>();
+            Map<String, SortOrder> sequenceGroupSortOrders = parseSequenceGroupSortOrders(options);
             List<String> allSequenceFields = new ArrayList<>();
             List<String> fieldsProtectedBySequenceGroup = new ArrayList<>();
             for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
@@ -447,8 +484,26 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                     .mapToInt(fieldName -> requireField(fieldName, fieldNames))
                                     .toArray();
 
+                    for (int field : sequenceFields) {
+                        String fieldName = fieldNames.get(field);
+                        String previousGroup =
+                                sequenceGroupByOrderingField.putIfAbsent(fieldName, k);
+                        checkArgument(
+                                previousGroup == null || previousGroup.equals(k),
+                                "Sequence field '%s' is shared by sequence groups '%s' and '%s'. "
+                                        + "Ordering fields must not overlap between sequence groups.",
+                                fieldName,
+                                previousGroup,
+                                k);
+                    }
+
+                    SortOrder sortOrder = sequenceGroupSortOrders.get(k);
                     Supplier<FieldsComparator> userDefinedSeqComparator =
-                            () -> UserDefinedSeqComparator.create(rowType, sequenceFields, true);
+                            () ->
+                                    UserDefinedSeqComparator.create(
+                                            rowType,
+                                            sequenceFields,
+                                            sortOrder == SortOrder.ASCENDING);
                     sequenceGroupProtectedFields(v).stream()
                             .map(fieldName -> requireField(fieldName, fieldNames))
                             .forEach(
@@ -579,7 +634,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 projectedSeqComparators.put(
                                         newField,
                                         UserDefinedSeqComparator.create(
-                                                readType, newSequenceFields, true));
+                                                readType,
+                                                newSequenceFields,
+                                                comparator.isAscendingOrder()));
                             }
                         });
 
