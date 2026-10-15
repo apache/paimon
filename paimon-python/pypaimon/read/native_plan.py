@@ -452,7 +452,8 @@ def native_plan(
         row_position_shard: Optional[Tuple[int, int]] = None,
         chunk_shuffle: Optional[Tuple[int, int]] = None,
         shard: Optional[Tuple[int, int]] = None,
-        partition_predicate: Optional[Predicate] = None) -> Plan:
+        partition_predicate: Optional[Predicate] = None,
+        global_index_result=None) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -469,15 +470,40 @@ def native_plan(
         builder = builder.with_partition_filter(_predicate_to_native(partition_predicate))
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
-    if incremental_range is None:
+    from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
+    supplied_pk_splits = (isinstance(global_index_result, GlobalIndexSplitResult)
+                          and not table.options.query_auth_enabled)
+    if supplied_pk_splits or incremental_range is None:
         scan = builder.new_scan()
     elif incremental_mode == 'delta':
-        # Keep the two-argument call compatible with runtimes predating the
-        # explicit mode API. Non-delta modes require the new binding.
         scan = builder.new_incremental_scan(*incremental_range)
     else:
-        scan = builder.new_incremental_scan(
-            *incremental_range, incremental_mode)
+        scan = builder.new_incremental_scan(*incremental_range, incremental_mode)
+    if global_index_result is not None and not table.options.query_auth_enabled:
+        # A PK result already selected a snapshot and physical files. Java's
+        # PrimaryKeyBatchScan returns those selections before ordinary planning.
+        from pypaimon_rust.datafusion import GlobalIndexResult, Split as NativeSplit
+        from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
+        from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
+        if isinstance(global_index_result, GlobalIndexSplitResult):
+            result = (getattr(global_index_result, '_native_result', None)
+                      if type(global_index_result) is PrimaryKeyScoredResult else None)
+            # Java's PK result uses snapshot 0 for an uncommitted table,
+            # whereas the core search uses None. Keep the Python result's ID.
+            if result is not None and result.snapshot_id() is None:
+                result = None
+            if result is None:
+                result = GlobalIndexResult.from_splits(
+                    global_index_result.snapshot_id,
+                    [NativeSplit.deserialize(serialize_split_v1(split)) for split in global_index_result.splits])
+        elif isinstance(global_index_result, ScoredGlobalIndexResult):
+            score = global_index_result.score_getter()
+            result = GlobalIndexResult.from_scored_row_ids({
+                row_id: score(row_id) for row_id in global_index_result.results()})
+        else:
+            result = GlobalIndexResult.from_row_ranges([
+                (range_.from_, range_.to) for range_ in global_index_result.results().to_range_list()])
+        scan = scan.with_global_index_result(result)
     if row_position_slice is not None:
         scan = scan.with_row_position_slice(*row_position_slice)
     if row_position_shard is not None:

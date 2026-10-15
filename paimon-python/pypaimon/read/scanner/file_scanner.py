@@ -334,10 +334,13 @@ class FileScanner:
                     raise ValueError(
                         "Primary-key scan requires a GlobalIndexSplitResult, but found %s."
                         % type(self._global_index_result).__name__)
-                return Plan(
-                    list(self._global_index_result.splits),
-                    snapshot_id=self._global_index_result.snapshot_id,
-                )
+                # Java ignores external raw-index results under query auth:
+                # masking can invalidate both their positions and their scores.
+                if not self.table.options.query_auth_enabled:
+                    return Plan(
+                        list(self._global_index_result.splits),
+                        snapshot_id=self._global_index_result.snapshot_id,
+                    )
         # Create appropriate split generator based on table type
         if self.chunk_shuffle is not None:
             self._validate_chunk_shuffle_compat()
@@ -471,7 +474,7 @@ class FileScanner:
         self._scanned_snapshot = snapshot
         self._scanned_snapshot_id = snapshot.id if snapshot else None
 
-        if row_ranges is None:
+        if row_ranges is None and not self.table.options.query_auth_enabled:
             global_index_plan = self._global_index_result \
                 if self._global_index_result is not None \
                 else self._eval_global_index(snapshot)
