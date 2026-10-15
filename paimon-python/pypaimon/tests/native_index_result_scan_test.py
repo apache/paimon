@@ -25,8 +25,10 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.read.scanner.file_scanner import FileScanner
-from pypaimon.read.split_serializer import serialize_split_v1
+from pypaimon.read.native_plan import _partition_fields
+from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
+from pypaimon.tests import native_hybrid_search_test as hybrid
 from pypaimon.tests import native_pk_full_text_search_test as text
 from pypaimon.tests import native_query_auth_test as auth
 from pypaimon.tests import native_vector_search_test as vectors
@@ -96,6 +98,7 @@ def test_core_search_result_passes_directly_to_scan_and_scored_splits_round_trip
     table, _ = source
     native = text._native_table(table)
     result = text._native(table).execute_local()
+    assert isinstance(result, GlobalIndexResult)
     scan = native.new_read_builder().with_projection(['id']).new_scan().with_global_index_result(result)
     for plan in [scan.plan(), scan.plan()]:
         assert plan.snapshot_id() == result.snapshot_id()
@@ -114,6 +117,8 @@ def test_native_search_result_hands_core_selection_directly_to_scan(source, pk_v
     table = table.copy({'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
     search = text._builder(table) if family == 'full-text' else vectors._single(table, [1, 0, 0, 0], 2)
     result = search.execute_local()
+    from pypaimon_rust.datafusion import GlobalIndexResult
+    assert isinstance(result._native_result, GlobalIndexResult)
     expected = sorted(position.row_position for position in result.positions)
     with patch('pypaimon.read.native_plan.serialize_split_v1',
                side_effect=AssertionError('Native result round-tripped through Python')), \
@@ -264,3 +269,43 @@ def test_authorized_scans_ignore_external_raw_index_selections(guarded_table, na
     else:
         plan = scan.plan()
     assert sorted(builder.new_read().to_arrow(plan.splits()).column('id').to_pylist()) == [2, 3, 4]
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch-vector', 'full-text', 'hybrid'])
+def test_all_core_searches_return_one_result_for_read_and_scan(rest_catalog, family):
+    import pyarrow as pa
+    from pypaimon_rust.datafusion import GlobalIndexResult
+    table = hybrid._table(rest_catalog[0])
+    native = text._native_table(table)
+    if family == 'vector':
+        results = [(native.new_vector_search_builder().with_vector_column('embedding')
+                    .with_query_vector([0., 0.]).with_limit(3).execute_local())]
+    elif family == 'batch-vector':
+        results = (native.new_batch_vector_search_builder().with_vector_column('embedding')
+                   .with_query_vectors([[0., 0.], [7., 0.]]).with_limit(3).execute_batch_local())
+        assert len(results) == 2
+    elif family == 'full-text':
+        results = [text._native(table, 'paimon', 3).execute_local()]
+    else:
+        results = [(native.new_hybrid_search_builder().with_limit(3)
+                    .add_vector_route('embedding', [0., 0.], 3, 1., {})
+                    .add_full_text_route('content', hybrid.match_query('paimon'), 3, 1., {})
+                    .execute_local())]
+    for result in results:
+        assert isinstance(result, GlobalIndexResult)
+        assert result.snapshot_id() == table.snapshot_manager().get_latest_snapshot().id
+        expected = result.row_ids()
+        ranked = pa.Table.from_batches(result.new_read_builder().with_projection(['id']).read())
+        assert ranked.column_names == ['id', '__paimon_search_score']
+        assert sorted(ranked.column('__paimon_search_score').to_pylist()) == pytest.approx(sorted(expected.values()))
+        builder = native.new_read_builder().with_projection(['id'])
+        plan = builder.new_scan().with_global_index_result(result).plan()
+        rows = pa.Table.from_batches(builder.new_read().read(plan.splits()))
+        assert sorted(rows.column('id').to_pylist()) == sorted(ranked.column('id').to_pylist())
+        carried_scores = {}
+        for selected in plan.splits():
+            split = deserialize_split_v1(selected.serialize(), _partition_fields(table), [])
+            for range_ in split.row_ranges():
+                for row_id in range(range_.from_, range_.to + 1):
+                    carried_scores[row_id] = split.get_score(row_id)
+        assert carried_scores == pytest.approx(expected)

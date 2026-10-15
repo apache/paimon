@@ -74,7 +74,7 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
         return self._splits
 
     def __getstate__(self):
-        # SearchResult owns a live core table. Transport the materialized
+        # GlobalIndexResult owns a live core table. Transport the materialized
         # Python metadata. copy.copy also uses this protocol and shares the
         # mutable splits, so the original must stop using its native cache too.
         self._native_result = None
@@ -84,7 +84,7 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
 
     @classmethod
     def _from_native(cls, table, result):
-        """Convert the selections already built by core without rebuilding them."""
+        """Wrap core GlobalIndexResult; retain it for direct native scan handoff."""
         from pypaimon.read.native_plan import _partition_fields
         from pypaimon.read.split_serializer import deserialize_split_v1
 

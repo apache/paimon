@@ -486,6 +486,7 @@ def native_plan(
         from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
         from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
         if isinstance(global_index_result, GlobalIndexSplitResult):
+            # Searches and scans share the same core GlobalIndexResult.
             result = (getattr(global_index_result, '_native_result', None)
                       if type(global_index_result) is PrimaryKeyScoredResult else None)
             # Java's PK result uses snapshot 0 for an uncommitted table,
