@@ -104,7 +104,6 @@ class TableScan:
 
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
-        primary-key global-index results,
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; Rust rejects this schema), unsupported time travel selectors,
         query auth, a missing pypaimon-rust, or a catalog / identifier Rust
@@ -165,8 +164,13 @@ class TableScan:
         result = self.file_scanner._global_index_result
         if result is None:
             return True
-        if (self.table.is_primary_key_table
-                or not self.file_scanner.data_evolution):
+        from pypaimon.read.native_plan import native_method_available
+        if not native_method_available('TableScan', 'with_global_index_result'):
+            return False
+        if self.table.is_primary_key_table:
+            from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
+            return isinstance(result, GlobalIndexSplitResult)
+        if not self.file_scanner.data_evolution:
             return False
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         return isinstance(result, GlobalIndexResult)
@@ -175,11 +179,7 @@ class TableScan:
         row_ranges = getattr(self.file_scanner, '_row_ranges', None)
         if row_ranges is not None:
             return [(range_.from_, range_.to) for range_ in row_ranges]
-        result = self.file_scanner._global_index_result
-        if result is None:
-            return None
-        return [(range_.from_, range_.to)
-                for range_ in result.results().to_range_list()]
+        return None
 
     def _try_native_plan(self) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
@@ -218,6 +218,8 @@ class TableScan:
                     extra_options['row_position_slice'] = (
                         fs.start_pos_of_this_subtask, fs.end_pos_of_this_subtask)
             row_ranges = self._native_row_ranges()
+            if fs._global_index_result is not None:
+                extra_options['global_index_result'] = fs._global_index_result
             if self.partition_predicate is not None:
                 # Explicit partition selectors are scan-only. Keep the ordinary
                 # row predicate separate so core can apply Java's override and
@@ -238,6 +240,7 @@ class TableScan:
             )
             splits = plan.splits()
             if (self.table.options.merge_engine() == 'first-row'
+                    and (fs._global_index_result is None or self.table.options.query_auth_enabled)
                     and not fs.skip_level0 and not fs.is_streaming
                     and any(file.level == 0 for split in splits for file in split.files)
                     and any(not split.raw_convertible and any(file.level > 0 for file in split.files)
@@ -247,7 +250,9 @@ class TableScan:
                 # physical order need not match the PK merge comparator.
                 return None
             partition_predicate = self.file_scanner.partition_key_predicate
-            if partition_predicate is not None and not any(isinstance(split, QueryAuthSplit) for split in splits):
+            if (partition_predicate is not None and not (
+                    self.table.is_primary_key_table and fs._global_index_result is not None)
+                    and not any(isinstance(split, QueryAuthSplit) for split in splits)):
                 # Authorized user predicates observe masked partition values;
                 # Rust has already applied only the safe raw partition tests.
                 splits = [s for s in splits
@@ -260,15 +265,6 @@ class TableScan:
                 if not (getattr(fs, 'deletion_vectors_enabled', False)
                         and not self.table.is_primary_key_table):
                     splits = fs._apply_push_down_limit(splits)
-            # Attach scores to the row ranges retained by native planning.
-            from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
-            from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
-            result = fs._global_index_result
-            if fs._row_ranges is None and isinstance(result, ScoredGlobalIndexResult):
-                splits = [IndexedSplit(
-                    split.data_split(), split.row_ranges(),
-                    scores_for_ranges(result.score_getter(), split.row_ranges()),
-                ) for split in splits]
             return Plan(splits, snapshot_id=plan.snapshot_id)
         except Exception as e:
             _raise_if_native_fork_safety_error(e)
