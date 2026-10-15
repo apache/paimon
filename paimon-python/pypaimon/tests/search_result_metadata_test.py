@@ -21,6 +21,7 @@ import pyarrow as pa
 import pytest
 
 import pypaimon.multimodal as pm
+from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.multimodal.query import ScanQuery
 
 
@@ -120,6 +121,16 @@ def test_metadata_only_matches_lookup_schema_and_values(docs, batch, empty, proj
         assert fast.num_rows == (0 if empty else 4)
         assert fast.schema == lookup.schema
         assert fast.equals(lookup)
+
+
+def test_metadata_only_preserves_core_row_id_nullability(docs):
+    schema = pa.schema([pa.field("_ROW_ID", pa.int64(), nullable=True)])
+    search = query(docs).select(["_ROW_ID"]).with_score()._for_execution()
+    result = DictBasedScoredIndexResult({1: 1.})
+    with patch("pypaimon.multimodal.query.read_arrow_schema", return_value=schema, create=True):
+        actual = search._read_global_index_result(result)
+    assert actual.schema == schema.append(pa.field("_score", pa.float64()))
+    assert actual.to_pylist() == [{"_ROW_ID": 1, "_score": 1.}]
 
 
 @pytest.mark.parametrize("batch", [False, True])
