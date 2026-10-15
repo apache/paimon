@@ -26,9 +26,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link DLFOpenApiActions}. */
 public class DLFOpenApiActionsTest {
@@ -45,6 +47,18 @@ public class DLFOpenApiActionsTest {
             actions.add(operation[2]);
         }
         assertEquals(74, actions.size());
+    }
+
+    @Test
+    public void testActionNamesAreUnique() {
+        Set<String> actions = new HashSet<>();
+        Set<String> duplicates = new TreeSet<>();
+        for (String[] operation : DLFOpenApiActions.operations()) {
+            if (!actions.add(operation[2])) {
+                duplicates.add(operation[2]);
+            }
+        }
+        assertTrue(duplicates.isEmpty(), "duplicate actions: " + duplicates);
     }
 
     @Test
