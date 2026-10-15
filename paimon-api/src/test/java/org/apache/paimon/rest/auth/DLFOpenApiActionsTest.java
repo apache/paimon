@@ -44,7 +44,7 @@ public class DLFOpenApiActionsTest {
             assertEquals(operation[2], DLFOpenApiActions.resolve(operation[0], path), path);
             actions.add(operation[2]);
         }
-        assertEquals(61, actions.size());
+        assertEquals(64, actions.size());
     }
 
     @Test
@@ -65,6 +65,9 @@ public class DLFOpenApiActionsTest {
         assertAction("RenameTable", "POST", paths.renameTable());
         assertAction("AuthTableQuery", "POST", paths.authTable("db", "t"));
         assertAction("CommitTable", "POST", paths.commitTable("db", "t"));
+        assertAction("AcquireCommitLock", "POST", paths.commitLock("db", "t"));
+        assertAction("RenewCommitLock", "POST", paths.commitLock("db", "t") + "/renew");
+        assertAction("ReplaceTable", "POST", paths.replaceTable("db", "t"));
         assertAction("GetTableToken", "GET", paths.tableToken("db", "t"));
         assertAction("RollbackToSnapshot", "POST", paths.rollbackTable("db", "t"));
         assertAction("GetTableSnapshot", "GET", paths.tableSnapshot("db", "t"));

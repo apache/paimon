@@ -50,6 +50,17 @@ final class DLFOpenApiActions {
         {"POST", "/v1/{prefix}/tables/rename", "RenameTable"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/auth", "AuthTableQuery"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit", "CommitTable"},
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock",
+            "AcquireCommitLock"
+        },
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew",
+            "RenewCommitLock"
+        },
+        {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/replace", "ReplaceTable"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/token", "GetTableToken"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/rollback", "RollbackToSnapshot"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/snapshot", "GetTableSnapshot"},
