@@ -129,9 +129,9 @@ class StreamReadBuilder:
         """Create a stateful streaming scan using the configured backend."""
         projection = self._projection_builder()
         projection._validate_map_key_filter()
+        from pypaimon.read.native_plan import _native_stream_auth_supported
         if (self.table.options.native_plan_enabled()
-                and self.table.catalog_environment.table_query_auth(
-                    self.table.options, self.table.identifier) is None):
+                and _native_stream_auth_supported(self.table)):
             try:
                 return StreamTableScan(
                     self.table, predicate=self._predicate, read_type=projection.read_type(),
