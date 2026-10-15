@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 
 import javax.annotation.Nullable;
 
@@ -29,7 +30,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Maintainer of deletionVectors index. */
 public class BucketedDvMaintainer {
@@ -38,6 +43,11 @@ public class BucketedDvMaintainer {
     private final Map<String, DeletionVector> deletionVectors;
     protected final boolean bitmap64;
     private boolean modified;
+
+    // Advance only when a committable is emitted, not when an intermediate DV file is generated.
+    // The maintainer is also carried by FileStoreWrite.State during writer checkpoint/restore.
+    private boolean deletionVectorBaselineRecorded;
+    @Nullable private String lastPreparedDeletionVectorFile;
 
     private BucketedDvMaintainer(
             DeletionVectorsIndexFile dvIndexFile, Map<String, DeletionVector> deletionVectors) {
@@ -120,6 +130,26 @@ public class BucketedDvMaintainer {
         return Optional.empty();
     }
 
+    /** Bind the restored/previously prepared DV state to this compact commit. */
+    public void prepareCommit(CompactIncrement increment) {
+        if (!deletionVectorBaselineRecorded || increment.isEmpty()) {
+            return;
+        }
+        increment.setExpectedDeletionVectorFile(lastPreparedDeletionVectorFile);
+        for (IndexFileMeta deleted : increment.deletedIndexFiles()) {
+            if (DELETION_VECTORS_INDEX.equals(deleted.indexType())
+                    && Objects.equals(lastPreparedDeletionVectorFile, deleted.fileName())) {
+                lastPreparedDeletionVectorFile = null;
+            }
+        }
+        // BucketedCombiner replaces the bucket's index with the last added file.
+        for (IndexFileMeta added : increment.newIndexFiles()) {
+            if (DELETION_VECTORS_INDEX.equals(added.indexType())) {
+                lastPreparedDeletionVectorFile = added.fileName();
+            }
+        }
+    }
+
     /**
      * Retrieves the deletion vector associated with the specified file name.
      *
@@ -166,9 +196,17 @@ public class BucketedDvMaintainer {
             if (restoredFiles == null) {
                 restoredFiles = Collections.emptyList();
             }
+            checkArgument(
+                    restoredFiles.size() <= 1,
+                    "Expected at most one deletion vector index file for a bucket, but found %s.",
+                    restoredFiles.size());
             Map<String, DeletionVector> deletionVectors =
                     new HashMap<>(handler.readAllDeletionVectors(partition, bucket, restoredFiles));
-            return create(partition, bucket, deletionVectors);
+            BucketedDvMaintainer maintainer = create(partition, bucket, deletionVectors);
+            maintainer.deletionVectorBaselineRecorded = true;
+            maintainer.lastPreparedDeletionVectorFile =
+                    restoredFiles.isEmpty() ? null : restoredFiles.get(0).fileName();
+            return maintainer;
         }
 
         public BucketedDvMaintainer create(

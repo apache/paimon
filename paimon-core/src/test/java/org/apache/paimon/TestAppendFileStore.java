@@ -143,7 +143,12 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
         List<IndexFileMeta> indexFiles =
                 fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
-        return factory.create(partition, bucket, indexFiles);
+        // Unaware-bucket tables may retain several DV index files. They do not use the
+        // single-file baseline of fixed-bucket compaction.
+        return factory.create(
+                partition,
+                bucket,
+                fileHandler.readAllDeletionVectors(partition, bucket, indexFiles));
     }
 
     public CommitMessageImpl writeDataFiles(

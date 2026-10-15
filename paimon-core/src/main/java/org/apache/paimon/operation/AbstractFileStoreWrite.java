@@ -281,6 +281,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             .getOrCompute()
                             .ifPresent(compactIncrement.newIndexFiles()::add);
                 }
+                if (writerContainer.deletionVectorsMaintainer != null) {
+                    writerContainer.deletionVectorsMaintainer.prepareCommit(compactIncrement);
+                }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(
                                 partition,

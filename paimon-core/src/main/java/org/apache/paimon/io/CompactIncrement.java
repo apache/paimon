@@ -20,6 +20,8 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.index.IndexFileMeta;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -34,6 +36,11 @@ public class CompactIncrement {
     private final List<DataFileMeta> changelogFiles;
     private final List<IndexFileMeta> newIndexFiles;
     private final List<IndexFileMeta> deletedIndexFiles;
+
+    // A recorded baseline with a null file means the bucket had no DV index.
+    // Legacy messages have no recorded baseline.
+    private boolean deletionVectorBaselineRecorded;
+    @Nullable private String expectedDeletionVectorFile;
 
     public CompactIncrement(
             List<DataFileMeta> compactBefore,
@@ -75,6 +82,20 @@ public class CompactIncrement {
         return deletedIndexFiles;
     }
 
+    public boolean hasDeletionVectorBaseline() {
+        return deletionVectorBaselineRecorded;
+    }
+
+    @Nullable
+    public String expectedDeletionVectorFile() {
+        return expectedDeletionVectorFile;
+    }
+
+    public void setExpectedDeletionVectorFile(@Nullable String file) {
+        this.deletionVectorBaselineRecorded = true;
+        this.expectedDeletionVectorFile = file;
+    }
+
     public boolean isEmpty() {
         return compactBefore.isEmpty()
                 && compactAfter.isEmpty()
@@ -97,25 +118,34 @@ public class CompactIncrement {
                 && Objects.equals(compactAfter, that.compactAfter)
                 && Objects.equals(changelogFiles, that.changelogFiles)
                 && Objects.equals(newIndexFiles, that.newIndexFiles)
-                && Objects.equals(deletedIndexFiles, that.deletedIndexFiles);
+                && Objects.equals(deletedIndexFiles, that.deletedIndexFiles)
+                && deletionVectorBaselineRecorded == that.deletionVectorBaselineRecorded
+                && Objects.equals(expectedDeletionVectorFile, that.expectedDeletionVectorFile);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(compactBefore, compactAfter, changelogFiles);
+        return Objects.hash(
+                compactBefore,
+                compactAfter,
+                changelogFiles,
+                deletionVectorBaselineRecorded,
+                expectedDeletionVectorFile);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "CompactIncrement {compactBefore = %s, compactAfter = %s, changelogFiles = %s, newIndexFiles = %s, deletedIndexFiles = %s}",
+                "CompactIncrement {compactBefore = %s, compactAfter = %s, changelogFiles = %s, newIndexFiles = %s, deletedIndexFiles = %s, deletionVectorBaselineRecorded = %s, expectedDeletionVectorFile = %s}",
                 compactBefore.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
                 compactAfter.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
                 changelogFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
                 newIndexFiles.stream().map(IndexFileMeta::fileName).collect(Collectors.toList()),
                 deletedIndexFiles.stream()
                         .map(IndexFileMeta::fileName)
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                deletionVectorBaselineRecorded,
+                expectedDeletionVectorFile);
     }
 
     public static CompactIncrement emptyIncrement() {

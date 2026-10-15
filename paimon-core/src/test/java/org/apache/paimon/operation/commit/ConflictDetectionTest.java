@@ -24,7 +24,9 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -34,11 +36,17 @@ import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import javax.annotation.Nullable;
 
@@ -59,6 +67,7 @@ import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -95,6 +104,97 @@ class ConflictDetectionTest {
                                 null,
                                 Snapshot.CommitKind.COMPACT))
                 .isEmpty();
+    }
+
+    @Test
+    void testBucketedDvConflictWithDataFileChecksDisabled() {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        ConflictDetection detection = bucketedDvDetection(handler);
+        Snapshot snapshot = snapshot(1);
+        Pair<BinaryRow, Integer> bucket = Pair.of(EMPTY_ROW, 0);
+        when(handler.scanBuckets(snapshot, DELETION_VECTORS_INDEX, Collections.singleton(bucket)))
+                .thenReturn(
+                        Collections.singletonMap(
+                                bucket,
+                                Collections.singletonList(
+                                        createDvIndexEntry(
+                                                        "current-dv",
+                                                        ADD,
+                                                        Collections.singletonList("data"))
+                                                .indexFile())));
+
+        assertThatThrownBy(
+                        () ->
+                                detection.checkConflicts(
+                                        snapshot,
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        null,
+                                        Snapshot.CommitKind.COMPACT,
+                                        Collections.singletonList(bucketedDvMessage("old-dv")),
+                                        false))
+                .hasMessageContaining("expected DV file old-dv, current DV file current-dv");
+        assertThat(
+                        detection.checkConflicts(
+                                snapshot,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                null,
+                                Snapshot.CommitKind.COMPACT,
+                                Collections.singletonList(bucketedDvMessage("current-dv")),
+                                false))
+                .isEmpty();
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = Snapshot.CommitKind.class,
+            names = {"APPEND", "OVERWRITE"})
+    void testBucketedDvBaselineOnlyCheckedForCompact(Snapshot.CommitKind kind) {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        ConflictDetection detection = bucketedDvDetection(handler);
+        assertThat(
+                        detection.checkConflicts(
+                                snapshot(1),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                null,
+                                kind,
+                                Collections.singletonList(bucketedDvMessage("old-dv")),
+                                false))
+                .isEmpty();
+        verifyNoInteractions(handler);
+    }
+
+    private ConflictDetection bucketedDvDetection(IndexFileHandler handler) {
+        return new PrimaryKeyConflictDetection(
+                "test-table",
+                "test-user",
+                RowType.of(),
+                mock(FileStorePathFactory.class),
+                (left, right) -> 0,
+                BucketMode.HASH_FIXED,
+                true,
+                false,
+                handler,
+                null);
+    }
+
+    private CommitMessage bucketedDvMessage(String expected) {
+        CompactIncrement increment =
+                new CompactIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createDvIndexEntry("new-dv", ADD, Collections.singletonList("data"))
+                                        .indexFile()),
+                        Collections.emptyList());
+        increment.setExpectedDeletionVectorFile(expected);
+        return new CommitMessageImpl(EMPTY_ROW, 0, 1, DataIncrement.emptyIncrement(), increment);
     }
 
     @Test

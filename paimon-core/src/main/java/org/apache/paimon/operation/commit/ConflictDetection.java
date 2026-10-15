@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -35,6 +36,8 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -203,6 +206,76 @@ public abstract class ConflictDetection {
         return false;
     }
 
+    /** Validate the DV state used by fixed-bucket compact results, including DV-only commits. */
+    private void checkBucketedDeletionVectorConflicts(
+            @Nullable Snapshot latestSnapshot, List<CommitMessage> messages) {
+        if (!deletionVectorsEnabled || bucketMode != BucketMode.HASH_FIXED) {
+            return;
+        }
+
+        Set<Pair<BinaryRow, Integer>> buckets = new HashSet<>();
+        for (CommitMessage message : messages) {
+            CompactIncrement increment = ((CommitMessageImpl) message).compactIncrement();
+            if (increment.hasDeletionVectorBaseline() && !increment.isEmpty()) {
+                buckets.add(Pair.of(message.partition(), message.bucket()));
+            }
+        }
+        if (buckets.isEmpty()) {
+            return;
+        }
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> snapshotFiles =
+                latestSnapshot == null
+                        ? Collections.emptyMap()
+                        : indexFileHandler.scanBuckets(
+                                latestSnapshot, DELETION_VECTORS_INDEX, buckets);
+
+        // Multiple consecutive results for a bucket may be committed together. Validate their
+        // dependency chain against a virtual state; intermediate DV files need not be published.
+        Map<Pair<BinaryRow, Integer>, String> states = new HashMap<>();
+        for (Pair<BinaryRow, Integer> bucket : buckets) {
+            List<IndexFileMeta> files = snapshotFiles.getOrDefault(bucket, Collections.emptyList());
+            checkState(
+                    files.size() <= 1,
+                    "Expected at most one deletion vector index file for a bucket, but found %s.",
+                    files.size());
+            // Keep null entries: a preceding result may remove the bucket's DV entirely.
+            states.put(bucket, files.isEmpty() ? null : files.get(0).fileName());
+        }
+        for (CommitMessage message : messages) {
+            CompactIncrement increment = ((CommitMessageImpl) message).compactIncrement();
+            if (!increment.hasDeletionVectorBaseline() || increment.isEmpty()) {
+                // Legacy messages do not carry a baseline. Do not confuse this with known-empty.
+                continue;
+            }
+            String expected = increment.expectedDeletionVectorFile();
+            Pair<BinaryRow, Integer> bucket = Pair.of(message.partition(), message.bucket());
+            String current = states.get(bucket);
+            checkState(
+                    Objects.equals(current, expected),
+                    "Deletion vector conflict for table %s, partition %s, bucket %s: "
+                            + "expected DV file %s, current DV file %s at snapshot %s. "
+                            + "Reload the latest state and recompute compaction; do not retry the stale result.",
+                    tableName,
+                    pathFactory.getPartitionString(message.partition()),
+                    message.bucket(),
+                    expected,
+                    current,
+                    latestSnapshot == null ? null : latestSnapshot.id());
+            for (IndexFileMeta deleted : increment.deletedIndexFiles()) {
+                if (DELETION_VECTORS_INDEX.equals(deleted.indexType())
+                        && Objects.equals(current, deleted.fileName())) {
+                    current = null;
+                }
+            }
+            for (IndexFileMeta added : increment.newIndexFiles()) {
+                if (DELETION_VECTORS_INDEX.equals(added.indexType())) {
+                    current = added.fileName();
+                }
+            }
+            states.put(bucket, current);
+        }
+    }
+
     public final Optional<RuntimeException> checkConflicts(
             Snapshot latestSnapshot,
             List<SimpleFileEntry> baseEntries,
@@ -210,6 +283,37 @@ public abstract class ConflictDetection {
             List<IndexManifestEntry> deltaIndexEntries,
             @Nullable RowIdConflictChecker rowIdConflictChecker,
             CommitKind commitKind) {
+        return checkConflicts(
+                latestSnapshot,
+                baseEntries,
+                deltaEntries,
+                deltaIndexEntries,
+                rowIdConflictChecker,
+                commitKind,
+                Collections.emptyList(),
+                true);
+    }
+
+    /**
+     * Checks compact DV dependencies independently of data-file conflict detection. The ordered
+     * messages retain each prepared result's baseline, including intermediate unpublished DV files.
+     */
+    public final Optional<RuntimeException> checkConflicts(
+            @Nullable Snapshot latestSnapshot,
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries,
+            List<IndexManifestEntry> deltaIndexEntries,
+            @Nullable RowIdConflictChecker rowIdConflictChecker,
+            CommitKind commitKind,
+            List<CommitMessage> compactMessages,
+            boolean checkDataFiles) {
+        if (commitKind == CommitKind.COMPACT) {
+            checkBucketedDeletionVectorConflicts(latestSnapshot, compactMessages);
+        }
+        if (latestSnapshot == null || !checkDataFiles) {
+            return Optional.empty();
+        }
+
         String baseCommitUser = latestSnapshot.commitUser();
         if (deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE)) {
             // Enrich dvName in fileEntry to checker for base ADD dv and delta DELETE dv.
