@@ -276,6 +276,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         return write;
     }
 
+    /** Factory for creating a table writer with the current table schema. */
     @FunctionalInterface
     public interface TableWriteFactory {
 
