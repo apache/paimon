@@ -20,11 +20,9 @@
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.read.native_plan import (
-    _catalog_metastore, _native_table, _partition_fields, _predicate_to_native,
+    _catalog_metastore, _native_table, _predicate_to_native,
     native_method_available)
-from pypaimon.read.split_serializer import deserialize_split_v1
-from pypaimon.table.source.primary_key_scored_result import (
-    PrimaryKeyScoredResult, PrimaryKeySearchPosition)
+from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 
 
 def try_native_vector_search(builder, queries, batch=False):
@@ -75,16 +73,5 @@ def try_native_vector_search(builder, queries, batch=False):
     native.with_query_vector(queries)
     result = native.execute_local()
     if builder._is_primary_key_vector_search():
-        return _NativePrimaryKeyScoredResult(table, result)
+        return PrimaryKeyScoredResult._from_native(table, result)
     return DictBasedScoredIndexResult(result.row_ids())
-
-
-class _NativePrimaryKeyScoredResult(PrimaryKeyScoredResult):
-    """Metadata view of the physical selections already built by Rust core."""
-
-    def __init__(self, table, result):
-        self._snapshot_id = result.snapshot_id() or 0
-        self._positions = tuple(PrimaryKeySearchPosition(*position) for position in result.positions())
-        self._splits = tuple(deserialize_split_v1(
-            split, _partition_fields(table), table.trimmed_primary_keys_fields)
-            for split in result.splits())

@@ -69,6 +69,20 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
     def splits(self):
         return self._splits
 
+    @classmethod
+    def _from_native(cls, table, result):
+        """Convert the selections already built by core without rebuilding them."""
+        from pypaimon.read.native_plan import _partition_fields
+        from pypaimon.read.split_serializer import deserialize_split_v1
+
+        value = cls.__new__(cls)
+        value._snapshot_id = result.snapshot_id() or 0
+        value._positions = tuple(PrimaryKeySearchPosition(*position) for position in result.positions())
+        value._splits = tuple(deserialize_split_v1(
+            split, _partition_fields(table), table.trimmed_primary_keys_fields)
+            for split in result.splits())
+        return value
+
 
 def _materialize(source_splits, positions, snapshot_id):
     sources = {}
@@ -121,11 +135,12 @@ def _ranges(positions):
 
 
 def _partition_bytes(partition):
-    to_bytes = getattr(partition, "to_bytes", None)
-    if callable(to_bytes):
-        return bytes(to_bytes())
-    values = getattr(partition, "values", ())
-    return repr(tuple(values)).encode("utf-8")
+    from pypaimon.table.row.generic_row import GenericRowSerializer
+
+    # Java PrimaryKeySearchPosition compares serialized BinaryRow partitions.
+    # Reuse the wire encoder for both GenericRow and BinaryRow, including the
+    # empty partition's arity prefix and eight-byte body.
+    return bytes(GenericRowSerializer.to_bytes(partition))
 
 
 def _position_key(position):
