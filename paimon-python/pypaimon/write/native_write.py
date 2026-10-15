@@ -21,7 +21,8 @@ from importlib import import_module
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
+from pypaimon.schema.arrow_schema import (
+    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
@@ -226,6 +227,9 @@ class NativeTableWrite:
         self._native_writer.write_arrow(data, bucket)
 
     def _prepare_native_arrow_data(self, data):
+        data = normalize_arrow_strings(data)
+        target = self._table_schema if data.schema.names == self._table_schema.names else self._schema
+        data = normalize_arrow_write_nullability(data, target)
         if self._write_cols is not None and arrow_schemas_compatible(
                 data.schema, self._table_schema, check_top_level_nullability=False,
                 allow_binary_compatibility=True):
@@ -239,7 +243,7 @@ class NativeTableWrite:
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
                 f"Write cols is: {self._write_cols}")
-        return normalize_arrow_strings(data)
+        return data
 
     def write_pandas(self, dataframe):
         if self._python_writer is not None:

@@ -28,6 +28,13 @@ from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
 from pypaimon.schema.data_types import AtomicType
 
 
+@pytest.fixture(autouse=True)
+def python_fallback_casts(monkeypatch):
+    # These tests exercise libc/Python fallbacks, including mocked localtime
+    # and changes to TZ. Native casts have separate process-zone regressions.
+    monkeypatch.setattr('pypaimon.casting.schema_evolution._native_schema_cast', lambda *args: None)
+
+
 @pytest.mark.parametrize('chunked', [False, True])
 def test_decimal_evolution_uses_supported_jvm_floating_decimal_digits(chunked):
     # Java 8/11/17 retain exact digits in this integral fast path. JDK 19+
