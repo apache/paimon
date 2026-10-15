@@ -332,8 +332,7 @@ public class IcebergCompatibilityTest {
                         .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
         TableCommitImpl commit = table.newCommit(commitUser);
 
-        // the level-0 files written between full compactions are never exported to Iceberg, but
-        // each full compaction removes them from Paimon
+        // level-0 files are not exported to Iceberg, and each full compaction removes them
         long id = 1;
         for (int round = 0; round < 3; round++) {
             for (int i = 0; i < 3; i++) {
@@ -385,8 +384,6 @@ public class IcebergCompatibilityTest {
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit.commit(2, write.prepareCommit(true, 2));
 
-        // metadata written before the totals were emitted has none of them, metadata written
-        // with the miscounted totals can have them at 0
         String[] totals = {"total-data-files", "total-records", "total-files-size"};
         long latestSnapshotId = table.snapshotManager().latestSnapshotId();
         Path metadataPath =

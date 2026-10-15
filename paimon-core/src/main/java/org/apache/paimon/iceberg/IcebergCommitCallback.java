@@ -1110,8 +1110,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 addedFiles.values().stream().mapToLong(p -> p.getRight().rowCount()).sum();
         metrics.addedFilesSize =
                 addedFiles.values().stream().mapToLong(p -> p.getRight().fileSize()).sum();
-        // removed Paimon files that Iceberg never saw (e.g. low-level files of a primary-key
-        // table) must not be counted, so only count the entries this commit marked as deleted
         metrics.deletedDataFiles = deletedFiles.size();
         metrics.deletedRecords =
                 deletedFiles.stream().mapToLong(IcebergDataFileMeta::recordCount).sum();
@@ -1122,8 +1120,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         metrics.totalDataFiles = computeLiveFileCount(newDataManifestFileMetas);
         metrics.totalRecords = computeLiveRowCount(newDataManifestFileMetas);
 
-        // file sizes are not in the manifest list, so the previous total is carried forward,
-        // but only while the previous totals agree with the manifests they were written with
+        // file sizes are not in the manifest list, so the previous total is reused when its
+        // file count matches the base manifests
         IcebergSnapshot baseSnapshot = baseMetadata.currentSnapshot();
         Long previousTotalDataFilesValue =
                 getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_DATA_FILES);
