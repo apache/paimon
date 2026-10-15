@@ -1813,7 +1813,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=nullable_array_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|non-nullable"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|[Nn]on-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 
