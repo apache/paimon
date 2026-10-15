@@ -266,7 +266,8 @@ class DataWriter(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             self.file_io.write_lance(file_path, data)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            self.file_io.write_vortex(file_path, data)
+            self.file_io.write_vortex(
+                file_path, data, compact=self.options.vortex_compact_enabled())
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
             self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:

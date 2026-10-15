@@ -21,6 +21,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -131,6 +132,18 @@ class VariantRowGroupReaderTest(unittest.TestCase):
             _LocalFileIO(), "parquet", self.path, read_fields,
             predicate, batch_size=256,
             predicate_field_names=predicate_field_names)
+
+    def test_scalar_projection_skips_variant_assembly(self):
+        reader = self._reader(self.read_fields[:1])
+        try:
+            with mock.patch(
+                    'pypaimon.read.reader.format_pyarrow_reader._assemble_variant_column',
+                    side_effect=AssertionError('variant assembly on scalar field')):
+                rows, columns, _ = _drain(reader)
+            self.assertEqual(rows, 2000)
+            self.assertEqual(columns, ['content_key'])
+        finally:
+            reader.close()
 
     def _large_dictionary_payload(self):
         if "store_schema" not in inspect.signature(pq.write_table).parameters:
