@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -725,11 +726,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<DataFileMeta> dataFilesToDelete = new ArrayList<>();
             dataFilesToDelete.addAll(commitMessage.newFilesIncrement().newFiles());
             dataFilesToDelete.addAll(commitMessage.newFilesIncrement().changelogFiles());
-            dataFilesToDelete.addAll(commitMessage.compactIncrement().compactAfter());
             dataFilesToDelete.addAll(commitMessage.compactIncrement().changelogFiles());
 
+            // New files may also be compaction inputs, but abort still owns their cleanup.
             for (DataFileMeta file : dataFilesToDelete) {
                 file.collectFiles(dataPathFactory).forEach(fileIO::deleteQuietly);
+            }
+
+            // A level upgrade may reuse a main file while adding new auxiliary files.
+            Set<Path> compactInputPaths =
+                    commitMessage.compactIncrement().compactBefore().stream()
+                            .flatMap(file -> file.collectFiles(dataPathFactory).stream())
+                            .collect(Collectors.toSet());
+
+            for (DataFileMeta file : commitMessage.compactIncrement().compactAfter()) {
+                file.collectFiles(dataPathFactory).stream()
+                        .filter(path -> !compactInputPaths.contains(path))
+                        .forEach(fileIO::deleteQuietly);
             }
 
             List<IndexFileMeta> indexFilesToDelete = new ArrayList<>();
