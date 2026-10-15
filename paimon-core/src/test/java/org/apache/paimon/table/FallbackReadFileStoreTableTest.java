@@ -578,8 +578,6 @@ public class FallbackReadFileStoreTableTest {
                                                 && ((Instant.SnapshotInstant) instant)
                                                                 .getSnapshotId()
                                                         == 1L),
-                        Mockito.isNull(),
-                        Mockito.isNull(),
                         Mockito.isNull());
 
         table.switchToBranch("bc").rollbackTo("checkpoint");
@@ -594,8 +592,6 @@ public class FallbackReadFileStoreTableTest {
                                                         .equals(
                                                                 ((Instant.TagInstant) instant)
                                                                         .getTagName())),
-                        Mockito.isNull(),
-                        Mockito.isNull(),
                         Mockito.isNull());
         assertThat(table.catalogEnvironment().uuid()).isEqualTo("main-uuid");
     }

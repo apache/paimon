@@ -231,6 +231,7 @@ class FileScanner:
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
+        self._explicit_partition_filter = partition_predicate is not None
         row_ranges = (
             _row_ranges_from_predicate(predicate) if predicate else None
         )
@@ -749,7 +750,10 @@ class FileScanner:
             return splits
         if self.data_evolution and self.deletion_vectors_enabled:
             return splits
-        if self._has_non_partition_filter() or self.auth_has_non_partition_filter:
+        if (self._has_non_partition_filter() or self.auth_has_non_partition_filter
+                # An explicit selector replaces ordinary partition pruning.
+                # Count rows only after the reader has checked the full filter.
+                or (self._explicit_partition_filter and self.predicate is not None)):
             return splits
 
         scanned_row_count = 0
