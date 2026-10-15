@@ -194,7 +194,9 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                             .toAlignedPath(file, entry.file());
             try (FileIndexFormat.Reader reader =
                     FileIndexFormat.createReader(
-                            table.fileIO().newInputStream(indexFilePath), table.rowType())) {
+                            table.fileIO().newInputStream(indexFilePath),
+                            table.rowType(),
+                            table.fileIO().getFileStatus(indexFilePath).getLen())) {
                 Set<FileIndexReader> readerSetK = reader.readColumnIndex("k");
                 Assertions.assertThat(readerSetK.size()).isEqualTo(1);
 

@@ -44,7 +44,7 @@ public class DLFOpenApiActionsTest {
             assertEquals(operation[2], DLFOpenApiActions.resolve(operation[0], path), path);
             actions.add(operation[2]);
         }
-        assertEquals(53, actions.size());
+        assertEquals(61, actions.size());
     }
 
     @Test
@@ -96,6 +96,10 @@ public class DLFOpenApiActionsTest {
         assertAction("AlterView", "POST", paths.view("db", "v"));
         assertAction("DropView", "DELETE", paths.view("db", "v"));
         assertAction("RenameView", "POST", paths.renameView());
+        assertAction("ListSemanticViews", "GET", paths.semanticViews("db"));
+        assertAction("GetSemanticView", "GET", paths.semanticView("db", "sv"));
+        assertAction("UpsertSemanticView", "POST", paths.semanticView("db", "sv"));
+        assertAction("DeleteSemanticView", "DELETE", paths.semanticView("db", "sv"));
         assertAction("ListFunctions", "GET", paths.functions("db"));
         assertAction("CreateFunction", "POST", paths.functions("db"));
         assertAction("GetFunction", "GET", paths.function("db", "f"));
@@ -104,6 +108,10 @@ public class DLFOpenApiActionsTest {
         assertAction("ListPermissionAssignments", "GET", paths.permissions());
         assertAction("GrantPermissionAssignment", "POST", paths.grantPermission());
         assertAction("RevokePermissionAssignment", "POST", paths.revokePermission());
+        assertAction("ListLabels", "GET", paths.labels());
+        assertAction("GetLabel", "POST", paths.getLabel());
+        assertAction("UpsertLabel", "POST", paths.upsertLabel());
+        assertAction("DeleteLabel", "POST", paths.deleteLabel());
     }
 
     /** Names match whole segments, so one spelled like a literal still resolves. */
@@ -113,6 +121,8 @@ public class DLFOpenApiActionsTest {
         assertAction("GetTable", "GET", paths.table("db", "token"));
         assertAction("DropBranch", "DELETE", paths.branch("db", "t", "forward"));
         assertAction("GetTag", "GET", paths.tag("db", "t", "tags"));
+        assertAction("GetSemanticView", "GET", paths.semanticView("db", "views"));
+        assertAction("GetView", "GET", paths.view("db", "semantic-views"));
         assertAction("GetTableToken", "GET", paths.tableToken("config", "t$snapshots"));
         assertAction("GetTable", "GET", paths.table("a/b", "c d"));
         assertAction("ListDatabases", "GET", new ResourcePaths("rename").databases());

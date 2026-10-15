@@ -97,8 +97,8 @@ class FilterRecordBatchReader(RecordBatchReader):
         columns = ([field.name for field in self.schema_fields]
                    if self.schema_fields is not None else
                    [name for name in batch.schema.names if name != "_row_kind"])
-        logical_batch = batch.select(columns)
-        df = polars.from_arrow(pa.Table.from_batches([logical_batch]))
+        # PyArrow 6 has Table.select but not RecordBatch.select.
+        df = polars.from_arrow(pa.Table.from_batches([batch]).select(columns))
         iterator = InternalRowWrapperIterator(
             self._iter_df_rows(df),
             df.width,

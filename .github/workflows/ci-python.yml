@@ -214,6 +214,14 @@ jobs:
           source = json.loads(distribution.read_text('direct_url.json'))
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
+          # Fail before the suite when Rust main lacks the required core bridge.
+          from pypaimon_rust.data import (
+              cast_array_for_schema_evolution,
+              normalize_array_for_write,
+              read_arrow_schema,
+          )
+          from pypaimon_rust.datafusion import ReadBuilder
+          assert callable(getattr(ReadBuilder, 'with_partition_filter', None))
           PY
 
       - name: Run Python tests with native planning, reading, writing, updating and committing
@@ -239,7 +247,8 @@ jobs:
             TZ="$zone" python -m pytest -q \
               paimon-python/pypaimon/tests/native_cast_completion_test.py \
               paimon-python/pypaimon/tests/native_temporal_zone_cast_test.py \
-              -k 'TIMESTAMP_LTZ or temporal'
+              paimon-python/pypaimon/tests/native_schema_cast_test.py \
+              -k 'TIMESTAMP or temporal'
           done
 
   torch:

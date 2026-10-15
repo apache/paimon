@@ -125,10 +125,11 @@ through `LabelManagement`, with `Label` objects as read results. This reuses the
 authentication and prefix configuration. See
 [Java catalog access](../concepts/rest/management-api#java-catalog-access).
 
-Upsert creates or replaces one binding using POST on the same single-key path used by GET and
-DELETE. Its request body contains only `value`. It requires the target entity to exist.
-Deleting an absent binding succeeds; deleting from a missing entity fails. Servers must implement
-these endpoints; the client does not fall back to table options or snapshot tags. See
+Listing names the entity in the query string; get, upsert, and delete each send one POST whose
+JSON body names the entity type, entity name, and key. No entity name or key is ever placed in the
+URL path. Upsert requires the target entity to exist. Deleting an absent binding succeeds;
+deleting from a missing entity fails. Servers must implement these endpoints; the client does not
+fall back to table options or snapshot tags. See
 [the label wire contract](../concepts/rest/management-api#entity-labels).
 
 ## Authentication and table access

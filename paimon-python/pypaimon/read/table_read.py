@@ -25,6 +25,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.casting.schema_evolution import read_arrow_schema
+
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_json_parser import extract_referenced_fields
@@ -46,7 +48,7 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import (
-    DataField, MapType, PyarrowFieldParser, is_blob_file_field, is_map_blob_type)
+    DataField, MapType, is_blob_file_field, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.arrow_utils import zero_column_batch
 
@@ -464,7 +466,7 @@ class TableRead:
         return projected if predicate_field_names(self.predicate) & extra_names else adapter
 
     def _output_arrow_schema(self, splits=None):
-        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        schema = read_arrow_schema(self.read_type)
         masks = set()
         if splits:
             for split in splits:
@@ -851,7 +853,12 @@ class TableRead:
     def _flatten_native_nested_batch(self, batch, schema):
         _, paths = self._reader_adapter()
         arrays = [extract_array(batch, path) for path in paths]
-        fields = list(PyarrowFieldParser.from_paimon_schema(self._adapter_read_type))
+        fields = list(read_arrow_schema(self._adapter_read_type))
+        # Authorization can mask a NOT NULL field. Keep the captured source
+        # nullability when flattening, including whole-parent/MAP projections.
+        projected = output_schema(batch.schema, OutputProjection([
+            (field.name, path) for field, path in zip(fields, paths)]))
+        fields = [field.with_nullable(field.nullable or projected[i].nullable) for i, field in enumerate(fields)]
         if self.include_row_kind:
             arrays.insert(0, batch.column(ROW_KIND_COLUMN))
             fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
@@ -1159,12 +1166,13 @@ class TableRead:
             yield from self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, schema)
             return
-        physical_schema = PyarrowFieldParser.from_paimon_schema(self._adapter_read_type)
+        physical_schema = read_arrow_schema(self._adapter_read_type)
         if self.include_row_kind:
             physical_schema = self._add_row_kind_to_schema(physical_schema)
         for batch in self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, physical_schema):
-            yield self._project_batch_to_output(batch)
+            yield self._try_to_pad_batch_by_schema(
+                self._project_batch_to_output(batch), schema, allow_type_cast=True)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -1665,8 +1673,8 @@ class TableRead:
             # Project the already masked schema, retaining captured nullability.
             adapted_projection = OutputProjection([(alias, path) for alias, path in outputs])
             actual = output_schema(batch.schema, adapted_projection)
-            declared = output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
-            fields = [field.with_nullable(actual[i].nullable) for i, field in enumerate(declared)]
+            declared = output_schema(read_arrow_schema(self.read_type), self.output_projection)
+            fields = [field.with_nullable(field.nullable or actual[i].nullable) for i, field in enumerate(declared)]
             if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
                 arrays.insert(0, batch.column(ROW_KIND_COLUMN))
                 fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
@@ -1873,7 +1881,7 @@ class TableRead:
 
         needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):
-            schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
+            schema = read_arrow_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
             if getattr(reader, 'blob_field_indices', None) is None:
                 from pypaimon.read.reader.field_indices import (
