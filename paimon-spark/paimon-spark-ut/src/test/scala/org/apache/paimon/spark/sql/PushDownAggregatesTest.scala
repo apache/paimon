@@ -227,6 +227,32 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
     }
   }
 
+  test("Push down aggregate - column without min/max statistics") {
+    // A column whose stats-mode is `counts` carries a null count but no min/max, which must not
+    // be mistaken for a column that is all null.
+    Seq("'fields.c1.stats-mode' = 'counts'", "'metadata.stats-mode' = 'counts'").foreach {
+      statsMode =>
+        withTable("T") {
+          spark.sql(s"CREATE TABLE T (c1 INT, c2 INT) TBLPROPERTIES($statsMode)")
+          spark.sql("INSERT INTO T VALUES (1, 10), (2, 20), (3, null)")
+          runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+          runAndCheckAggregate("SELECT MIN(c1), MAX(c1) FROM T", Row(1, 3) :: Nil, 2)
+          runAndCheckAggregate("SELECT MIN(c1), MAX(c2) FROM T", Row(1, 20) :: Nil, 2)
+        }
+    }
+
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 INT, c2 INT) TBLPROPERTIES('fields.c1.stats-mode' = 'counts')")
+      spark.sql("INSERT INTO T VALUES (1, 10), (2, 20), (3, null)")
+      // c2 still has full statistics
+      runAndCheckAggregate("SELECT MIN(c2), MAX(c2) FROM T", Row(10, 20) :: Nil, 0)
+      // A column added after the data was written is null in every existing file
+      spark.sql("ALTER TABLE T ADD COLUMN c3 INT")
+      spark.sql("INSERT INTO T VALUES (4, 40, 400)")
+      runAndCheckAggregate("SELECT MIN(c3), MAX(c3) FROM T", Row(400, 400) :: Nil, 0)
+    }
+  }
+
   test("Push down aggregate - primary key table with deletion vector") {
     Seq(true, false).foreach(
       deletionVectorsEnabled => {
