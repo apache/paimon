@@ -333,4 +333,97 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       assert(trace.contains("its rows store their row ids"), trace)
     }
   }
+
+  test("Paimon copy files procedure: data-evolution table with a vector field") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT, embedding ARRAY<FLOAT>) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'file.format' = 'parquet',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO src VALUES (1, array(1.0f, 0.0f)), (2, array(2.0f, 0.0f))")
+      val vectorFiles = fileNames("src").count(_.contains(".vector."))
+      assert(vectorFiles > 0, fileNames("src"))
+
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      // the vector file is copied as a vector file
+      assert(fileNames("dst").count(_.contains(".vector.")) == vectorFiles, fileNames("dst"))
+      checkAnswer(
+        sql("SELECT id, embedding, _ROW_ID FROM dst"),
+        sql("SELECT id, embedding, _ROW_ID FROM src"))
+
+      sql("INSERT INTO dst VALUES (3, array(3.0f, 0.0f))")
+      checkAnswer(
+        sql("SELECT id, embedding, _ROW_ID FROM dst WHERE id = 3"),
+        Row(3, Seq(3.0f, 0.0f), 2) :: Nil)
+    }
+  }
+
+  test("Paimon copy files procedure: data-evolution table with a blob field") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT, picture BINARY) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'blob-field' = 'picture')
+            |""".stripMargin)
+      sql("INSERT INTO src VALUES (1, CAST('p1' AS BINARY)), (2, CAST('p2' AS BINARY))")
+      val blobFiles = fileNames("src").count(_.endsWith(".blob"))
+      assert(blobFiles > 0, fileNames("src"))
+
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      // the blob file is copied as a blob file
+      assert(fileNames("dst").count(_.endsWith(".blob")) == blobFiles, fileNames("dst"))
+      checkAnswer(
+        sql("SELECT id, CAST(picture AS STRING), _ROW_ID FROM dst"),
+        sql("SELECT id, CAST(picture AS STRING), _ROW_ID FROM src"))
+      checkAnswer(sql("SELECT CAST(picture AS STRING) FROM dst WHERE id = 2"), Row("p2") :: Nil)
+    }
+  }
+
+  test("Paimon copy files procedure: partitioned data-evolution table with a vector field") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT, embedding ARRAY<FLOAT>, pt STRING)
+            |PARTITIONED BY (pt) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'file.format' = 'parquet',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO src VALUES
+            |(1, array(1.0f, 0.0f), 'a'), (2, array(2.0f, 0.0f), 'b'), (3, array(3.0f, 0.0f), 'c')
+            |""".stripMargin)
+      sql("INSERT INTO src VALUES (4, array(4.0f, 0.0f), 'a'), (5, array(5.0f, 0.0f), 'c')")
+
+      // the commit may order the partitions in any way
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      checkAnswer(sql("SELECT * FROM dst"), sql("SELECT * FROM src"))
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID) = count(*) FROM dst"), Row(true) :: Nil)
+
+      // only partition b is overwritten
+      sql("INSERT INTO src VALUES (6, array(6.0f, 0.0f), 'b')")
+      checkAnswer(
+        sql("""CALL sys.copy(source_table => 'src', target_table => 'dst', where => "pt = 'b'")"""),
+        Row(true) :: Nil)
+      checkAnswer(sql("SELECT * FROM dst"), sql("SELECT * FROM src"))
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID) = count(*) FROM dst"), Row(true) :: Nil)
+    }
+  }
+
+  private def fileNames(table: String): Seq[String] =
+    sql(s"SELECT file_path FROM `$table$$files`").collect().map(_.getString(0)).toSeq
 }
