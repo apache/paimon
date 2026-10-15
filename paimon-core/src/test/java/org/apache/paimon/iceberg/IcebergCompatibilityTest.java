@@ -332,7 +332,8 @@ public class IcebergCompatibilityTest {
                         .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
         TableCommitImpl commit = table.newCommit(commitUser);
 
-        // level-0 files are not exported to Iceberg, and each full compaction removes them
+        // after the first snapshot, level-0 files are not exported to Iceberg, and each full
+        // compaction removes them
         long id = 1;
         for (int round = 0; round < 3; round++) {
             for (int i = 0; i < 3; i++) {
@@ -350,6 +351,41 @@ public class IcebergCompatibilityTest {
             assertSummaryTotalsMatchManifests(table);
         }
         assertThat(getIcebergResult()).hasSize(6);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSnapshotSummaryIgnoresRemovedFilesNotInIceberg() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        1,
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        // the only file of pt=2 is a level-0 file, which is not exported to Iceberg
+        write.write(GenericRow.of(2, 1, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        assertSummaryTotalsMatchManifests(table);
+
+        Map<String, String> partition = new HashMap<>();
+        partition.put("pt", "2");
+        commit.truncatePartitions(Collections.singletonList(partition));
+        assertSummaryTotalsMatchManifests(table);
+        assertThat(getIcebergResult()).containsExactly("Record(1, 1, 10)");
 
         write.close();
         commit.close();
@@ -3200,6 +3236,7 @@ public class IcebergCompatibilityTest {
         long removedFilesSize = 0;
         long deleteFiles = 0;
         long positionDeletes = 0;
+        Set<BinaryRow> changedPartitions = new HashSet<>();
         for (IcebergManifestFileMeta fileMeta :
                 manifestList.read(new Path(snapshot.manifestList()).getName())) {
             for (IcebergManifestEntry entry : manifestFile.read(fileMeta.manifestPath())) {
@@ -3208,7 +3245,9 @@ public class IcebergCompatibilityTest {
                         deleteFiles++;
                         positionDeletes += entry.file().recordCount();
                     }
-                } else if (entry.isLive()) {
+                    continue;
+                }
+                if (entry.isLive()) {
                     dataFiles++;
                     records += entry.file().recordCount();
                     filesSize += entry.file().fileSizeInBytes();
@@ -3216,6 +3255,10 @@ public class IcebergCompatibilityTest {
                     deletedDataFiles++;
                     deletedRecords += entry.file().recordCount();
                     removedFilesSize += entry.file().fileSizeInBytes();
+                }
+                if (entry.status() != IcebergManifestEntry.Status.EXISTING
+                        && entry.snapshotId() == snapshot.snapshotId()) {
+                    changedPartitions.add(entry.file().partition());
                 }
             }
         }
@@ -3228,6 +3271,7 @@ public class IcebergCompatibilityTest {
                 .containsEntry("deleted-data-files", String.valueOf(deletedDataFiles))
                 .containsEntry("deleted-records", String.valueOf(deletedRecords))
                 .containsEntry("removed-files-size", String.valueOf(removedFilesSize))
+                .containsEntry("changed-partition-count", String.valueOf(changedPartitions.size()))
                 .containsEntry("total-delete-files", String.valueOf(deleteFiles))
                 .containsEntry("total-position-deletes", String.valueOf(positionDeletes));
     }

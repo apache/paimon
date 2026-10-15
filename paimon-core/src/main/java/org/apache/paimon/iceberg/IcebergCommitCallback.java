@@ -1115,7 +1115,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 deletedFiles.stream().mapToLong(IcebergDataFileMeta::recordCount).sum();
         metrics.deletedFilesSize =
                 deletedFiles.stream().mapToLong(IcebergDataFileMeta::fileSizeInBytes).sum();
-        metrics.changedPartitionCount = modifiedPartitionsSet.size();
+        Set<BinaryRow> changedPartitions = new HashSet<>();
+        addedFiles.values().stream().map(Pair::getLeft).forEach(changedPartitions::add);
+        deletedFiles.stream()
+                .map(file -> removedFiles.get(file.filePath()).getLeft())
+                .forEach(changedPartitions::add);
+        metrics.changedPartitionCount = changedPartitions.size();
 
         metrics.totalDataFiles = computeLiveFileCount(newDataManifestFileMetas);
         metrics.totalRecords = computeLiveRowCount(newDataManifestFileMetas);
