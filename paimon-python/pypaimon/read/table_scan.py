@@ -142,12 +142,11 @@ class TableScan:
             database_name = self.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
-        if self.table.options.query_auth_enabled:
-            # The binding currently carries explicit partition selectors as
-            # ordinary filters. Keep them on Python, where masked scan-only
-            # selectors can be rejected as Java requires.
-            if self.partition_predicate is not None:
+        if self.partition_predicate is not None:
+            from pypaimon.read.native_plan import native_method_available
+            if not native_method_available('ReadBuilder', 'with_partition_filter'):
                 return False
+        if self.table.options.query_auth_enabled:
             # The filesystem path has no catalog-issued authorization session.
             loader = getattr(getattr(self.table, 'catalog_environment', None), 'catalog_loader', None)
             from pypaimon.read.native_plan import _catalog_metastore
@@ -219,20 +218,17 @@ class TableScan:
                     extra_options['row_position_slice'] = (
                         fs.start_pos_of_this_subtask, fs.end_pos_of_this_subtask)
             row_ranges = self._native_row_ranges()
-            native_predicate = self.predicate
             if self.partition_predicate is not None:
-                native_predicate = PredicateBuilder.and_predicates([
-                    predicate for predicate in (
-                        native_predicate,
-                        self.file_scanner.partition_key_predicate,
-                    ) if predicate is not None
-                ])
+                # Explicit partition selectors are scan-only. Keep the ordinary
+                # row predicate separate so core can apply Java's override and
+                # masked-partition validation semantics.
+                extra_options['partition_predicate'] = fs.partition_key_predicate
             # Append positions still precede LIMIT. Rust owns PK shards and
             # source-backed sorted-index refinement before applying LIMIT.
             defer_limit = has_distribution and not self.table.is_primary_key_table
             plan = native_plan(
                 self.table,
-                predicate=native_predicate,
+                predicate=self.predicate,
                 limit=None if defer_limit else self.limit,
                 projection=(
                     [field.name for field in self._read_type]
