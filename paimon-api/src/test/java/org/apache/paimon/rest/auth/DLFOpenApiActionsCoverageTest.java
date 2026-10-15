@@ -48,14 +48,12 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.apache.paimon.rest.RESTCatalogInternalOptions.PREFIX;
@@ -71,19 +69,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DLFOpenApiActionsCoverageTest {
 
     /** RESTApi methods with no entry in DLFOpenApiActions; they are signed without an action. */
-    private static final Set<String> WITHOUT_ACTION =
-            new TreeSet<>(
-                    Arrays.asList(
-                            "getTableById",
-                            "listConsumersPaged",
-                            "listFunctionDetailsPaged",
-                            "listFunctionsPagedGlobally",
-                            "listSchemasPaged",
-                            "listTablesPagedGlobally",
-                            "listViewsPagedGlobally",
-                            "loadSchema",
-                            "resetConsumer",
-                            "rollbackSchema"));
+    private static final Set<String> WITHOUT_ACTION = Collections.emptySet();
 
     /** A value per parameter type; "SELECT" is valid both as a name and as an access. */
     private static final Map<Class<?>, Object> ARGUMENTS = arguments();
