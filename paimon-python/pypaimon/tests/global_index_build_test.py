@@ -1121,6 +1121,20 @@ class GlobalIndexBuildTest(
         with self.assertRaisesRegex(ValueError, 'deletion vectors'):
             dv_table.create_global_index('embedding', index_type=FULL_TEXT_IDENTIFIER)
 
+    def test_build_options_cannot_change_table_deletion_vector_eligibility(self):
+        for enabled in (False, True):
+            with self.subTest(deletion_vectors=enabled):
+                table_options = dict(self.table_options)
+                table_options['deletion-vectors.enabled'] = str(enabled).lower()
+                table = self._create_table(options=table_options)
+                build_options = {'deletion-vectors.enabled': str(not enabled).lower()}
+                if enabled:
+                    with self.assertRaisesRegex(ValueError, 'deletion vectors'):
+                        GlobalIndexBuilder(table, 'name', index_type=FULL_TEXT_IDENTIFIER, options=build_options)
+                else:
+                    self.assertEqual([], GlobalIndexBuilder(
+                        table, 'name', index_type=FULL_TEXT_IDENTIFIER, options=build_options).build())
+
     def test_vindex_native_options_follow_java_mapping(self):
         data_type = ArrayType(True, AtomicType('FLOAT'))
         options = {

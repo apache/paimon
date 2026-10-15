@@ -403,7 +403,7 @@ def test_java_records_per_file_option_overrides_table_alias(rest_catalog, kind):
     assert _ids(table, table.new_read_builder().new_predicate_builder().equal('name', 'a')) == [1, 5]
 
 
-@pytest.mark.parametrize('options', [{'write.native.enabled': 'false'}, {'data-evolution.enabled': 'false'}])
+@pytest.mark.parametrize('options', [{'write.native.enabled': 'false'}])
 def test_ineligible_tables_choose_python_before_building(rest_catalog, options):
     catalog, _ = rest_catalog
     table = _create(catalog, options=options)

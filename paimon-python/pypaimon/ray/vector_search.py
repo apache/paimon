@@ -38,7 +38,8 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 def _execute_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     """Execute the builder of an already snapshot-pinned ``VectorQuery``."""
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    reader = builder.new_vector_search_read()
+    from pypaimon.table.source.native_search_plan import python_search_reader
+    reader = python_search_reader(builder.new_vector_search_read())
     if (type(reader) is not DataEvolutionVectorRead
             or not reader._table.options.data_evolution_enabled()):
         raise ValueError("Ray vector search supports only data-evolution tables.")

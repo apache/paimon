@@ -32,8 +32,6 @@ def build_native_global_index(builder, partition_filter):
     from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
     if (builder._index_type not in ('btree', 'bitmap', 'full-text') + tuple(VINDEX_IDENTIFIERS)
             or not table.options.native_write_enabled()
-            or not table.options.data_evolution_enabled()
-            or not table.options.global_index_enabled()
             or (table.options.deletion_vectors_enabled() and builder._index_type == 'full-text')
             or table.options.query_auth_enabled
             or table.is_primary_key_table

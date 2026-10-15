@@ -110,6 +110,8 @@ class DataEvolutionGlobalIndexScanner:
         options = self._options
 
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
+            from pypaimon.globalindex.union_global_index_reader import UnionGlobalIndexReader
+
             groups = []
             group = index_metas.get(field.id)
             if group is not None:
@@ -125,8 +127,10 @@ class DataEvolutionGlobalIndexScanner:
             if not groups:
                 return []
             if len(groups) == 1:
-                return _create_readers(
-                    file_io, index_path, groups[0].metas, field, executor, options)
+                # Families may cover different row ranges. Like Java, union
+                # their matches before the evaluator combines field predicates.
+                return [UnionGlobalIndexReader(_create_readers(
+                    file_io, index_path, groups[0].metas, field, executor, options))]
             union_coverage = Range.sort_and_merge_overlap(
                 [
                     range_key
@@ -142,7 +146,7 @@ class DataEvolutionGlobalIndexScanner:
                     _create_readers(
                         file_io, index_path, group.metas, field, executor,
                         options, pad_ranges=pad_ranges))
-            return readers
+            return [UnionGlobalIndexReader(readers)]
 
         return GlobalIndexEvaluator(fields, readers_function)
 
