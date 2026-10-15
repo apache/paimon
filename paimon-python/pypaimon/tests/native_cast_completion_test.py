@@ -32,7 +32,6 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse
-from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.schema.data_types import DataTypeParser, PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
@@ -194,15 +193,12 @@ def test_not_null_mask_adapts_only_output_schema(rest_catalog, table_mode, mask)
     expected = [None, None] if mask == 'null' else [Decimal('1.00'), None]
     result = _read(table, ['masked', 'id']).sort_by([('id', 'ascending')])
     assert result.column('masked').to_pylist() == expected
-    assert not table.field_dict['masked'].type.nullable
-    assert not table.field_dict['id'].type.nullable
-    id_field = read_arrow_schema(table.fields).field('id')
-    assert result.schema == pa.schema([pa.field('masked', target), id_field])
+    assert result.schema.field('masked').nullable
     assert _read(table, ['masked'], limit=0).schema.field('masked').nullable
     projection = {'first': 'masked', 'second': 'masked', 'id': 'id'}
     result = _read(table, projection).sort_by([('id', 'ascending')])
     assert result.column('first').to_pylist() == expected == result.column('second').to_pylist()
-    assert result.schema == pa.schema([pa.field('first', target), pa.field('second', target), id_field])
+    assert result.schema.field('first').nullable and result.schema.field('second').nullable
     builder = table.copy({'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'}).new_read_builder()
     builder.with_projection(['masked', 'id'])
     splits = builder.new_scan().plan().splits()

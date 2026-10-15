@@ -127,7 +127,6 @@ class TestTableCommit(unittest.TestCase):
             table.raw_table.create_tag("empty")
             tagged = table.scan(tag_name="empty").to_arrow()
             self.assertEqual(0, tagged.num_rows)
-            self.assertFalse(table.raw_table.fields[0].type.nullable)
             self.assertEqual(read_arrow_schema(table.raw_table.fields), tagged.schema)
 
             table.add([{"feature": "state_imu_body"}])

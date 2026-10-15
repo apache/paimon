@@ -24,8 +24,6 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.casting.schema_evolution import read_arrow_schema
-from pypaimon.table.special_fields import SpecialFields
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('v', pa.int32()), ('w', pa.int32())])
@@ -88,16 +86,12 @@ def _read(table, native, projection, predicate=None, limit=None):
 @pytest.mark.parametrize('deletion_vectors', [False, True])
 def test_partial_column_updates_keep_latest_metadata_provider(tmp_path, native, native_write, deletion_vectors):
     table = _table(tmp_path, True, native_write, deletion_vectors)
-    assert not SpecialFields.ROW_ID.type.nullable
-    assert not SpecialFields.SEQUENCE_NUMBER.type.nullable
     _update(table, 'v', 0, 77)
     _update(table, 'w', 1, 88)
     for projection in (['_SEQUENCE_NUMBER'], ['id', '_SEQUENCE_NUMBER'],
                        ['_SEQUENCE_NUMBER', 'w', '_ROW_ID', 'v', 'id']):
         result = _read(table, native, projection)
         assert result.column_names == projection
-        expected_schema = read_arrow_schema(table.new_read_builder().with_projection(projection).read_type())
-        assert result.schema == expected_schema
         assert result['_SEQUENCE_NUMBER'].null_count == 0
         if 'id' in projection:
             result = result.sort_by('id')

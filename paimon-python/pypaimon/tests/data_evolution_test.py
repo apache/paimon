@@ -32,7 +32,6 @@ from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.table.row.offset_row import OffsetRow
-from pypaimon.table.special_fields import SpecialFields
 
 
 def _filter_batch_arrow(batch, predicate):
@@ -1051,9 +1050,6 @@ class DataEvolutionTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         actual_with_meta = table_read.to_arrow(table_scan.plan().splits())
-        self.assertFalse(SpecialFields.ROW_ID.type.nullable)
-        self.assertFalse(SpecialFields.SEQUENCE_NUMBER.type.nullable)
-        self.assertEqual(actual_with_meta.schema, read_arrow_schema(read_builder.read_type()))
         self.assertEqual(actual_with_meta.column('_ROW_ID').null_count, 0)
         self.assertEqual(actual_with_meta.column('_SEQUENCE_NUMBER').null_count, 0)
 

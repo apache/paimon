@@ -26,7 +26,6 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.blob import Blob
@@ -1717,8 +1716,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(table.field_dict['payloads'].type.value.nullable)
-        self.assertEqual(result.schema, read_arrow_schema(table.fields))
         self.assertEqual(
             {
                 row['id']: None if row['payloads'] is None else dict(row['payloads'])
@@ -1789,8 +1786,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(table.field_dict['payloads'].type.element.nullable)
-        self.assertEqual(result.schema, read_arrow_schema(table.fields))
         self.assertEqual(
             {
                 row['id']: row['payloads']

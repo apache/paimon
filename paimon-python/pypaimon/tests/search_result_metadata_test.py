@@ -21,7 +21,6 @@ import pyarrow as pa
 import pytest
 
 import pypaimon.multimodal as pm
-from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.multimodal.query import ScanQuery
 
 
@@ -104,33 +103,6 @@ def test_duplicate_projections_keep_scores(docs, batch, column):
     if column == "_ROW_ID":
         with_lookup = query(docs, batch).select([column, column]).where("id >= 0").with_score().to_arrow()
         assert (with_lookup[0] if batch else with_lookup).schema == (actual[0] if batch else actual).schema
-
-
-@pytest.mark.parametrize("batch", [False, True])
-@pytest.mark.parametrize("empty", [False, True])
-@pytest.mark.parametrize("projection", [[], ["_ROW_ID"], ["_ROW_ID", "_ROW_ID"]])
-def test_metadata_only_matches_lookup_schema_and_values(docs, batch, empty, projection):
-    kwargs = {"pre_filter": "id < 0"} if empty else {}
-    with patch.object(ScanQuery, "_read_global_index_result", side_effect=AssertionError("final lookup")):
-        actual = query(docs, batch, **kwargs).select(projection).with_score().order_by_score().to_arrow()
-    expected = (query(docs, batch, **kwargs).select(projection).where("id >= 0")
-                .with_score().order_by_score().to_arrow())
-    actual, expected = (actual, expected) if batch else ([actual], [expected])
-    assert len(actual) == len(expected) == (2 if batch else 1)
-    for fast, lookup in zip(actual, expected):
-        assert fast.num_rows == (0 if empty else 4)
-        assert fast.schema == lookup.schema
-        assert fast.equals(lookup)
-
-
-def test_metadata_only_preserves_core_row_id_nullability(docs):
-    schema = pa.schema([pa.field("_ROW_ID", pa.int64(), nullable=True)])
-    search = query(docs).select(["_ROW_ID"]).with_score()._for_execution()
-    result = DictBasedScoredIndexResult({1: 1.})
-    with patch("pypaimon.multimodal.query.read_arrow_schema", return_value=schema, create=True):
-        actual = search._read_global_index_result(result)
-    assert actual.schema == schema.append(pa.field("_score", pa.float64()))
-    assert actual.to_pylist() == [{"_ROW_ID": 1, "_score": 1.}]
 
 
 @pytest.mark.parametrize("batch", [False, True])

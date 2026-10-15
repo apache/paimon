@@ -79,7 +79,7 @@ class BinaryRowTest(unittest.TestCase):
         write.close()
         commit.close()
 
-        cls.expected = cls.data.cast(read_arrow_schema(append_table.fields))
+        cls.data = cls.data.cast(read_arrow_schema(append_table.fields))
 
     @classmethod
     def tearDownClass(cls):
@@ -93,7 +93,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.not_equal('f2', 6)  # test stats filter when filtering ManifestEntry
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(1, 4)
+        expected = self.data.slice(1, 4)
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))
 
@@ -107,7 +107,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.less_than('f2', 8)
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(0, 2)
+        expected = self.data.slice(0, 2)
         self.assertEqual(actual, expected)
         self.assertEqual(len(expected), len(splits))  # test stats filter when filtering ManifestEntry
 
@@ -117,7 +117,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.is_null('f1')  # value_stats_cols=None
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(4, 1)
+        expected = self.data.slice(4, 1)
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))
 
@@ -143,7 +143,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.is_not_null('f1')
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(0, 4)
+        expected = self.data.slice(0, 4)
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))
 
@@ -155,7 +155,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.is_in('f2', [6, 8])
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.take([0, 2])
+        expected = self.data.take([0, 2])
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))
 
@@ -165,7 +165,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.equal('f2', 6)
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(0, 1)
+        expected = self.data.slice(0, 1)
         self.assertEqual(expected, actual)
         self.assertEqual(len(splits), len(expected))  # test partition filter when filtering ManifestEntry
 
@@ -176,7 +176,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.not_equal('f2', 6)
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(1, 4)
+        expected = self.data.slice(1, 4)
         self.assertEqual(actual, expected)
         self.assertEqual(len(splits), len(expected))  # test partition filter when filtering ManifestEntry
 
@@ -187,7 +187,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.less_than('f0', 3)
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(0, 2)
+        expected = self.data.slice(0, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))  # test key stats filter when filtering ManifestEntry
 
@@ -197,7 +197,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.is_null('f1')
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(4, 1)
+        expected = self.data.slice(4, 1)
         self.assertEqual(actual, expected)
 
     @pytest.mark.python_plan
@@ -207,7 +207,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate_builder = read_builder.new_predicate_builder()
         predicate = predicate_builder.is_not_null('f1')
         splits, actual = self._read_result(read_builder.with_filter(predicate))
-        expected = self.expected.slice(0, 4)
+        expected = self.data.slice(0, 4)
         self.assertEqual(actual, expected)
 
     @pytest.mark.python_plan
@@ -218,7 +218,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate = predicate_builder.is_in('f0', [1, 5])
         splits, actual = self._read_result(read_builder.with_filter(predicate))
         # expected rows: indices [0, 3]
-        expected = self.expected.take([0, 4])
+        expected = self.data.take([0, 4])
         self.assertEqual(actual, expected)
         self.assertEqual(len(splits), len(expected))  # test key stats filter when filtering ManifestEntry
 

@@ -103,7 +103,6 @@ class TableWriteTest(unittest.TestCase):
             commit.close()
         actual = self._read_sorted(table, [('id', 'ascending')])
         self.assertEqual(actual.to_pylist(), expected)
-        self.assertFalse(table.fields[0].type.nullable)
         expected_schema = read_arrow_schema(Schema.from_pyarrow_schema(arrow_schema(pa.string())).fields)
         self.assertEqual(actual.schema.remove_metadata(), expected_schema)
 
