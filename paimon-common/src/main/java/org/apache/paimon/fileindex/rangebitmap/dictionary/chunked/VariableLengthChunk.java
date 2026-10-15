@@ -38,7 +38,7 @@ public class VariableLengthChunk extends AbstractChunk {
     private int size;
     private int currentOffset;
 
-    private int keysBaseOffset;
+    private long keysBaseOffset;
     private int offsetsLength;
     private int keysLength;
     private SeekableInputStream in;
@@ -69,7 +69,7 @@ public class VariableLengthChunk extends AbstractChunk {
 
     public VariableLengthChunk(
             ByteBuffer headers,
-            int keysBaseOffset,
+            long keysBaseOffset,
             SeekableInputStream in,
             KeyFactory.KeyDeserializer deserializer,
             Comparator<Object> comparator) {
