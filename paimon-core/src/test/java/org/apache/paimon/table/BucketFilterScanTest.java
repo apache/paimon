@@ -24,6 +24,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.PhysicalBucketPredicate;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
@@ -125,6 +127,19 @@ public class BucketFilterScanTest extends TableTestBase {
                         PredicateBuilder.and(pb.lessThan(0, 3), pb.equal(1, 5)),
                         PredicateBuilder.and(pb.equal(0, 3), pb.equal(1, 7)));
         assertThat(plan(table, predicate1)).containsExactlyInAnyOrder("3,1", "1,6", "2,6");
+        assertThat(
+                        plan(
+                                table.newReadBuilder()
+                                        .withFilter(predicate1)
+                                        .withBucketFilter(PhysicalBucketPredicate.equal(6))))
+                .containsExactlyInAnyOrder("1,6", "2,6");
+        assertThat(
+                        plan(
+                                table.newReadBuilder()
+                                        .withFilter(predicate1)
+                                        .withBucketFilter(PhysicalBucketPredicate.equal(6))
+                                        .withBucket(1)))
+                .isEmpty();
 
         // ---- build predicate: (a < 3 AND b = 5) OR (a = 3 AND b < 100) ----
         Predicate predicate2 =
@@ -237,7 +252,11 @@ public class BucketFilterScanTest extends TableTestBase {
     }
 
     private Set<String> plan(Table table, Predicate predicate) {
-        return table.newReadBuilder().withFilter(predicate).newScan().plan().splits().stream()
+        return plan(table.newReadBuilder().withFilter(predicate));
+    }
+
+    private Set<String> plan(ReadBuilder readBuilder) {
+        return readBuilder.newScan().plan().splits().stream()
                 .map(
                         split -> {
                             DataSplit dataSplit = (DataSplit) split;

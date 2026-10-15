@@ -112,6 +112,14 @@ public interface ReadBuilder extends Serializable {
      * Push bucket filter. Note that this method cannot be used simultaneously with {@link
      * #withShard(int, int)}.
      *
+     * <p>A {@link PhysicalBucketPredicate} can also prune manifests using their bucket ranges.
+     * Ordinary filters still filter individual entries and indexed buckets. Repeated calls replace
+     * the previous bucket filter. Combine physical predicates with {@link
+     * PhysicalBucketPredicate#intersect(PhysicalBucketPredicate)} or {@link
+     * PhysicalBucketPredicate#union(PhysicalBucketPredicate)} before passing them to this method to
+     * preserve manifest pruning and serializability. The inherited {@link Filter#and(Filter)}
+     * returns an ordinary, non-serializable filter and does not preserve manifest-range pruning.
+     *
      * <p>Reason: Bucket filtering and sharding are different logical mechanisms for selecting
      * subsets of table data. Applying both methods simultaneously introduces conflicting selection
      * criteria.

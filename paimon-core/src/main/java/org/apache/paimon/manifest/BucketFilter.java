@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.source.PhysicalBucketPredicate;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.TriFilter;
 
@@ -98,7 +99,7 @@ public class BucketFilter {
     public boolean mayContain(ManifestFileMeta manifest) {
         Integer minBucket = manifest.minBucket();
         Integer maxBucket = manifest.maxBucket();
-        if (minBucket == null || maxBucket == null) {
+        if (minBucket == null || maxBucket == null || minBucket > maxBucket) {
             return true;
         }
         if (onlyReadRealBuckets && maxBucket < 0) {
@@ -106,6 +107,11 @@ public class BucketFilter {
         }
         if (specifiedBucket != null
                 && (specifiedBucket < minBucket || specifiedBucket > maxBucket)) {
+            return false;
+        }
+        // Physical IDs are independent of totalBuckets, which may be unknown or mixed.
+        if (bucketFilter instanceof PhysicalBucketPredicate
+                && !((PhysicalBucketPredicate) bucketFilter).mayContain(minBucket, maxBucket)) {
             return false;
         }
         if (totalAwareBucketFilter instanceof ManifestBucketFilter) {
