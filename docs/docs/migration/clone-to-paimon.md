@@ -130,11 +130,59 @@ the catalog. The following example limits the selection to two source tables:
 | `--clone_if_exists false` | Skips targets that already exist. The default is `true`, which clones into existing compatible targets. |
 | `--meta_only true` | Clones the schema without copying data. The default is `false`. |
 | `--parallelism 10` | Sets the clone job parallelism. |
+| `--copy_files true` | For Hive sources in ORC, Parquet or Avro format, copies the data files as they are instead of reading and rewriting their rows. The default is `false`. See [Copy Data Files](#copy-data-files). |
+| `--recursive_listing true` | With `--copy_files true`, also copies files in sub directories of each partition. The default is `false`. |
 
 A multi-table clone does not commit all tables atomically. After a failure, inspect target
 tables and rerun the required scope. `--clone_if_exists false` is useful for skipping existing
 tables, but is not a resume mechanism: an existing table may have been created before its
 data was copied.
+
+## Copy Data Files
+
+By default, a Hive table in ORC or Parquet format is cloned by reading its rows and writing them
+again. With `--copy_files true`, the data files are copied as they are, which avoids decoding and
+re-encoding every row. Only ORC, Parquet and Avro sources are supported, and the target keeps the
+format of the source, so `--prefer_file_format` is rejected. When several tables are cloned, all
+of them are checked before the job starts; exclude the tables in other formats with
+`--excluded_tables`.
+
+```bash
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    clone \
+    --clone_from hive \
+    --database default \
+    --table hivetable \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://localhost:9083 \
+    --target_database analytics \
+    --target_table hivetable_copy \
+    --target_catalog_conf warehouse=hdfs:///paimon-warehouse \
+    --copy_files true
+```
+
+Copied files keep the columns they were written with, and Paimon reads them by column name:
+
+- An existing target must have exactly the same fields as the source, in the same order and
+  nullable, otherwise clone fails before copying.
+- A partition whose metastore columns have other types than the table columns fails the clone.
+  Columns missing from a partition are read as null.
+- The column names inside the files must match the metastore columns exactly. Positional names,
+  such as `_col0` in old Hive ORC files, and names that differ only in case are not mapped to the
+  table columns.
+
+Files are committed like any clone, by overwriting: a rerun replaces the partitions that receive
+files, or the whole table if it is not partitioned.
+
+Only the partitions registered in the metastore are copied. A partitioned table without
+registered partitions copies nothing, even if its location holds files.
+
+By default only the files directly inside each partition directory are copied. Add
+`--recursive_listing true` when a partition keeps its files in sub directories. Files inside
+directories whose names start with `_` or `.`, such as `_temporary` and `.hive-staging`, and files
+whose own names start with `_` or `.`, are never copied. Every other file in the listed
+directories is copied, so make sure they only hold data files of the table. A file listed by more
+than one partition, because one partition is located inside another, fails the clone.
 
 ## Clone a Paimon Source
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive.clone;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryWriter;
@@ -62,6 +63,9 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     private static final Logger LOG = LoggerFactory.getLogger(HiveTableCloneExtractor.class);
     public static final HiveTableCloneExtractor INSTANCE = new HiveTableCloneExtractor();
 
+    /** Formats whose data files can be copied into a Paimon table as they are. */
+    private static final List<String> COPY_FILES_FORMATS = Arrays.asList("orc", "parquet", "avro");
+
     @Override
     public boolean matches(Table table) {
         return true;
@@ -85,6 +89,30 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             String defaultPartitionName,
             @Nullable PartitionPredicate predicate)
             throws Exception {
+        return extractFiles(
+                catalogOptions,
+                client,
+                table,
+                fileIO,
+                identifier,
+                partitionRowType,
+                defaultPartitionName,
+                predicate,
+                false);
+    }
+
+    @Override
+    public List<HivePartitionFiles> extractFiles(
+            Map<String, String> catalogOptions,
+            IMetaStoreClient client,
+            Table table,
+            FileIO fileIO,
+            Identifier identifier,
+            RowType partitionRowType,
+            String defaultPartitionName,
+            @Nullable PartitionPredicate predicate,
+            boolean recursive)
+            throws Exception {
         return listFromPureHiveTable(
                 client,
                 identifier,
@@ -92,7 +120,8 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
                 fileIO,
                 partitionRowType,
                 defaultPartitionName,
-                predicate);
+                predicate,
+                recursive);
     }
 
     @Override
@@ -104,6 +133,11 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
 
     @Override
     public Map<String, String> extractOptions(Table table) {
+        return extractOptions(table, false);
+    }
+
+    @Override
+    public Map<String, String> extractOptions(Table table, boolean copyFiles) {
         Map<String, String> hiveTableOptions = table.getParameters();
         Map<String, String> paimonOptions = new HashMap<>();
         String comment = hiveTableOptions.get("comment");
@@ -113,7 +147,13 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
         }
 
         String format = parseFormat(table);
-        if (supportCloneSplits(format)) {
+        if (copyFiles && !COPY_FILES_FORMATS.contains(format)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Copying data files is only supported for formats %s, but table has format '%s'.",
+                            COPY_FILES_FORMATS, format));
+        }
+        if (!copyFiles && supportCloneSplits(format)) {
             Map<String, String> cloneSplitsOptions = getOptionsWhenCloneSplits(table, format);
             paimonOptions.putAll(cloneSplitsOptions);
             return paimonOptions;
@@ -150,7 +190,8 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             FileIO fileIO,
             RowType partitionRowType,
             String defaultPartitionName,
-            @javax.annotation.Nullable PartitionPredicate predicate)
+            @javax.annotation.Nullable PartitionPredicate predicate,
+            boolean recursive)
             throws Exception {
         List<Partition> partitions =
                 client.listPartitions(
@@ -158,9 +199,16 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
         String format = parseFormat(sourceTable);
 
         if (partitions.isEmpty()) {
+            if (partitionRowType.getFieldCount() > 0) {
+                // files under the table location belong to partitions unknown to the metastore
+                LOG.warn(
+                        "Partitioned table {} has no partitions in the metastore, no files are cloned.",
+                        identifier);
+                return Collections.emptyList();
+            }
             String location = sourceTable.getSd().getLocation();
             return Collections.singletonList(
-                    listFiles(fileIO, location, BinaryRow.EMPTY_ROW, format));
+                    listFiles(fileIO, location, BinaryRow.EMPTY_ROW, format, recursive));
         } else {
             List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
             partitionRowType
@@ -177,20 +225,85 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
                                 valueSetters,
                                 defaultPartitionName);
                 if (predicate == null || predicate.test(partitionRow)) {
-                    results.add(listFiles(fileIO, location, partitionRow, format));
+                    checkPartitionColumns(identifier, sourceTable, partition);
+                    results.add(listFiles(fileIO, location, partitionRow, format, recursive));
                 }
+            }
+            if (recursive) {
+                checkNoSharedFiles(identifier, results);
             }
             return results;
         }
     }
 
-    private static HivePartitionFiles listFiles(
-            FileIO fileIO, String location, BinaryRow partition, String format) throws IOException {
-        List<FileStatus> fileStatuses =
-                Arrays.stream(fileIO.listStatus(new Path(location)))
-                        .filter(s -> !s.isDir())
-                        .filter(HIDDEN_PATH_FILTER)
-                        .collect(Collectors.toList());
+    /**
+     * Copied files are read with the table columns, so a partition must not declare a column of the
+     * table with another type. Columns missing from a partition are read as null.
+     */
+    private static void checkPartitionColumns(
+            Identifier identifier, Table table, Partition partition) {
+        if (!partition.getSd().isSetCols()) {
+            return;
+        }
+        Map<String, String> tableTypes = new HashMap<>();
+        for (FieldSchema column : table.getSd().getCols()) {
+            tableTypes.put(column.getName(), column.getType());
+        }
+        for (FieldSchema column : partition.getSd().getCols()) {
+            String tableType = tableTypes.get(column.getName());
+            if (tableType != null && !tableType.equalsIgnoreCase(column.getType())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Can not copy the files of partition %s of table %s: column '%s' has type '%s' in the partition but '%s' in the table.",
+                                partition.getValues(),
+                                identifier,
+                                column.getName(),
+                                column.getType(),
+                                tableType));
+            }
+        }
+    }
+
+    /**
+     * Listing recursively, a partition located inside another partition would have its files cloned
+     * twice.
+     */
+    @VisibleForTesting
+    static void checkNoSharedFiles(Identifier identifier, List<HivePartitionFiles> partitions) {
+        Map<Path, BinaryRow> owners = new HashMap<>();
+        for (HivePartitionFiles partitionFiles : partitions) {
+            for (Path path : partitionFiles.paths()) {
+                BinaryRow owner = owners.putIfAbsent(path, partitionFiles.partition());
+                if (owner != null) {
+                    throw new IllegalStateException(
+                            String.format(
+                                    "File %s of table %s is listed by more than one partition, "
+                                            + "check the partition locations or disable recursive listing.",
+                                    path, identifier));
+                }
+            }
+        }
+    }
+
+    @VisibleForTesting
+    static HivePartitionFiles listFiles(
+            FileIO fileIO, String location, BinaryRow partition, String format, boolean recursive)
+            throws IOException {
+        Path root = new Path(location);
+        List<FileStatus> fileStatuses;
+        if (recursive) {
+            fileStatuses =
+                    Arrays.stream(fileIO.listFiles(root, true))
+                            .filter(HIDDEN_PATH_FILTER)
+                            .filter(s -> !isInHiddenDirectory(root, s.getPath()))
+                            .collect(Collectors.toList());
+        } else {
+            fileStatuses =
+                    Arrays.stream(fileIO.listStatus(root))
+                            .filter(s -> !s.isDir())
+                            .filter(HIDDEN_PATH_FILTER)
+                            .collect(Collectors.toList());
+        }
         List<Path> paths = new ArrayList<>();
         List<Long> fileSizes = new ArrayList<>();
         for (FileStatus fileStatus : fileStatuses) {
@@ -198,6 +311,32 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             fileSizes.add(fileStatus.getLen());
         }
         return new HivePartitionFiles(partition, paths, fileSizes, format);
+    }
+
+    /**
+     * Whether any directory between the root and the file is hidden, like the '_temporary' and
+     * '.hive-staging' directories left by failed jobs. The same convention is used by Hadoop's
+     * input formats.
+     */
+    private static boolean isInHiddenDirectory(Path root, Path file) {
+        String rootPath = trimTrailingSlash(root.toUri().getPath());
+        Path directory = file.getParent();
+        while (directory != null) {
+            String directoryPath = trimTrailingSlash(directory.toUri().getPath());
+            if (directoryPath.length() <= rootPath.length()) {
+                return false;
+            }
+            String name = directory.getName();
+            if (name.startsWith("_") || name.startsWith(".")) {
+                return true;
+            }
+            directory = directory.getParent();
+        }
+        return false;
+    }
+
+    private static String trimTrailingSlash(String path) {
+        return path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
     }
 
     private static String parseCompression(StorageDescriptor storageDescriptor) {

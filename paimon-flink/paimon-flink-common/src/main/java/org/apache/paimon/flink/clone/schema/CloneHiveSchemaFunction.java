@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.clone.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.hive.HiveCatalog;
@@ -64,6 +65,7 @@ public class CloneHiveSchemaFunction
     protected final Map<String, String> targetCatalogConfig;
     @Nullable protected final String preferFileFormat;
     protected final boolean cloneIfExists;
+    protected final boolean copyFiles;
 
     protected transient HiveCatalog hiveCatalog;
     protected transient Catalog targetCatalog;
@@ -73,10 +75,20 @@ public class CloneHiveSchemaFunction
             Map<String, String> targetCatalogConfig,
             @Nullable String preferFileFormat,
             boolean cloneIfExists) {
+        this(sourceCatalogConfig, targetCatalogConfig, preferFileFormat, cloneIfExists, false);
+    }
+
+    public CloneHiveSchemaFunction(
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            @Nullable String preferFileFormat,
+            boolean cloneIfExists,
+            boolean copyFiles) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
         this.preferFileFormat = preferFileFormat;
         this.cloneIfExists = cloneIfExists;
+        this.copyFiles = copyFiles;
     }
 
     /**
@@ -109,7 +121,7 @@ public class CloneHiveSchemaFunction
                 HiveCloneUtils.getDatabaseOptions(hiveCatalog, tuple.f0.getDatabaseName());
         targetCatalog.createDatabase(tuple.f1.getDatabaseName(), true, databaseOptions);
 
-        Schema schema = HiveCloneUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0);
+        Schema schema = HiveCloneUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0, copyFiles);
         Map<String, String> options = schema.options();
 
         // check support clone splits
@@ -147,6 +159,12 @@ public class CloneHiveSchemaFunction
                             "existed paimon table '%s' is not a FileStoreTable, but a %s",
                             tuple.f1, existedTable.getClass().getName()));
             checkCompatible(schema, (FileStoreTable) existedTable);
+            if (copyFiles) {
+                checkSameFields(
+                        schema.fields(),
+                        ((FileStoreTable) existedTable).schema().fields(),
+                        existedTable.fullName());
+            }
 
             LOG.info("paimon table '{}' already exists, use it as target table.", tuple.f1);
         } catch (Catalog.TableNotExistException e) {
@@ -157,6 +175,32 @@ public class CloneHiveSchemaFunction
 
         CloneSchemaInfo schemaInfo = new CloneSchemaInfo(tuple, supportCloneSplits);
         collector.collect(schemaInfo);
+    }
+
+    /**
+     * Copied files keep the columns they were written with, but are read with the latest schema of
+     * the target. So the target must have exactly the columns of the source, all nullable as Hive
+     * columns are.
+     */
+    @VisibleForTesting
+    static void checkSameFields(
+            List<DataField> sourceFields, List<DataField> existedFields, String existedTableName) {
+        boolean same = sourceFields.size() == existedFields.size();
+        for (int i = 0; same && i < sourceFields.size(); i++) {
+            DataField source = sourceFields.get(i);
+            DataField existed = existedFields.get(i);
+            same =
+                    source.name().equals(existed.name())
+                            && existed.type().isNullable()
+                            && source.type().copy(true).equals(existed.type());
+        }
+        checkState(
+                same,
+                "Can not copy data files to existed paimon table %s because its fields differ from "
+                        + "the source table. Source fields are %s, existed fields are %s.",
+                existedTableName,
+                sourceFields,
+                existedFields);
     }
 
     private void checkCompatible(Schema sourceSchema, FileStoreTable existedTable) {
