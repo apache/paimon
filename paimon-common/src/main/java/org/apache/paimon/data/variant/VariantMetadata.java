@@ -18,58 +18,140 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import static org.apache.paimon.utils.BinaryRowDataUtil.byteBufferEquals;
 
 /**
- * The string dictionary of a variant metadata buffer, with lazily decoded entries.
+ * The variant metadata dictionary, decoded lazily on first use.
  *
  * <p>Rows of a batch usually share the same metadata bytes, so an instance can be shared across
- * rows: {@link #adopt(ByteBuffer)} reparses the dictionary only when the bytes change. A shared
- * instance is a mutable cache slot, not a stable dictionary; do not retain it across calls.
+ * rows and reparse the dictionary only when the bytes change. A shared instance is a mutable cache
+ * slot, not a stable dictionary; do not retain it across calls.
  *
- * <p>This class is not thread safe.
+ * <p>{@link #adopt} adopts the current row's metadata; {@link #buffer()} / {@link #get} decode it
+ * lazily. A fully typed projection never touches the dictionary, so it pays nothing per row.
+ *
+ * <p>Not thread safe.
  */
 public class VariantMetadata {
     private static final int MAX_DICTIONARY_SIZE = 1 << 24;
 
-    private ByteBuffer reuse;
+    // Current row's metadata bytes; a live reference valid only during the synchronous read.
+    private ByteBuffer raw;
+    // Decoded metadata buffer, returned by {@link #buffer()} and read by {@link #get}.
+    private ByteBuffer snapshot;
+    // Whether {@link #snapshot} already matches the current {@link #raw}.
+    private boolean decoded;
     private int dictSize;
     private String[] dict;
     private int offsetSize;
     private int stringStart;
 
-    /** Creates an empty metadata that adopts the first buffer passed to {@link #adopt}. */
+    /**
+     * Creates an empty metadata; the dictionary is decoded lazily from the buffer given to {@link
+     * #adopt}.
+     */
     public static VariantMetadata empty() {
         return new VariantMetadata();
     }
 
     private VariantMetadata() {
-        this.reuse = null;
+        this.raw = null;
+        this.snapshot = null;
+        this.decoded = false;
         this.dictSize = 0;
         this.dict = null;
         this.offsetSize = 0;
         this.stringStart = 0;
     }
 
-    public void adopt(ByteBuffer current) {
-        if (reuse != null
-                && reuse.remaining() == current.remaining()
-                && byteBufferEquals(reuse, current)) {
+    /**
+     * Adopt the current row's metadata bytes. The decode is deferred to {@link #buffer()} / {@link
+     * #get}. Call once per row before any read that may need the dictionary.
+     */
+    public void adopt(ByteBuffer raw) {
+        this.raw = raw;
+        this.decoded = false;
+    }
+
+    public ByteBuffer buffer() {
+        ensureDecoded();
+        return snapshot;
+    }
+
+    @VisibleForTesting
+    public boolean isDecoded() {
+        return decoded;
+    }
+
+    private void ensureDecoded() {
+        if (decoded) {
+            return;
+        }
+        if (raw != null) {
+            decode(raw);
+        } else if (snapshot == null) {
+            throw new IllegalStateException(
+                    "metadata must be adopted before use; call VariantMetadata.adopt(...) first");
+        }
+        decoded = true;
+    }
+
+    public int length() {
+        ensureDecoded();
+        return dictSize;
+    }
+
+    public String get(int id) {
+        ensureDecoded();
+        if (id < 0 || id >= dictSize) {
+            throw GenericVariantUtil.malformedVariant();
+        }
+        String key = dict[id];
+        if (key == null) {
+            int start =
+                    GenericVariantUtil.readUnsigned(
+                            snapshot, 1 + (id + 1) * offsetSize, offsetSize);
+            int nextStart =
+                    GenericVariantUtil.readUnsigned(
+                            snapshot, 1 + (id + 2) * offsetSize, offsetSize);
+            if (nextStart < start) {
+                throw GenericVariantUtil.malformedVariant();
+            }
+            if (nextStart > 0) {
+                int end = stringStart + nextStart - 1;
+                if (end < 0 || end >= snapshot.remaining()) {
+                    throw GenericVariantUtil.malformedVariant();
+                }
+            }
+            int length = nextStart - start;
+            key = GenericVariantUtil.decodeMetadataKey(snapshot, stringStart + start, length);
+            dict[id] = key;
+        }
+        return key;
+    }
+
+    // Decodes {@link #raw} into the cached dictionary. Called only from {@link #ensureDecoded}.
+    private void decode(ByteBuffer raw) {
+        if (snapshot != null
+                && snapshot.remaining() == raw.remaining()
+                && byteBufferEquals(snapshot, raw)) {
             return;
         }
 
         // Validate into locals first; only publish after the checks pass.
-        int offsetSize = ((GenericVariantUtil.getByte(current, 0) >> 6) & 0x3) + 1;
-        int dictSize = GenericVariantUtil.readUnsigned(current, 1, offsetSize);
+        int offsetSize = ((GenericVariantUtil.getByte(raw, 0) >> 6) & 0x3) + 1;
+        int dictSize = GenericVariantUtil.readUnsigned(raw, 1, offsetSize);
         long offsetTableEnd = 1L + offsetSize + (dictSize + 1L) * offsetSize;
-        if (dictSize > MAX_DICTIONARY_SIZE || offsetTableEnd > current.remaining()) {
+        if (dictSize > MAX_DICTIONARY_SIZE || offsetTableEnd > raw.remaining()) {
             throw GenericVariantUtil.malformedVariant();
         }
 
-        reuse = snapshot(current);
+        snapshot = copyBuffer(raw);
         this.offsetSize = offsetSize;
         this.dictSize = dictSize;
         stringStart = 1 + (dictSize + 2) * offsetSize;
@@ -81,42 +163,7 @@ public class VariantMetadata {
         }
     }
 
-    public int length() {
-        return dictSize;
-    }
-
-    public String get(int id) {
-        if (id < 0 || id >= dictSize) {
-            throw GenericVariantUtil.malformedVariant();
-        }
-        String key = dict[id];
-        if (key == null) {
-            int start =
-                    GenericVariantUtil.readUnsigned(reuse, 1 + (id + 1) * offsetSize, offsetSize);
-            int nextStart =
-                    GenericVariantUtil.readUnsigned(reuse, 1 + (id + 2) * offsetSize, offsetSize);
-            if (nextStart < start) {
-                throw GenericVariantUtil.malformedVariant();
-            }
-            if (nextStart > 0) {
-                int end = stringStart + nextStart - 1;
-                if (end < 0 || end >= reuse.remaining()) {
-                    throw GenericVariantUtil.malformedVariant();
-                }
-            }
-            int length = nextStart - start;
-            key = GenericVariantUtil.decodeMetadataKey(reuse, stringStart + start, length);
-            dict[id] = key;
-        }
-        return key;
-    }
-
-    public ByteBuffer buffer() {
-        return reuse;
-    }
-
-    /** Snapshots the buffer's remaining bytes so later decodes do not observe reused memory. */
-    private static ByteBuffer snapshot(ByteBuffer buffer) {
+    private static ByteBuffer copyBuffer(ByteBuffer buffer) {
         ByteBuffer copy = buffer.duplicate();
         byte[] bytes = new byte[copy.remaining()];
         copy.get(bytes);

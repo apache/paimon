@@ -37,6 +37,7 @@ public class BinaryRowDataUtil {
 
     public static final sun.misc.Unsafe UNSAFE = MemorySegment.UNSAFE;
     public static final int BYTE_ARRAY_BASE_OFFSET = UNSAFE.arrayBaseOffset(byte[].class);
+
     public static final BinaryRow EMPTY_ROW = new BinaryRow(0);
     // JDK 9+: delegate to the SIMD-intrinsified Arrays.equals range overload. The Object +
     // offset we receive is BASE + index for a byte[], so the index is offset - BASE.

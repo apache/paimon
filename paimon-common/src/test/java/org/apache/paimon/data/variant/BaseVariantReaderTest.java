@@ -98,16 +98,17 @@ public class BaseVariantReaderTest {
 
     private static Object readVariant(
             BaseVariantReader reader, InternalRow row, VariantSchema schema) {
-        reader.metadata()
-                .adopt(
-                        ByteBuffer.wrap(row.getBinary(schema.topLevelMetadataIdx))
-                                .order(ByteOrder.LITTLE_ENDIAN));
-        return reader.read(row);
+        VariantMetadata metadata = VariantMetadata.empty();
+        metadata.adopt(
+                ByteBuffer.wrap(row.getBinary(schema.topLevelMetadataIdx))
+                        .order(ByteOrder.LITTLE_ENDIAN));
+        return reader.read(row, metadata);
     }
 
     private static Object readVariant(
-            BaseVariantReader reader, InternalRow row, ByteBuffer metadata) {
-        reader.metadata().adopt(metadata);
-        return reader.read(row);
+            BaseVariantReader reader, InternalRow row, ByteBuffer metadataBuffer) {
+        VariantMetadata metadata = VariantMetadata.empty();
+        metadata.adopt(metadataBuffer);
+        return reader.read(row, metadata);
     }
 }

@@ -117,11 +117,8 @@ public class VariantMetadataTest {
                                 })
                         .order(ByteOrder.LITTLE_ENDIAN);
 
-        assertThatThrownBy(
-                        () -> {
-                            metadata.adopt(corrupt);
-                        })
-                .hasMessageContaining("MALFORMED_VARIANT");
+        metadata.adopt(corrupt);
+        assertThatThrownBy(() -> metadata.get(0)).hasMessageContaining("MALFORMED_VARIANT");
     }
 
     @Test
@@ -130,11 +127,8 @@ public class VariantMetadataTest {
         VariantMetadata metadata = VariantMetadata.empty();
         ByteBuffer corrupt = ByteBuffer.wrap(new byte[] {0, 1}).order(ByteOrder.LITTLE_ENDIAN);
 
-        assertThatThrownBy(
-                        () -> {
-                            metadata.adopt(corrupt);
-                        })
-                .hasMessageContaining("MALFORMED_VARIANT");
+        metadata.adopt(corrupt);
+        assertThatThrownBy(() -> metadata.get(0)).hasMessageContaining("MALFORMED_VARIANT");
     }
 
     @Test
@@ -222,11 +216,12 @@ public class VariantMetadataTest {
         ByteBuffer corrupt = ByteBuffer.wrap(new byte[] {1, 1}).order(ByteOrder.LITTLE_ENDIAN);
 
         // The first bad read must be rejected.
-        assertThatThrownBy(() -> metadata.adopt(corrupt)).hasMessageContaining("MALFORMED_VARIANT");
+        metadata.adopt(corrupt);
+        assertThatThrownBy(() -> metadata.get(0)).hasMessageContaining("MALFORMED_VARIANT");
 
         // Repeated reads of the same invalid buffer must also be rejected, not silently reuse the
         // previously cached dictionary.
-        assertThatThrownBy(() -> metadata.adopt(corrupt)).hasMessageContaining("MALFORMED_VARIANT");
+        assertThatThrownBy(() -> metadata.get(0)).hasMessageContaining("MALFORMED_VARIANT");
 
         // After the invalid reads, a new valid metadata must still be adopted correctly.
         GenericVariant another = GenericVariant.fromJson("{\"b\":2}");

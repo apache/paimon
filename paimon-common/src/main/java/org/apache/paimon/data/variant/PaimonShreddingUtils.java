@@ -47,10 +47,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.ZoneId;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -607,30 +604,38 @@ public class PaimonShreddingUtils {
     /** Assemble a variant struct, in which each field is extracted from the variant value. */
     public static InternalRow assembleVariantStruct(
             InternalRow inputRow, VariantSchema schema, FieldToExtract[] fields) {
+        return assembleVariantStruct(inputRow, schema, fields, VariantMetadata.empty());
+    }
+
+    /**
+     * Assemble a variant struct, in which each field is extracted from the variant value. {@code
+     * metadata} is the caller-owned decoded-dictionary cache; it is rebound to the current row's
+     * metadata bytes exactly once here, and readers only consume it lazily and never rebind it.
+     * Callers reading many rows should share a single cache instance across the batch so the
+     * dictionary is reparsed only when the bytes actually change.
+     */
+    public static InternalRow assembleVariantStruct(
+            InternalRow inputRow,
+            VariantSchema schema,
+            FieldToExtract[] fields,
+            VariantMetadata metadata) {
         if (inputRow.isNullAt(schema.topLevelMetadataIdx)) {
             throw malformedVariant();
         }
         ByteBuffer topLevelMetadata = binaryBuffer(inputRow, schema.topLevelMetadataIdx);
+        metadata.adopt(topLevelMetadata);
         int numFields = fields.length;
         GenericRow resultRow = new GenericRow(numFields);
-        if (numFields == 0) {
-            return resultRow;
-        }
-
-        Set<VariantMetadata> adopted = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (FieldToExtract field : fields) {
-            VariantMetadata metadata = field.reader().metadata();
-            if (adopted.add(metadata)) {
-                metadata.adopt(topLevelMetadata);
-            }
-        }
-
         int fieldIdx = 0;
         while (fieldIdx < numFields) {
             resultRow.setField(
                     fieldIdx,
                     extractField(
-                            inputRow, schema, fields[fieldIdx].path(), fields[fieldIdx].reader()));
+                            inputRow,
+                            metadata,
+                            schema,
+                            fields[fieldIdx].path(),
+                            fields[fieldIdx].reader()));
             fieldIdx += 1;
         }
         return resultRow;
@@ -649,7 +654,6 @@ public class PaimonShreddingUtils {
 
         RowType variantRowType = (RowType) dataType;
         List<DataField> fields = variantRowType.getFields();
-        VariantMetadata metadata = VariantMetadata.empty();
         FieldToExtract[] fieldsToExtract = new FieldToExtract[fields.size()];
         for (int i = 0; i < fields.size(); i++) {
             DataField field = fields.get(i);
@@ -657,8 +661,7 @@ public class PaimonShreddingUtils {
             boolean failOnError = VariantMetadataUtils.failOnError(field.description());
             ZoneId timeZoneId = VariantMetadataUtils.timeZoneId(field.description());
             VariantCastArgs castArgs = new VariantCastArgs(failOnError, timeZoneId);
-            fieldsToExtract[i] =
-                    buildFieldsToExtract(field.type(), path, castArgs, variantSchema, metadata);
+            fieldsToExtract[i] = buildFieldsToExtract(field.type(), path, castArgs, variantSchema);
         }
         return fieldsToExtract;
     }
@@ -669,19 +672,6 @@ public class PaimonShreddingUtils {
      */
     public static FieldToExtract buildFieldsToExtract(
             DataType dataType, String path, VariantCastArgs castArgs, VariantSchema inputSchema) {
-        return buildFieldsToExtract(dataType, path, castArgs, inputSchema, VariantMetadata.empty());
-    }
-
-    /**
-     * According to the dataType, variant extraction path and variantSchema, build the
-     * FieldToExtract, sharing the decoded metadata dictionary across fields.
-     */
-    public static FieldToExtract buildFieldsToExtract(
-            DataType dataType,
-            String path,
-            VariantCastArgs castArgs,
-            VariantSchema inputSchema,
-            VariantMetadata metadata) {
         VariantPathSegment[] rawPath = VariantPathSegment.parse(path);
         SchemaPathSegment[] schemaPath = new SchemaPathSegment[rawPath.length];
         VariantSchema schema = inputSchema;
@@ -728,8 +718,7 @@ public class PaimonShreddingUtils {
                         schema,
                         dataType,
                         castArgs,
-                        (schemaPath.length == 0) && inputSchema.isUnshredded(),
-                        metadata);
+                        (schemaPath.length == 0) && inputSchema.isUnshredded());
         return new FieldToExtract(schemaPath, reader);
     }
 
@@ -739,6 +728,7 @@ public class PaimonShreddingUtils {
      */
     private static Object extractField(
             InternalRow inputRow,
+            VariantMetadata metadata,
             VariantSchema inputSchema,
             SchemaPathSegment[] pathList,
             BaseVariantReader reader) {
@@ -758,7 +748,7 @@ public class PaimonShreddingUtils {
                     return null;
                 }
                 GenericVariant v =
-                        new GenericVariant(binaryBuffer(row, variantIdx), reader.metadata.buffer());
+                        new GenericVariant(binaryBuffer(row, variantIdx), metadata.buffer());
                 while (pathIdx < pathLen) {
                     VariantPathSegment rowPath = pathList[pathIdx].rawPath();
                     if (rowPath instanceof ObjectExtraction && v.getType() == OBJECT) {
@@ -808,7 +798,7 @@ public class PaimonShreddingUtils {
             }
             pathIdx += 1;
         }
-        return reader.read(row);
+        return reader.read(row, metadata);
     }
 
     /** Assemble a batch of variant (binary format) from a batch of variant values. */
@@ -846,12 +836,13 @@ public class PaimonShreddingUtils {
         WritableColumnVector[] converterVectors = new WritableColumnVector[1];
         converterVectors[0] = output;
         GenericRow converterRow = new GenericRow(1);
+        VariantMetadata metadata = VariantMetadata.empty();
         for (int i = 0; i < numRows; ++i) {
             if (input.isNullAt(i)) {
                 converterRow.setField(0, null);
             } else {
                 converterRow.setField(
-                        0, assembleVariantStruct(input.getRow(i), variantSchema, fields));
+                        0, assembleVariantStruct(input.getRow(i), variantSchema, fields, metadata));
             }
             converter.convert(converterRow, converterVectors);
         }
