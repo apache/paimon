@@ -107,13 +107,8 @@ class NativeFullTextGlobalIndexReader(GlobalIndexReader):
         filter_bytes = (
             None if include_row_ids is None else include_row_ids.serialize()
         )
-        row_ids, scores = self._native_reader.search(
-            full_text_search.query,
-            limit=limit,
-            filter_bytes=filter_bytes)
-        id_to_scores = dict(zip(row_ids, scores))
-        return _completed_future(
-            DictBasedScoredIndexResult(id_to_scores).top_k(limit))
+        return _completed_future(_search_top_k(
+            self._native_reader, full_text_search.query, limit, filter_bytes))
 
     def _ensure_loaded(self):
         if self._searcher is not None:
@@ -201,6 +196,23 @@ class NativeFullTextGlobalIndexReader(GlobalIndexReader):
         if self._stream is not None:
             self._stream.close()
             self._stream = None
+
+
+def _search_top_k(reader, query, limit, filter_bytes=None):
+    # The native collector breaks score ties by document ordinal, whereas
+    # Python ranks ties by row ID. Read beyond the boundary until every tied
+    # candidate is available, without fetching the whole corpus otherwise.
+    maximum = 2147483647
+    fetch = min(limit + 1, maximum)
+    while True:
+        row_ids, scores = reader.search(query, limit=fetch, filter_bytes=filter_bytes)
+        selected = DictBasedScoredIndexResult(dict(zip(row_ids, scores))).top_k(limit)
+        getter = selected.score_getter()
+        if (len(row_ids) < fetch or len(row_ids) <= limit or fetch == maximum
+                or min(scores) < min(getter(row_id) for row_id in selected.results())):
+            # Do not retain a score getter closing over the larger candidate map.
+            return DictBasedScoredIndexResult({row_id: getter(row_id) for row_id in selected.results()})
+        fetch = min(fetch * 2, maximum)
 
 
 def _read_fully(stream, length: int) -> bytes:

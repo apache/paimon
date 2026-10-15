@@ -655,7 +655,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
 
         self.assertEqual([7], sorted(list(result.results())))
         self.assertEqual(match_query("paimon"), calls[0][0])
-        self.assertEqual(10, calls[0][1])
+        self.assertEqual(11, calls[0][1])  # One lookahead hit detects score ties at top-k.
         self.assertIsNone(calls[0][2])
 
     def test_reader_delegates_boolean_query_json_to_native(self):
@@ -837,7 +837,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         self.assertEqual(10, captured_searches[0].limit)
         self.assertEqual(match_query("paimon", "And"), captured_searches[0].query)
 
-    def test_full_text_builder_sends_leaf_candidate_limit_for_compound_queries(self):
+    def test_full_text_builder_sends_top_k_for_compound_queries(self):
         from pypaimon.table.source.full_text_search_builder import (
             FullTextSearchBuilderImpl,
         )
@@ -882,7 +882,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
                 .read([split])
             )
 
-        self.assertEqual([100], captured_limits)
+        self.assertEqual([3], captured_limits)
 
     def test_full_text_scan_ignores_other_index_types_on_same_column(self):
         from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
