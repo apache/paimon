@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -215,7 +216,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
 
         assertThat(actual.partition()).isEqualTo(expected.partition());
         assertThat(actual.bucket()).isEqualTo(expected.bucket());
-        assertThat(actual.bucket()).isLessThan(2);
+        org.assertj.core.api.Assertions.assertThat(actual.bucket()).isLessThan(2);
     }
 
     private TableSchema createTableSchema() throws Exception {
