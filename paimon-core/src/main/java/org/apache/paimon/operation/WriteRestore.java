@@ -31,6 +31,11 @@ public interface WriteRestore {
 
     long latestCommittedIdentifier(String user);
 
+    /** Latest retained identifier whose data and required compaction work are complete. */
+    default long latestCompletedCompactionIdentifier(String user) {
+        return Long.MIN_VALUE;
+    }
+
     RestoreFiles restoreFiles(
             BinaryRow partition,
             int bucket,

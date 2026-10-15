@@ -103,6 +103,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -173,6 +174,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean appendCommitCheckConflict = false;
     private boolean materializeDvRowIdCheck = false;
     private long lastCommittedSnapshotId = -1L;
+    private final Set<Long> incompleteAppends = new HashSet<>();
+    @Nullable private FullCompactionRefresh fullCompactionRefresh;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
 
@@ -239,6 +242,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
+    }
+
+    public FileStoreCommitImpl withFullCompactionRefresh(FullCompactionRefresh refresh) {
+        this.fullCompactionRefresh = refresh;
+        return this;
     }
 
     private <T> T runWithLock(Callable<T> callable) {
@@ -313,12 +321,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (latestSnapshot.isPresent()) {
+            Snapshot durable = latestSnapshot.get();
             List<ManifestCommittable> result = new ArrayList<>();
             for (ManifestCommittable committable : committables) {
-                // if committable is newer than latest snapshot, then it hasn't been committed
-                if (committable.identifier() > latestSnapshot.get().commitIdentifier()) {
+                boolean pendingCompact =
+                        committable.identifier() == durable.commitIdentifier()
+                                && durable.commitKind() == CommitKind.APPEND
+                                && committable.fileCommittables().stream()
+                                        .map(message -> (CommitMessageImpl) message)
+                                        .anyMatch(
+                                                message ->
+                                                        !message.compactIncrement()
+                                                                        .changelogFiles()
+                                                                        .isEmpty()
+                                                                || !message.compactIncrement()
+                                                                        .newIndexFiles()
+                                                                        .isEmpty());
+                if (pendingCompact) {
+                    incompleteAppends.add(committable.identifier());
+                    result.add(committable);
+                } else if (committable.identifier() > durable.commitIdentifier()) {
                     result.add(committable);
                 } else {
+                    incompleteAppends.remove(committable.identifier());
                     commitCallbacks.forEach(callback -> callback.retry(committable));
                 }
             }
@@ -350,10 +375,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         try {
             List<SimpleFileEntry> appendSimpleEntries =
                     SimpleFileEntry.from(changes.appendTableFiles);
-            if (!ignoreEmptyCommit
-                    || !changes.appendTableFiles.isEmpty()
-                    || !changes.appendChangelog.isEmpty()
-                    || !changes.appendIndexFiles.isEmpty()) {
+            if (!incompleteAppends.contains(committable.identifier())
+                    && (!ignoreEmptyCommit
+                            || !changes.appendTableFiles.isEmpty()
+                            || !changes.appendChangelog.isEmpty()
+                            || !changes.appendIndexFiles.isEmpty())) {
                 CommitKind commitKind = CommitKind.APPEND;
                 if (appendCommitCheckConflict) {
                     checkAppendFiles = true;
@@ -397,23 +423,67 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (!changes.compactTableFiles.isEmpty()
                     || !changes.compactChangelog.isEmpty()
                     || !changes.compactIndexFiles.isEmpty()) {
+                AtomicBoolean refreshedCompaction = new AtomicBoolean();
+                CommitChangesProvider compactProvider =
+                        compactChangesProvider(
+                                new CommitChanges(
+                                        changes.compactTableFiles,
+                                        changes.compactChangelog,
+                                        changes.compactIndexFiles),
+                                materializedBuckets);
+                Map<String, String> compactProperties = committable.properties();
+                if (!options.dataEvolutionEnabled()
+                        && (options.changelogProducer()
+                                        == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                                || options.changelogProducer()
+                                        == CoreOptions.ChangelogProducer.LOOKUP)) {
+                    compactProperties = new HashMap<>(committable.properties());
+                    compactProperties.put("paimon.commit.compact-protocol", "recoverable-v1");
+                }
+                if (fullCompactionRefresh != null
+                        && options.changelogProducer()
+                                == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                        && changes.compactIndexFiles.isEmpty()) {
+                    List<CommitMessage> remaining =
+                            commitMessages.stream()
+                                    .map(
+                                            message -> {
+                                                CommitMessageImpl original =
+                                                        (CommitMessageImpl) message;
+                                                return (CommitMessage)
+                                                        new CommitMessageImpl(
+                                                                original.partition(),
+                                                                original.bucket(),
+                                                                original.totalBuckets(),
+                                                                org.apache.paimon.io.DataIncrement
+                                                                        .emptyIncrement(),
+                                                                original.compactIncrement());
+                                            })
+                                    .collect(Collectors.toList());
+                    compactProvider =
+                            requiredCompactionChanges(
+                                    collectChanges(remaining),
+                                    remaining,
+                                    committable.identifier(),
+                                    refreshedCompaction);
+                }
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(
-                                        new CommitChanges(
-                                                changes.compactTableFiles,
-                                                changes.compactChangelog,
-                                                changes.compactIndexFiles),
-                                        materializedBuckets),
+                                compactProvider,
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.properties(),
+                                compactProperties,
                                 CommitKind.COMPACT,
                                 false,
                                 true,
                                 null);
                 generatedSnapshot += 1;
+                if (refreshedCompaction.get()) {
+                    throw new RuntimeException(
+                            "Compaction and changelog are committed; refresh the writer before continuing.");
+                }
             }
+            incompleteAppends.remove(committable.identifier());
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
             LOG.info(
@@ -433,6 +503,70 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
         return generatedSnapshot;
+    }
+
+    private CommitChangesProvider requiredCompactionChanges(
+            ManifestEntryChanges changes,
+            List<CommitMessage> messages,
+            long identifier,
+            AtomicBoolean refreshedCompaction) {
+        List<ManifestEntry> files = new ArrayList<>(changes.appendTableFiles);
+        files.addAll(changes.compactTableFiles);
+        List<ManifestEntry> merged = new ArrayList<>(FileEntry.mergeEntries(files));
+        List<ManifestEntry> changelog = new ArrayList<>(changes.appendChangelog);
+        changelog.addAll(changes.compactChangelog);
+        List<IndexManifestEntry> indexes = new ArrayList<>(changes.appendIndexFiles);
+        indexes.addAll(changes.compactIndexFiles);
+        CommitChanges combined = new CommitChanges(merged, changelog, indexes);
+        return latest -> {
+            refreshedCompaction.set(false);
+            if (latest != null
+                    && options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                    && changes.compactIndexFiles.isEmpty()) {
+                List<SimpleFileEntry> base =
+                        conflictDetection.scanBaseDataFiles(
+                                latest,
+                                changedPartitions(merged, indexes),
+                                merged,
+                                indexes,
+                                CommitKind.COMPACT,
+                                null,
+                                false);
+                Optional<RuntimeException> conflict =
+                        conflictDetection.checkConflicts(
+                                latest,
+                                base,
+                                SimpleFileEntry.from(merged),
+                                indexes,
+                                conflictDetection.createRowIdConflictChecker(
+                                        schemaManager, merged, CommitKind.COMPACT),
+                                CommitKind.COMPACT);
+                if (conflict.isPresent()) {
+                    if (fullCompactionRefresh == null) {
+                        throw conflict.get();
+                    }
+                    ManifestEntryChanges refreshed =
+                            collectChanges(
+                                    fullCompactionRefresh.refresh(
+                                            latest, messages, identifier, ioManager));
+                    List<ManifestEntry> refreshedFiles =
+                            new ArrayList<>(refreshed.appendTableFiles);
+                    refreshedFiles.addAll(refreshed.compactTableFiles);
+                    List<ManifestEntry> refreshedChangelog =
+                            new ArrayList<>(refreshed.appendChangelog);
+                    refreshedChangelog.addAll(refreshed.compactChangelog);
+                    List<IndexManifestEntry> refreshedIndexes =
+                            new ArrayList<>(refreshed.appendIndexFiles);
+                    refreshedIndexes.addAll(refreshed.compactIndexFiles);
+                    refreshedCompaction.set(true);
+                    return new CommitChanges(
+                            new ArrayList<>(FileEntry.mergeEntries(refreshedFiles)),
+                            refreshedChangelog,
+                            refreshedIndexes);
+                }
+            }
+            return combined;
+        };
     }
 
     private void reportCommit(

@@ -78,6 +78,8 @@ Configured catalog locks protect every snapshot publication attempt, including t
 The writer acquires the lock before reading the latest snapshot, validating changes and preparing
 manifests. It checks that the lock is still valid immediately before publishing. Each snapshot has
 its own scope: APPEND and COMPACT snapshots produced by the same commit acquire separate locks.
+Recovery retains required compact changelog/index work when only APPEND is durable; a matching
+completed COMPACT snapshot acknowledges that work.
 Post-commit callbacks run after the scope ends. Metadata-only manifest replacement validates the
 caller's prepared layout against the current head while holding the lock.
 

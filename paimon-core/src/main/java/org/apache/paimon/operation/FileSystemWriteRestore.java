@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
@@ -82,6 +83,24 @@ public class FileSystemWriteRestore implements WriteRestore {
                 .latestSnapshotOfUserFromFilesystem(user)
                 .map(Snapshot::commitIdentifier)
                 .orElse(Long.MIN_VALUE);
+    }
+
+    @Override
+    public long latestCompletedCompactionIdentifier(String user) {
+        Optional<Snapshot> snapshot = snapshotManager.latestSnapshotOfUserFromFilesystem(user);
+        while (snapshot.isPresent()) {
+            Snapshot current = snapshot.get();
+            if (current.commitKind() == Snapshot.CommitKind.COMPACT
+                    && current.properties() != null
+                    && "recoverable-v1"
+                            .equals(current.properties().get("paimon.commit.compact-protocol"))) {
+                return current.commitIdentifier();
+            }
+            snapshot =
+                    snapshotManager.latestSnapshotOfUser(
+                            user, current.id() - 1, Snapshot.FIRST_SNAPSHOT_ID);
+        }
+        return Long.MIN_VALUE;
     }
 
     @Override

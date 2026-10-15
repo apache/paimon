@@ -48,6 +48,56 @@ public class LoserTreeTest {
     private static final Comparator<KeyValue> SEQUENCE_COMPARATOR =
             Comparator.comparingLong(KeyValue::sequenceNumber).reversed();
 
+    @org.junit.jupiter.api.Test
+    void batchReleaseFailureClosesItsReaderAndEveryRemainingLeaf() throws IOException {
+        RuntimeException releaseFailure = new IllegalStateException("release failed");
+        IOException closeFailure = new IOException("close failed");
+        int[] closed = new int[3];
+        List<RecordReader<Integer>> readers = new ArrayList<>();
+        for (int index = 0; index < closed.length; index++) {
+            final int leaf = index;
+            readers.add(
+                    new RecordReader<Integer>() {
+                        @Override
+                        public RecordIterator<Integer> readBatch() {
+                            return new RecordIterator<Integer>() {
+                                private boolean emitted;
+
+                                @Override
+                                public Integer next() {
+                                    if (emitted) {
+                                        return null;
+                                    }
+                                    emitted = true;
+                                    return leaf;
+                                }
+
+                                @Override
+                                public void releaseBatch() {
+                                    if (leaf == 0) {
+                                        throw releaseFailure;
+                                    }
+                                }
+                            };
+                        }
+
+                        @Override
+                        public void close() throws IOException {
+                            closed[leaf]++;
+                            if (leaf == 1) {
+                                throw closeFailure;
+                            }
+                        }
+                    });
+        }
+        LoserTree<Integer> tree =
+                new LoserTree<>(readers, Comparator.reverseOrder(), Comparator.reverseOrder());
+        tree.initializeIfNeeded();
+        assertThatThrownBy(tree::close).isSameAs(releaseFailure);
+        assertThat(closed).containsExactly(1, 1, 1);
+        assertThat(releaseFailure.getSuppressed()).containsExactly(closeFailure);
+    }
+
     @RepeatedTest(100)
     public void testLoserTreeIsOrdered() throws IOException {
         List<ReusingTestData> reusingTestData = new ArrayList<>();

@@ -134,8 +134,8 @@ public class MergeSorter {
         for (ReaderSupplier<KeyValue> supplier : lazyReaders) {
             try {
                 readers.add(supplier.get());
-            } catch (IOException e) {
-                // if one of the readers creating failed, we need to close them all.
+            } catch (Throwable e) {
+                // Schema lookup can wrap an I/O failure in an unchecked exception.
                 readers.forEach(IOUtils::closeQuietly);
                 throw e;
             }
