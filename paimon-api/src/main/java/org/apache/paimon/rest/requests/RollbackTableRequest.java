@@ -46,46 +46,26 @@ public class RollbackTableRequest implements RESTRequest {
     @Nullable
     private final Long fromSnapshot;
 
-    @JsonProperty("fromSnapshotUuid")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @Nullable
-    private final String fromSnapshotUuid;
-
     @JsonProperty("tableId")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
     private final String tableId;
 
-    @JsonProperty("commitUser")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @Nullable
-    private final String commitUser;
-
     @JsonCreator
-    @ConstructorProperties({"instant", "fromSnapshot", "fromSnapshotUuid", "tableId", "commitUser"})
+    @ConstructorProperties({"instant", "fromSnapshot", "tableId"})
     public RollbackTableRequest(
             @JsonProperty(FIELD_INSTANT) Instant instant,
             @JsonProperty(FIELD_FROM_SNAPSHOT) @Nullable Long fromSnapshot,
-            @JsonProperty("fromSnapshotUuid") @Nullable String fromSnapshotUuid,
-            @JsonProperty("tableId") @Nullable String tableId,
-            @JsonProperty("commitUser") @Nullable String commitUser) {
+            @JsonProperty("tableId") @Nullable String tableId) {
         this.instant = instant;
         this.fromSnapshot = fromSnapshot;
-        this.fromSnapshotUuid = fromSnapshotUuid;
         this.tableId = tableId;
-        this.commitUser = commitUser;
     }
 
     @JsonGetter("tableId")
     @Nullable
     public String getTableId() {
         return tableId;
-    }
-
-    @JsonGetter("commitUser")
-    @Nullable
-    public String getCommitUser() {
-        return commitUser;
     }
 
     @JsonGetter(FIELD_INSTANT)
@@ -97,11 +77,5 @@ public class RollbackTableRequest implements RESTRequest {
     @Nullable
     public Long getFromSnapshot() {
         return fromSnapshot;
-    }
-
-    @JsonGetter("fromSnapshotUuid")
-    @Nullable
-    public String getFromSnapshotUuid() {
-        return fromSnapshotUuid;
     }
 }

@@ -3660,33 +3660,23 @@ components:
     RollbackTableRequest:
       type: object
       description: >-
-        tableId identifies the expected table incarnation independently of lock ownership.
-        Writer rollback supplies commitUser, fromSnapshot and fromSnapshotUuid regardless of
-        whether the writer acquired a lease. commitUser identifies the writer, not a requirement
-        for a lease to exist. A live lease requires the exact owner and authenticated caller;
-        without a live lease, conditional optimistic rollback is allowed. Snapshot IDs can be
-        reused after rollback, so both expected head fields must be checked against the current
-        head inside the mutation transaction before partition changes or file cleanup. The server
-        must validate table incarnation, admission and expected head, then roll back and clear
-        the lease atomically. Manual rollback may omit writer identity, but cannot change a
-        leased head. Omit tableId only when its UUID is unavailable.
+        tableId identifies the expected table incarnation; omit it only when its UUID is unavailable.
+        Automatic conflict rollback supplies fromSnapshot and targets its predecessor. Rollback
+        executes independently of commit leases and does not carry writer identity or a snapshot
+        UUID. The server must validate the table incarnation and expected snapshot ID atomically
+        with rollback, before partition changes or file cleanup. For automatic conflict rollback,
+        it should also check that the current head is still a COMPACT snapshot, since snapshot IDs
+        can be reused after rollback. Manual rollback may omit fromSnapshot.
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
         fromSnapshot:
           type: [ integer, "null" ]
           format: int64
-          description: Expected latest snapshot ID, required for writer rollback.
-        fromSnapshotUuid:
-          type: [ string, "null" ]
-          minLength: 1
-          description: Expected latest snapshot UUID; requires fromSnapshot and is required for writer rollback.
+          description: Expected latest snapshot ID, required for automatic conflict rollback.
         tableId:
           type: [ string, "null" ]
-          description: Expected table or branch UUID, independently of commitUser.
-        commitUser:
-          type: [ string, "null" ]
-          description: Writer identity for admission against any active lease; requires both expected head fields.
+          description: Expected table or branch UUID.
     RollbackSchemaRequest:
       type: object
       required:

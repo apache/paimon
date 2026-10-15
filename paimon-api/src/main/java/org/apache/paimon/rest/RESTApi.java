@@ -767,8 +767,6 @@ public class RESTApi {
      * @param instant instant to rollback
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot.
-     * @param fromSnapshotUuid expected snapshot UUID, checked together with fromSnapshot
-     * @param commitUser writer identity for active-lock admission, or null without a writer
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
      *     or the tag not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
@@ -778,12 +776,8 @@ public class RESTApi {
             Identifier identifier,
             @Nullable String tableUuid,
             Instant instant,
-            @Nullable Long fromSnapshot,
-            @Nullable String fromSnapshotUuid,
-            @Nullable String commitUser) {
-        RollbackTableRequest request =
-                new RollbackTableRequest(
-                        instant, fromSnapshot, fromSnapshotUuid, tableUuid, commitUser);
+            @Nullable Long fromSnapshot) {
+        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot, tableUuid);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
