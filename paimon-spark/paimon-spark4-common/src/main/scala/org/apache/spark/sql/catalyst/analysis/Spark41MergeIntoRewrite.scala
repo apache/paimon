@@ -28,12 +28,13 @@ import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.plans.{FullOuter, Inner, JoinType, LeftAnti, LeftOuter, RightOuter}
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, AppendData, DeleteAction, Filter, HintInfo, InsertAction, Join, JoinHint, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, NO_BROADCAST_AND_REPLICATION, Project, ReplaceData, UpdateAction, WriteDelta}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Delete, Discard, Insert, Instruction, Keep, ROW_ID, Update}
-import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{OPERATION_COLUMN, WRITE_OPERATION, WRITE_WITH_METADATA_OPERATION}
+import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{COPY_OPERATION, INSERT_OPERATION, OPERATION_COLUMN, UPDATE_OPERATION}
 import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
 import org.apache.spark.sql.connector.write.{RowLevelOperationTable, SupportsDelta}
 import org.apache.spark.sql.connector.write.RowLevelOperation.Command.MERGE
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, ExtractV2Table}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.IntegerType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -73,7 +74,8 @@ object Spark41MergeIntoRewrite
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
         case m: MergeIntoTable
-            if m.resolved && m.rewritable && !m.needSchemaEvolution &&
+            if m.resolved && m.rewritable &&
+              !SparkShimLoader.shim.mergeNeedsSchemaEvolution(m) &&
               (targetsV2CopyOnWriteTable(m.targetTable) || targetsV2DeltaTable(m.targetTable)) =>
           // Pure append-only tables skip postHoc `PaimonMergeInto`, so evolve schema here.
           val evolved = evolveSchemaIfPaimon(m)
@@ -380,7 +382,7 @@ object Spark41MergeIntoRewrite
       checkCardinality: Boolean): MergeRows = {
 
     // Unmatched target rows must be copied through since groups are being replaced wholesale.
-    val carryoverRowsOutput = Literal(WRITE_WITH_METADATA_OPERATION) +: targetTable.output
+    val carryoverRowsOutput = Literal(COPY_OPERATION) +: targetTable.output
     val keepCarryoverRowsInstruction = Keep(Copy, TrueLiteral, carryoverRowsOutput)
 
     val matchedInstructions = matchedActions.map {
@@ -463,13 +465,18 @@ object Spark41MergeIntoRewrite
     }
   }
 
-  // Mirrors `RewriteMergeIntoTable.toInstruction`.
+  // Mirrors `RewriteMergeIntoTable.toInstruction`. Spark 4.2 (SPARK-56510) dropped
+  // WRITE_WITH_METADATA_OPERATION / WRITE_OPERATION: an updated row now carries UPDATE_OPERATION
+  // and a newly inserted row INSERT_OPERATION, while COPY_OPERATION is reserved for carried-over
+  // rows. The distinction matters on the write side — `DataAndMetadataWritingSparkTask` routes
+  // UPDATE/COPY through `write(metadata, data)` and INSERT through `write(data)`, so an inserted
+  // row must not be labelled COPY or it would be written with an all-null metadata row.
   private def toInstruction(action: MergeAction, metadataAttrs: Seq[Attribute]): Instruction = {
     action match {
       case UpdateAction(cond, assignments, _) =>
         val rowValues = assignments.map(_.value)
         val metadataValues = nullifyMetadataOnUpdate(metadataAttrs)
-        val output = Seq(Literal(WRITE_WITH_METADATA_OPERATION)) ++ rowValues ++ metadataValues
+        val output = Seq(Literal(UPDATE_OPERATION)) ++ rowValues ++ metadataValues
         Keep(Update, cond.getOrElse(TrueLiteral), output)
 
       case DeleteAction(cond) =>
@@ -478,7 +485,7 @@ object Spark41MergeIntoRewrite
       case InsertAction(cond, assignments) =>
         val rowValues = assignments.map(_.value)
         val metadataValues = metadataAttrs.map(attr => Literal(null, attr.dataType))
-        val output = Seq(Literal(WRITE_OPERATION)) ++ rowValues ++ metadataValues
+        val output = Seq(Literal(INSERT_OPERATION)) ++ rowValues ++ metadataValues
         Keep(Insert, cond.getOrElse(TrueLiteral), output)
 
       case other =>

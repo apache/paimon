@@ -30,6 +30,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{GENERATOR, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.CatalogPlugin
+import org.apache.spark.sql.paimon.shims.SparkVersionCompat
 import org.apache.spark.sql.types.{BinaryType, DataType, DayTimeIntervalType, LongType, NullType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -65,7 +66,7 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
   private def resolveV1Function(u: UnResolvedPaimonV1Function): Expression = {
     u.funcIdent.catalog match {
       case Some(catalog) =>
-        catalogManager.catalog(catalog) match {
+        SparkVersionCompat.catalog(catalogManager, catalog) match {
           case v1FunctionCatalog: SupportV1Function =>
             v1FunctionCatalog.registerAndResolveV1Function(u)
           case _ =>
@@ -141,8 +142,8 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
 
   private def functionCatalog(nameParts: Seq[String]): CatalogPlugin = {
     nameParts.length match {
-      case 2 => catalogManager.currentCatalog
-      case 3 => catalogManager.catalog(nameParts.head)
+      case 2 => SparkVersionCompat.currentCatalog(catalogManager)
+      case 3 => SparkVersionCompat.catalog(catalogManager, nameParts.head)
       case _ =>
         throw new UnsupportedOperationException(
           s"Invalid function identifier: ${nameParts.mkString(".")}")

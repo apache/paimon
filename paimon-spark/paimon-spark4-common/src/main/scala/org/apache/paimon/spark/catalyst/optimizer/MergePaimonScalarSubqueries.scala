@@ -30,20 +30,18 @@ object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
       newV2ScanRelation: DataSourceV2ScanRelation,
       cachedV2ScanRelation: DataSourceV2ScanRelation)
       : Option[(LogicalPlan, AttributeMap[Attribute])] = {
-    (newV2ScanRelation, cachedV2ScanRelation) match {
-      case (
-            DataSourceV2ScanRelation(
-              newRelation,
-              newScan: PaimonScan,
-              newOutput,
-              newPartitioning,
-              newOrdering),
-            DataSourceV2ScanRelation(
-              cachedRelation,
-              cachedScan: PaimonScan,
-              _,
-              cachedPartitioning,
-              cacheOrdering)) =>
+    // Match by type and read fields through named accessors: Spark 4.2 (SPARK-56385) added a
+    // sixth `pushedFilters` parameter, which breaks positional patterns.
+    (newV2ScanRelation.scan, cachedV2ScanRelation.scan) match {
+      case (newScan: PaimonScan, cachedScan: PaimonScan) =>
+        val newRelation = newV2ScanRelation.relation
+        val newOutput = newV2ScanRelation.output
+        val newPartitioning = newV2ScanRelation.keyGroupedPartitioning
+        val newOrdering = newV2ScanRelation.ordering
+        val cachedRelation = cachedV2ScanRelation.relation
+        val cachedPartitioning = cachedV2ScanRelation.keyGroupedPartitioning
+        val cacheOrdering = cachedV2ScanRelation.ordering
+
         checkIdenticalPlans(newRelation, cachedRelation).flatMap {
           outputMap =>
             if (
@@ -60,14 +58,14 @@ object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
                   val cachedOutputNameMap = cachedRelation.output.map(a => a.name -> a).toMap
                   val mergedOutput =
                     mergedAttributes.map(a => cachedOutputNameMap.getOrElse(a.name, a))
-                  val newV2ScanRelation =
+                  val mergedV2ScanRelation =
                     cachedV2ScanRelation.copy(scan = mergedScan, output = mergedOutput)
 
                   val mergedOutputNameMap = mergedOutput.map(a => a.name -> a).toMap
                   val newOutputMap =
                     AttributeMap(newOutput.map(a => a -> mergedOutputNameMap(a.name).toAttribute))
 
-                  newV2ScanRelation -> newOutputMap
+                  mergedV2ScanRelation -> newOutputMap
               }
             } else {
               None

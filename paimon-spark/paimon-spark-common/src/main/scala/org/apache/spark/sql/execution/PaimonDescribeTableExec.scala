@@ -30,7 +30,7 @@ import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogStorageF
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.connector.catalog.Identifier
-import org.apache.spark.sql.execution.datasources.v2.DescribeTableExec
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -47,7 +47,9 @@ case class PaimonDescribeTableExec(
 
   override protected def run(): Seq[InternalRow] = {
     val rows =
-      ArrayBuffer.empty ++= DescribeTableExec(output, table, isExtended).executeCollect()
+      ArrayBuffer.empty ++= SparkShimLoader.shim
+        .createDescribeTableExec(output, catalog.name(), identifier, table, isExtended)
+        .executeCollect()
 
     if (partitionSpec.nonEmpty) {
       describeDetailedPartitionInfo(rows)
@@ -90,8 +92,11 @@ case class PaimonDescribeTableExec(
         s"Found ${partition.size} matching partitions. " +
           s"Expected exactly one partition to match the partition spec.")
     }
-    val dummyStorageFormat =
-      CatalogStorageFormat(None, None, None, None, compressed = false, Map.empty)
+    // `CatalogStorageFormat.empty` over the case-class constructor: Spark 4.2 added a 7th
+    // `serdeName` field, so a 6-arg call compiled against 4.2 emits `apply$default$7`, which does
+    // not exist on 3.5/4.0/4.1. The factory is present on every supported version and yields the
+    // same all-empty value.
+    val dummyStorageFormat = CatalogStorageFormat.empty
     val statistics = partition.head
     // Include only reported values. Spark omits the "Partition Parameters" row for an empty map.
     val partParameters: Map[String, String] = Seq(

@@ -68,8 +68,9 @@ case class CreatePaimonSQLFunctionCommand(
     val sessionCatalog = sparkSession.sessionState.catalog
     val conf = sparkSession.sessionState.conf
 
-    val inputParam = inputParamText.map(UserDefinedFunction.parseRoutineParam(_, parser))
-    val returnType = parseReturnTypeText(returnTypeText, isTableFunc, parser)
+    // Spark 4.2 added a trailing `collation` parameter with no default to both helpers.
+    val inputParam = inputParamText.map(UserDefinedFunction.parseRoutineParam(_, parser, None))
+    val returnType = parseReturnTypeText(returnTypeText, isTableFunc, parser, None)
 
     val function = SQLFunction(
       name,
@@ -78,6 +79,7 @@ case class CreatePaimonSQLFunctionCommand(
       exprText,
       queryText,
       comment,
+      None, // collation, added in Spark 4.2
       isDeterministic,
       containsSQL,
       isTableFunc,

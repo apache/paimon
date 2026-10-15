@@ -27,6 +27,7 @@ import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.connector.read.InputPartition
 import org.apache.spark.sql.execution.datasources.v2.DataSourceRDD
 
+import java.lang.reflect.Method
 import java.util.{IdentityHashMap, List => JList, Map => JMap, Optional, UUID}
 
 import scala.util.control.NonFatal
@@ -66,30 +67,25 @@ object PaimonSparkMicroBatchMetadata {
       var occurrenceOnly: PaimonMicroBatchMetadata = null
       var inputCount = 0
       var valid = true
-      val partitions = dataSourceRDD.partitions
-      var partitionIndex = 0
+      val inputs = dataSourceInputPartitions(dataSourceRDD)
 
-      while (valid && partitionIndex < partitions.length) {
-        val inputs = dataSourceInputPartitions(partitions(partitionIndex)).iterator
-        while (valid && inputs.hasNext) {
-          inputs.next() match {
-            case input: PaimonMicroBatchInputPartition =>
-              val current = input.metadata
-              if (current eq null) {
-                valid = false
-              } else if (occurrenceOnly eq null) {
-                occurrenceOnly = current
-                inputCount += 1
-              } else if ((occurrenceOnly eq current) || occurrenceOnly == current) {
-                inputCount += 1
-              } else {
-                valid = false
-              }
-            case _: PaimonInputPartition => valid = false
-            case _ =>
-          }
+      while (valid && inputs.hasNext) {
+        inputs.next() match {
+          case input: PaimonMicroBatchInputPartition =>
+            val current = input.metadata
+            if (current eq null) {
+              valid = false
+            } else if (occurrenceOnly eq null) {
+              occurrenceOnly = current
+              inputCount += 1
+            } else if ((occurrenceOnly eq current) || occurrenceOnly == current) {
+              inputCount += 1
+            } else {
+              valid = false
+            }
+          case _: PaimonInputPartition => valid = false
+          case _ =>
         }
-        partitionIndex += 1
       }
 
       if (!valid || ((occurrenceOnly ne null) && inputCount != occurrenceOnly.splitCount)) {
@@ -134,39 +130,61 @@ object PaimonSparkMicroBatchMetadata {
     }
   }
 
-  private def dataSourceInputPartitions(partition: Partition): Seq[InputPartition] = {
-    if (partition == null) {
-      throw new IllegalArgumentException("Data source RDD partition must not be null.")
-    }
-
-    val pluralMethod =
-      try {
-        Some(partition.getClass.getMethod("inputPartitions"))
-      } catch {
-        case _: NoSuchMethodException => None
+  /**
+   * The input partitions of every `DataSourceRDDPartition` of `rdd`, lazily. All partitions of one
+   * RDD are the same class, so the accessor is resolved once for the whole RDD.
+   */
+  private def dataSourceInputPartitions(rdd: DataSourceRDD): Iterator[InputPartition] = {
+    val partitions = rdd.partitions
+    if (partitions.isEmpty) {
+      Iterator.empty
+    } else {
+      val accessor = inputPartitionAccessor(partitions.head)
+      partitions.iterator.flatMap {
+        partition =>
+          requireNonNullPartition(partition)
+          normalizeInputPartitions(accessor.invoke(partition))
       }
-
-    pluralMethod match {
-      case Some(method) => requireInputPartitions(method.invoke(partition))
-      case None =>
-        Seq(requireInputPartition(partition.getClass.getMethod("inputPartition").invoke(partition)))
     }
   }
 
-  private def requireInputPartitions(value: Any): Seq[InputPartition] =
-    value match {
-      case null => throw new IllegalArgumentException("Input partitions must not be null.")
-      case values: scala.collection.Seq[_] =>
-        values.iterator.map(requireInputPartition).toVector
-      case other =>
-        throw new IllegalArgumentException(
-          s"Unexpected input partitions type ${other.getClass.getName}.")
+  private def inputPartitionAccessor(partition: Partition): Method = {
+    requireNonNullPartition(partition)
+    methodOf(partition, "inputPartitions")
+      .orElse(methodOf(partition, "inputPartition"))
+      .getOrElse(throw new IllegalArgumentException(
+        s"No input partition accessor on ${partition.getClass.getName}."))
+  }
+
+  private def requireNonNullPartition(partition: Partition): Unit = {
+    if (partition == null) {
+      throw new IllegalArgumentException("Data source RDD partition must not be null.")
+    }
+  }
+
+  private def methodOf(partition: Partition, name: String): Option[Method] =
+    try {
+      Some(partition.getClass.getMethod(name))
+    } catch {
+      case _: NoSuchMethodException => None
     }
 
-  private def requireInputPartition(value: Any): InputPartition =
+  /**
+   * `DataSourceRDDPartition` has held its input partition(s) in three shapes across the supported
+   * Spark versions: a bare `InputPartition` (3.2), a `Seq[InputPartition]` from 3.3 to 4.1, where
+   * the RDD itself grouped storage-partitioned-join partitions, and an `Option[InputPartition]`
+   * since 4.2 (SPARK-55535), which moved that grouping out into `GroupPartitionsExec`. A `None`
+   * there is a padded empty partition and contributes no input, the same as the empty `Seq` the
+   * middle shape used for it.
+   */
+  private def normalizeInputPartitions(value: Any): Seq[InputPartition] =
     value match {
-      case input: InputPartition => input
-      case null => throw new IllegalArgumentException("Input partition must not be null.")
+      case null => throw new IllegalArgumentException("Input partitions must not be null.")
+      case input: InputPartition => Seq(input)
+      case values: scala.collection.Seq[_] =>
+        values.iterator.flatMap(normalizeInputPartitions).toVector
+      case option: Option[_] =>
+        option.iterator.flatMap(normalizeInputPartitions).toVector
       case other =>
         throw new IllegalArgumentException(
           s"Unexpected input partition type ${other.getClass.getName}.")
