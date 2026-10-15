@@ -115,7 +115,16 @@ class ReadBuilder:
         self._predicate = predicate
         return self
 
-    def with_partition_filter(self, partition_filter: Predicate) -> 'ReadBuilder':
+    def with_partition_filter(self, partition_filter: Optional[Predicate]) -> 'ReadBuilder':
+        """Replace scan-only partition selection; None restores derived pruning.
+
+        As with Java's PartitionPredicate, only partition fields are allowed.
+        Ordinary row predicates remain independent and are checked by the reader.
+        """
+        if partition_filter is not None and (
+                not self.table.partition_keys
+                or not predicate_field_names(partition_filter).issubset(self.table.partition_keys)):
+            raise ValueError('Partition filter must reference only partition keys of a partitioned table')
         self._partition_filter = partition_filter
         return self
 

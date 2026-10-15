@@ -451,7 +451,8 @@ def native_plan(
         row_position_slice: Optional[Tuple[int, int]] = None,
         row_position_shard: Optional[Tuple[int, int]] = None,
         chunk_shuffle: Optional[Tuple[int, int]] = None,
-        shard: Optional[Tuple[int, int]] = None) -> Plan:
+        shard: Optional[Tuple[int, int]] = None,
+        partition_predicate: Optional[Predicate] = None) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -464,6 +465,8 @@ def native_plan(
             "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, limit, projection)
+    if partition_predicate is not None:
+        builder = builder.with_partition_filter(_predicate_to_native(partition_predicate))
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
     if incremental_range is None:
