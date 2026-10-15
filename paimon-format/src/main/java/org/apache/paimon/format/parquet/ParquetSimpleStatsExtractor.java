@@ -43,6 +43,7 @@ import org.apache.parquet.column.statistics.IntStatistics;
 import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 
 import javax.annotation.Nullable;
@@ -231,6 +232,25 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
     private SimpleColStats toTimestampStats(Statistics<?> stats, int precision) {
         // the typed statistics class for Int96 is BinaryStatistics
         if (stats instanceof BinaryStatistics) {
+            return new SimpleColStats(null, null, stats.getNumNulls());
+        }
+
+        LogicalTypeAnnotation annotation = stats.type().getLogicalTypeAnnotation();
+        if (annotation instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
+            LogicalTypeAnnotation.TimeUnit unit =
+                    ((LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) annotation).getUnit();
+            LongStatistics longStats = (LongStatistics) stats;
+            if (unit == LogicalTypeAnnotation.TimeUnit.MILLIS) {
+                return new SimpleColStats(
+                        Timestamp.fromEpochMillis(longStats.getMin()),
+                        Timestamp.fromEpochMillis(longStats.getMax()),
+                        stats.getNumNulls());
+            } else if (unit == LogicalTypeAnnotation.TimeUnit.MICROS) {
+                return new SimpleColStats(
+                        Timestamp.fromMicros(longStats.getMin()),
+                        Timestamp.fromMicros(longStats.getMax()),
+                        stats.getNumNulls());
+            }
             return new SimpleColStats(null, null, stats.getNumNulls());
         }
 

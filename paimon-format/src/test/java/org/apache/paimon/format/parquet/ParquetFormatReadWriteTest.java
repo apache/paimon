@@ -26,6 +26,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
@@ -33,6 +34,7 @@ import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -43,6 +45,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -54,6 +57,8 @@ import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.MessageType;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -666,5 +671,86 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         Assertions.assertThat(readPks(declaredType, isNull))
                 .as("every row must survive: `x.y` is simply absent, with nothing to collide with")
                 .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    @Test
+    public void testIcebergTimestampMicros() throws Exception {
+        Options options = new Options();
+        options.set("metadata.iceberg.storage", "table-location");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType rowType =
+                RowType.builder()
+                        .field("local_timestamp", DataTypes.TIMESTAMP(3))
+                        .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                        .build();
+        Timestamp min = Timestamp.fromEpochMillis(1691827200123L);
+        Timestamp max = Timestamp.fromEpochMillis(1691827200456L);
+
+        // repeated values, so that the columns are dictionary encoded
+        write(
+                format.createWriterFactory(rowType),
+                file,
+                GenericRow.of(min, min),
+                GenericRow.of(max, max),
+                GenericRow.of(min, min));
+
+        // Iceberg requires MICROS for timestamptz, timestamp without time zone is unchanged
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            MessageType schema = reader.getFooter().getFileMetaData().getSchema();
+            Assertions.assertThat(schema.getType("local_timestamp").getLogicalTypeAnnotation())
+                    .isEqualTo(
+                            LogicalTypeAnnotation.timestampType(
+                                    false, LogicalTypeAnnotation.TimeUnit.MILLIS));
+            Assertions.assertThat(schema.getType("utc_timestamp").getLogicalTypeAnnotation())
+                    .isEqualTo(
+                            LogicalTypeAnnotation.timestampType(
+                                    true, LogicalTypeAnnotation.TimeUnit.MICROS));
+            Assertions.assertThat(reader.getFooter().getBlocks().get(0).getColumns().get(1))
+                    .satisfies(
+                            column ->
+                                    Assertions.assertThat(column.getEncodings())
+                                            .anyMatch(e -> e.name().contains("DICTIONARY")));
+        }
+
+        // values are read back unchanged, also with a predicate on the MICROS column
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, Collections.emptyList())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+        Assertions.assertThat(rows).hasSize(3);
+        Assertions.assertThat(rows.get(1).getTimestamp(1, 3)).isEqualTo(max);
+        rows.clear();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(
+                                rowType, rowType, Collections.singletonList(builder.equal(1, max)))
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+        // the predicate only prunes row groups, so the row group holding the match is kept
+        Assertions.assertThat(rows).hasSize(3);
+
+        // footer statistics are decoded with the unit of the file
+        SimpleColStats stats =
+                format.createStatsExtractor(
+                                rowType,
+                                new SimpleColStatsCollector.Factory[] {
+                                    SimpleColStatsCollector.from("full"),
+                                    SimpleColStatsCollector.from("full")
+                                })
+                        .get()
+                        .extract(fileIO, file, fileIO.getFileSize(file))[1];
+        Assertions.assertThat(stats.min()).isEqualTo(min);
+        Assertions.assertThat(stats.max()).isEqualTo(max);
     }
 }

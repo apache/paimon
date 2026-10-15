@@ -28,6 +28,8 @@ import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 
 import org.apache.parquet.CorruptDeltaByteArrays;
 import org.apache.parquet.VersionParser.ParsedVersion;
@@ -115,7 +117,7 @@ public class VectorizedColumnReader {
     }
 
     private boolean isLazyDecodingSupported(
-            PrimitiveType.PrimitiveTypeName typeName, ColumnVector columnVector) {
+            PrimitiveType.PrimitiveTypeName typeName, ColumnVector columnVector, DataType type) {
         boolean isSupported = false;
         switch (typeName) {
             case INT32:
@@ -136,7 +138,19 @@ public class VectorizedColumnReader {
             case BINARY:
                 isSupported = columnVector instanceof BytesColumnVector;
         }
-        return isSupported;
+        if (!isSupported || typeName != PrimitiveType.PrimitiveTypeName.INT64) {
+            return isSupported;
+        }
+
+        int precision;
+        if (type instanceof TimestampType) {
+            precision = ((TimestampType) type).getPrecision();
+        } else if (type instanceof LocalZonedTimestampType) {
+            precision = ((LocalZonedTimestampType) type).getPrecision();
+        } else {
+            return true;
+        }
+        return ParquetVectorUpdaterFactory.isNativeTimestampUnit(descriptor, precision);
     }
 
     /** Reads `total` rows from this columnReader into column. */
@@ -172,6 +186,7 @@ public class VectorizedColumnReader {
             }
             PrimitiveType.PrimitiveTypeName typeName =
                     descriptor.getPrimitiveType().getPrimitiveTypeName();
+            boolean lazyDecodingSupported = isLazyDecodingSupported(typeName, column, type);
             if (isCurrentPageDictionaryEncoded) {
                 // Save starting offset in case we need to decode dictionary IDs.
                 int startOffset = readState.valueOffset;
@@ -198,14 +213,11 @@ public class VectorizedColumnReader {
                             (VectorizedValuesReader) dataColumn);
                 }
 
-                // TIMESTAMP_MILLIS encoded as INT64 can't be lazily decoded as we need to post
-                // process
-                // the values to add microseconds precision.
-                if (column.hasDictionary()
-                        || (startRowId == pageFirstRowIndex
-                                && isLazyDecodingSupported(typeName, column))) {
+                if (lazyDecodingSupported
+                        && (column.hasDictionary() || startRowId == pageFirstRowIndex)) {
                     column.setDictionary(new ParquetDictionary(dictionary));
                 } else {
+                    column.setDictionary(null);
                     updater.decodeDictionaryIds(
                             readState.valueOffset - startOffset,
                             startOffset,
