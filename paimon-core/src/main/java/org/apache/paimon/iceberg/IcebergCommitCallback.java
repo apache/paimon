@@ -47,6 +47,7 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -1120,6 +1121,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         deletedFiles.stream()
                 .map(file -> removedFiles.get(file.filePath()).getLeft())
                 .forEach(changedPartitions::add);
+        if (needAddDvToIceberg && !indexFiles.isEmpty()) {
+            changedPartitions.addAll(
+                    partitionsWithChangedDeleteFiles(indexFiles, baseDVManifestFileMetas));
+        }
         metrics.changedPartitionCount = changedPartitions.size();
 
         metrics.totalDataFiles = computeLiveFileCount(newDataManifestFileMetas);
@@ -1886,6 +1891,40 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         return manifestFile.rollingWrite(
                 icebergDvEntries.iterator(), snapshotId, IcebergManifestFileMeta.Content.DELETES);
+    }
+
+    private Set<BinaryRow> partitionsWithChangedDeleteFiles(
+            List<IndexManifestEntry> indexFiles,
+            List<IcebergManifestFileMeta> baseDvManifestFileMetas) {
+        Set<String> baseDeleteFiles = new HashSet<>();
+        for (IcebergManifestFileMeta meta : baseDvManifestFileMetas) {
+            for (IcebergManifestEntry entry :
+                    manifestFile.read(new Path(meta.manifestPath()).getName())) {
+                if (entry.isLive()) {
+                    baseDeleteFiles.add(entry.file().filePath());
+                }
+            }
+        }
+
+        Set<BinaryRow> partitions = new HashSet<>();
+        for (IndexManifestEntry entry : indexFiles) {
+            if (!DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                continue;
+            }
+            boolean inBase = baseDeleteFiles.contains(indexFileHandler.filePath(entry).toString());
+            boolean changed;
+            if (entry.kind() == FileKind.ADD) {
+                // a retry passes every index file of the snapshot as ADD, unchanged ones included
+                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+                changed = !inBase && dvRanges != null && !dvRanges.isEmpty();
+            } else {
+                changed = inBase;
+            }
+            if (changed) {
+                partitions.add(entry.partition());
+            }
+        }
+        return partitions;
     }
 
     // -------------------------------------------------------------------------------------
