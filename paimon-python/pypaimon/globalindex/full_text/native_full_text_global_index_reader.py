@@ -86,11 +86,12 @@ class PaimonFullTextInput:
 class NativeFullTextGlobalIndexReader(GlobalIndexReader):
     """Full-text global index reader using paimon-full-text."""
 
-    def __init__(self, file_io, index_path: str, io_metas: List[GlobalIndexIOMeta]):
+    def __init__(self, file_io, index_path: str, io_metas: List[GlobalIndexIOMeta], max_candidates=None):
         assert len(io_metas) == 1, "Expected exactly one index file per shard"
         self._file_io = file_io
         self._index_path = index_path
         self._io_meta = io_metas[0]
+        self._max_candidates = max_candidates
         self._searcher = None
         self._native_reader = None
         self._stream = None
@@ -108,7 +109,7 @@ class NativeFullTextGlobalIndexReader(GlobalIndexReader):
             None if include_row_ids is None else include_row_ids.serialize()
         )
         return _completed_future(_search_top_k(
-            self._native_reader, full_text_search.query, limit, filter_bytes))
+            self._native_reader, full_text_search.query, limit, filter_bytes, self._max_candidates))
 
     def _ensure_loaded(self):
         if self._searcher is not None:
@@ -198,12 +199,15 @@ class NativeFullTextGlobalIndexReader(GlobalIndexReader):
             self._stream = None
 
 
-def _search_top_k(reader, query, limit, filter_bytes=None):
+def _search_top_k(reader, query, limit, filter_bytes=None, max_candidates=None):
     # The native collector breaks score ties by document ordinal, whereas
     # Python ranks ties by row ID. Read beyond the boundary until every tied
     # candidate is available, without fetching the whole corpus otherwise.
-    maximum = 2147483647
+    maximum = 2147483647 if max_candidates is None else min(max_candidates, 2147483647)
+    if maximum == 0:
+        return DictBasedScoredIndexResult({})
     fetch = min(limit + 1, maximum)
+    probes = 0
     while True:
         row_ids, scores = reader.search(query, limit=fetch, filter_bytes=filter_bytes)
         selected = DictBasedScoredIndexResult(dict(zip(row_ids, scores))).top_k(limit)
@@ -212,7 +216,12 @@ def _search_top_k(reader, query, limit, filter_bytes=None):
                 or min(scores) < min(getter(row_id) for row_id in selected.results())):
             # Do not retain a score getter closing over the larger candidate map.
             return DictBasedScoredIndexResult({row_id: getter(row_id) for row_id in selected.results()})
-        fetch = min(fetch * 2, maximum)
+        probes += 1
+        # Every probe reruns the native query. After two small probes, fetch
+        # the known corpus bound once instead of repeatedly scanning a large
+        # tie group. Never use INT_MAX as a fallback without a known bound:
+        # the native wrapper allocates output buffers of the requested size.
+        fetch = maximum if max_candidates is not None and probes >= 2 else min(fetch * 2, maximum)
 
 
 def _read_fully(stream, length: int) -> bytes:

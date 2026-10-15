@@ -47,7 +47,7 @@ def _index(rows):
 def test_top_k_preserves_row_id_ties_and_raw_offsets(filtered):
     data = _index([(row_id, "paimon") for row_id in [100, 50, 30, 1, 2, 3]])
     include = _bitmap(150, 130, 102) if filtered else None
-    result = _search_raw_full_text(data, 100, match_query("paimon"), 1, include)
+    result = _search_raw_full_text(data, 100, match_query("paimon"), 1, include, max_candidates=6)
     assert list(result.results()) == ([102] if filtered else [101])
 
 
@@ -65,12 +65,59 @@ def test_top_k_does_not_fetch_the_whole_index_without_boundary_ties():
     try:
         ids, scores = reader.search(match_query("paimon"), limit=128)
         expected = DictBasedScoredIndexResult(dict(zip(ids, scores))).top_k(3)
-        actual = _search_top_k(RecordingReader(), match_query("paimon"), 3)
+        actual = _search_top_k(RecordingReader(), match_query("paimon"), 3, max_candidates=128)
         assert list(actual.results()) == list(expected.results())
         assert {i: actual.score_getter()(i) for i in actual.results()} == {
             i: expected.score_getter()(i) for i in expected.results()}
         assert calls[0] == 4
         assert max(calls) < 128
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("filtered", [False, True])
+def test_large_boundary_ties_cap_native_query_repetitions(filtered):
+    native = pytest.importorskip("paimon_ftindex")
+    count = 1024
+    data = _index([(i, "paimon document" + str(i)) for i in reversed(range(count))])
+    reader = native.FullTextIndexReader(PaimonFullTextInput(BytesIO(data)))
+    include = _bitmap(*range(0, count, 3)).serialize() if filtered else None
+    calls = []
+
+    class RecordingReader:
+        def search(self, query, **kwargs):
+            calls.append(kwargs["limit"])
+            assert kwargs["filter_bytes"] == include
+            return reader.search(query, **kwargs)
+
+    try:
+        ids, scores = reader.search(match_query("paimon"), limit=count, filter_bytes=include)
+        expected = DictBasedScoredIndexResult(dict(zip(ids, scores))).top_k(10)
+        actual = _search_top_k(RecordingReader(), match_query("paimon"), 10, include, count)
+        assert {i: actual.score_getter()(i) for i in actual.results()} == {
+            i: expected.score_getter()(i) for i in expected.results()}
+        assert calls == [11, 22, count]
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("bound", [None, 128])
+def test_small_boundary_ties_finish_before_the_corpus_bound(bound):
+    native = pytest.importorskip("paimon_ftindex")
+    data = _index([(i, "paimon" if i < 3 else "paimon " + "lake " * i)
+                   for i in reversed(range(128))])
+    reader = native.FullTextIndexReader(PaimonFullTextInput(BytesIO(data)))
+    calls = []
+
+    class RecordingReader:
+        def search(self, query, **kwargs):
+            calls.append(kwargs["limit"])
+            return reader.search(query, **kwargs)
+
+    try:
+        actual = _search_top_k(RecordingReader(), match_query("paimon"), 1, max_candidates=bound)
+        assert list(actual.results()) == [0]
+        assert calls == [2, 4]
     finally:
         reader.close()
 
@@ -98,7 +145,7 @@ def test_per_shard_top_k_preserves_global_ranking_and_duplicate_precedence(overl
             pass
 
     with patch("pypaimon.table.source.full_text_read._create_full_text_reader",
-               side_effect=lambda kind, io, path, metas: Reader(int(metas[0].file_name))):
+               side_effect=lambda kind, io, path, metas, bound: Reader(int(metas[0].file_name))):
         read = DataEvolutionFullTextRead(_StubTable([field], entries), 1, field, match_query("paimon"))
         result = read._eval_column_query({"text": splits}, None)
     assert list(result.results()) == ([1] if overlap else [3])

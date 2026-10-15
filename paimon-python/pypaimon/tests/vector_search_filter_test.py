@@ -806,7 +806,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         _patch_snapshot(self, [entry])
         captured_searches = []
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     captured_searches.append(fts)
@@ -853,7 +853,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         _patch_snapshot(self, [entry])
         captured_limits = []
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     captured_limits.append(fts.limit)
@@ -3255,7 +3255,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         captured_io_metas = []
 
         def _fake_create(index_type, file_io, index_path,
-                         index_io_meta_list):
+                         index_io_meta_list, max_candidates=None):
             captured_io_metas.append(list(index_io_meta_list))
 
             class _FakeReader:
@@ -3307,7 +3307,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         partition_filter = object()
         captured = []
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     captured.append(fts.include_row_ids)
@@ -3373,7 +3373,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         )
         raw_split = RawFullTextSearchSplit([Range(5, 9)])
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     return _completed_future(DictBasedScoredIndexResult({2: 1.0}))
@@ -3405,7 +3405,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         self.assertEqual(([5, 6, 8], ["raw paimon", None, "raw full-text"], 5),
                          build_raw_index.call_args.args)
         search_raw.assert_called_once_with(
-            b"raw-index", 5, match_query("paimon"), 5)
+            b"raw-index", 5, match_query("paimon"), 5, max_candidates=3)
         self.assertEqual([2, 8], sorted(list(result.results())))
         self.assertEqual(1.0, result.score_getter()(2))
         self.assertEqual(9.0, result.score_getter()(8))
@@ -3431,7 +3431,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         _patch_snapshot(self, entries)
 
         def _fake_create(index_type, file_io, index_path,
-                         index_io_meta_list):
+                         index_io_meta_list, max_candidates=None):
             row_id = index_io_meta_list[0].file_name
             row_id = int(row_id.split("-")[1].split(".")[0])
 
