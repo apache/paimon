@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.schema.data_types import is_array_blob_type, is_blob_type, is_map_blob_type
@@ -533,7 +534,7 @@ class _PreFilterQuery(ScanQuery):
         added_row_id = projection is None or row_id_name not in projection
         if metadata_only:
             row_ids = pa.array(list(result.results()), type=pa.int64())
-            fields = [pa.field(row_id_name, pa.int64(), nullable=False)] * (len(projection) or 1)
+            fields = [read_arrow_schema([SpecialFields.ROW_ID]).field(row_id_name)] * (len(projection) or 1)
             table = pa.Table.from_arrays(
                 [row_ids] * len(fields), schema=pa.schema(fields))
         else:

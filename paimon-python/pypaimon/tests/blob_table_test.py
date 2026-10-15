@@ -26,6 +26,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.blob import Blob
@@ -1716,7 +1717,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(result.schema.field('payloads').type.item_field.nullable)
+        self.assertFalse(table.field_dict['payloads'].type.value.nullable)
+        self.assertEqual(result.schema, read_arrow_schema(table.fields))
         self.assertEqual(
             {
                 row['id']: None if row['payloads'] is None else dict(row['payloads'])
@@ -1739,7 +1741,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[('bad', None)]], type=nullable_map_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|non-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 
@@ -1787,9 +1789,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(
-            result.schema.field('payloads').type.value_field.nullable
-        )
+        self.assertFalse(table.field_dict['payloads'].type.element.nullable)
+        self.assertEqual(result.schema, read_arrow_schema(table.fields))
         self.assertEqual(
             {
                 row['id']: row['payloads']
@@ -1812,7 +1813,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=nullable_array_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|non-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 

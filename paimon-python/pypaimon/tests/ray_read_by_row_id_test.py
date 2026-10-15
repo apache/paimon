@@ -30,6 +30,7 @@ ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.ray import read_by_row_id
+from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 class RayReadByRowIdTest(unittest.TestCase):
@@ -530,7 +531,26 @@ class RayReadByRowIdTest(unittest.TestCase):
             target, pa.table({"_ROW_ID": pa.array([], pa.int64())}),
             self.catalog_options, projection=proj)
         self.assertTrue(real_schema.equals(empty.schema().base_schema))
-        self.assertFalse(empty.schema().base_schema.field("_ROW_ID").nullable)
+
+    def test_empty_result_keeps_nested_read_schema_and_projection_order(self):
+        schema = pa.schema([
+            pa.field("id", pa.int32(), nullable=False),
+            pa.field("details", pa.struct([pa.field("value", pa.int64(), nullable=False)]), nullable=False),
+        ])
+        target = self._create(schema=schema)
+        self._write(target, pa.Table.from_pylist([{"id": 1, "details": {"value": 7}}], schema=schema))
+        projection = ["details", "id"]
+        actual = self._read(target, projection + ["_ROW_ID"])
+        self.assertEqual(actual.to_pylist(), [{"details": {"value": 7}, "id": 1, "_ROW_ID": 0}])
+        for name in [target, self._create(schema=schema)]:
+            with self.subTest(target=name):
+                empty = read_by_row_id(
+                    name, pa.table({"_ROW_ID": pa.array([], pa.int64())}),
+                    self.catalog_options, projection=projection)
+                self.assertEqual(empty.count(), 0)
+                self.assertEqual(empty.schema().base_schema, actual.schema)
+                logical_schema = PyarrowFieldParser.from_paimon_schema(self.catalog.get_table(name).fields)
+                self.assertEqual(logical_schema, schema)
 
     def test_custom_row_id_col(self):
         target = self._create()

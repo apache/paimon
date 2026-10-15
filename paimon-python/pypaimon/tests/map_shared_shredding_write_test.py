@@ -26,6 +26,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.data.map_shared_shredding import (
     is_shared_shredding,
     parse_shared_shredding_metadata,
@@ -169,8 +170,12 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
                 self.assertTrue(field.type['__col_1'].nullable)
                 reader = table.new_read_builder()
                 result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+                self.assertFalse(table.field_dict['metrics'].type.value.nullable)
+                expected_schema = read_arrow_schema(table.fields)
+                self.assertEqual(result.schema, expected_schema)
                 # Arrow 6 cannot convert non-nullable MAP values to scalars.
-                actual = result.column('metrics').cast(pa.map_(pa.string(), value_type))
+                read_value_type = expected_schema.field('metrics').type.item_type
+                actual = result.column('metrics').cast(pa.map_(pa.string(), read_value_type))
                 self.assertEqual(expected, actual.to_pylist())
 
     def test_nested_non_nullable_map_values_in_subprocess(self):

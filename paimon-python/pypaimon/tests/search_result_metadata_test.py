@@ -106,6 +106,23 @@ def test_duplicate_projections_keep_scores(docs, batch, column):
 
 
 @pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("projection", [[], ["_ROW_ID"], ["_ROW_ID", "_ROW_ID"]])
+def test_metadata_only_matches_lookup_schema_and_values(docs, batch, empty, projection):
+    kwargs = {"pre_filter": "id < 0"} if empty else {}
+    with patch.object(ScanQuery, "_read_global_index_result", side_effect=AssertionError("final lookup")):
+        actual = query(docs, batch, **kwargs).select(projection).with_score().order_by_score().to_arrow()
+    expected = (query(docs, batch, **kwargs).select(projection).where("id >= 0")
+                .with_score().order_by_score().to_arrow())
+    actual, expected = (actual, expected) if batch else ([actual], [expected])
+    assert len(actual) == len(expected) == (2 if batch else 1)
+    for fast, lookup in zip(actual, expected):
+        assert fast.num_rows == (0 if empty else 4)
+        assert fast.schema == lookup.schema
+        assert fast.equals(lookup)
+
+
+@pytest.mark.parametrize("batch", [False, True])
 def test_post_filter_and_deleted_rows_keep_score_alignment(docs, batch):
     docs.delete("id = 1")
     actual = query(docs, batch).select(["id"]).where("id >= 2").with_score().order_by_score().to_arrow()
