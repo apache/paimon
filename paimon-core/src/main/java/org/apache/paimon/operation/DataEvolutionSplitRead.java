@@ -19,10 +19,14 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
+import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
@@ -61,6 +65,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
+import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -212,7 +218,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     private RecordReader<InternalRow> createReader(
-            DataSplit dataSplit, List<Range> rowRanges, RowType readRowType) throws IOException {
+            DataSplit dataSplit, List<Range> rowRanges, RowType outputRowType) throws IOException {
+        // Partition values belong to the split and may be absent from every physical file.
+        // Plan and merge only data columns, then restore partitions in the requested order.
+        Pair<Pair<int[], RowType>, List<DataField>> partitionMapping =
+                PartitionUtils.getPartitionMapping2fieldsWithoutPartition(
+                        schema.partitionKeys(),
+                        outputRowType.getFields(),
+                        schema.logicalPartitionType());
+        RowType readRowType = new RowType(partitionMapping.getRight());
         List<DataFileMeta> files = dataSplit.dataFiles();
 
         List<DeletionFile> deletionFiles = dataSplit.deletionFiles().orElse(null);
@@ -228,7 +242,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         // the suppliers below run lazily, so take the filters now, the same way the read type is
         // already taken by the caller
-        List<Predicate> filters = readTypeFilters(this.filters, readRowType);
+        List<Predicate> filters = readTypeFilters(this.filters, outputRowType);
 
         List<List<DataFileMeta>> splitByRowId = mergeRangesAndSort(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
@@ -308,7 +322,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        return ConcatRecordReader.create(suppliers);
+        RecordReader<InternalRow> reader = ConcatRecordReader.create(suppliers);
+        PartitionInfo partitionInfo = PartitionUtils.create(partitionMapping.getLeft(), partition);
+        if (partitionInfo != null) {
+            PartitionSettedRow partitionRow = PartitionSettedRow.from(partitionInfo);
+            return reader.transform(partitionRow::replaceRow);
+        }
+        return reader;
     }
 
     private RecordReader<InternalRow> createReader(IndexedSplit indexedSplit) throws IOException {
@@ -475,8 +495,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection);
             String formatIdentifier = readTarget.formatIdentifier;
             Builder targetFormatBuilder =
-                    ROW_SIDECAR_FORMAT.equals(formatIdentifier)
-                            ? rowSidecarFormatBuilder(readRowType, null, nestedFieldEnabled)
+                    readTarget.isPositionalRowFormat()
+                            ? positionalRowFormatBuilder(readRowType, null, nestedFieldEnabled)
                             : formatBuilder;
             long schemaId = firstFile.schemaId();
             TableSchema dataSchema = bunchDataSchemas[i];
@@ -528,8 +548,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         FileReadTarget readTarget =
                 readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection);
         Builder formatBuilder =
-                ROW_SIDECAR_FORMAT.equals(readTarget.formatIdentifier)
-                        ? rowSidecarFormatBuilder(readRowType, null, nestedFieldEnabled)
+                readTarget.isPositionalRowFormat()
+                        ? positionalRowFormatBuilder(readRowType, null, nestedFieldEnabled)
                         : formatBuilder(readRowType, null, nestedFieldEnabled);
         // Use the physical schema: the full table schema may declare columns this file never wrote.
         FormatReaderMapping mapping =
@@ -766,12 +786,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         FileReadTarget readTarget =
                 readTarget(file, dataFilePathFactory, rowRanges, fileIndexResult);
         String formatIdentifier = readTarget.formatIdentifier;
-        boolean readRowSidecar = ROW_SIDECAR_FORMAT.equals(formatIdentifier);
+        boolean positionalRowFormat = readTarget.isPositionalRowFormat();
         Builder targetFormatBuilder =
-                readRowSidecar
-                        ? rowSidecarFormatBuilder(readRowType, fileFilters, nestedFieldEnabled)
+                positionalRowFormat
+                        ? positionalRowFormatBuilder(readRowType, fileFilters, nestedFieldEnabled)
                         : formatBuilder(readRowType, fileFilters, nestedFieldEnabled);
-        TableSchema readerDataSchema = readRowSidecar ? physicalDataSchema : fileSchema;
+        TableSchema readerDataSchema = positionalRowFormat ? physicalDataSchema : fileSchema;
         FormatReaderMapping formatReaderMapping =
                 singleFileReaderMappings.computeIfAbsent(
                         new SingleFileKey(
@@ -873,7 +893,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         coreOptions.scanIgnoreCorruptFile(),
                         coreOptions.scanIgnoreLostFile(),
                         formatReaderMapping.getIndexMapping(),
-                        formatReaderMapping.getCastMapping(),
+                        trackingCastMapping(readTarget, formatReaderMapping),
                         PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
                         true,
                         file.firstRowId(),
@@ -887,6 +907,32 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         return applyDeletionVector(
                 fileRecordReader, file.nonNullRowIdRange(), rowRanges, deletionVector);
+    }
+
+    @Nullable
+    private CastFieldGetter[] trackingCastMapping(
+            FileReadTarget target, FormatReaderMapping mapping) {
+        CastFieldGetter[] casts = mapping.getCastMapping();
+        if (!target.isPositionalRowFormat()
+                || casts == null
+                || mapping.getSystemFields().isEmpty()) {
+            return casts;
+        }
+        // The physical schema omits tracking fields, but DataFileRecordReader supplies them
+        // before casting. Preserve those values without changing the cached cast mapping.
+        CastFieldGetter[] result = casts.clone();
+        for (DataField field :
+                new DataField[] {SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER}) {
+            Integer index = mapping.getSystemFields().get(field.name());
+            if (index != null) {
+                result[index] =
+                        new CastFieldGetter(
+                                InternalRowUtils.createNullCheckingFieldGetter(field.type(), index),
+                                CastExecutors.identityCastExecutor(),
+                                field.name());
+            }
+        }
+        return result;
     }
 
     private FileRecordReader<InternalRow> applyDeletionVector(
@@ -1095,9 +1141,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 nestedFieldEnabled);
     }
 
-    // Row sidecars use positional decoding and contain exactly the physical write schema.
+    // Row sidecars and ordinary row-format data files decode against the physical write schema.
     // Row tracking fields are supplied by DataFileRecordReader from the manifest entry.
-    private Builder rowSidecarFormatBuilder(
+    private Builder positionalRowFormatBuilder(
             RowType readRowType, @Nullable List<Predicate> filters, boolean nestedFieldEnabled) {
         return new Builder(
                 formatDiscover,
@@ -1332,6 +1378,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             this.formatIdentifier = formatIdentifier;
             this.path = path;
             this.fileSize = fileSize;
+        }
+
+        /**
+         * Sidecars and ordinary "row" data files use the same positional decoder and physical
+         * schema mapping. They can share a cache entry for the same physical and requested fields.
+         */
+        private boolean isPositionalRowFormat() {
+            return ROW_SIDECAR_FORMAT.equals(formatIdentifier);
         }
     }
 

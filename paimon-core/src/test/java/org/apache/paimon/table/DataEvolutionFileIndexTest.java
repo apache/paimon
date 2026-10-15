@@ -37,9 +37,12 @@ import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -75,6 +78,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -165,6 +169,343 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getLong(0)).isEqualTo(50L);
         assertThat(rows.get(0).getString(1).toString()).isEqualTo(f2(50));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPositionalRowPreservesTrackingFieldsAfterSchemaCast(boolean ordinaryRowFormat)
+            throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(
+                CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(),
+                Boolean.toString(!ordinaryRowFormat));
+        if (ordinaryRowFormat) {
+            options.put(CoreOptions.FILE_FORMAT.key(), "row");
+        }
+        FileStoreTable table = createTable("row_sidecar_tracking_cast", options);
+        writeAllColumns(table, ROW_COUNT);
+        catalog.alterTable(
+                identifier("row_sidecar_tracking_cast"),
+                SchemaChange.updateColumnType("f0", DataTypes.BIGINT()),
+                false);
+
+        FileStoreTable latest = getTable(identifier("row_sidecar_tracking_cast"));
+        RowType readType =
+                SpecialFields.rowTypeWithRowTracking(latest.rowType(), true, true)
+                        .project(
+                                "f0",
+                                SpecialFields.ROW_ID.name(),
+                                SpecialFields.SEQUENCE_NUMBER.name());
+        Predicate filter =
+                new PredicateBuilder(latest.rowType()).equal(1, BinaryString.fromString(f1(50)));
+
+        ReadBuilder readBuilder = latest.newReadBuilder().withReadType(readType).withFilter(filter);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        long maxSequenceNumber =
+                ((DataSplit) plan.splits().get(0)).dataFiles().get(0).maxSequenceNumber();
+        List<InternalRow> rows = collect(readBuilder.newRead().executeFilter(), plan, readType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getLong(0)).isEqualTo(50L);
+        assertThat(rows.get(0).getLong(1)).isEqualTo(50L);
+        assertThat(rows.get(0).isNullAt(2)).isFalse();
+        assertThat(rows.get(0).getLong(2)).isEqualTo(maxSequenceNumber);
+
+        ReadBuilder rangeReadBuilder =
+                latest.newReadBuilder()
+                        .withReadType(readType)
+                        .withFilter(filter)
+                        .withRowRanges(Collections.singletonList(new Range(0L, ROW_COUNT - 1L)));
+        rows =
+                collect(
+                        rangeReadBuilder.newRead().executeFilter(),
+                        rangeReadBuilder.newScan().plan(),
+                        readType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getLong(0)).isEqualTo(50L);
+        assertThat(rows.get(0).getLong(1)).isEqualTo(50L);
+        assertThat(rows.get(0).isNullAt(2)).isFalse();
+        assertThat(rows.get(0).getLong(2)).isEqualTo(maxSequenceNumber);
+
+        RowType trackedType = SpecialFields.rowTypeWithRowTracking(latest.rowType(), true, true);
+        PredicateBuilder trackedBuilder = new PredicateBuilder(trackedType);
+        Predicate rowIdFilter =
+                PredicateBuilder.and(
+                        filter,
+                        trackedBuilder.between(
+                                trackedType.getFieldIndex(SpecialFields.ROW_ID.name()),
+                                0L,
+                                ROW_COUNT - 1L));
+        ReadBuilder rowIdReadBuilder =
+                latest.newReadBuilder().withReadType(readType).withFilter(rowIdFilter);
+        rows =
+                collect(
+                        rowIdReadBuilder.newRead().executeFilter(),
+                        rowIdReadBuilder.newScan().plan(),
+                        readType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getLong(0)).isEqualTo(50L);
+        assertThat(rows.get(0).getLong(1)).isEqualTo(50L);
+        assertThat(rows.get(0).getLong(2)).isEqualTo(maxSequenceNumber);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRowSidecarRestoresMissingPartitionField(boolean merged) throws Exception {
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.STRING())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        Identifier identifier = identifier("row_sidecar_partition_restore");
+        catalog.createTable(identifier, schemaBuilder.build(), false);
+        FileStoreTable table = getTable(identifier);
+
+        RowType writeType = table.rowType().project("f1");
+        BatchWriteBuilder writeBuilder = table.copy(bitmapOptions("f1")).newBatchWriteBuilder();
+        List<InternalRow> writtenRows = new ArrayList<>();
+        for (int i = 0; i < ROW_COUNT; i++) {
+            writtenRows.add(GenericRow.of(BinaryString.fromString(f1(i))));
+        }
+        try (BatchTableWrite write = writeBuilder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.writeBundle(
+                    new InternalRowSerializer(table.schema().logicalPartitionType())
+                            .toBinaryRow(GenericRow.of(BinaryString.fromString("p1"))),
+                    0,
+                    new BundleRecords() {
+                        @Override
+                        public long rowCount() {
+                            return writtenRows.size();
+                        }
+
+                        @Override
+                        public Iterator<InternalRow> iterator() {
+                            return writtenRows.iterator();
+                        }
+                    });
+            commit.commit(write.prepareCommit());
+        }
+
+        if (merged) {
+            BatchWriteBuilder mergeWriteBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write =
+                            mergeWriteBuilder
+                                    .newWrite()
+                                    .withWriteType(table.rowType().project("f2"));
+                    BatchTableCommit commit = mergeWriteBuilder.newCommit()) {
+                write.writeBundle(
+                        new InternalRowSerializer(table.schema().logicalPartitionType())
+                                .toBinaryRow(GenericRow.of(BinaryString.fromString("p1"))),
+                        0,
+                        new BundleRecords() {
+                            @Override
+                            public long rowCount() {
+                                return ROW_COUNT;
+                            }
+
+                            @Override
+                            public Iterator<InternalRow> iterator() {
+                                return writtenRows.stream()
+                                        .map(row -> (InternalRow) GenericRow.of(row.getString(0)))
+                                        .iterator();
+                            }
+                        });
+                List<CommitMessage> messages = write.prepareCommit();
+                setFirstRowId(messages, 0L);
+                commit.commit(messages);
+            }
+        }
+
+        FileStoreTable latest = getTable(identifier);
+        RowType readType =
+                latest.rowType()
+                        .project(
+                                merged
+                                        ? new String[] {"f2", "pt", "f1"}
+                                        : new String[] {"pt", "f1"});
+        Predicate filter =
+                new PredicateBuilder(latest.rowType()).equal(1, BinaryString.fromString(f1(50)));
+        for (List<Range> ranges : Arrays.<List<Range>>asList(null, fullRowRanges())) {
+            ReadBuilder readBuilder =
+                    latest.newReadBuilder().withReadType(readType).withFilter(filter);
+            if (ranges != null) {
+                readBuilder.withRowRanges(ranges);
+            }
+            List<InternalRow> rows =
+                    collect(
+                            readBuilder.newRead().executeFilter(),
+                            readBuilder.newScan().plan(),
+                            readType);
+
+            InternalRow row = assertSingleRow(rows);
+            assertThat(row.getString(readType.getFieldIndex("pt")).toString()).isEqualTo("p1");
+            assertThat(row.getString(readType.getFieldIndex("f1")).toString()).isEqualTo(f1(50));
+            if (merged) {
+                assertThat(row.getString(0).toString()).isEqualTo(f1(50));
+            }
+        }
+
+        RowType partitionOnly = latest.rowType().project("pt");
+        ReadBuilder partitionReadBuilder = latest.newReadBuilder().withReadType(partitionOnly);
+        List<InternalRow> partitions =
+                collect(
+                        partitionReadBuilder.newRead(),
+                        partitionReadBuilder.newScan().plan(),
+                        partitionOnly);
+        assertThat(partitions).hasSize(ROW_COUNT);
+        assertThat(partitions)
+                .allSatisfy(row -> assertThat(row.getString(0).toString()).isEqualTo("p1"));
+    }
+
+    // Deleting the data files proves the rows come from the row sidecars: without them the read
+    // would fail on the missing files.
+    @Test
+    public void testMergedGroupFinalSelectionChoosesRowSidecar() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_dv_row_sidecar", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        assertRow(assertSingleRow(readAfterDeletingDataFiles(table, filter, null)), 50);
+    }
+
+    @Test
+    public void testSingleFileFinalSelectionChoosesRowSidecar() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_bitmap_dv_row_sidecar", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        assertRow(assertSingleRow(readAfterDeletingDataFiles(table, filter, null)), 50);
+    }
+
+    @Test
+    public void testMergedGroupFinalSelectionChoosesRowSidecarWithRowRanges() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_bitmap_dv_row_sidecar_ranges", options);
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), Collections.emptyMap());
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        assertRow(assertSingleRow(readAfterDeletingDataFiles(table, filter, fullRowRanges())), 50);
+    }
+
+    @Test
+    public void testSingleFileFinalSelectionChoosesRowSidecarWithRowRanges() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_bitmap_dv_row_sidecar_ranges", options);
+        writeAllColumns(table, ROW_COUNT);
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        assertRow(assertSingleRow(readAfterDeletingDataFiles(table, filter, fullRowRanges())), 50);
+    }
+
+    private static List<Range> fullRowRanges() {
+        return Collections.singletonList(new Range(0L, ROW_COUNT - 1L));
+    }
+
+    // The f0/f1 file is read from its row sidecar (its data file is deleted), the f2 file has no
+    // sidecar and is read from its data file.
+    @Test
+    public void testMergedGroupMixedSidecarAndDataFileRead() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("merged_mixed_sidecar_data_file", options);
+        Map<String, String> withoutSidecar = new HashMap<>();
+        withoutSidecar.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "false");
+        writeSplitColumns(table, ROW_COUNT, bitmapOptions("f1"), withoutSidecar);
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        assertRow(
+                assertSingleRow(
+                        readAfterDeletingDataFiles(
+                                table,
+                                filter,
+                                null,
+                                file ->
+                                        file.writeCols() != null
+                                                && file.writeCols().contains("f1"))),
+                50);
+    }
+
+    // The first file is read from its row sidecar (its data file is deleted), the second file has
+    // no sidecar and is read from its data file.
+    @Test
+    public void testSingleFileMixedSidecarAndDataFileRead() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true");
+        FileStoreTable table = createTable("single_mixed_sidecar_data_file", options);
+        writeAllColumns(table, ROW_COUNT);
+        Map<String, String> withoutSidecar = new HashMap<>(bitmapOptions("f1"));
+        withoutSidecar.put(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "false");
+        writeAllColumns(getTable(identifier(table.name())).copy(withoutSidecar), ROW_COUNT);
+        // deleting the overlapping rows leaves the first file with a single-row bitmap selection,
+        // sparse enough to be read from its sidecar, while the second file has no sidecar at all
+        deleteRows(table, 51, 52, 53, 54, 55);
+
+        Predicate filter = equalAnyF1(50, 51, 52, 53, 54, 55);
+        List<InternalRow> rows =
+                readAfterDeletingDataFiles(
+                        table,
+                        filter,
+                        null,
+                        file -> file.firstRowId() != null && file.firstRowId() == 0L);
+        // row 50 of the first file comes from its sidecar, rows 50-55 of the second file come
+        // from its data file
+        assertThat(rows).hasSize(7);
+        for (InternalRow row : rows) {
+            int index = row.getInt(0);
+            assertThat(index).isBetween(50, 55);
+            assertThat(row.getString(1).toString()).isEqualTo(f1(index));
+            assertThat(row.getString(2).toString()).isEqualTo(f2(index));
+        }
+
+        // the same mixed read with row tracking: the row id of the sidecar row comes from the
+        // manifest entry, the row ids of the data file rows from its own range
+        RowType readType =
+                rowTypeWithRowId(getTable(identifier(table.name())).rowType())
+                        .project(SpecialFields.ROW_ID.name(), "f0", "f1");
+        List<InternalRow> trackedRows = readWithFilter(table, filter, readType);
+        assertThat(trackedRows).hasSize(7);
+        assertThat(trackedRows.stream().map(row -> row.getLong(0)))
+                .containsExactlyInAnyOrder(50L, 150L, 151L, 152L, 153L, 154L, 155L);
+    }
+
+    // Ordinary row-format data files use the same physical schema mapping as row sidecars. The
+    // row format has no format-level filter pushdown, so the bitmap index provides the selection.
+    @Test
+    public void testOrdinaryRowFormatDataFile() throws Exception {
+        Map<String, String> options = bitmapOptions("f1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "row");
+        FileStoreTable table = createTable("ordinary_row_format_file", options);
+        writeAllColumns(table, ROW_COUNT);
+
+        assertRow(assertSingleRow(readWithFilter(table, equalF1(f1(50)), null)), 50);
+
+        RowType readType =
+                rowTypeWithRowId(table.rowType()).project(SpecialFields.ROW_ID.name(), "f1");
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getLong(0)).isEqualTo(50L);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo(f1(50));
     }
 
     @Test
@@ -1212,6 +1553,53 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         return readWithFilter(table, predicate, null);
     }
 
+    private List<InternalRow> readAfterDeletingDataFiles(
+            FileStoreTable table, Predicate predicate, @Nullable List<Range> rowRanges)
+            throws Exception {
+        return readAfterDeletingDataFiles(table, predicate, rowRanges, null);
+    }
+
+    /**
+     * Reads after deleting the data files. A non-null delete filter restricts the deletion to the
+     * matching files, so part of the split is read from the row sidecars and the rest from the
+     * remaining data files.
+     */
+    private List<InternalRow> readAfterDeletingDataFiles(
+            FileStoreTable table,
+            Predicate predicate,
+            @Nullable List<Range> rowRanges,
+            @Nullable java.util.function.Predicate<DataFileMeta> deleteFilter)
+            throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        ReadBuilder readBuilder = latest.newReadBuilder().withFilter(predicate);
+        if (rowRanges != null) {
+            readBuilder.withRowRanges(rowRanges);
+        }
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        // with row ranges the scan wraps the split into an IndexedSplit
+        Split first = plan.splits().get(0);
+        DataSplit split =
+                first instanceof IndexedSplit
+                        ? ((IndexedSplit) first).dataSplit()
+                        : (DataSplit) first;
+        DataFilePathFactory pathFactory =
+                latest.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(split.partition(), split.bucket());
+        for (DataFileMeta file : split.dataFiles()) {
+            if (deleteFilter == null || deleteFilter.test(file)) {
+                assertThat(latest.fileIO().delete(pathFactory.toPath(file), false)).isTrue();
+            }
+        }
+
+        List<InternalRow> rows = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(latest.rowType());
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+        return rows;
+    }
+
     private List<InternalRow> readWithFilter(
             FileStoreTable table, Predicate predicate, @Nullable RowType readType)
             throws Exception {
@@ -1365,6 +1753,14 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
     private static Predicate equalF1(String value) {
         return new PredicateBuilder(rowType()).equal(1, BinaryString.fromString(value));
+    }
+
+    private static Predicate equalAnyF1(int... values) {
+        Predicate[] predicates = new Predicate[values.length];
+        for (int i = 0; i < values.length; i++) {
+            predicates[i] = equalF1(f1(values[i]));
+        }
+        return PredicateBuilder.or(predicates);
     }
 
     private static Predicate equalF2(String value) {
