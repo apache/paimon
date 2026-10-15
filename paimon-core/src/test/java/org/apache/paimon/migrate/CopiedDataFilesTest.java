@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SpecialFields;
@@ -58,6 +59,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -297,6 +299,67 @@ public class CopiedDataFilesTest extends TableTestBase {
     }
 
     @Test
+    public void testDedicatedFilesFollowingTheirRowsAreAccepted() throws Exception {
+        createTable(TARGET, Options.DATA_EVOLUTION, false);
+        // vector-store files rolled at other rows than the normal files, two blob files for one
+        // normal file, and a blob column added after the first rows
+        List<DataFileMeta> vectors =
+                files(
+                        file("n0.parquet", 0, 100),
+                        file("n1.parquet", 100, 100),
+                        file("v0.vector.parquet", 0, 150, "e"),
+                        file("v1.vector.parquet", 150, 50, "e"));
+        List<DataFileMeta> blobs =
+                files(
+                        file("n2.parquet", 200, 2),
+                        file("n3.parquet", 202, 4),
+                        file("b0.blob", 202, 2, "b"),
+                        file("b1.blob", 204, 2, "b"));
+
+        CopiedDataFiles.adaptToTarget(table(TARGET), Collections.singletonList(vectors));
+        CopiedDataFiles.adaptToTarget(table(TARGET), Collections.singletonList(blobs));
+
+        assertThat(vectors)
+                .extracting(DataFileMeta::fileName)
+                .containsExactly(
+                        "n0.parquet", "v0.vector.parquet", "n1.parquet", "v1.vector.parquet");
+        assertThat(blobs)
+                .extracting(DataFileMeta::fileName)
+                .containsExactly("n2.parquet", "n3.parquet", "b0.blob", "b1.blob");
+    }
+
+    @Test
+    public void testDedicatedFilesTheCommitWouldGiveOtherRowsAreRefused() throws Exception {
+        createTable(TARGET, Options.DATA_EVOLUTION, false);
+        // a vector column added after the first rows: the vector-store file would get rows 0 and 1
+        assertRefused(
+                "v1.vector.parquet",
+                files(
+                        file("n0.parquet", 0, 2),
+                        file("n1.parquet", 2, 2),
+                        file("v1.vector.parquet", 2, 2, "e")));
+        // a vector column updated
+        assertRefused(
+                "u0.vector.parquet",
+                files(
+                        file("n0.parquet", 0, 2),
+                        file("v0.vector.parquet", 0, 2, "e"),
+                        file("u0.vector.parquet", 0, 1, "e")));
+        // a blob column updated
+        assertRefused(
+                "u0.blob",
+                files(
+                        file("n0.parquet", 0, 2),
+                        file("b0.blob", 0, 2, "b"),
+                        file("u0.blob", 1, 1, "b")));
+        // a bucket without vector-store files would move those of the other buckets
+        assertRefused(
+                "n0.parquet",
+                files(file("n0.parquet", 0, 2)),
+                files(file("n1.parquet", 2, 2), file("v1.vector.parquet", 2, 2, "e")));
+    }
+
+    @Test
     public void testFilesThatStoreTheirRowIdsAreRefusedByRowTrackingTargets() throws Exception {
         createTable(SOURCE, Options.ROW_TRACKING, false);
         write(table(SOURCE), row(1, "a", "p1"), row(2, "b", "p1"));
@@ -397,6 +460,39 @@ public class CopiedDataFilesTest extends TableTestBase {
     // ---------------------------------------------------------------------------------------------
     // helpers
     // ---------------------------------------------------------------------------------------------
+
+    private static DataFileMeta file(
+            String name, long firstRowId, long rowCount, String... writeCols) {
+        return DataFileMeta.forAppend(
+                name,
+                1L,
+                rowCount,
+                SimpleStats.EMPTY_STATS,
+                0L,
+                0L,
+                0L,
+                Collections.emptyList(),
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                firstRowId,
+                writeCols.length == 0 ? null : Arrays.asList(writeCols));
+    }
+
+    private static List<DataFileMeta> files(DataFileMeta... files) {
+        return new ArrayList<>(Arrays.asList(files));
+    }
+
+    @SafeVarargs
+    private final void assertRefused(String fileName, List<DataFileMeta>... buckets)
+            throws Exception {
+        FileStoreTable target = table(TARGET);
+        assertThatThrownBy(() -> CopiedDataFiles.adaptToTarget(target, Arrays.asList(buckets)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot copy data file " + fileName)
+                .hasMessageContaining("row ids of other rows");
+    }
 
     private enum Options {
         PLAIN,

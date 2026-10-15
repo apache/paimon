@@ -27,8 +27,10 @@ import org.apache.paimon.table.SpecialFields;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Map;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -49,7 +51,8 @@ import static org.apache.paimon.types.VectorType.isVectorStoreFile;
  * <p>A row-tracking commit gives a blob or vector-store file the row ids of the normal file before
  * it, so the files of one row id range are committed in order: the normal file, then its dedicated
  * files. A file that updates columns of rows another copied file holds cannot be committed that
- * way, and is refused: compacting the source first merges it into one file per row id range.
+ * way, and is refused: compacting the source first merges it into one file per row id range. So is
+ * a blob or vector-store file that the commit would give the row ids of other rows than it holds.
  */
 public final class CopiedDataFiles {
 
@@ -59,6 +62,10 @@ public final class CopiedDataFiles {
     public static void adaptToTarget(
             FileStoreTable target, Collection<List<DataFileMeta>> copiedFilesByBucket) {
         boolean rowTracking = target.coreOptions().rowTrackingEnabled();
+        boolean vectorStoreFiles =
+                copiedFilesByBucket.stream()
+                        .flatMap(List::stream)
+                        .anyMatch(file -> kind(file) == 2);
         for (List<DataFileMeta> files : copiedFilesByBucket) {
             checkNoColumnUpdates(target, files);
             if (rowTracking) {
@@ -69,6 +76,7 @@ public final class CopiedDataFiles {
                                         (DataFileMeta file) -> file.firstRowId(),
                                         Comparator.nullsLast(Comparator.naturalOrder()))
                                 .thenComparingInt(CopiedDataFiles::kind));
+                checkDedicatedFilesFollowTheirRows(target, files, vectorStoreFiles);
             }
             ListIterator<DataFileMeta> iterator = files.listIterator();
             while (iterator.hasNext()) {
@@ -152,6 +160,108 @@ public final class CopiedDataFiles {
                                 file.fileName(), target.name()));
             }
         }
+    }
+
+    /**
+     * Refuses a blob or vector-store file that the commit would give the row ids of other rows than
+     * it holds. The commit gives a normal file the row ids after the normal file before it, a blob
+     * file those from the start of the normal file before it, or after the blob file of the same
+     * field following that normal file, and a vector-store file those after the vector-store file
+     * before it in the whole commit. This replays that on the files of one bucket, which the commit
+     * keeps together but may order among the other buckets in any way: so when the copy has
+     * vector-store files, those of every bucket must also hold as many rows as its normal files. A
+     * source breaks this when a blob or vector column was updated, or added after rows were
+     * written.
+     */
+    private static void checkDedicatedFilesFollowTheirRows(
+            FileStoreTable target, List<DataFileMeta> files, boolean vectorStoreFiles) {
+        // the row ids the commit gives, counted from the first one it gives to the bucket
+        long start = 0;
+        long blobStartDefault = 0;
+        Map<String, Long> blobStarts = new HashMap<>();
+        long vectorStoreStart = 0;
+        List<DataFileMeta> normalFiles = new ArrayList<>();
+        List<Long> normalStarts = new ArrayList<>();
+        List<DataFileMeta> dedicatedFiles = new ArrayList<>();
+        List<Long> dedicatedStarts = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            int kind = kind(file);
+            if (kind == 0) {
+                normalFiles.add(file);
+                normalStarts.add(start);
+                blobStartDefault = start;
+                blobStarts.clear();
+                start += file.rowCount();
+                continue;
+            }
+            long given;
+            if (kind == 1) {
+                String field = file.writeCols().get(0);
+                given = blobStarts.getOrDefault(field, blobStartDefault);
+                blobStarts.put(field, given + file.rowCount());
+            } else {
+                given = vectorStoreStart;
+                vectorStoreStart += file.rowCount();
+            }
+            if (given >= start) {
+                // no normal file holds these row ids yet: the commit refuses it
+                throw rowsOfOtherFiles(target, file);
+            }
+            dedicatedFiles.add(file);
+            dedicatedStarts.add(given);
+        }
+
+        // the normal and the dedicated files are both in the order of their source row ids
+        int normal = 0;
+        for (int i = 0; i < dedicatedFiles.size(); i++) {
+            DataFileMeta file = dedicatedFiles.get(i);
+            if (file.firstRowId() == null) {
+                continue;
+            }
+            long row = file.firstRowId();
+            long end = row + file.rowCount();
+            long offset = dedicatedStarts.get(i) - row;
+            while (normal < normalFiles.size() && endRowId(normalFiles.get(normal)) <= row) {
+                normal++;
+            }
+            // every row of the file must get the row id the commit gives it in its normal file
+            for (int n = normal; row < end; n++) {
+                DataFileMeta normalFile = n < normalFiles.size() ? normalFiles.get(n) : null;
+                if (normalFile == null
+                        || normalFile.firstRowId() == null
+                        || normalFile.firstRowId() > row
+                        || normalStarts.get(n) - normalFile.firstRowId() != offset) {
+                    throw rowsOfOtherFiles(target, file);
+                }
+                row = endRowId(normalFile);
+            }
+        }
+
+        if (vectorStoreFiles && vectorStoreStart < start) {
+            // rows without a vector-store file move those of the next buckets onto other rows
+            for (int n = normalFiles.size() - 1; n >= 0; n--) {
+                if (normalStarts.get(n) <= vectorStoreStart) {
+                    throw rowsOfOtherFiles(target, normalFiles.get(n));
+                }
+            }
+        }
+    }
+
+    private static long endRowId(DataFileMeta file) {
+        return file.firstRowId() == null ? Long.MIN_VALUE : file.firstRowId() + file.rowCount();
+    }
+
+    private static IllegalArgumentException rowsOfOtherFiles(
+            FileStoreTable target, DataFileMeta file) {
+        return new IllegalArgumentException(
+                String.format(
+                        "Cannot copy data file %s into table %s: the commit would give the blob or "
+                                + "vector-store files of the source the row ids of other rows "
+                                + "than they hold, because they do not follow the rows of the "
+                                + "normal files, as after updating a blob or vector column or "
+                                + "adding one to rows already written. Rewrite those rows in "
+                                + "the source first, for example with INSERT OVERWRITE.",
+                        file.fileName(), target.name()));
     }
 
     /** 0 for a normal file, 1 for a blob file, 2 for a vector-store file. */

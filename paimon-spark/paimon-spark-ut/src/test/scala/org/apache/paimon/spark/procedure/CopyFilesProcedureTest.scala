@@ -365,6 +365,57 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon copy files procedure: vector field added after the first rows") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'file.format' = 'parquet',
+            |  'vector.file.format' = 'parquet')
+            |""".stripMargin)
+      // these rows have no vector file
+      sql("INSERT INTO src VALUES (1), (2)")
+      sql("ALTER TABLE src ADD COLUMN embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;2'")
+      sql("INSERT INTO src VALUES (3, array(3.0f, 0.0f)), (4, array(4.0f, 0.0f))")
+      assert(fileNames("src").exists(_.contains(".vector.")), fileNames("src"))
+
+      assertCopyRefused("src", "dst")
+      // rewriting the rows gives each of them its vector
+      sql("INSERT OVERWRITE src SELECT * FROM src")
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      checkAnswer(sql("SELECT id, embedding FROM dst"), sql("SELECT id, embedding FROM src"))
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID) = count(*) FROM dst"), Row(true) :: Nil)
+    }
+  }
+
+  test("Paimon copy files procedure: vector column updated in the source") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT, embedding ARRAY<FLOAT>) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'file.format' = 'parquet',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO src VALUES (1, array(1.0f, 0.0f)), (2, array(2.0f, 0.0f))")
+      sql("UPDATE src SET embedding = array(9.0f, 0.0f) WHERE id = 1")
+
+      assertCopyRefused("src", "dst")
+      // rewriting the rows gives each of them its vector
+      sql("INSERT OVERWRITE src SELECT * FROM src")
+      checkAnswer(
+        sql("CALL sys.copy(source_table => 'src', target_table => 'dst')"),
+        Row(true) :: Nil)
+      checkAnswer(sql("SELECT id, embedding FROM dst"), sql("SELECT id, embedding FROM src"))
+      checkAnswer(sql("SELECT count(DISTINCT _ROW_ID) = count(*) FROM dst"), Row(true) :: Nil)
+    }
+  }
+
   test("Paimon copy files procedure: data-evolution table with a blob field") {
     withTable("src", "dst") {
       sql("""
@@ -422,6 +473,42 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       checkAnswer(sql("SELECT * FROM dst"), sql("SELECT * FROM src"))
       checkAnswer(sql("SELECT count(DISTINCT _ROW_ID) = count(*) FROM dst"), Row(true) :: Nil)
     }
+  }
+
+  test("Paimon copy files procedure: partition written before the vector field was added") {
+    withTable("src", "dst") {
+      sql("""
+            |CREATE TABLE src (id INT, pt STRING) PARTITIONED BY (pt) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'file.format' = 'parquet',
+            |  'vector.file.format' = 'parquet')
+            |""".stripMargin)
+      sql("INSERT INTO src VALUES (1, 'a'), (2, 'a')")
+      sql("ALTER TABLE src ADD COLUMN embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;2'")
+      sql("INSERT INTO src VALUES (3, 'b', array(3.0f, 0.0f)), (4, 'b', array(4.0f, 0.0f))")
+
+      // the rows of partition a have no vector file, which would move those of partition b
+      assertCopyRefused("src", "dst")
+
+      // each partition alone has a vector file for all of its rows or for none
+      checkAnswer(
+        sql("""CALL sys.copy(source_table => 'src', target_table => 'dst', where => "pt = 'b'")"""),
+        Row(true) :: Nil)
+      checkAnswer(
+        sql("""CALL sys.copy(source_table => 'src', target_table => 'dst', where => "pt = 'a'")"""),
+        Row(true) :: Nil)
+      checkAnswer(sql("SELECT * FROM dst"), sql("SELECT * FROM src"))
+    }
+  }
+
+  private def assertCopyRefused(source: String, target: String): Unit = {
+    val error = intercept[Exception] {
+      sql(s"CALL sys.copy(source_table => '$source', target_table => '$target')")
+    }
+    val trace = ExceptionUtils.stringifyException(error)
+    assert(trace.contains("row ids of other rows"), trace)
+    checkAnswer(sql(s"SELECT count(*) FROM $target"), Row(0) :: Nil)
   }
 
   private def fileNames(table: String): Seq[String] =
