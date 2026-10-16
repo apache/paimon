@@ -29,6 +29,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
@@ -36,7 +39,9 @@ import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectReader;
 
 import javax.annotation.Nullable;
 
@@ -53,6 +58,7 @@ public class JsonFileReader extends AbstractTextFileReader {
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
 
     private final JsonOptions options;
+    private final ObjectReader jsonReader;
 
     public JsonFileReader(
             FileIO fileIO,
@@ -64,12 +70,34 @@ public class JsonFileReader extends AbstractTextFileReader {
             throws IOException {
         super(fileIO, filePath, rowType, options.getLineDelimiter(), offset, length);
         this.options = options;
+        // Parse floating-point numbers as BigDecimal only when needed, so DECIMAL values keep
+        // their precision instead of being rounded through double.
+        this.jsonReader =
+                containsDecimal(rowType)
+                        ? JsonSerdeUtil.OBJECT_MAPPER_INSTANCE
+                                .reader()
+                                .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                        : JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.reader();
+    }
+
+    private static boolean containsDecimal(DataType type) {
+        if (type.is(DataTypeRoot.DECIMAL)) {
+            return true;
+        }
+        if (type.is(DataTypeFamily.CONSTRUCTED)) {
+            for (DataType nested : DataTypeChecks.getNestedTypes(type)) {
+                if (containsDecimal(nested)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override
     protected InternalRow parseLine(String line) throws IOException {
         try {
-            JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
+            JsonNode jsonNode = jsonReader.readTree(line);
             return (InternalRow) convertJsonValue(jsonNode, rowType, options);
         } catch (JsonProcessingException e) {
             if (options.ignoreParseErrors()) {
@@ -108,7 +136,12 @@ public class JsonFileReader extends AbstractTextFileReader {
             case ROW:
                 return convertJsonRow(node, (RowType) dataType, options);
             default:
-                return convertPrimitiveStringToType(node.asText(), dataType, options);
+                // Non-DECIMAL types keep the double text they got before BigDecimal parsing.
+                String text =
+                        node.isBigDecimal() && !dataType.is(DataTypeRoot.DECIMAL)
+                                ? String.valueOf(node.doubleValue())
+                                : node.asText();
+                return convertPrimitiveStringToType(text, dataType, options);
         }
     }
 
