@@ -18,13 +18,13 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.data.BlobViewStruct
 import org.apache.paimon.spark.{BaseTable, DataConverter, SparkTable, SparkTypeUtils, SparkUtils}
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.function.{BlobViewFieldIdSparkFunction, BlobViewSparkFunction, DescriptorToPresignedUrlFunction, ResolvedDescriptorToPresignedUrlFunction}
 import org.apache.paimon.spark.utils.CatalogUtils
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.types.DataTypeRoot
 import org.apache.paimon.utils.{InternalRowUtils, TypeUtils}
 
 import org.apache.spark.sql.SparkSession
@@ -107,20 +107,12 @@ object ReplacePaimonFunctions {
         CatalogUtils.toIdentifier(
           catalogAndIdentifier.identifier(),
           catalogAndIdentifier.catalog().name())
-      if (!sparkTable.table.rowType().containsField(fieldName)) {
-        throw new IllegalArgumentException(
-          s"Cannot find blob field $fieldName in upstream table ${paimonIdentifier.getFullName}.")
-      }
-      val field = sparkTable.table.rowType().getField(fieldName)
-      if (!field.`type`().is(DataTypeRoot.BLOB)) {
-        throw new IllegalArgumentException(
-          s"Field $fieldName in upstream table ${paimonIdentifier.getFullName} " +
-            "is not a BLOB field.")
-      }
+      val fieldId =
+        BlobViewStruct.resolveBlobFieldId(paimonIdentifier, sparkTable.table.rowType(), fieldName)
 
       ApplyFunctionExpression(
         new BlobViewFieldIdSparkFunction,
-        Seq(Literal(paimonIdentifier.getFullName), Literal(field.id()), rowId))
+        Seq(Literal(paimonIdentifier.getFullName), Literal(fieldId), rowId))
     }
   }
 }

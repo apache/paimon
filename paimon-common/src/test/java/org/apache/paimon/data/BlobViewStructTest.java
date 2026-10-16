@@ -19,6 +19,9 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +45,33 @@ public class BlobViewStructTest {
         assertThat(deserialized.identifier()).isEqualTo(Identifier.fromString("default.source"));
         assertThat(deserialized.fieldId()).isEqualTo(7);
         assertThat(deserialized.rowId()).isEqualTo(5L);
+    }
+
+    @Test
+    public void testConstructByFieldName() {
+        Identifier identifier = Identifier.fromString("default.source");
+        RowType upstreamRowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(7, "picture", DataTypes.BLOB())));
+
+        BlobViewStruct viewStruct = BlobViewStruct.of(identifier, upstreamRowType, "picture", 5L);
+        assertThat(viewStruct.identifier()).isEqualTo(identifier);
+        assertThat(viewStruct.fieldId()).isEqualTo(7);
+        assertThat(viewStruct.rowId()).isEqualTo(5L);
+
+        assertThat(Blob.fromView(identifier, upstreamRowType, "picture", 5L))
+                .isEqualTo(Blob.fromView(identifier, 7, 5L))
+                .isEqualTo(Blob.fromView(viewStruct));
+
+        assertThatThrownBy(() -> BlobViewStruct.of(identifier, upstreamRowType, "missing", 5L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Cannot find blob field missing in upstream table default.source.");
+
+        assertThatThrownBy(() -> BlobViewStruct.of(identifier, upstreamRowType, "id", 5L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Field id in upstream table default.source is not a BLOB field.");
     }
 
     @Test
