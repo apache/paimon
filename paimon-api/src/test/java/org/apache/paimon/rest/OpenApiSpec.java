@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 /** The operations of the REST OpenAPI specs in docs/static, each as "METHOD /path/{template}". */
@@ -61,6 +62,25 @@ public final class OpenApiSpec {
             }
         }
         return operations;
+    }
+
+    /** The component schemas of both specs, by name. */
+    public static Map<String, JsonNode> schemas() throws IOException {
+        File directory = specDirectory();
+        Map<String, JsonNode> schemas = new TreeMap<>();
+        for (String file : FILES) {
+            Iterator<Map.Entry<String, JsonNode>> entries =
+                    new YAMLMapper()
+                            .readTree(new File(directory, file))
+                            .path("components")
+                            .path("schemas")
+                            .fields();
+            while (entries.hasNext()) {
+                Map.Entry<String, JsonNode> entry = entries.next();
+                schemas.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return schemas;
     }
 
     /** Returns the operation a request matches, preferring literal segments, or null. */

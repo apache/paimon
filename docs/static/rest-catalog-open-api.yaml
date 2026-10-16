@@ -3813,7 +3813,7 @@ components:
           items:
             $ref: '#/components/schemas/TableSchema'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetSchemaResponse:
       type: object
       properties:
@@ -3955,7 +3955,7 @@ components:
           items:
             $ref: '#/components/schemas/Snapshot'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     AuthTableQueryRequest:
       type: object
       properties:
@@ -4009,7 +4009,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetDatabaseResponse:
       type: object
       properties:
@@ -4044,7 +4044,7 @@ components:
             type: string
             description: table name of the table.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTableDetailsResponse:
       type: object
       properties:
@@ -4053,7 +4053,7 @@ components:
           items:
             $ref: '#/components/schemas/GetTableResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTablesGloballyResponse:
       type: object
       properties:
@@ -4062,7 +4062,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ConfigResponse:
       type: object
       properties:
@@ -4082,7 +4082,7 @@ components:
           items:
             $ref: '#/components/schemas/Partition'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     CreateBranchRequest:
       type: object
       properties:
@@ -4140,7 +4140,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     TagInfo:
       type: object
       properties:
@@ -4184,7 +4184,7 @@ components:
             type: string
             description: view name of the view.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewDetailsResponse:
       type: object
       properties:
@@ -4193,7 +4193,7 @@ components:
           items:
             $ref: '#/components/schemas/GetViewResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsGloballyResponse:
       type: object
       properties:
@@ -4202,7 +4202,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewsGloballyResponse:
       type: object
       properties:
@@ -4211,7 +4211,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsResponse:
       type: object
       properties:
@@ -4220,7 +4220,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionDetailsResponse:
       type: object
       properties:
@@ -4229,7 +4229,7 @@ components:
           items:
             $ref: '#/components/schemas/GetFunctionResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetFunctionResponse:
       type: object
       properties:
@@ -4287,7 +4287,7 @@ components:
           items:
             $ref: '#/components/schemas/ConsumerInfo'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
           description: Token for the next page of results
     ResetConsumerRequest:
       type: object
