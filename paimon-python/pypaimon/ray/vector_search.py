@@ -18,8 +18,10 @@
 """Ray execution of snapshot-pinned, single-vector queries."""
 
 from collections import Counter
+from concurrent.futures import CancelledError
 from contextlib import closing, contextmanager
 import math
+import threading
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
@@ -216,6 +218,22 @@ def _scores(result):
     return scores
 
 
+_task_state = threading.local()
+
+
+@contextmanager
+def _task_cancellation(event):
+    """Keep hybrid cancellation on driver threads, out of serialized worker state."""
+    previous = getattr(_task_state, "cancelled", None)
+    _task_state.cancelled = event
+    try:
+        if event.is_set():
+            raise CancelledError()
+        yield
+    finally:
+        _task_state.cancelled = previous
+
+
 def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False, prepare_item=None):
     """Bound in-flight work and, optionally, completed results awaiting plan order."""
     import ray
@@ -229,8 +247,11 @@ def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False, 
     pending = {}
     buffered = {}
     next_ordinal = 0
+    cancelled = getattr(_task_state, "cancelled", None)
     try:
         while True:
+            if cancelled is not None and cancelled.is_set():
+                raise CancelledError()
             while len(pending) + len(buffered) < concurrency:
                 item = next(remaining, None)
                 if item is None:
@@ -240,7 +261,10 @@ def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False, 
                 pending[remote.remote(context_ref, *args)] = ordinal
             if not pending:
                 break
-            ready, _ = ray.wait(list(pending), num_returns=1)
+            ready, _ = ray.wait(list(pending), num_returns=1,
+                                **({"timeout": 0.1} if cancelled is not None else {}))
+            if not ready:
+                continue
             ref = ready[0]
             result = ray.get(ref)
             ordinal = pending.pop(ref)

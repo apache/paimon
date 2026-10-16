@@ -17,7 +17,9 @@
 
 """Ray full-text shard execution, preserving local corpus and merge semantics."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
+from threading import Event
 
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.ray.vector_search import _execution_options, _map_tasks, _require_ray, _scores
@@ -93,14 +95,40 @@ def _search_raw(reader, item):
 
 
 def _execute_hybrid_search(builder, *, concurrency=None, ray_remote_args=None):
-    from pypaimon.ray.vector_search import _execute_vector_search
+    from pypaimon.ray.vector_search import _execute_vector_search, _task_cancellation
 
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    route_results = []
-    # Route builders share the resolved snapshot. Running routes successively
-    # makes concurrency a query-wide bound, rather than multiplying it per route.
-    for route in builder.route_builders():
+    # Resolve the shared snapshot before any route starts planning on a thread.
+    routes = builder.route_builders()
+    workers = min(concurrency, len(routes))
+    route_concurrency = concurrency // max(1, workers)
+
+    def execute_route(route):
         execute = _execute_vector_search if route.route.is_vector() else _execute_full_text_search
-        result = execute(route.search_builder, concurrency=concurrency, ray_remote_args=remote_args)
-        route_results.append(builder.to_route_result(route, result))
+        return execute(route.search_builder, concurrency=route_concurrency, ray_remote_args=remote_args)
+
+    if workers <= 1:
+        return builder.rank([builder.to_route_result(route, execute_route(route)) for route in routes])
+
+    cancelled = Event()
+
+    def run(route):
+        with _task_cancellation(cancelled):
+            return execute_route(route)
+
+    route_results = [None] * len(routes)
+    # Each concurrent route gets a share of the existing search-task budget.
+    # Completion order must not change route ordering supplied to the ranker.
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        try:
+            for ordinal, route in enumerate(routes):
+                futures[executor.submit(run, route)] = ordinal
+            for future in as_completed(futures):
+                ordinal = futures[future]
+                route_results[ordinal] = builder.to_route_result(routes[ordinal], future.result())
+        finally:
+            cancelled.set()
+            for future in futures:
+                future.cancel()
     return builder.rank(route_results)
