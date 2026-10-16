@@ -27,9 +27,11 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
+from pypaimon.read.push_down_utils import exclude_predicate_with_fields, predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.table.special_fields import SpecialFields
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,8 @@ class TableScan:
             if native is not None:
                 return native
         auth_result = self.__auth_query()
+        if self._query_auth_fn is not None:
+            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         # The native planner bypasses the auth-aware file scanner. Resolve auth
         # before selecting a planning backend.
         if (not native_auth and auth_result is None and self._native_requested()
@@ -81,8 +85,6 @@ class TableScan:
             native = self._try_native_plan()
             if native is not None:
                 return native
-        if auth_result is not None:
-            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
         return wrap_plan_with_auth(auth_result, plan)
 
@@ -276,6 +278,8 @@ class TableScan:
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
             raise TableNoPermissionException(self.table.identifier)
+        if self._query_auth_fn is not None:
+            prune_scanner_by_auth(self.table, self.file_scanner, None)
         # Writer restore/overwrite must see L0 even when batch reads hide it.
         skip_level0 = self.file_scanner.skip_level0
         try:
@@ -302,13 +306,13 @@ class TableScan:
             if native is not None:
                 return native, None
         auth_result = self.__auth_query()
+        if self._query_auth_fn is not None:
+            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         if (not native_auth and auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:
                 return native, None
-        if auth_result is not None:
-            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan, stats = self.file_scanner.scan_with_stats()
         return wrap_plan_with_auth(auth_result, plan), stats
 
@@ -602,48 +606,35 @@ def validate_auth_rules(table, auth_result, latest_fields=None):
 def authorize(table, query_auth_fn, read_type, predicate=None, partition_predicate=None):
     if query_auth_fn is None:
         return None
-    requested_type = read_type
-    if read_type:
-        from pypaimon.read.push_down_utils import predicate_field_names
-        selected = {field.name for field in read_type}
-        names = set(selected)
-        for query_filter in (predicate, partition_predicate):
-            if query_filter is not None:
-                names.update(predicate_field_names(query_filter))
-        requested_type = list(read_type) + [
-            field for field in table.fields if field.name in names and field.name not in selected]
-    auth_result = resolve_auth_result(query_auth_fn, requested_type)
+    fields = table.fields
+    if table.options.row_tracking_enabled():
+        fields = SpecialFields.row_type_with_row_tracking(fields)
+    auth_result = resolve_auth_result(query_auth_fn, read_type, predicate, partition_predicate,
+                                      {field.name for field in fields})
     if auth_result is not None:
         validate_auth_rules(table, auth_result)
         if partition_predicate is not None and auth_result.column_masking:
-            from pypaimon.read.push_down_utils import predicate_field_names
             if predicate_field_names(partition_predicate) & set(auth_result.column_masking):
                 raise ValueError("Explicit partition filters cannot reference masked columns")
     return auth_result
 
 
 def prune_scanner_by_auth(table, scanner, auth_result):
-    # Java excludes masked columns from all raw-data pruning. The complete
-    # query predicate is executed after masks have produced visible values.
-    if auth_result.column_masking:
-        from pypaimon.read.push_down_utils import exclude_predicate_with_fields
-        masked = set(auth_result.column_masking)
-        query_predicate = getattr(scanner, 'predicate', None)
-        for name in ('predicate', 'predicate_for_stats', 'primary_key_predicate', 'partition_key_predicate'):
-            setattr(scanner, name, exclude_predicate_with_fields(getattr(scanner, name, None), masked))
-        init_selector = getattr(scanner, '_init_bucket_selector', None)
-        if init_selector is not None:
-            scanner._bucket_selector = init_selector()
-        if query_predicate is not None:
-            scanner.auth_has_non_partition_filter = True
-    if not auth_result.filter:
+    masked = set(auth_result.column_masking or {}) if auth_result is not None else set()
+    predicate = scanner._user_predicate
+    effective = exclude_predicate_with_fields(predicate, masked)
+    if effective != scanner.predicate:
+        scanner._set_predicate(effective)
+    scanner.auth_partition_predicate = None
+    scanner.auth_has_non_partition_filter = bool(
+        predicate is not None and masked & predicate_field_names(predicate))
+    if auth_result is None or not auth_result.filter:
         return
     partition_preds, has_non_partition = __split_auth_filter(table, auth_result)
     if partition_preds:
         combined = PredicateBuilder.and_predicates(partition_preds)
         scanner.auth_partition_predicate = combined
-    if has_non_partition:
-        scanner.auth_has_non_partition_filter = True
+    scanner.auth_has_non_partition_filter |= has_non_partition
 
 
 def __split_auth_filter(table, auth_result):

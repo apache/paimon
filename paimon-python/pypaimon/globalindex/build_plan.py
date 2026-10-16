@@ -318,17 +318,11 @@ def split_one_by_contiguous_row_range(split):
 
 
 def copy_split_with_files(split, files):
-    data_deletion_files = None
-    if getattr(split, "data_deletion_files", None) is not None:
-        index_by_file = {id(file): i for i, file in enumerate(split.files)}
-        data_deletion_files = [
-            split.data_deletion_files[index_by_file[id(file)]]
-            for file in files
-        ]
+    # Like Java's splitByContiguousRowRange, build over physical row IDs.
+    # Query readers apply the deletion vectors from their own snapshot.
     return DataSplit(
         files=list(files),
         partition=split.partition,
         bucket=split.bucket,
         raw_convertible=getattr(split, "raw_convertible", False),
-        data_deletion_files=data_deletion_files,
     )

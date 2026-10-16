@@ -3858,17 +3858,6 @@ public class CoreOptions implements Serializable {
         return fields;
     }
 
-    /**
-     * Returns the set of BLOB fields that support partial updates (e.g. via MERGE INTO).
-     *
-     * <p>Currently, only descriptor-based BLOB fields (configured via {@link
-     * #BLOB_DESCRIPTOR_FIELD}) are updatable. Raw-data BLOB fields are not updatable because the
-     * update cost is too high.
-     */
-    public Set<String> updatableBlobFields() {
-        return blobInlineField();
-    }
-
     private Set<String> parseCommaSeparatedSet(ConfigOption<String> option) {
         return options.getOptional(option)
                 .map(

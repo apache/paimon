@@ -25,15 +25,15 @@ from pypaimon.read.native_plan import (
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 
 
-def try_native_vector_search(builder, queries, batch=False):
-    """Return existing Python result types, or None to use the Python reader.
+def _native_vector_builder(builder, batch=False):
+    """Configure a native builder, or return None before execution.
 
     Search, scalar filtering, refinement and physical-position selection all
-    belong to Rust core. Python only converts the scored result metadata.
+    belong to Rust core. Python only translates options and typed predicates.
     """
     table = builder._table
     reject_search_under_query_auth(table)
-    native_enabled = getattr(table.options, 'native_read_enabled', None)
+    native_enabled = getattr(getattr(table, 'options', None), 'native_read_enabled', None)
     if not callable(native_enabled) or not native_enabled():
         return None
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
@@ -64,6 +64,14 @@ def try_native_vector_search(builder, queries, batch=False):
     except ValueError:
         # Qualify unsupported typed literals before searching.
         return None
+    return native
+
+
+def try_native_vector_search(builder, queries, batch=False):
+    native = _native_vector_builder(builder, batch)
+    if native is None:
+        return None
+    table = builder._table
     # Once the Native route is chosen, errors must not trigger another search
     # against a potentially newer snapshot.
     if batch:

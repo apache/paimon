@@ -19,7 +19,9 @@
 package org.apache.paimon.spark.copy;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
@@ -34,6 +36,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CopyFilesUtil}. */
 public class CopyFilesUtilTest {
+
+    @Test
+    void testNewDataFilePathKeepsTheKindOfTheFile() {
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path("/target/bucket-0"),
+                        "parquet",
+                        "data-",
+                        "changelog-",
+                        false,
+                        null,
+                        null);
+
+        assertThat(newName(pathFactory, "data-a-0.parquet"))
+                .endsWith(".parquet")
+                .doesNotContain(".vector.");
+        assertThat(newName(pathFactory, "data-a-0.vector.lance")).endsWith(".vector.lance");
+        assertThat(newName(pathFactory, "data-a-0.blob")).endsWith(".blob");
+        assertThat(newName(pathFactory, "data-a-0.video")).endsWith(".video");
+    }
+
+    private static String newName(DataFilePathFactory pathFactory, String sourceFileName) {
+        String name = CopyFilesUtil.newDataFilePath(pathFactory, sourceFileName).getName();
+        assertThat(name).startsWith("data-").doesNotStartWith("data-a-");
+        return name;
+    }
 
     @Test
     void testClearWriteColsSequencesWhenChangingSchemaId() {
