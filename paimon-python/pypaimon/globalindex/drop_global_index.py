@@ -89,6 +89,11 @@ class GlobalIndexDropper:
                 )
 
     def build(self) -> List[CommitMessage]:
+        partition_filter = self._resolve_partition_filter()
+        messages = self._native_build(partition_filter)
+        if messages is not None:
+            return messages
+
         snapshot = self._table.snapshot_manager().get_latest_snapshot()
         if snapshot is None:
             return []
@@ -96,7 +101,6 @@ class GlobalIndexDropper:
         target_field_ids = [
             self._table.field_dict[column].id for column in self._index_columns
         ]
-        partition_filter = self._resolve_partition_filter()
 
         def should_delete(entry: IndexManifestEntry) -> bool:
             index_file = entry.index_file
@@ -132,6 +136,27 @@ class GlobalIndexDropper:
             )
             for partition, deletes in by_partition.items()
         ]
+
+    def _native_build(self, partition_filter):
+        from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+        from pypaimon.write.native_commit import _rest_catalog_supported, from_native_commit_messages
+
+        table = self._table
+        if (not table.options.native_write_enabled()
+                or table.options.query_auth_enabled
+                or not native_method_available('Table', 'new_global_index_drop_builder')
+                or not _rest_catalog_supported(table)):
+            return None
+        from pypaimon_rust.datafusion import GlobalIndexDropBuilder
+        if not GlobalIndexDropBuilder.supports_index_type(self._index_type):
+            return None
+        native = _native_table(table).new_global_index_drop_builder()
+        native.with_index_columns(self._index_columns).with_index_type(self._index_type)
+        if partition_filter is not None:
+            native.with_partition_filter(_predicate_to_native(partition_filter))
+        # Preparing deletion messages is read-only. Python retains explicit
+        # commit and dry-run ownership; failures must not remove index files.
+        return from_native_commit_messages(table, native.build())
 
     def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:

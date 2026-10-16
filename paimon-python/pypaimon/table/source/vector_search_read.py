@@ -1021,6 +1021,7 @@ def _configured_vector_metric(options, vector_column, index_type=None):
 
 
 def _raw_search_metric(table, vector_column, options, index_type=None):
+    from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import LUMINA_IDENTIFIERS
     from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
 
     table_map = _table_options_map(table)
@@ -1030,7 +1031,7 @@ def _raw_search_metric(table, vector_column, options, index_type=None):
             return configured
 
     # Before an index exists, use its writer's default, not another column's metric.
-    if index_type in VINDEX_IDENTIFIERS:
+    if index_type in VINDEX_IDENTIFIERS or index_type in LUMINA_IDENTIFIERS:
         return "inner_product"
 
     inferred = None

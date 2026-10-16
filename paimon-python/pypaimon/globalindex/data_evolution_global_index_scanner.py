@@ -25,7 +25,7 @@ from pypaimon.globalindex.global_index_evaluator import (
     GlobalIndexEvaluator,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _map_future
+from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
@@ -110,6 +110,8 @@ class DataEvolutionGlobalIndexScanner:
         options = self._options
 
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
+            from pypaimon.globalindex.union_global_index_reader import UnionGlobalIndexReader
+
             groups = []
             group = index_metas.get(field.id)
             if group is not None:
@@ -124,25 +126,14 @@ class DataEvolutionGlobalIndexScanner:
                 )
             if not groups:
                 return []
-            if len(groups) == 1:
-                return _create_readers(
-                    file_io, index_path, groups[0].metas, field, executor, options)
-            union_coverage = Range.sort_and_merge_overlap(
-                [
-                    range_key
-                    for group in groups
-                    for range_key in group.coverage_ranges
-                ],
-                True,
-            )
+            # Like Java, union every reader for the field. Missing coverage
+            # belongs to raw fallback, not to the matches returned by an index.
             readers = []
             for group in groups:
-                pad_ranges = _exclude_ranges(union_coverage, group.coverage_ranges)
                 readers.extend(
                     _create_readers(
-                        file_io, index_path, group.metas, field, executor,
-                        options, pad_ranges=pad_ranges))
-            return readers
+                        file_io, index_path, group.metas, field, executor, options))
+            return [UnionGlobalIndexReader(readers)]
 
         return GlobalIndexEvaluator(fields, readers_function)
 
@@ -272,74 +263,9 @@ class _IndexMetaFileGroup:
         self.index_field_id = index_field_id
         self.field_ids = tuple(field_ids)
         self.metas = {}
-        self.coverage_ranges = []
 
     def add_file(self, index_type, range_key, io_meta):
-        self.coverage_ranges.append(range_key)
         self.metas.setdefault(index_type, {}).setdefault(range_key, []).append(io_meta)
-
-
-class _PaddingGlobalIndexReader(GlobalIndexReader):
-    def __init__(self, wrapped, padding):
-        self._wrapped = wrapped
-        # Padding rows have not been tested by this index.
-        self._padding = GlobalIndexResult.create(padding.results(), is_exact=False)
-
-    def _pad(self, future):
-        return _map_future(
-            future,
-            lambda result: None if result is None else result.or_(self._padding))
-
-    def visit_equal(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_equal(field_ref, literal))
-
-    def visit_not_equal(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_not_equal(field_ref, literal))
-
-    def visit_less_than(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_less_than(field_ref, literal))
-
-    def visit_less_or_equal(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_less_or_equal(field_ref, literal))
-
-    def visit_greater_than(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_greater_than(field_ref, literal))
-
-    def visit_greater_or_equal(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_greater_or_equal(field_ref, literal))
-
-    def visit_is_null(self, field_ref):
-        return self._pad(self._wrapped.visit_is_null(field_ref))
-
-    def visit_is_not_null(self, field_ref):
-        return self._pad(self._wrapped.visit_is_not_null(field_ref))
-
-    def visit_in(self, field_ref, literals):
-        return self._pad(self._wrapped.visit_in(field_ref, literals))
-
-    def visit_not_in(self, field_ref, literals):
-        return self._pad(self._wrapped.visit_not_in(field_ref, literals))
-
-    def visit_starts_with(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_starts_with(field_ref, literal))
-
-    def visit_ends_with(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_ends_with(field_ref, literal))
-
-    def visit_contains(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_contains(field_ref, literal))
-
-    def visit_like(self, field_ref, literal):
-        return self._pad(self._wrapped.visit_like(field_ref, literal))
-
-    def visit_between(self, field_ref, from_v, to_v):
-        return self._pad(self._wrapped.visit_between(field_ref, from_v, to_v))
-
-    def visit_not_between(self, field_ref, from_v, to_v):
-        return self._pad(self._wrapped.visit_not_between(field_ref, from_v, to_v))
-
-    def close(self):
-        self._wrapped.close()
 
 
 def _resolve_snapshot(table, snapshot):
@@ -392,17 +318,9 @@ def _core_options(table):
     return options
 
 
-def _exclude_ranges(base_ranges, excluded_ranges):
-    excluded_ranges = Range.sort_and_merge_overlap(excluded_ranges, True)
-    result = []
-    for base_range in Range.sort_and_merge_overlap(base_ranges, True):
-        result.extend(base_range.exclude(excluded_ranges))
-    return Range.sort_and_merge_overlap(result, True)
-
-
 def _create_readers(
         file_io, index_path, index_type_metas, field, executor=None,
-        options=None, pad_ranges=None):
+        options=None):
     """Create readers for a specific field, dispatched by index_type.
 
     Unknown indexTypes raise — a silent skip would make
@@ -430,11 +348,7 @@ def _create_readers(
                     OffsetGlobalIndexReader(
                         inner, range_key.from_, range_key.to))
         if offset_readers:
-            reader = UnionGlobalIndexReader(offset_readers)
-            if pad_ranges:
-                padding = GlobalIndexResult.from_ranges(pad_ranges)
-                reader = _PaddingGlobalIndexReader(reader, padding)
-            readers.append(reader)
+            readers.append(UnionGlobalIndexReader(offset_readers))
     return readers
 
 
