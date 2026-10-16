@@ -362,9 +362,10 @@ print(explanation.native_planned)
 The adapter checks the installed binding's capabilities and falls back to the
 Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
-and split metadata plus partition, bucket and file-statistics pruning counters.
-Explain collects the complete metadata funnel before LIMIT, so it can decode
-more manifest entries than ordinary planning. It does not read data files.
+and split metadata plus counters for actual Native planning work, available in
+`explanation.planning_counters`. Statistics collection retains early manifest,
+sidecar and LIMIT optimizations. The Python scanner's before/after pruning funnel
+is unavailable for Native plans because skipped entries are not decoded.
 For programmatic access, `plan, stats = builder.new_scan().scan_with_stats()`
 returns the same counters as `plan.stats()`. Ordinary plans return `None`
 from this getter. Snapshot metadata is available separately as `plan.snapshot_id`.

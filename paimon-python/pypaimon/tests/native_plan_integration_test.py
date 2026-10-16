@@ -1564,15 +1564,19 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(result.split_count, 1)
         self.assertEqual(result.file_count, 1)
         self.assertNotIn('pruning not tracked', str(result))
-        self.assertEqual(result.file_skipping.before, 2)
-        self.assertEqual(result.file_skipping.after, 1)
+        self.assertIsNone(result.file_skipping)
+        self.assertEqual(result.planning_counters['manifest_entries_read'], 2)
+        self.assertEqual(result.planning_counters['manifest_entries_pruned_by_data_stats'], 1)
+        self.assertEqual(result.planning_counters['final_files'], 1)
         builder.with_filter(builder.new_predicate_builder().equal('k', 99))
         empty = builder.explain()
         self.assertTrue(empty.native_planned)
         self.assertEqual(empty.snapshot_id, 2)
         self.assertEqual(empty.split_count, 0)
-        self.assertEqual(empty.file_skipping.before, 2)
-        self.assertEqual(empty.file_skipping.after, 0)
+        self.assertIsNone(empty.file_skipping)
+        self.assertEqual(empty.planning_counters['manifest_entries_read'], 2)
+        self.assertEqual(empty.planning_counters['manifest_entries_pruned_by_data_stats'], 2)
+        self.assertEqual(empty.planning_counters['final_files'], 0)
 
     def test_empty_table_explain_preserves_native_metadata(self):
         self.cat.create_table(

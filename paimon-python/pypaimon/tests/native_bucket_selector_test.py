@@ -86,7 +86,7 @@ def _predicate(pb, case):
 @pytest.mark.parametrize('primary_key', [False, True], ids=['append', 'pk'])
 @pytest.mark.parametrize('case', ['or', 'intersection', 'partition-or', 'unconstrained-branch',
                                   'unsafe-or', 'safe-and', 'contradiction'])
-def test_native_bucket_funnel_matches_java_compatible_python(rest_catalog, primary_key, case):
+def test_native_bucket_selection_matches_java_compatible_python(rest_catalog, primary_key, case):
     catalog, _ = rest_catalog
     schema = pa.schema([('pt', pa.int32()), ('id', pa.int32()), ('value', pa.int32())])
     table, _ = _create(catalog, schema, ['pt'], ['pt', 'id'] if primary_key else None,
@@ -98,19 +98,19 @@ def test_native_bucket_funnel_matches_java_compatible_python(rest_catalog, prima
     actual_files, actual, native = _selected(table, predicate, True)
     assert actual == expected
     assert actual_files == files
-    assert native.entries_potential_total == python.entries_potential_total == 8
-    assert native.entries_after_partition == python.entries_after_partition
-    assert native.entries_after_bucket == python.entries_after_bucket
-    assert native.entries_after_stats == python.entries_after_stats
+    assert native.entries_potential_total is None
+    assert native.entries_total <= python.entries_total
+    assert native.planning_counters['manifest_entries_after_entry_pruning'] == python.entries_after_bucket
+    assert native.planning_counters['manifest_entries_after_manifest_filters'] == python.entries_after_stats
     assert _selected(table, predicate, True, stats=False)[:2] == (actual_files, actual)
     if case == 'partition-or':
-        assert native.entries_after_bucket == 2
+        assert native.planning_counters['manifest_entries_after_entry_pruning'] == 2
     elif case == 'unconstrained-branch':
-        assert native.entries_after_bucket == 5
+        assert native.planning_counters['manifest_entries_after_entry_pruning'] == 5
     elif case in ('unsafe-or', 'contradiction'):
-        assert native.entries_after_bucket == 8
+        assert native.planning_counters['manifest_entries_after_entry_pruning'] == 8
     else:
-        assert native.entries_after_bucket < 8
+        assert native.planning_counters['manifest_entries_after_entry_pruning'] < 8
 
 
 @pytest.mark.parametrize('case', ['one-key-or', 'intersection', 'mixed-or'])
@@ -130,12 +130,12 @@ def test_native_composite_bucket_keys_preserve_java_clause_boundaries(rest_catal
     files, expected, python = _selected(table, predicate, False)
     actual_files, actual, native = _selected(table, predicate, True)
     assert (actual_files, actual) == (files, expected)
-    assert native.entries_after_bucket == python.entries_after_bucket
-    assert native.entries_after_stats == python.entries_after_stats
+    assert native.planning_counters['manifest_entries_after_entry_pruning'] == python.entries_after_bucket
+    assert native.planning_counters['manifest_entries_after_manifest_filters'] == python.entries_after_stats
     if case == 'mixed-or':
-        assert native.entries_after_bucket == 16
+        assert native.planning_counters['manifest_entries_after_entry_pruning'] == 16
     else:
-        assert native.entries_after_bucket <= 4
+        assert native.planning_counters['manifest_entries_after_entry_pruning'] <= 4
 
 
 def test_explicit_partition_filter_does_not_replace_partition_values_in_bucket_predicate(rest_catalog):
@@ -150,8 +150,7 @@ def test_explicit_partition_filter_does_not_replace_partition_values_in_bucket_p
     actual_files, actual, native = _selected(table, predicate, True, partition_filter=selector)
     assert (actual_files, actual) == (files, expected)
     assert actual == [{'pt': 2, 'id': 7, 'value': 7}]
-    assert native.entries_after_partition == python.entries_after_partition == 4
-    assert native.entries_after_bucket == python.entries_after_bucket == 1
+    assert native.planning_counters['manifest_entries_after_entry_pruning'] == python.entries_after_bucket == 1
 
 
 @pytest.mark.parametrize('masked', ['pt', 'value'])
@@ -182,20 +181,22 @@ def test_native_bucket_specialization_excludes_masked_inputs_and_keeps_safe_conj
     assert (actual_files, actual) == (files, expected)
     assert [row['id'] for row in actual] == [3, 3]
     assert all(row[masked] == 'visible' for row in actual)
-    assert native.entries_after_bucket == python.entries_after_bucket == (8 if masked == 'pt' else 2)
+    selected_entries = native.planning_counters['manifest_entries_after_entry_pruning']
+    assert selected_entries == python.entries_after_bucket == (8 if masked == 'pt' else 2)
     assert _selected(table, predicate, True, stats=False)[:2] == (actual_files, actual)
 
 
 @pytest.mark.parametrize('limit', [0, 1])
-def test_native_correlated_bucket_statistics_precede_limit(rest_catalog, limit):
+def test_native_correlated_bucket_statistics_preserve_limit(rest_catalog, limit):
     catalog, _ = rest_catalog
     schema = pa.schema([('pt', pa.int32()), ('id', pa.int32()), ('value', pa.int32())])
     table, _ = _create(catalog, schema, ['pt'], ['pt', 'id'], {'bucket': '4', 'bucket-key': 'id'})
     _append(table, [{'pt': pt, 'id': index, 'value': index} for pt in [1, 2] for index in range(64)], schema)
     predicate = _predicate(table.new_read_builder().new_predicate_builder(), 'partition-or')
     files, actual, stats = _selected(table, predicate, True, limit=limit)
-    assert stats.entries_potential_total == stats.entries_after_partition == 8
-    assert stats.entries_after_bucket == 2
+    assert stats.entries_potential_total is None
+    assert stats.planning_counters['manifest_entries_read'] == (0 if limit == 0 else 8)
+    assert stats.planning_counters['manifest_entries_after_entry_pruning'] == (0 if limit == 0 else 2)
     assert len(actual) == limit
     matches = [{'pt': 1, 'id': 3, 'value': 3}, {'pt': 2, 'id': 7, 'value': 7}]
     assert all(row in matches for row in actual)
@@ -229,7 +230,6 @@ def test_native_incremental_bucket_specialization_preserves_physical_events(rest
     actual_files, actual, native = _selected(table, predicate, True)
     assert (actual_files, actual) == (files, expected)
     assert len(actual) == 4
-    assert native.entries_after_partition == python.entries_after_partition == 16
-    assert native.entries_after_bucket == python.entries_after_bucket == 4
-    assert native.entries_after_stats == python.entries_after_stats
+    assert native.planning_counters['manifest_entries_after_entry_pruning'] == python.entries_after_bucket == 4
+    assert native.planning_counters['manifest_entries_after_manifest_filters'] == python.entries_after_stats
     assert _selected(table, predicate, True, stats=False)[:2] == (actual_files, actual)

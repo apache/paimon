@@ -132,6 +132,8 @@ class ExplainResult:
 
     # Whether the same core Native pass produced the plan and pruning counters.
     native_planned: bool = False
+    # Actual work performed by Native planning, retaining early metadata pruning.
+    planning_counters: Optional[Dict[str, Any]] = None
 
     def __str__(self) -> str:
         return render_explain(self)
@@ -174,6 +176,20 @@ def render_explain(result: ExplainResult) -> str:
           result.bucket_pruning.format() if result.bucket_pruning else "n/a")
     _line(out, "File skipping",
           result.file_skipping.format() if result.file_skipping else "n/a")
+
+    if result.planning_counters is not None:
+        out.write("\nNative planning counters\n")
+        for label, name in (
+            ('Manifest entries decoded', 'manifest_entries_read'),
+            ('Bucket rejects', 'manifest_entries_pruned_by_bucket'),
+            ('Partition rejects', 'manifest_entries_pruned_by_partition'),
+            ('File statistics rejects', 'manifest_entries_pruned_by_data_stats'),
+            ('Cross-schema rejects', 'manifest_entries_pruned_by_cross_schema_stats'),
+            ('Manifest row-range skips', 'manifest_files_pruned_by_row_ranges'),
+            ('Split candidates built', 'split_candidates_built'),
+            ('LIMIT stopped planning', 'limit_early_stopped'),
+        ):
+            _line(out, label, str(result.planning_counters[name]))
 
     out.write("\n")
     _line(out, "Splits", str(result.split_count))

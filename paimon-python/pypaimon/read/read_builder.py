@@ -483,7 +483,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: Optional[ScanStat
     bucket_mode_str = _safe_bucket_mode(table)
 
     native_planned = stats is None or stats.native_planned
-    if stats is None:
+    if stats is None or native_planned:
         partition_pruning = bucket_pruning = file_skipping = None
     else:
         partition_pruning = _partition_pruning(stats, scan)
@@ -585,6 +585,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: Optional[ScanStat
         split_size_p95=sz_p95,
         has_auth=plan_has_auth,
         native_planned=native_planned,
+        planning_counters=stats.planning_counters if stats is not None else None,
         splits=split_infos if verbose else None,
     )
 

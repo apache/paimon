@@ -15,9 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native explain keeps the complete metadata funnel in one planning pass."""
+"""Native explain reports ordinary planning work without disabling early pruning."""
 
 from contextlib import ExitStack
+import json
+import pickle
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -72,7 +74,7 @@ def _native_explain(builder, verbose=False):
 
 
 @pytest.mark.parametrize('limit,expected_files', [(None, 2), (0, 0), (1, 2)])
-def test_native_explain_counts_all_stats_candidates_before_limit(rest_catalog, limit, expected_files):
+def test_native_explain_reports_actual_file_statistics_work(rest_catalog, limit, expected_files):
     catalog, _ = rest_catalog
     table, schema = _create(catalog)
     for start in [0, 10, 100]:
@@ -84,12 +86,16 @@ def test_native_explain_counts_all_stats_candidates_before_limit(rest_catalog, l
     result = _native_explain(builder, True)
     assert result.snapshot_id == 3
     assert result.file_count == expected_files
-    assert (result.file_skipping.before, result.file_skipping.after, result.file_skipping.pruned) == (3, 2, 1)
+    assert result.file_skipping is None
+    assert result.planning_counters['manifest_entries_read'] == (0 if limit == 0 else 3)
+    assert result.planning_counters['manifest_entries_pruned_by_data_stats'] == (0 if limit == 0 else 1)
+    assert 'Manifest entries decoded' in str(result)
+    assert json.loads(json.dumps(result.planning_counters)) == result.planning_counters
     assert result.split_count == len(builder.new_scan().plan().splits())
     assert result.splits is not None
 
 
-def test_native_explain_partition_and_bucket_funnel_matches_python(rest_catalog):
+def test_native_explain_reports_actual_bucket_then_partition_pruning(rest_catalog):
     catalog, _ = rest_catalog
     schema = pa.schema([('pt', pa.int32()), ('id', pa.int32()), ('value', pa.int32())])
     table, _ = _create(catalog, schema, ['pt'], ['pt', 'id'], {'bucket': '4', 'bucket-key': 'id'})
@@ -103,14 +109,17 @@ def test_native_explain_partition_and_bucket_funnel_matches_python(rest_catalog)
 
     expected, actual = explain(False), explain(True)
     for name in ['partition_pruning', 'bucket_pruning', 'file_skipping']:
-        assert getattr(actual, name) == getattr(expected, name)
-    assert (actual.partition_pruning.before, actual.partition_pruning.after) == (8, 4)
-    assert (actual.bucket_pruning.before, actual.bucket_pruning.after) == (4, 1)
+        assert getattr(actual, name) is None
+    assert actual.planning_counters['manifest_entries_read'] == 8
+    # A partition-specialized bucket selector conservatively keeps the other
+    # partition, whose four entries are rejected by the partition filter.
+    assert actual.planning_counters['manifest_entries_pruned_by_bucket'] == 3
+    assert actual.planning_counters['manifest_entries_pruned_by_partition'] == 4
     assert actual.file_count == expected.file_count == 1
 
 
 @pytest.mark.parametrize('limit,expected_files', [(None, 3), (0, 0), (1, 1)])
-def test_native_explain_counts_candidates_before_limit_without_row_filter(rest_catalog, limit, expected_files):
+def test_native_explain_preserves_limit_stopping_without_row_filter(rest_catalog, limit, expected_files):
     catalog, _ = rest_catalog
     table, schema = _create(catalog)
     for start in range(3):
@@ -121,13 +130,18 @@ def test_native_explain_counts_candidates_before_limit_without_row_filter(rest_c
     scan = reader.new_scan()
     with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
-    assert stats.entries_after_stats == 3
+    assert stats.entries_after_stats is None
+    assert stats.planning_counters['final_files'] == expected_files
+    assert pickle.loads(pickle.dumps(stats)) == stats
+    if limit is not None:
+        assert stats.planning_counters['limit_early_stopped']
+        assert stats.planning_counters['split_candidates_built'] == limit
     assert len(plan.splits()) == expected_files
     assert [split.file_paths for split in plan.splits()] == [
         split.file_paths for split in reader.new_scan().plan().splits()]
 
 
-def test_native_explain_counts_cross_schema_overwrite_entries_before_netting(rest_catalog):
+def test_native_explain_records_cross_schema_overwrite_netting(rest_catalog):
     from pypaimon.schema.data_types import AtomicType
     from pypaimon.schema.schema_change import SchemaChange
     catalog, _ = rest_catalog
@@ -144,9 +158,9 @@ def test_native_explain_counts_cross_schema_overwrite_entries_before_netting(res
         outcomes.append(_native_explain(reader) if native else reader.explain())
     expected, actual = outcomes
     assert actual.file_count == expected.file_count == 1
-    assert actual.file_skipping == expected.file_skipping
-    assert actual.file_skipping.before == 3
-    assert actual.file_skipping.after == 2
+    assert actual.file_skipping is None
+    assert actual.planning_counters['manifest_entries_read'] == 3
+    assert actual.planning_counters['manifest_entries_after_merge'] == 1
 
 
 def test_native_explain_keeps_empty_and_historical_snapshot_metadata(rest_catalog):
@@ -169,7 +183,8 @@ def test_native_explain_keeps_empty_and_historical_snapshot_metadata(rest_catalo
     result = _native_explain(builder)
     assert result.snapshot_id == 2
     assert result.file_count == 0
-    assert (result.file_skipping.before, result.file_skipping.after) == (2, 0)
+    assert result.file_skipping is None
+    assert result.planning_counters['manifest_entries_pruned_by_data_stats'] == 2
 
 
 def test_native_explain_does_not_open_data_files(rest_catalog):
@@ -197,9 +212,7 @@ def test_native_stats_are_readonly_and_normal_planning_stays_lightweight(rest_ca
     assert scan.plan().stats() is None
     plan = scan.with_stats().plan()
     stats = plan.stats()
-    assert stats.complete
-    assert stats.entries_potential_total == stats.manifest_entries_read == 1
-    assert stats.entries_after_partition == stats.entries_after_bucket == stats.entries_after_stats == 1
+    assert stats.manifest_entries_read == stats.manifest_entries_after_manifest_filters == 1
     assert plan.snapshot_id() == 1
     with pytest.raises(AttributeError):
         stats.manifest_entries_read = 100
@@ -210,7 +223,6 @@ def test_native_stats_are_readonly_and_normal_planning_stays_lightweight(rest_ca
 
 @pytest.mark.parametrize('changelog', [False, True])
 def test_native_incremental_explain_reports_only_the_selected_window(rest_catalog, changelog):
-    import json
     catalog, _ = rest_catalog
     table, schema = _create(catalog, primary_keys=['id'] if changelog else None,
                             options={'bucket': '1', 'changelog-producer': 'input'} if changelog else {})
@@ -230,7 +242,7 @@ def test_native_incremental_explain_reports_only_the_selected_window(rest_catalo
     with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
-    assert stats.entries_potential_total == stats.entries_after_stats == 2
+    assert stats.planning_counters['manifest_entries_read'] == stats.planning_counters['final_files'] == 2
     assert plan.snapshot_id == 3
     assert all(split.is_streaming for split in plan.splits())
     assert all(file.file_name.startswith('changelog-') == changelog
@@ -238,7 +250,7 @@ def test_native_incremental_explain_reports_only_the_selected_window(rest_catalo
 
 
 @pytest.mark.parametrize('limit', [None, 0, 1])
-def test_native_data_evolution_explain_tracks_projected_files_before_limit(rest_catalog, limit):
+def test_native_data_evolution_explain_tracks_projection_with_limit(rest_catalog, limit):
     catalog, _ = rest_catalog
     table, schema = _create(catalog, options={
         'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
@@ -259,8 +271,9 @@ def test_native_data_evolution_explain_tracks_projected_files_before_limit(rest_
     with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
-    assert stats.entries_potential_total == stats.entries_after_bucket == 2
-    assert stats.entries_after_stats == 1
+    assert stats.entries_potential_total is None
+    assert stats.planning_counters['manifest_entries_read'] == (0 if limit == 0 else 2)
+    assert stats.planning_counters['final_files'] == (0 if limit == 0 else 1)
     assert len(plan.splits()) == (0 if limit == 0 else 1)
 
 

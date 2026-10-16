@@ -16,7 +16,7 @@
 # under the License.
 
 from dataclasses import dataclass, field
-from typing import Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 
 @dataclass
@@ -38,11 +38,11 @@ class ScanStats:
     # manifest-level partition skip. ``entries_total`` is what actually reached
     # ``_filter_manifest_entry``; the gap between the two captures
     # manifest-level pruning.
-    entries_potential_total: int = 0
+    entries_potential_total: Optional[int] = 0
     entries_total: int = 0
-    entries_after_partition: int = 0
-    entries_after_bucket: int = 0
-    entries_after_stats: int = 0
+    entries_after_partition: Optional[int] = 0
+    entries_after_bucket: Optional[int] = 0
+    entries_after_stats: Optional[int] = 0
 
     # Identity sets are Python-scanner bookkeeping. Native returns counters
     # without transporting partition values back across the language boundary.
@@ -52,16 +52,46 @@ class ScanStats:
     buckets_seen: Optional[Set[Tuple[Tuple, int]]] = field(default_factory=set)
     buckets_after_pruning: Optional[Set[Tuple[Tuple, int]]] = field(default_factory=set)
     native_planned: bool = False
+    # Native counters describe actual planning work; skipped metadata is not decoded
+    # to reconstruct the Python scanner's before/after funnel.
+    planning_counters: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_native(cls, stats):
         return cls(
             manifest_files_total=stats.manifest_files_before_partition_pruning,
             manifest_files_after_partition=stats.manifest_files_after_partition_pruning,
-            entries_potential_total=stats.entries_potential_total,
             entries_total=stats.manifest_entries_read,
-            entries_after_partition=stats.entries_after_partition,
-            entries_after_bucket=stats.entries_after_bucket,
-            entries_after_stats=stats.entries_after_stats,
+            entries_potential_total=None, entries_after_partition=None,
+            entries_after_bucket=None, entries_after_stats=None,
+            planning_counters={name: getattr(stats, name) for name in (
+                'base_manifest_files',
+                'delta_manifest_files',
+                'manifest_files_before_partition_pruning',
+                'manifest_files_after_partition_pruning',
+                'manifest_files_pruned_by_row_ranges',
+                'manifest_entries_read',
+                'manifest_entries_pruned_by_bucket',
+                'manifest_entries_pruned_by_partition',
+                'manifest_entries_after_entry_pruning',
+                'manifest_entries_pruned_by_level',
+                'manifest_entries_pruned_by_row_ranges',
+                'manifest_entries_pruned_by_data_stats',
+                'manifest_entries_after_manifest_filters',
+                'manifest_entries_after_merge',
+                'manifest_entries_pruned_by_cross_schema_stats',
+                'manifest_entries_after_cross_schema_stats',
+                'data_evolution_groups_before_stats',
+                'data_evolution_groups_pruned_by_stats',
+                'data_evolution_groups_pruned_by_row_ranges',
+                'split_candidates_built',
+                'limit_early_stopped',
+                'splits_before_limit',
+                'splits_after_limit',
+                'final_splits',
+                'final_files',
+                'planned_data_file_bytes',
+                'limit',
+            )},
             partition_keys_before=None, partition_keys_after=None,
             buckets_seen=None, buckets_after_pruning=None, native_planned=True)
