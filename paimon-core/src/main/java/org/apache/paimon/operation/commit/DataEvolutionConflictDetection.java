@@ -410,7 +410,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                                 "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
                                         + "operations "
                                         + "have encountered conflicts, data files: "
-                                        + dataFileGroup));
+                                        + dataFileGroup.stream()
+                                                .map(this::fileEntryToString)
+                                                .collect(Collectors.toList())));
             }
         }
         return Optional.empty();
@@ -448,10 +450,12 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                                     "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
                                             + "operations have encountered conflicts, dedicated "
                                             + "file %s %s %s: %s",
-                                    dedicatedFile,
+                                    fileEntryToString(dedicatedFile),
                                     dedicatedRange,
                                     conflictReason,
-                                    intersectingDataFiles)));
+                                    intersectingDataFiles.stream()
+                                            .map(this::fileEntryToString)
+                                            .collect(Collectors.toList()))));
         }
         return Optional.empty();
     }
