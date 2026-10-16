@@ -47,6 +47,13 @@ def metadata_local_millis(millis):
     return _signed(int(millis) + _local_offset(int(millis) // 1000) * 1000, 64)
 
 
+def metadata_epoch_millis(millis):
+    """Java DataFileMeta.creationTimeEpochMillis for a stored local TIMESTAMP."""
+    from pypaimon.casting.temporal_utils import _local_to_utc_seconds, _signed
+    seconds, fraction = divmod(int(millis), 1000)
+    return _signed(_local_to_utc_seconds(seconds) * 1000 + fraction, 64)
+
+
 def metadata_snapshot(table):
     """Use the table's captured view, including an explicitly empty snapshot."""
     if '_read_snapshot' in vars(table):

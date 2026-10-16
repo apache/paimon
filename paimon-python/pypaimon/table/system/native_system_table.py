@@ -23,11 +23,9 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.read.native_plan import _native_table, native_method_available
 from pypaimon.write.native_commit import _rest_catalog_supported
 
-# Partitions need the catalog's list-partitions operation, which is not carried
-# by a resolved Native Table. Keep that table on the existing catalog path.
 _NATIVE_TABLES = frozenset((
     'snapshots', 'schemas', 'options', 'manifests', 'files', 'buckets',
-    'tags', 'branches', 'file_key_ranges', 'table_indexes', 'consumers',
+    'tags', 'branches', 'file_key_ranges', 'table_indexes', 'consumers', 'partitions',
 ))
 
 
