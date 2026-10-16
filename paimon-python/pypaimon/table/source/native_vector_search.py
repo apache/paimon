@@ -33,7 +33,7 @@ def _native_vector_builder(builder, batch=False):
     """
     table = builder._table
     reject_search_under_query_auth(table)
-    native_enabled = getattr(table.options, 'native_read_enabled', None)
+    native_enabled = getattr(getattr(table, 'options', None), 'native_read_enabled', None)
     if not callable(native_enabled) or not native_enabled():
         return None
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
