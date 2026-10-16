@@ -21,6 +21,7 @@ package org.apache.paimon.zookeeper;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.utils.ExceptionUtils;
 
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.locks.InterProcessMutex;
@@ -146,17 +147,8 @@ public class ZooKeeperCatalogLock implements Lock {
         heldLock.set(acquiredLock);
         return () -> {
             heldLock.set(acquiredLock.previous);
-            try {
-                if (mutex.heldNode() != null) {
-                    mutex.release();
-                }
-            } catch (Exception e) {
-                LOG.warn(
-                        "paimon_lock_release_failed releasing lock '{}' for {}.{}",
-                        path,
-                        database,
-                        table,
-                        e);
+            if (mutex.heldNode() != null) {
+                mutex.release();
             }
         };
     }
@@ -186,6 +178,11 @@ public class ZooKeeperCatalogLock implements Lock {
         try {
             nodeGone = current.node == null || client.checkExists().forPath(current.node) == null;
         } catch (Exception e) {
+            if (ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent()) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(
+                        "Interrupted while verifying ZooKeeper lock '" + current.path + "'", e);
+            }
             nodeGone = true;
             LOG.warn(
                     "paimon_lock_verify_failed could not re-verify lock node '{}'",
@@ -292,6 +289,10 @@ public class ZooKeeperCatalogLock implements Lock {
                             removed.add(path);
                         }
                     } catch (Exception e) {
+                        if (ExceptionUtils.findThrowable(e, InterruptedException.class)
+                                .isPresent()) {
+                            Thread.currentThread().interrupt();
+                        }
                         LOG.warn("paimon_lock_release_failed on close, lock '{}'", path, e);
                     }
                 });

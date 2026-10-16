@@ -53,6 +53,26 @@ public class CatalogOptions {
                     .defaultValue(CatalogTableType.MANAGED)
                     .withDescription("Type of table.");
 
+    public static final ConfigOption<Boolean> LOCK_ENABLED =
+            ConfigOptions.key("lock.enabled")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Enable catalog locking. Defaults to enabled on object stores.");
+
+    public static final ConfigOption<String> LOCK_TYPE =
+            ConfigOptions.key("lock.type")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The catalog lock factory identifier. Defaults to the catalog's built-in lock factory.");
+
+    public static final ConfigOption<Duration> LOCK_ACQUIRE_TIMEOUT =
+            ConfigOptions.key("lock-acquire-timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(8))
+                    .withDescription("The maximum time to wait for acquiring the lock.");
+
     public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
             key("client-pool-size")
                     .intType()
