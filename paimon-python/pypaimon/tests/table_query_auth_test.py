@@ -77,6 +77,7 @@ class _FakeTable:
 class _FakeScan:
     def __init__(self, plan, identifier=None, auth_result=None):
         self._plan = plan
+        self._query_auth_fn = None
         self.table = _FakeTable(identifier)
         self.file_scanner = _FakeFileScanner(plan)
         self._auth_result = auth_result
