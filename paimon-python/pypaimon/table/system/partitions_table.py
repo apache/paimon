@@ -94,7 +94,8 @@ class PartitionsTable(SystemTable):
             if stats is None:
                 stats = {
                     "partition_string": partition_string,
-                    "partition_key": partition_key,
+                    "deletion_key": _deletion_partition_key(
+                        entry.partition, self.base_table.options.options.get(CoreOptions.PARTITION_DEFAULT_NAME)),
                     "record_count": 0,
                     "file_size_in_bytes": 0,
                     "file_count": 0,
@@ -130,7 +131,7 @@ class PartitionsTable(SystemTable):
                                      else metadata_local_millis(stats["last_update_time"]))
             total_buckets.append(stats["total_buckets"])
             deleted_counts.append(
-                deleted_record_counts.get(stats["partition_key"], 0))
+                deleted_record_counts.get(stats["deletion_key"], 0))
 
         n = len(partition_map)
         return pyarrow.table({
@@ -211,3 +212,23 @@ def _render_partition(partition, default_name) -> str:
             text = default_name
         parts.append("{}={}".format(field.name, text))
     return "/".join(parts)
+
+
+def _deletion_partition_key(partition, default_name):
+    """Java looks up deletion metadata after converting the spec back to typed values."""
+    from pypaimon.table.row.generic_row import GenericRow, _parse_type_precision_scale
+    values = []
+    for index, field in enumerate(partition.fields):
+        value = partition.get_field(index)
+        if value is not None:
+            text = _render_value(value, field.type)
+            if text == default_name or _is_null_or_whitespace_only(text):
+                value = None
+            elif isinstance(value, (bytes, bytearray, memoryview)):
+                value = text.encode('utf-8')
+            elif str(field.type).upper().startswith('TIME') and not str(field.type).upper().startswith('TIMESTAMP'):
+                precision, _ = _parse_type_precision_scale(field.type)
+                quantum = 10 ** (6 - min(precision, 3))
+                value = value.replace(microsecond=value.microsecond // quantum * quantum)
+        values.append(value)
+    return bytes(GenericRowSerializer.to_bytes(GenericRow(values, partition.fields)))

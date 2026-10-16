@@ -145,6 +145,13 @@ def test_deletion_vector_counts_read_avro_metadata_and_keep_unknown(rest_catalog
             0, GenericRow([partition], table.partition_keys_fields), bucket,
             IndexFileMeta('DELETION_VECTORS', partition + str(bucket), 1, 1, dv_ranges=ranges)))
     # Only manifest metadata is needed; no deletion-vector payload is opened.
+    table = _with_index_entries(table, entries)
+    rows = _assert_parity(table)
+    assert {row['partition']: row['deleted_record_count'] for row in rows} == {
+        'p=known': 6, 'p=unknown': None, 'p=zero': 0}
+
+
+def _with_index_entries(table, entries):
     name = IndexManifestFile(table).write(entries)
     snapshot = table.snapshot_manager().get_latest_snapshot()
     path = table.snapshot_manager().snapshot_dir + '/snapshot-' + str(snapshot.id)
@@ -152,10 +159,34 @@ def test_deletion_vector_counts_read_avro_metadata_and_keep_unknown(rest_catalog
         data = json.loads(stream.read())
     data['indexManifest'] = name
     table.file_io.overwrite_file_utf8(path, json.dumps(data))
-    table = table._copy_with_snapshot(table.snapshot_manager().get_latest_snapshot())
+    return table._copy_with_snapshot(table.snapshot_manager().get_latest_snapshot())
+
+
+@pytest.mark.parametrize('typ,value,canonical', [
+    (pa.string(), 'MISSING', None),
+    (pa.string(), '\x1c', None),
+    (pa.binary(), b'\xed\xa0\x80', '\ufffd'.encode('utf-8')),
+    (pa.time32('ms'), time(12, 34, 56, 123000), time(12, 34, 56)),
+])
+def test_deletion_lookup_uses_java_partition_spec_round_trip(rest_catalog, typ, value, canonical):
+    catalog, _ = rest_catalog
+    schema = pa.schema([('id', pa.int32()), ('p', typ)])
+    table = _create(catalog, schema, ['p'], {
+        'deletion-vectors.enabled': 'true', 'partition.default-name': 'MISSING'})
+    _append(table, [{'id': i, 'p': value} for i in range(3)]
+            + [{'id': i + 3, 'p': canonical} for i in range(3)], schema)
+    entries = []
+    for partition, count in [(value, 1), (canonical, 3)]:
+        ranges = {'file': DeletionVectorMeta('file', 0, 1, count)}
+        entries.append(IndexManifestEntry(
+            0, GenericRow([partition], table.partition_keys_fields), 0,
+            IndexFileMeta('DELETION_VECTORS', str(count), 1, 1, dv_ranges=ranges)))
+    table = _with_index_entries(table, entries)
     rows = _assert_parity(table)
-    assert {row['partition']: row['deleted_record_count'] for row in rows} == {
-        'p=known': 6, 'p=unknown': None, 'p=zero': 0}
+    assert len(rows) == 2
+    # Java reconstructs NULL/default and UTF-8 replacement bytes from the spec,
+    # so both displayed rows look up the canonical partition's count.
+    assert [row['deleted_record_count'] for row in rows] == [3, 3]
 
 
 @pytest.mark.parametrize('native', [False, True])
