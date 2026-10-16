@@ -20,14 +20,17 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.ResourceType;
+import org.apache.paimon.rest.OpenApiSpec;
 import org.apache.paimon.rest.ResourcePaths;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.TreeSet;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,6 +50,22 @@ public class DLFOpenApiActionsTest {
             actions.add(operation[2]);
         }
         assertEquals(74, actions.size());
+    }
+
+    /** The table and docs/static/rest-*-open-api.yaml must list the same operations. */
+    @Test
+    public void testOperationsMatchTheOpenApiSpec() throws IOException {
+        Set<String> spec = new TreeSet<>();
+        for (String operation : OpenApiSpec.operations()) {
+            spec.add(OpenApiSpec.normalize(operation));
+        }
+        Set<String> registered = new TreeSet<>();
+        for (String[] operation : DLFOpenApiActions.operations()) {
+            registered.add(OpenApiSpec.normalize(operation[0] + " " + operation[1]));
+        }
+        assertThat(registered)
+                .as("DLFOpenApiActions must register exactly the spec operations")
+                .containsExactlyInAnyOrderElementsOf(spec);
     }
 
     @Test

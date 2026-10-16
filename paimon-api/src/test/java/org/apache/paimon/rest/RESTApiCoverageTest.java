@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.auth;
+package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.Function;
@@ -29,7 +29,6 @@ import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.management.RowFilter;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.view.SemanticViewDefinition;
 
 import com.sun.net.httpserver.HttpServer;
@@ -54,8 +53,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.rest.RESTCatalogInternalOptions.PREFIX;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
@@ -65,8 +66,10 @@ import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Every request {@link RESTApi} sends with openapi-v4 must carry an x-acs-action. */
-class DLFOpenApiActionsCoverageTest {
+/**
+ * Every request {@link RESTApi} sends must be in the OpenAPI spec and carry an openapi-v4 action.
+ */
+class RESTApiCoverageTest {
 
     /** RESTApi methods with no entry in DLFOpenApiActions; they are signed without an action. */
     private static final Set<String> WITHOUT_ACTION = Collections.emptySet();
@@ -76,7 +79,7 @@ class DLFOpenApiActionsCoverageTest {
 
     private final List<String[]> requests = new CopyOnWriteArrayList<>();
     private HttpServer server;
-    private RESTApi api;
+    private Options options;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -98,7 +101,7 @@ class DLFOpenApiActionsCoverageTest {
                 });
         server.start();
 
-        Options options = new Options();
+        options = new Options();
         options.set(URI, "http://127.0.0.1:" + server.getAddress().getPort());
         options.set(PREFIX, "clg-paimon-1");
         options.set(TOKEN_PROVIDER, "dlf");
@@ -106,7 +109,6 @@ class DLFOpenApiActionsCoverageTest {
         options.set(DLF_ACCESS_KEY_SECRET, "sk");
         options.set(DLF_REGION, "cn-hangzhou");
         options.set(DLF_SIGNING_ALGORITHM, "openapi-v4");
-        api = new RESTApi(options, false);
     }
 
     @AfterEach
@@ -119,8 +121,70 @@ class DLFOpenApiActionsCoverageTest {
     /** A new REST call fails here until it is added to DLFOpenApiActions or WITHOUT_ACTION. */
     @Test
     void testEveryRequestCarriesAnAction() throws Exception {
-        List<String> silent = new ArrayList<>();
         Map<String, List<String>> withoutAction = new TreeMap<>();
+        sendEveryRequest()
+                .forEach(
+                        (name, sent) -> {
+                            for (String[] request : sent) {
+                                if (request[2] == null) {
+                                    withoutAction
+                                            .computeIfAbsent(name, k -> new ArrayList<>())
+                                            .add(request[0] + " " + request[1]);
+                                }
+                            }
+                        });
+
+        Map<String, List<String>> missing = new TreeMap<>(withoutAction);
+        missing.keySet().removeAll(WITHOUT_ACTION);
+        assertThat(missing)
+                .as("requests without x-acs-action; map them in DLFOpenApiActions")
+                .isEmpty();
+        assertThat(withoutAction.keySet())
+                .as("WITHOUT_ACTION entries that now resolve; remove them")
+                .containsAll(WITHOUT_ACTION);
+    }
+
+    /** Adding or removing a REST call fails here until docs/static/rest-*-open-api.yaml follows. */
+    @Test
+    void testRequestsMatchTheOpenApiSpec() throws Exception {
+        Set<String> spec = OpenApiSpec.operations();
+        Set<String> unsent = new TreeSet<>(spec);
+        Map<String, List<String>> unspecified = new TreeMap<>();
+        sendEveryRequest()
+                .forEach(
+                        (name, sent) -> {
+                            for (String[] request : sent) {
+                                String operation = OpenApiSpec.match(spec, request[0], request[1]);
+                                if (operation == null) {
+                                    unspecified
+                                            .computeIfAbsent(name, k -> new ArrayList<>())
+                                            .add(request[0] + " " + request[1]);
+                                } else {
+                                    unsent.remove(operation);
+                                }
+                            }
+                        });
+
+        assertThat(unspecified).as("requests the OpenAPI spec lacks; add them to it").isEmpty();
+        assertThat(unsent)
+                .as("spec operations RESTApi never sends; drop them or add the call")
+                .isEmpty();
+    }
+
+    /** Requests sent by each public method, by name; "RESTApi" holds the constructor's. */
+    private Map<String, List<String[]>> sendEveryRequest() throws Exception {
+        Map<String, List<String[]>> sent = new TreeMap<>();
+        Options withConfig = new Options(options.toMap());
+        withConfig.set(WAREHOUSE, "x1");
+        try {
+            new RESTApi(withConfig, true);
+        } catch (RuntimeException ignored) {
+            // a reply of {} may not parse; only the request matters
+        }
+        sent.put("RESTApi", new ArrayList<>(requests));
+
+        RESTApi api = new RESTApi(options, false);
+        List<String> silent = new ArrayList<>();
         for (Method method : RESTApi.class.getDeclaredMethods()) {
             if (!Modifier.isPublic(method.getModifiers())
                     || Modifier.isStatic(method.getModifiers())
@@ -136,24 +200,10 @@ class DLFOpenApiActionsCoverageTest {
             if (requests.isEmpty()) {
                 silent.add(method.toGenericString());
             }
-            for (String[] request : requests) {
-                if (request[2] == null) {
-                    withoutAction
-                            .computeIfAbsent(method.getName(), k -> new ArrayList<>())
-                            .add(request[0] + " " + request[1]);
-                }
-            }
+            sent.computeIfAbsent(method.getName(), k -> new ArrayList<>()).addAll(requests);
         }
-
         assertThat(silent).as("methods that sent no request; give them arguments").isEmpty();
-        Map<String, List<String>> missing = new TreeMap<>(withoutAction);
-        missing.keySet().removeAll(WITHOUT_ACTION);
-        assertThat(missing)
-                .as("requests without x-acs-action; map them in DLFOpenApiActions")
-                .isEmpty();
-        assertThat(withoutAction.keySet())
-                .as("WITHOUT_ACTION entries that now resolve; remove them")
-                .containsAll(WITHOUT_ACTION);
+        return sent;
     }
 
     private static Object[] arguments(Method method) {
