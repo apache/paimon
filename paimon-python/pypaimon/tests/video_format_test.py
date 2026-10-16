@@ -153,6 +153,9 @@ class VideoFormatTest(unittest.TestCase):
         self.assertEqual(frames[0].payload_descriptor, frames[3].payload_descriptor)
         self.assertNotEqual(frames[0].payload_descriptor, frames[2].payload_descriptor)
         self.assertIsNone(values[4])
+        # The file index still exposes the placeholder sentinel. Materializing
+        # that cell without an older version yields NULL.
+        self.assertIsNone(self._read(target, row_indices=[5])[0])
 
     def test_cross_language_video_v1_fixture(self):
         fixture = self._fixture_bytes(self.VIDEO_FIXTURE)
