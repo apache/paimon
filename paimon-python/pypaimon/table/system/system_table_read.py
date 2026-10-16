@@ -121,14 +121,6 @@ class SystemTableRead:
         if not splits:
             return self._empty_table()
 
-        from pypaimon.table.system.system_table_scan import NativeSystemSplit
-        if any(isinstance(split, NativeSystemSplit) for split in splits):
-            if not all(isinstance(split, NativeSystemSplit) for split in splits):
-                raise TypeError('Cannot mix Native and Python system-table splits')
-            from pypaimon.table.system.native_system_table import read_native_system_splits
-            return read_native_system_splits(
-                self.system_table, self.read_type, self.predicate, self.limit, splits)
-
         arrow_predicate = (
             self.predicate.to_arrow() if self.predicate is not None else None
         )

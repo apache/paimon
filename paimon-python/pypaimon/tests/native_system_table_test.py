@@ -35,7 +35,7 @@ from pypaimon.tests import native_plan_rest_test
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = pytest.mark.skipif(
-    not native_method_available('Table', 'system_table'),
+    not native_method_available('Table', 'new_system_read'),
     reason='Native system-table reader required')
 
 SCHEMA = pa.schema([('id', pa.int32()), ('value', pa.string()), ('pt', pa.string())])
@@ -186,17 +186,15 @@ def test_native_error_is_not_retried_in_python(source):
 def test_native_reader_preserves_schema_on_empty_and_rejects_catalog_tables(source):
     _, table, _ = source
     native = _native_table(table)
-    builder = native.system_table('files').new_read_builder()
-    reader = builder.new_read().read(builder.new_scan().plan().splits())
-    try:
-        assert reader.schema.names[16] == 'deleteRowCount'
-        assert pa.Table.from_batches(list(reader), schema=reader.schema).num_rows == 0
-    finally:
-        reader.close()
+    read = native.new_system_read('files')
+    result = read.read()
+    assert result.schema.names[16] == 'deleteRowCount'
+    assert result.num_rows == 0
+    assert [field.name() for field in read.read_type()] == result.schema.names
     with pytest.raises(Exception, match='requires a catalog|unknown'):
-        native.system_table('partitions')
+        native.new_system_read('partitions')
     with pytest.raises(Exception, match='requires a catalog|unknown'):
-        native.system_table('unknown')
+        native.new_system_read('unknown')
 
 
 def test_writer_version_is_loaded_from_snapshot_metadata(source):
@@ -292,7 +290,7 @@ def test_native_metadata_auth_guard(source):
     _, table, _ = source
     denied = _native_table(table.copy({'query-auth.enabled': 'true'}))
     with pytest.raises(Exception, match='query-auth.enabled'):
-        denied.system_table('options')
+        denied.new_system_read('options')
 
 
 @pytest.mark.parametrize('keyed', [False, True])
@@ -344,16 +342,24 @@ def test_metadata_paths_keep_escaped_partition_components(source, name):
     assert actual.column('partition').to_pylist() == ['{a/b%=λ}']
 
 
-def test_native_reader_filters_before_projection_without_python_arrow_filter(source):
+def test_system_read_filters_before_projection_without_python_arrow_filter(source):
+    from pypaimon.read.native_plan import _predicate_to_native
     _, table, _ = source
     _append(table, [{'id': 1, 'value': 'a', 'pt': 'a'}])
     _append(table, [{'id': 2, 'value': 'b', 'pt': 'b'}])
     system = _system(table, 'snapshots', True)
     predicate = PredicateBuilder(system.row_type().fields).greater_than('snapshot_id', 1)
+    read = _native_table(table).new_system_read('snapshots').with_projection(['commit_user'])
+    read.with_filter(_predicate_to_native(predicate)).with_limit(1)
     with patch.object(type(predicate), 'to_arrow', side_effect=AssertionError('Python Arrow filter ran')):
-        result = _read(system, ['commit_user'], predicate, 1)
+        result = read.read()
     assert result.num_rows == 1
-    assert result.column_names == ['commit_user']
+    assert result.schema.names == ['commit_user']
+    assert [field.name() for field in read.read_type()] == ['commit_user']
+    read.with_limit(0)
+    empty = read.read()
+    assert empty.num_rows == 0
+    assert empty.schema == result.schema
 
 
 def test_captured_native_split_can_be_reused_with_another_read_configuration(source):
@@ -378,16 +384,16 @@ def test_captured_native_split_reads_without_recreating_rest_environment(source)
         assert reader.to_arrow(splits).to_pylist() == [{'snapshot_id': 1}]
 
 
-def test_core_repeated_projection_split_transport(source):
+def test_system_read_repeated_and_empty_projections(source):
     _, table, _ = source
-    builder = _native_table(table).system_table('options').new_read_builder()
-    builder.with_projection(['value', 'key', 'value'])
-    splits = pickle.loads(pickle.dumps(builder.new_scan().plan().splits()))
-    reader = builder.new_read().read(splits)
-    try:
-        result = pa.Table.from_batches(list(reader), schema=reader.schema)
-    finally:
-        reader.close()
+    read = _native_table(table).new_system_read('options')
+    read.with_projection(['value', 'key', 'value'])
+    result = read.read()
     assert result.num_rows > 0
-    assert result.column_names == ['value', 'key', 'value']
+    assert result.schema.names == ['value', 'key', 'value']
     assert result.column(0).to_pylist() == result.column(2).to_pylist()
+    read.with_projection([])
+    empty = read.read()
+    assert empty.num_columns == 0
+    assert empty.num_rows == result.num_rows
+    assert read.read_type() == []

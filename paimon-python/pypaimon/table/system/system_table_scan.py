@@ -63,20 +63,6 @@ class SystemSplit(Split):
         return self._arrow_table
 
 
-class NativeSystemSplit(SystemSplit):
-    """Captured core metadata split; Rust owns filtering and projection."""
-
-    def __init__(self, native_split):
-        self.native_split = native_split
-
-    @property
-    def row_count(self):
-        return self.native_split.row_count()
-
-    def arrow_table(self):
-        raise TypeError('Native system-table splits must be read through their core reader')
-
-
 class SystemTableScan:
     """Returns a one-element plan containing the entire system table."""
 
@@ -84,8 +70,8 @@ class SystemTableScan:
         self.system_table = system_table
 
     def plan(self) -> Plan:
-        from pypaimon.table.system.native_system_table import try_plan_native_system_table
-        splits = try_plan_native_system_table(self.system_table)
-        if splits is not None:
-            return Plan(_splits=splits)
-        return Plan(_splits=[SystemSplit(self.system_table._build_arrow_table())])
+        from pypaimon.table.system.native_system_table import try_read_native_system_table
+        arrow_table = try_read_native_system_table(self.system_table)
+        if arrow_table is None:
+            arrow_table = self.system_table._build_arrow_table()
+        return Plan(_splits=[SystemSplit(arrow_table)])
