@@ -259,6 +259,7 @@ jobs:
               paimon-python/pypaimon/tests/native_cast_completion_test.py \
               paimon-python/pypaimon/tests/native_temporal_zone_cast_test.py \
               paimon-python/pypaimon/tests/native_schema_cast_test.py \
+              paimon-python/pypaimon/tests/native_partition_metadata_test.py \
               -k 'TIMESTAMP or temporal'
           done
 

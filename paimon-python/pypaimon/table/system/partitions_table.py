@@ -27,7 +27,7 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.files_table import _render_value
+from pypaimon.table.system.files_table import _render_object, _render_value
 from pypaimon.table.system.system_table import (
     SystemTable, metadata_snapshot, metadata_local_millis, metadata_epoch_millis)
 from pypaimon.table.row.generic_row import GenericRowSerializer
@@ -84,18 +84,17 @@ class PartitionsTable(SystemTable):
         deleted_record_counts = self._deleted_record_counts(snapshot)
 
         partition_map: dict = {}
+        default_name = self.base_table.options.options.get(CoreOptions.PARTITION_DEFAULT_NAME)
+        legacy = self.base_table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)
         for entry in entries:
             partition_key = bytes(GenericRowSerializer.to_bytes(entry.partition))
             spec_key = partition_key
-            partition_string = _render_partition(
-                entry.partition, self.base_table.options.options.get(CoreOptions.PARTITION_DEFAULT_NAME))
-
             stats = partition_map.get(spec_key)
             if stats is None:
+                partition = _normalize_partition(entry.partition, default_name, legacy)
                 stats = {
-                    "partition_string": partition_string,
-                    "deletion_key": _deletion_partition_key(
-                        entry.partition, self.base_table.options.options.get(CoreOptions.PARTITION_DEFAULT_NAME)),
+                    "partition_string": _render_partition(partition, default_name),
+                    "deletion_key": bytes(GenericRowSerializer.to_bytes(partition)),
                     "record_count": 0,
                     "file_size_in_bytes": 0,
                     "file_count": 0,
@@ -214,21 +213,36 @@ def _render_partition(partition, default_name) -> str:
     return "/".join(parts)
 
 
-def _deletion_partition_key(partition, default_name):
-    """Java looks up deletion metadata after converting the spec back to typed values."""
-    from pypaimon.table.row.generic_row import GenericRow, _parse_type_precision_scale
+def _normalize_partition(partition, default_name, legacy):
+    """Java reconstructs one typed spec row for both display and deletion lookup."""
+    from pypaimon.table.row.generic_row import (
+        GenericRow, _parse_type_precision_scale, _is_ltz_type, _normalize_ltz,
+        _datetime_to_millis_and_nanos, _millis_nanos_to_datetime)
     values = []
     for index, field in enumerate(partition.fields):
         value = partition.get_field(index)
         if value is not None:
-            text = _render_value(value, field.type)
+            text = _render_object(value, field.type) if legacy else _render_value(value, field.type)
             if text == default_name or _is_null_or_whitespace_only(text):
                 value = None
             elif isinstance(value, (bytes, bytearray, memoryview)):
                 value = text.encode('utf-8')
-            elif str(field.type).upper().startswith('TIME') and not str(field.type).upper().startswith('TIMESTAMP'):
+            elif str(field.type).upper().startswith('TIMESTAMP'):
+                precision, _ = _parse_type_precision_scale(field.type)
+                millis, nanos = _datetime_to_millis_and_nanos(_normalize_ltz(value))
+                if _is_ltz_type(str(field.type).upper()):
+                    wall_millis = millis if legacy else metadata_local_millis(millis)
+                    millis = metadata_epoch_millis(wall_millis)
+                if precision <= 3:
+                    quantum = 10 ** (3 - precision)
+                    millis, nanos = millis // quantum * quantum, 0
+                else:
+                    quantum = 10 ** (9 - precision)
+                    nanos = nanos // quantum * quantum
+                value = _millis_nanos_to_datetime(millis, nanos)
+            elif not legacy and str(field.type).upper().startswith('TIME'):
                 precision, _ = _parse_type_precision_scale(field.type)
                 quantum = 10 ** (6 - min(precision, 3))
                 value = value.replace(microsecond=value.microsecond // quantum * quantum)
         values.append(value)
-    return bytes(GenericRowSerializer.to_bytes(GenericRow(values, partition.fields)))
+    return GenericRow(values, partition.fields)

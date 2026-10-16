@@ -20,6 +20,7 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 import json
+import os
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -90,7 +91,8 @@ def _assert_parity(table):
 def test_partition_values_are_java_casts(rest_catalog, typ, value, expected):
     catalog, _ = rest_catalog
     schema = pa.schema([('id', pa.int32()), ('p', typ)])
-    table = _create(catalog, schema, ['p'], {'partition.default-name': 'MISSING'})
+    table = _create(catalog, schema, ['p'], {
+        'partition.default-name': 'MISSING', 'partition.legacy-name': 'false'})
     _append(table, [{'id': 1, 'p': value}, {'id': 2, 'p': None}], schema)
     rows = _assert_parity(table)
     assert sorted(row['partition'] for row in rows) == sorted(['p=' + expected, 'p=MISSING'])
@@ -162,17 +164,22 @@ def _with_index_entries(table, entries):
     return table._copy_with_snapshot(table.snapshot_manager().get_latest_snapshot())
 
 
-@pytest.mark.parametrize('typ,value,canonical', [
-    (pa.string(), 'MISSING', None),
-    (pa.string(), '\x1c', None),
-    (pa.binary(), b'\xed\xa0\x80', '\ufffd'.encode('utf-8')),
-    (pa.time32('ms'), time(12, 34, 56, 123000), time(12, 34, 56)),
+@pytest.mark.parametrize('typ,value,canonical,legacy', [
+    (pa.string(), 'MISSING', None, True),
+    (pa.string(), 'MISSING', None, False),
+    (pa.string(), '\x1c', None, True),
+    (pa.string(), '\x1c', None, False),
+    # Java byte[].toString has no stable legacy spec; exercise its SQL cast.
+    (pa.binary(), b'\xed\xa0\x80', '\ufffd'.encode('utf-8'), False),
+    (pa.time32('ms'), time(12, 34, 56, 123000), time(12, 34, 56), True),
+    (pa.time32('ms'), time(12, 34, 56, 123000), time(12, 34, 56), False),
 ])
-def test_deletion_lookup_uses_java_partition_spec_round_trip(rest_catalog, typ, value, canonical):
+def test_deletion_lookup_uses_java_partition_spec_round_trip(rest_catalog, typ, value, canonical, legacy):
     catalog, _ = rest_catalog
     schema = pa.schema([('id', pa.int32()), ('p', typ)])
     table = _create(catalog, schema, ['p'], {
-        'deletion-vectors.enabled': 'true', 'partition.default-name': 'MISSING'})
+        'deletion-vectors.enabled': 'true', 'partition.default-name': 'MISSING',
+        'partition.legacy-name': str(legacy).lower()})
     _append(table, [{'id': i, 'p': value} for i in range(3)]
             + [{'id': i + 3, 'p': canonical} for i in range(3)], schema)
     entries = []
@@ -184,9 +191,46 @@ def test_deletion_lookup_uses_java_partition_spec_round_trip(rest_catalog, typ, 
     table = _with_index_entries(table, entries)
     rows = _assert_parity(table)
     assert len(rows) == 2
-    # Java reconstructs NULL/default and UTF-8 replacement bytes from the spec,
-    # so both displayed rows look up the canonical partition's count.
-    assert [row['deleted_record_count'] for row in rows] == [3, 3]
+    # A legacy TIME spec is an integer millisecond count, so Java keeps its
+    # sub-second digits even when the declared TIME precision is zero.
+    expected = [1, 3] if legacy and pa.types.is_time(typ) else [3, 3]
+    assert sorted(row['deleted_record_count'] for row in rows) == expected
+
+
+def test_default_legacy_time_partition_keeps_deletion_counts(rest_catalog):
+    from pypaimon.tests.deletion_vector_path_test import _delete
+    catalog, _ = rest_catalog
+    schema = pa.schema([('id', pa.int32()), ('p', pa.time32('ms'))])
+    table = _create(catalog, schema, ['p'], {
+        'deletion-vectors.enabled': 'true', 'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true'})
+    _append(table, [{'id': i, 'p': time(12, 34, 56, 120000)} for i in range(2)], schema)
+    _delete(table, [0])
+    rows = _assert_parity(table)
+    assert [(row['partition'], row['deleted_record_count']) for row in rows] == [('p=12:34:56', 1)]
+
+
+@pytest.mark.parametrize('legacy,instant,expected,deleted', [
+    (True, '2024-01-01T00:00:00+00:00', '2024-01-01 00:00:00.000', 0),
+    (False, '2024-01-01T00:00:00+00:00', '2023-12-31 19:00:00.000', 1),
+    (True, '2024-11-03T06:30:00+00:00', '2024-11-03 06:30:00.000', 0),
+    (False, '2024-11-03T06:30:00+00:00', '2024-11-03 01:30:00.000', 0),
+])
+def test_temporal_ltz_partition_specs_match_java_in_new_york(rest_catalog, legacy, instant, expected, deleted):
+    from pypaimon.tests.deletion_vector_path_test import _delete
+    # Native caches the process system zone. CI runs this golden case in a
+    # separate process initialized with New York, as for temporal cast tests.
+    if os.environ.get('TZ') != 'America/New_York':
+        pytest.skip('Java golden values require TZ=America/New_York')
+    catalog, _ = rest_catalog
+    schema = pa.schema([('id', pa.int32()), ('p', pa.timestamp('ms', tz='UTC'))])
+    table = _create(catalog, schema, ['p'], {
+        'deletion-vectors.enabled': 'true', 'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true', 'partition.legacy-name': str(legacy).lower()})
+    _append(table, [{'id': i, 'p': datetime.fromisoformat(instant)} for i in range(2)], schema)
+    _delete(table, [0])
+    rows = _assert_parity(table)
+    assert [(row['partition'], row['deleted_record_count']) for row in rows] == [('p=' + expected, deleted)]
 
 
 @pytest.mark.parametrize('native', [False, True])
