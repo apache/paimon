@@ -75,10 +75,21 @@ def _render_value(value, data_type=None) -> str:
             from pypaimon.utils.file_store_path_factory import _decode_java_utf8
             return _decode_java_utf8(value)
         if 'TIMESTAMP_LTZ' in type_name or 'WITH LOCAL TIME ZONE' in type_name:
-            from pypaimon.casting.temporal_string import temporal_to_string
-            from pypaimon.schema.data_types import PyarrowFieldParser
-            arrow_type = PyarrowFieldParser.from_paimon_type(data_type)
-            return temporal_to_string(pyarrow.array([value], type=arrow_type), data_type)[0].as_py()
+            from pypaimon.casting.temporal_string import format_timestamp_parts
+            from pypaimon.casting.temporal_utils import _epoch_day_to_date, _local_offset
+            from pypaimon.table.row.generic_row import (
+                _datetime_to_millis_and_nanos, _normalize_ltz, _parse_type_precision_scale)
+            # BinaryRow timestamps need not fit Arrow's i64 nanosecond range.
+            value = _normalize_ltz(value)
+            millis, nanos = _datetime_to_millis_and_nanos(value)
+            seconds = millis // 1000
+            day, second_of_day = divmod(seconds + _local_offset(seconds), 86400)
+            year, month, day = _epoch_day_to_date(day)
+            hour, second_of_day = divmod(second_of_day, 3600)
+            minute, second = divmod(second_of_day, 60)
+            nanos += millis % 1000 * 1000000 + getattr(value, 'nanosecond', 0)
+            precision, _ = _parse_type_precision_scale(data_type)
+            return format_timestamp_parts(year, month, day, hour, minute, second, nanos, precision)
         return cast_value_to_string(value, data_type)
     if isinstance(value, bool):
         return 'true' if value else 'false'
@@ -132,8 +143,10 @@ def _metadata_file_path(table, entry):
         return entry.file.external_path
     # Display Java's logical bucket path; the IO path may have decoded URI
     # escapes or dropped file: to reach a literal escaped local directory.
-    bucket = table.path_factory().bucket_path(
+    from pypaimon.utils.path import resolve_path
+    relative_bucket = table.path_factory().relative_bucket_path(
         tuple(entry.partition.values), int(entry.bucket), canonical_partition=True)
+    bucket = resolve_path(str(table.table_path), relative_bucket)
     return bucket.rstrip('/') + '/' + entry.file.file_name
 
 

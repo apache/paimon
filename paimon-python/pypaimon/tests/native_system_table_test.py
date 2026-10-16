@@ -284,6 +284,13 @@ def test_nonempty_table_indexes(rest_catalog):
     assert _canonical(actual, 'table_indexes') == _canonical(expected, 'table_indexes')
     rows = actual.to_pylist()
     assert rows and rows[0]['index_field_name'] == 'name'
+    # Populate an index before fixing the view to empty: otherwise both paths
+    # return no indexes even if the Python reader incorrectly reloads latest.
+    empty = table._copy_with_snapshot(None)
+    for native in (False, True):
+        result = _read(_system(empty, 'table_indexes', native))
+        assert result.num_rows == 0
+        assert result.schema == actual.schema
 
 
 def test_native_metadata_auth_guard(source):

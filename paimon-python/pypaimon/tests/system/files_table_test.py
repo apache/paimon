@@ -20,14 +20,20 @@
 import os
 import shutil
 import tempfile
+import time
 import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
-from pypaimon.table.system.files_table import FilesTable, _row_values
+from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
+from pypaimon.table.system.files_table import FilesTable, _metadata_file_path, _render_partition, _row_values
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
 
 def _read(table):
@@ -263,6 +269,67 @@ class FilesTableTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             _row_values(CorruptRow())
 
+
+@pytest.mark.parametrize('type_name', ['TIMESTAMP_LTZ(9)', 'TIMESTAMP(9) WITH LOCAL TIME ZONE'])
+@pytest.mark.parametrize('value,expected', [
+    (datetime(2500, 1, 1, tzinfo=timezone.utc), {
+        'UTC': '2500-01-01 00:00:00.000000000',
+        'America/New_York': '2499-12-31 19:00:00.000000000',
+        'Asia/Shanghai': '2500-01-01 08:00:00.000000000',
+    }),
+    (datetime(2500, 7, 1, microsecond=123456, tzinfo=timezone.utc), {
+        'UTC': '2500-07-01 00:00:00.123456000',
+        'America/New_York': '2500-06-30 20:00:00.123456000',
+        'Asia/Shanghai': '2500-07-01 08:00:00.123456000',
+    }),
+    (datetime(1600, 1, 1, microsecond=123456, tzinfo=timezone.utc), {
+        'UTC': '1600-01-01 00:00:00.123456000',
+        'America/New_York': '1599-12-31 19:03:58.123456000',
+        'Asia/Shanghai': '1600-01-01 08:05:43.123456000',
+    }),
+])
+def test_ltz_partition_strings_outside_arrow_nanosecond_range(type_name, value, expected):
+    zone = os.environ.get('TZ', time.tzname[0])
+    if zone not in expected:
+        pytest.skip('Run Java timezone golden cases with TZ set to UTC, New York or Shanghai')
+    fields = [DataField(0, 'pt', AtomicType(type_name))]
+    row = GenericRow([value], fields)
+    decoded = GenericRowDeserializer.from_bytes(GenericRowSerializer.to_bytes(row), fields)
+    assert _render_partition(decoded) == '{' + expected[zone] + '}'
+
+
+def test_ltz_partition_strings_preserve_submicrosecond_fraction():
+    import pandas as pd
+    expected = {
+        'UTC': '2024-01-01 00:00:00.123456789',
+        'America/New_York': '2023-12-31 19:00:00.123456789',
+        'Asia/Shanghai': '2024-01-01 08:00:00.123456789',
+    }
+    zone = os.environ.get('TZ', time.tzname[0])
+    if zone not in expected:
+        pytest.skip('Run Java timezone golden cases with TZ set to UTC, New York or Shanghai')
+    row = GenericRow([pd.Timestamp('2024-01-01 00:00:00.123456789', tz='UTC')],
+                     [DataField(0, 'pt', AtomicType('TIMESTAMP_LTZ(9)'))])
+    assert _render_partition(row) == '{' + expected[zone] + '}'
+
+
+@pytest.mark.parametrize('root,expected', [
+    ('file:/warehouse/t', 'file:/warehouse/t/'),
+    ('file:///warehouse/t', 'file:/warehouse/t/'),
+    ('s3://bucket/warehouse/t', 's3://bucket/warehouse/t/'),
+])
+@pytest.mark.parametrize('data_directory', [None, 'data'])
+def test_metadata_file_paths_keep_logical_scheme_and_escaped_partition(root, expected, data_directory):
+    factory = FileStorePathFactory(
+        root=root, partition_keys=['pt'], default_part_value='__DEFAULT_PARTITION__',
+        format_identifier='parquet', data_file_prefix='data-', changelog_file_prefix='changelog-',
+        legacy_partition_name=False, file_suffix_include_compression=False, file_compression='zstd',
+        data_file_path_directory=data_directory, partition_types=[AtomicType('STRING')])
+    table = SimpleNamespace(table_path=root, path_factory=lambda: factory)
+    entry = SimpleNamespace(file=SimpleNamespace(external_path=None, file_name='data.parquet'),
+                            partition=GenericRow(['a/b'], [DataField(0, 'pt', AtomicType('STRING'))]), bucket=0)
+    assert _metadata_file_path(table, entry) == (
+        expected + ('data/' if data_directory else '') + 'pt=a%2Fb/bucket-0/data.parquet')
 
 if __name__ == "__main__":
     unittest.main()

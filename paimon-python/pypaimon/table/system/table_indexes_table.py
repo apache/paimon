@@ -74,7 +74,8 @@ class TableIndexesTable(SystemTable):
 
     def _build_arrow_table(self) -> pyarrow.Table:
         snapshot = metadata_snapshot(self.base_table)
-        entries = IndexFileHandler(self.base_table).scan(snapshot)
+        # scan(None) means latest; a resolved empty view must stay empty.
+        entries = [] if snapshot is None else IndexFileHandler(self.base_table).scan(snapshot)
 
         rows = {
             "partition": [],
