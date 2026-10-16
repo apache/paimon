@@ -18,6 +18,7 @@
 
 package org.apache.paimon.zookeeper;
 
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
@@ -42,10 +43,7 @@ public final class ZooKeeperCatalogLockOptions {
                     .withDescription("ZooKeeper session timeout.");
 
     public static final ConfigOption<Duration> LOCK_ACQUIRE_TIMEOUT =
-            ConfigOptions.key("lock-acquire-timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofMinutes(8))
-                    .withDescription("Maximum time to wait for acquiring the ZooKeeper lock.");
+            CatalogOptions.LOCK_ACQUIRE_TIMEOUT;
 
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("lock.zookeeper.connection-timeout")

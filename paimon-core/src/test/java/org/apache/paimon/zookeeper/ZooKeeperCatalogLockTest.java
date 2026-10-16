@@ -18,14 +18,24 @@
 
 package org.apache.paimon.zookeeper;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.factories.FactoryUtil;
-import org.apache.paimon.jdbc.JdbcCatalogOptions;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.state.ConnectionState;
@@ -35,6 +45,7 @@ import org.apache.zookeeper.ZooKeeper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -50,6 +61,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -81,7 +93,7 @@ class ZooKeeperCatalogLockTest {
     private static Options options() {
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, "s3://test-bucket/warehouse");
-        options.set(JdbcCatalogOptions.LOCK_TYPE, ZooKeeperCatalogLockFactory.IDENTIFIER);
+        options.set(CatalogOptions.LOCK_TYPE, ZooKeeperCatalogLockFactory.IDENTIFIER);
         options.set(ZooKeeperCatalogLockOptions.QUORUM, zk.getConnectString());
         options.set(ZooKeeperCatalogLockOptions.SESSION_TIMEOUT, Duration.ofSeconds(10));
         options.set(ZooKeeperCatalogLockOptions.LOCK_ACQUIRE_TIMEOUT, Duration.ofSeconds(30));
@@ -112,6 +124,68 @@ class ZooKeeperCatalogLockTest {
         assertNotNull(factory);
         assertTrue(factory instanceof ZooKeeperCatalogLockFactory);
         assertEquals("zookeeper", factory.identifier());
+    }
+
+    @Test
+    void filesystemCatalogCommitUsesConfiguredLock(@TempDir java.nio.file.Path warehouse)
+            throws Exception {
+        Options options = options();
+        options.set(CatalogOptions.WAREHOUSE, warehouse.toUri().toString());
+        options.set(CatalogOptions.LOCK_ENABLED, true);
+        Identifier identifier = Identifier.create("db", "table");
+
+        try (Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options))) {
+            catalog.createDatabase(identifier.getDatabaseName(), false);
+            catalog.createTable(
+                    identifier, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
+            Table table = catalog.getTable(identifier);
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            List<CommitMessage> messages;
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
+                write.write(GenericRow.of(1));
+                messages = write.prepareCommit();
+            }
+
+            Lock blocker =
+                    new ZooKeeperCatalogLockFactory()
+                            .createLock(
+                                    CatalogLockContext.fromOptions(options),
+                                    identifier,
+                                    null,
+                                    "blocker",
+                                    new Options());
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try (Lock ignored = blocker) {
+                AutoCloseable scope = blocker.acquire();
+                try {
+                    CountDownLatch attempted = new CountDownLatch(1);
+                    Future<?> commit =
+                            pool.submit(
+                                    () -> {
+                                        attempted.countDown();
+                                        try (BatchTableCommit tableCommit =
+                                                table.newBatchWriteBuilder().newCommit()) {
+                                            tableCommit.commit(messages);
+                                        }
+                                        return null;
+                                    });
+                    assertTrue(attempted.await(20, TimeUnit.SECONDS));
+                    assertThrows(
+                            TimeoutException.class,
+                            () -> commit.get(500, TimeUnit.MILLISECONDS),
+                            "filesystem table commit bypassed the configured ZooKeeper lock");
+                    scope.close();
+                    scope = null;
+                    commit.get(20, TimeUnit.SECONDS);
+                } finally {
+                    if (scope != null) {
+                        scope.close();
+                    }
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+        }
     }
 
     @Test
