@@ -34,6 +34,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericDatumReader;
@@ -160,6 +161,27 @@ class IcebergManifestBlockSizeTest {
                         table.fileIO().newInputStream(path), new GenericDatumReader<>())) {
             assertThat(reader.getSchema().getName()).isEqualTo(recordName);
             assertThat(reader.getMetaString("avro.codec")).isEqualTo("deflate");
+            if ("manifest_entry".equals(recordName)) {
+                assertThat(reader.getMetaKeys())
+                        .contains(
+                                "schema",
+                                "schema-id",
+                                "partition-spec",
+                                "partition-spec-id",
+                                "format-version",
+                                "content");
+                assertThat(
+                                JsonSerdeUtil.fromJson(
+                                        reader.getMetaString("partition-spec"), List.class))
+                        .isEmpty();
+                assertThat(reader.getMetaString("format-version"))
+                        .isEqualTo(
+                                String.valueOf(
+                                        table.coreOptions()
+                                                .toConfiguration()
+                                                .get(IcebergOptions.FORMAT_VERSION)));
+                assertThat(reader.getMetaString("content")).isEqualTo("data");
+            }
         }
         long records = 0;
         int blocks = 0;

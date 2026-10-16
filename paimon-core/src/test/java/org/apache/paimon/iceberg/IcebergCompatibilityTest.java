@@ -41,6 +41,7 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+import org.apache.paimon.iceberg.metadata.IcebergPartitionField;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
@@ -66,8 +67,10 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
@@ -77,6 +80,8 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.ManifestFiles;
+import org.apache.iceberg.SchemaParser;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
@@ -2501,6 +2506,51 @@ public class IcebergCompatibilityTest {
 
         String manifestPath =
                 icebergTable.currentSnapshot().allManifests(icebergTable.io()).get(0).path();
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(new File(manifestPath)),
+                        new GenericDatumReader<>())) {
+            assertThat(dataFileReader.getMetaKeys())
+                    .contains(
+                            "schema",
+                            "schema-id",
+                            "partition-spec",
+                            "partition-spec-id",
+                            "format-version",
+                            "content");
+            IcebergSchema expectedSchema = IcebergSchema.create(table.schema());
+            assertThat(SchemaParser.fromJson(dataFileReader.getMetaString("schema")).asStruct())
+                    .isEqualTo(icebergTable.schema().asStruct());
+            assertThat(
+                            JsonSerdeUtil.fromJson(
+                                    dataFileReader.getMetaString("schema"), IcebergSchema.class))
+                    .isEqualTo(expectedSchema);
+            assertThat(dataFileReader.getMetaString("schema-id"))
+                    .isEqualTo(String.valueOf(expectedSchema.schemaId()));
+
+            List<IcebergPartitionField> partitionFields =
+                    JsonSerdeUtil.fromJson(
+                            dataFileReader.getMetaString("partition-spec"),
+                            new TypeReference<List<IcebergPartitionField>>() {});
+            assertThat(partitionFields)
+                    .extracting(IcebergPartitionField::name)
+                    .containsExactly("country", "day");
+            assertThat(partitionFields)
+                    .extracting(IcebergPartitionField::fieldId)
+                    .containsExactly(1000, 1001);
+            assertThat(dataFileReader.getMetaString("partition-spec-id")).isEqualTo("0");
+            assertThat(dataFileReader.getMetaString("format-version")).isEqualTo("2");
+            assertThat(dataFileReader.getMetaString("content")).isEqualTo("data");
+        }
+
+        // Resolve the partition spec from the physical header, without an external spec map.
+        try (CloseableIterable<org.apache.iceberg.DataFile> files =
+                ManifestFiles.read(
+                        icebergTable.currentSnapshot().allManifests(icebergTable.io()).get(0),
+                        icebergTable.io())) {
+            assertThat(files).isNotEmpty();
+        }
+
         Map<String, Integer> manifestFieldIdsMap = parseAvroSchemaFieldIds(manifestPath);
         assertThat(manifestFieldIdsMap)
                 .hasSize(28)
