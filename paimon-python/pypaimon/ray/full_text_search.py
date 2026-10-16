@@ -25,7 +25,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.ray.vector_search import _execution_options, _map_tasks, _require_ray, _scores, _shared_scalar_filters
 from pypaimon.table.source.full_text_read import (
-    DataEvolutionFullTextRead, _index_type, _raw_row_ranges, _split_search_splits,
+    DataEvolutionFullTextRead, _index_candidate_limit, _index_type, _raw_row_ranges, _split_search_splits,
 )
 from pypaimon.table.source import global_index_live_row_filter
 from pypaimon.utils.range import Range
@@ -68,9 +68,11 @@ class _RayFullTextRead(DataEvolutionFullTextRead):
     def _eval_column_query(self, splits_by_column, live_rows):
         items = splits_by_column.get(self._text_columns[0].name, [])
         merged = {}
+        reader = self._worker_reader()
+        reader._limit = _index_candidate_limit(items, self._limit)
         with _shared_scalar_filters(items, self._filter, self._remote_args,
                                     _prepare_scalar_filter) as prepare, closing(_map_tasks(
-                                        _search_index, self._worker_reader(), items,
+                                        _search_index, reader, items,
                                         self._concurrency, self._remote_args, True, prepare)) as tasks:
             for _, scores in tasks:
                 # Duplicate row IDs keep the first planned shard's score.

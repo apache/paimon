@@ -655,7 +655,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
 
         self.assertEqual([7], sorted(list(result.results())))
         self.assertEqual(match_query("paimon"), calls[0][0])
-        self.assertEqual(10, calls[0][1])
+        self.assertEqual(11, calls[0][1])  # One lookahead hit detects score ties at top-k.
         self.assertIsNone(calls[0][2])
 
     def test_reader_delegates_boolean_query_json_to_native(self):
@@ -806,7 +806,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         _patch_snapshot(self, [entry])
         captured_searches = []
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     captured_searches.append(fts)
@@ -837,7 +837,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         self.assertEqual(10, captured_searches[0].limit)
         self.assertEqual(match_query("paimon", "And"), captured_searches[0].query)
 
-    def test_full_text_builder_sends_leaf_candidate_limit_for_compound_queries(self):
+    def test_full_text_builder_sends_top_k_for_compound_queries(self):
         from pypaimon.table.source.full_text_search_builder import (
             FullTextSearchBuilderImpl,
         )
@@ -853,7 +853,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         _patch_snapshot(self, [entry])
         captured_limits = []
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     captured_limits.append(fts.limit)
@@ -882,7 +882,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
                 .read([split])
             )
 
-        self.assertEqual([100], captured_limits)
+        self.assertEqual([3], captured_limits)
 
     def test_full_text_scan_ignores_other_index_types_on_same_column(self):
         from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
@@ -3252,7 +3252,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         captured_io_metas = []
 
         def _fake_create(index_type, file_io, index_path,
-                         index_io_meta_list):
+                         index_io_meta_list, max_candidates=None):
             captured_io_metas.append(list(index_io_meta_list))
 
             class _FakeReader:
@@ -3304,7 +3304,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         partition_filter = object()
         captured = []
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     captured.append(fts.include_row_ids)
@@ -3370,7 +3370,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         )
         raw_split = RawFullTextSearchSplit([Range(5, 9)])
 
-        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
                     return _completed_future(DictBasedScoredIndexResult({2: 1.0}))
@@ -3402,7 +3402,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         self.assertEqual(([5, 6, 8], ["raw paimon", None, "raw full-text"], 5),
                          build_raw_index.call_args.args)
         search_raw.assert_called_once_with(
-            b"raw-index", 5, match_query("paimon"), 5)
+            b"raw-index", 5, match_query("paimon"), 5, max_candidates=3)
         self.assertEqual([2, 8], sorted(list(result.results())))
         self.assertEqual(1.0, result.score_getter()(2))
         self.assertEqual(9.0, result.score_getter()(8))
@@ -3428,7 +3428,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         _patch_snapshot(self, entries)
 
         def _fake_create(index_type, file_io, index_path,
-                         index_io_meta_list):
+                         index_io_meta_list, max_candidates=None):
             row_id = index_io_meta_list[0].file_name
             row_id = int(row_id.split("-")[1].split(".")[0])
 

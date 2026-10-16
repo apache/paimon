@@ -175,13 +175,15 @@ class DataEvolutionFullTextRead(FullTextRead):
         splits = splits_by_column.get(column, [])
         if not splits:
             return ScoredGlobalIndexResult.create_empty()
+        reader = copy(self)
+        reader._limit = _index_candidate_limit(splits, self._limit)
         futures = []
         for split in splits:
             include_row_ids = global_index_live_row_filter.for_range(
                 live_rows, split.row_range_start, split.row_range_end)
             if include_row_ids is not None and include_row_ids.is_empty():
                 continue
-            futures.append(self._eval(
+            futures.append(reader._eval(
                 split.row_range_start, split.row_range_end,
                 split.full_text_index_files,
                 include_row_ids,
@@ -223,13 +225,13 @@ class DataEvolutionFullTextRead(FullTextRead):
 
         reader = _create_full_text_reader(
             index_type, file_io, index_path,
-            index_io_meta_list
+            index_io_meta_list, row_range_end - row_range_start + 1
         )
 
         full_text_search = FullTextSearch(
             field_name=self._text_columns[0].name,
             query=self._query,
-            limit=_candidate_limit(row_range_start, row_range_end),
+            limit=min(self._limit, row_range_end - row_range_start + 1),
         )
         if include_row_ids is not None:
             full_text_search = full_text_search.with_include_row_ids(include_row_ids)
@@ -251,7 +253,6 @@ class DataEvolutionFullTextRead(FullTextRead):
             raise ValueError(f"Unsupported full-text index type: '{index_type}'")
 
         row_range_start = raw_row_ranges[0].from_
-        row_range_end = raw_row_ranges[-1].to
         search_kwargs = {}
         if include_row_ids is not None:
             raw_rows = GlobalIndexResult.from_ranges(raw_row_ranges).results()
@@ -277,7 +278,8 @@ class DataEvolutionFullTextRead(FullTextRead):
             index_bytes,
             row_range_start,
             self._query,
-            _candidate_limit(row_range_start, row_range_end),
+            min(self._limit, sum(row_range.count() for row_range in raw_row_ranges)),
+            max_candidates=table.num_rows,
             **search_kwargs,
         ).top_k(self._limit)
 
@@ -329,12 +331,16 @@ class DataEvolutionFullTextRead(FullTextRead):
             writer.close()
 
 
-def _candidate_limit(row_range_start: int, row_range_end: int) -> int:
-    size = row_range_end - row_range_start + 1
-    return min(size, 2147483647)
+def _index_candidate_limit(splits, limit):
+    ranges = sorted((split.row_range_start, split.row_range_end) for split in splits)
+    if any(start <= previous_end for (_, previous_end), (start, _) in zip(ranges, ranges[1:])):
+        # Overlapping shards may assign different scores to the same row.
+        # Preserve first-shard precedence before truncating the global result.
+        return min(max(end - start + 1 for start, end in ranges), 2147483647)
+    return limit
 
 
-def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list):
+def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
     """Create a global index reader for full-text search."""
     from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
         FULL_TEXT_IDENTIFIER,
@@ -343,7 +349,7 @@ def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list
         from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
             NativeFullTextGlobalIndexReader,
         )
-        return NativeFullTextGlobalIndexReader(file_io, index_path, index_io_meta_list)
+        return NativeFullTextGlobalIndexReader(file_io, index_path, index_io_meta_list, max_candidates)
     raise ValueError(f"Unsupported full-text index type: '{index_type}'")
 
 
@@ -383,10 +389,10 @@ def _index_type(index_splits):
     return None
 
 
-def _search_raw_full_text(index_bytes, row_range_start, query, limit, include_row_ids=None):
+def _search_raw_full_text(index_bytes, row_range_start, query, limit, include_row_ids=None, max_candidates=None):
     from paimon_ftindex import FullTextIndexReader
     from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-        PaimonFullTextInput,
+        PaimonFullTextInput, _search_top_k,
     )
 
     reader = FullTextIndexReader(PaimonFullTextInput(BytesIO(index_bytes)))
@@ -395,11 +401,11 @@ def _search_raw_full_text(index_bytes, row_range_start, query, limit, include_ro
         if include_row_ids is not None:
             relative_ids = GlobalIndexResult.create(include_row_ids).offset(-row_range_start).results()
             search_kwargs["filter_bytes"] = relative_ids.serialize()
-        row_ids, scores = reader.search(query, limit=limit, **search_kwargs)
+        result = _search_top_k(reader, query, limit, max_candidates=max_candidates, **search_kwargs)
         return DictBasedScoredIndexResult(
             {
-                row_range_start + row_id: score
-                for row_id, score in zip(row_ids, scores)
+                row_range_start + row_id: result.score_getter()(row_id)
+                for row_id in result.results()
             })
     finally:
         reader.close()
