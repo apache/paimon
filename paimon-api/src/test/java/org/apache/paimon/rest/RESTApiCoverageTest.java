@@ -182,9 +182,12 @@ class RESTApiCoverageTest {
             // a reply of {} may not parse; only the request matters
         }
         sent.put("RESTApi", new ArrayList<>(requests));
+        List<String> silent = new ArrayList<>();
+        if (requests.isEmpty()) {
+            silent.add("RESTApi(Options, boolean)");
+        }
 
         RESTApi api = new RESTApi(options, false);
-        List<String> silent = new ArrayList<>();
         for (Method method : RESTApi.class.getDeclaredMethods()) {
             if (!Modifier.isPublic(method.getModifiers())
                     || Modifier.isStatic(method.getModifiers())
