@@ -132,7 +132,7 @@ class TableQueryAuthResult:
         if not self.has_restrictions:
             return plan
         auth_splits = [QueryAuthSplit(split, self) for split in plan.splits()]
-        return Plan(auth_splits, snapshot_id=plan.snapshot_id)
+        return Plan(auth_splits, snapshot_id=plan.snapshot_id, _scan_stats=plan.scan_stats())
 
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:

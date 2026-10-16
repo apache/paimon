@@ -56,10 +56,10 @@ class ScanStats:
     @classmethod
     def from_native(cls, stats):
         return cls(
-            manifest_files_total=stats.manifest_files_total,
-            manifest_files_after_partition=stats.manifest_files_after_partition,
+            manifest_files_total=stats.manifest_files_before_partition_pruning,
+            manifest_files_after_partition=stats.manifest_files_after_partition_pruning,
             entries_potential_total=stats.entries_potential_total,
-            entries_total=stats.entries_total,
+            entries_total=stats.manifest_entries_read,
             entries_after_partition=stats.entries_after_partition,
             entries_after_bucket=stats.entries_after_bucket,
             entries_after_stats=stats.entries_after_stats,

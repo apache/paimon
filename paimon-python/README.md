@@ -365,6 +365,9 @@ even when pruning removes every split. Native explain output includes snapshot
 and split metadata plus partition, bucket and file-statistics pruning counters.
 Explain collects the complete metadata funnel before LIMIT, so it can decode
 more manifest entries than ordinary planning. It does not read data files.
+For programmatic access, `plan, stats = builder.new_scan().scan_with_stats()`
+returns the same counters as `plan.scan_stats()`. Ordinary plans return `None`
+from this getter.
 
 Fixed-bucket Native planning also handles ORs of equality/IN predicates,
 intersects repeated key constraints, and specializes predicates per partition.

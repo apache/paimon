@@ -516,12 +516,13 @@ def native_plan(
     if shard is not None:
         scan = scan.with_shard(*shard)
     if collect_stats:
+        scan = scan.with_stats()
+    rust_plan = scan.plan()
+    plan = _from_native_plan(table, rust_plan)
+    if collect_stats:
         from pypaimon.read.scan_stats import ScanStats
-        rust_plan, stats = scan.plan_with_stats()
-        plan = _from_native_plan(table, rust_plan)
-        plan._scan_stats = ScanStats.from_native(stats)
-        return plan
-    return _from_native_plan(table, scan.plan())
+        plan._scan_stats = ScanStats.from_native(rust_plan.scan_stats())
+    return plan
 
 
 def _native_stream_auth_supported(table):

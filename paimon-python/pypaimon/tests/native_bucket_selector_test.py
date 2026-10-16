@@ -52,6 +52,7 @@ def _selected(table, predicate, native, stats=True, partition_filter=None, limit
                                       side_effect=AssertionError('Native read fell back')))
         if stats:
             plan, counters = scan.scan_with_stats()
+            assert plan.scan_stats() is counters
         else:
             plan, counters = scan.plan(), None
         rows = reader.new_read().to_arrow(plan.splits()).to_pylist()
@@ -196,8 +197,13 @@ def test_native_correlated_bucket_statistics_precede_limit(rest_catalog, limit):
     assert stats.entries_potential_total == stats.entries_after_partition == 8
     assert stats.entries_after_bucket == 2
     assert len(actual) == limit
-    assert all(row in [{'pt': 1, 'id': 3, 'value': 3}, {'pt': 2, 'id': 7, 'value': 7}] for row in actual)
-    assert _selected(table, predicate, True, stats=False, limit=limit)[:2] == (files, actual)
+    matches = [{'pt': 1, 'id': 3, 'value': 3}, {'pt': 2, 'id': 7, 'value': 7}]
+    assert all(row in matches for row in actual)
+    plain_files, plain_rows, _ = _selected(table, predicate, True, stats=False, limit=limit)
+    assert plain_files == files
+    assert len(plain_rows) == limit
+    # PK bucket scans have no row order, so LIMIT may select either matching row.
+    assert all(row in matches for row in plain_rows)
 
 
 @pytest.mark.parametrize('changelog', [False, True])

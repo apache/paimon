@@ -194,12 +194,15 @@ def test_native_stats_are_readonly_and_normal_planning_stays_lightweight(rest_ca
     table, schema = _create(catalog)
     _append(table, [{'id': i, 'value': i} for i in range(3)], schema)
     scan = _native_table(table).new_read_builder().new_scan()
-    plan, stats = scan.plan_with_stats()
-    assert stats.entries_potential_total == stats.entries_total == 1
+    assert scan.plan().scan_stats() is None
+    plan = scan.with_stats().plan()
+    stats = plan.scan_stats()
+    assert stats.complete
+    assert stats.entries_potential_total == stats.manifest_entries_read == 1
     assert stats.entries_after_partition == stats.entries_after_bucket == stats.entries_after_stats == 1
     assert plan.snapshot_id() == 1
     with pytest.raises(AttributeError):
-        stats.entries_total = 100
+        stats.manifest_entries_read = 100
     with patch('pypaimon.read.scan_stats.ScanStats.from_native',
                side_effect=AssertionError('ordinary plan requested statistics')):
         assert table.new_read_builder().new_scan().plan().snapshot_id == 1
