@@ -83,6 +83,8 @@ public class ParquetFastPathCompactRewriter {
         long startNanos = System.nanoTime();
         long inputBytes = toCompact.stream().mapToLong(DataFileMeta::fileSize).sum();
         long inputRows = toCompact.stream().mapToLong(DataFileMeta::rowCount).sum();
+        long minAverageCompressedRowGroupSize =
+                options.appendCompactionRowGroupCopyMinAverageCompressedRowGroupSize();
         try {
             if (dvFactory != null) {
                 reportMiss(
@@ -151,6 +153,24 @@ public class ParquetFastPathCompactRewriter {
                     return null;
                 }
                 preparedInputs.add(new PreparedInput(request.file, indexedFooter.source));
+            }
+
+            MissReason rowGroupSizeMiss =
+                    checkAverageCompressedRowGroupSize(
+                            preparedInputs, minAverageCompressedRowGroupSize);
+            if (rowGroupSizeMiss != null) {
+                reportMiss(
+                        metrics,
+                        rowGroupSizeMiss,
+                        String.format(
+                                "inputFiles=%d, inputRowGroups=%d, "
+                                        + "minAverageCompressedRowGroupSize=%d",
+                                toCompact.size(),
+                                preparedInputs.stream()
+                                        .mapToInt(input -> input.source.blockCount())
+                                        .sum(),
+                                minAverageCompressedRowGroupSize));
+                return null;
             }
 
             long prepareMs = elapsedMillis(startNanos);
@@ -383,6 +403,20 @@ public class ParquetFastPathCompactRewriter {
         if (options.rowTrackingEnabled() || options.dataEvolutionEnabled()) {
             return MissReason.ROW_TRACKING;
         }
+        if (options.scanIgnoreCorruptFile()) {
+            return MissReason.SCAN_IGNORE_CORRUPT_FILE;
+        }
+        long minAverageCompressedRowGroupSize =
+                options.appendCompactionRowGroupCopyMinAverageCompressedRowGroupSize();
+        if (minAverageCompressedRowGroupSize > 0 && !toCompact.isEmpty()) {
+            long totalFileBytes = 0L;
+            for (DataFileMeta file : toCompact) {
+                totalFileBytes += file.fileSize();
+            }
+            if (totalFileBytes / toCompact.size() < minAverageCompressedRowGroupSize) {
+                return MissReason.SMALL_ROW_GROUP;
+            }
+        }
         Incompatibility configurationMiss = checker.checkConfiguration();
         if (configurationMiss != null) {
             return toMissReason(configurationMiss);
@@ -425,6 +459,25 @@ public class ParquetFastPathCompactRewriter {
         }
         if (!SimpleStatsMerger.sameValueStatsCols(expectedValueStatsCols, file.valueStatsCols())) {
             return MissReason.OTHER;
+        }
+        return null;
+    }
+
+    @Nullable
+    private static MissReason checkAverageCompressedRowGroupSize(
+            List<PreparedInput> preparedInputs, long minAverageCompressedRowGroupSize) {
+        if (minAverageCompressedRowGroupSize <= 0) {
+            return null;
+        }
+        long compressedBytes = 0L;
+        int rowGroupCount = 0;
+        for (PreparedInput preparedInput : preparedInputs) {
+            rowGroupCount += preparedInput.source.blockCount();
+            compressedBytes += preparedInput.source.sumCompressedBlockBytes();
+        }
+        if (rowGroupCount == 0
+                || compressedBytes / rowGroupCount < minAverageCompressedRowGroupSize) {
+            return MissReason.SMALL_ROW_GROUP;
         }
         return null;
     }

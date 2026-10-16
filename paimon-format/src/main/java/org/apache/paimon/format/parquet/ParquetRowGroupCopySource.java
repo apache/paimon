@@ -63,6 +63,14 @@ public final class ParquetRowGroupCopySource {
         return metadata.getBlocks().size();
     }
 
+    public long sumCompressedBlockBytes() {
+        long sum = 0L;
+        for (BlockMetaData block : metadata.getBlocks()) {
+            sum += block.getCompressedSize();
+        }
+        return sum;
+    }
+
     public ParquetRowGroupCopier.Input copierInput() {
         return new ParquetRowGroupCopier.Input(inputFile, metadata);
     }

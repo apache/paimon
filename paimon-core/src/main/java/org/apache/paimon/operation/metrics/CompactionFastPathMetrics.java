@@ -43,6 +43,8 @@ public class CompactionFastPathMetrics {
         ROW_TRACKING,
         FILE_SOURCE,
         IO_ERROR,
+        SMALL_ROW_GROUP,
+        SCAN_IGNORE_CORRUPT_FILE,
         OTHER
     }
 

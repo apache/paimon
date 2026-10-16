@@ -307,6 +307,8 @@ public class AppendOnlyTableCompactionTest {
         Map<String, String> options = new HashMap<>();
         options.put("file.format", "parquet");
         options.put("append.compaction.row-group-copy.enabled", "true");
+        options.put(
+                "append.compaction.row-group-copy.min-average-compressed-row-group-size", "0 b");
         tableSchema = tableSchema.copy(options);
         recreate();
 
@@ -373,6 +375,8 @@ public class AppendOnlyTableCompactionTest {
         schemaBuilder.column("payload", DataTypes.BYTES());
         schemaBuilder.option("file.format", "parquet");
         schemaBuilder.option("append.compaction.row-group-copy.enabled", "true");
+        schemaBuilder.option(
+                "append.compaction.row-group-copy.min-average-compressed-row-group-size", "0 b");
         schemaBuilder.option("compaction.min.file-num", "3");
         schemaBuilder.option("bucket", "-1");
         tableSchema = new FileSystemSchemaManager(fileIO, path).createTable(schemaBuilder.build());

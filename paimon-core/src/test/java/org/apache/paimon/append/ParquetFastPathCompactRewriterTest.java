@@ -28,9 +28,12 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.parquet.ParquetRowGroupCopySource;
 import org.apache.paimon.format.parquet.ParquetUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -41,6 +44,7 @@ import org.apache.paimon.metrics.TestMetricRegistry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.metrics.CompactionFastPathMetrics;
 import org.apache.paimon.operation.metrics.CompactionFastPathMetrics.MissReason;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordReader;
@@ -55,6 +59,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.IOUtils;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -113,6 +118,135 @@ public class ParquetFastPathCompactRewriterTest {
     }
 
     @Test
+    public void testFastPathMissWhenAverageRowGroupTooSmall() throws Exception {
+        PreparedTable prepared = prepareTable(Collections.emptyMap(), 64, 32);
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        FileStoreTable table =
+                prepared.table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(),
+                                "true"));
+
+        List<DataFileMeta> rewriteResult = compact(prepared, false);
+        assertThat(tryFastPath(prepared, table, metrics, null)).isNull();
+        List<DataFileMeta> fastPathResult = compact(prepared, false);
+
+        assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(0L);
+        assertThat(getCounter(metrics, missMetricName(MissReason.SMALL_ROW_GROUP))).isEqualTo(1L);
+    }
+
+    @Test
+    public void testFastPathHitWhenRowGroupSizeGuardDisabled() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_MIN_AVG_COMPRESSED_ROW_GROUP_SIZE
+                        .key(),
+                "0 b");
+        PreparedTable prepared = prepareTable(options, 64, 32);
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+
+        List<DataFileMeta> rewriteResult = compact(prepared, false);
+        List<DataFileMeta> fastPathResult = compactWithMetrics(prepared, true, metrics, null);
+
+        assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(1L);
+    }
+
+    @Test
+    public void testFastPathHitsAtMeasuredCompressedAverage() throws Exception {
+        PreparedTable prepared = prepareTable(Collections.emptyMap(), 3, 20);
+        long averageCompressed = averageCompressedRowGroupBytes(prepared);
+        long averageFile = averageFileBytes(prepared);
+        assertThat(averageCompressed).isPositive();
+        assertThat(averageFile).isGreaterThanOrEqualTo(averageCompressed);
+
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        FileStoreTable table = tableWithRowGroupThreshold(prepared, averageCompressed);
+        List<DataFileMeta> rewriteResult = compact(prepared, false);
+        List<DataFileMeta> fastPathResult = tryFastPath(prepared, table, metrics, null);
+
+        assertThat(fastPathResult).isNotNull();
+        assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
+        assertThat(readRows(prepared, fastPathResult))
+                .containsExactlyInAnyOrderElementsOf(readRows(prepared, rewriteResult));
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(1L);
+    }
+
+    @Test
+    public void testFooterCheckRejectsBelowCompressedAverage() throws Exception {
+        PreparedTable prepared = prepareTable(Collections.emptyMap(), 3, 20);
+        long averageCompressed = averageCompressedRowGroupBytes(prepared);
+        long threshold = averageCompressed + 1;
+        // File size includes the footer, so the manifest pre-check still qualifies.
+        assertThat(averageFileBytes(prepared)).isGreaterThanOrEqualTo(threshold);
+
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        FileStoreTable table = tableWithRowGroupThreshold(prepared, threshold);
+
+        assertThat(tryFastPath(prepared, table, metrics, null)).isNull();
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(0L);
+        assertThat(getCounter(metrics, missMetricName(MissReason.SMALL_ROW_GROUP))).isEqualTo(1L);
+    }
+
+    @Test
+    public void testFastPathMissWhenScanIgnoreCorruptFilesEnabled() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_IGNORE_CORRUPT_FILE.key(), "true");
+        options.put(
+                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_MIN_AVG_COMPRESSED_ROW_GROUP_SIZE
+                        .key(),
+                "0 b");
+        PreparedTable prepared = prepareTable(options, 3, 10);
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+
+        List<DataFileMeta> rewriteResult = compact(prepared, false);
+        List<DataFileMeta> fastPathResult = compactWithMetrics(prepared, true, metrics, null);
+
+        assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(0L);
+        assertThat(getCounter(metrics, missMetricName(MissReason.SCAN_IGNORE_CORRUPT_FILE)))
+                .isEqualTo(1L);
+    }
+
+    @Test
+    public void testRewriteRetainsHealthyRowsWithIgnoreCorruptAndDamagedInput() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_IGNORE_CORRUPT_FILE.key(), "true");
+        options.put(
+                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_MIN_AVG_COMPRESSED_ROW_GROUP_SIZE
+                        .key(),
+                "0 b");
+        PreparedTable prepared = prepareTable(options, 2, 32);
+        DataFilePathFactory pathFactory =
+                prepared.table
+                        .store()
+                        .pathFactory()
+                        .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
+        DataFileMeta damagedFile = prepared.files.get(0);
+        Path damagedPath = pathFactory.toPath(damagedFile);
+        corruptFirstRowGroupDataPage(
+                prepared.table.fileIO(),
+                damagedPath,
+                damagedFile.fileSize(),
+                prepared.table.coreOptions().toConfiguration());
+
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        List<DataFileMeta> compacted = compactWithMetrics(prepared, true, metrics, null);
+
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(0L);
+        assertThat(getCounter(metrics, missMetricName(MissReason.SCAN_IGNORE_CORRUPT_FILE)))
+                .isEqualTo(1L);
+        assertThat(readRows(prepared, compacted)).hasSize(32);
+    }
+
+    @Test
     public void testFastPathMissWhenBloomConfigured() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("parquet.bloom.filter.enabled", "true");
@@ -132,7 +266,7 @@ public class ParquetFastPathCompactRewriterTest {
     public void testFastPathMissWhenFileIndexConfiguredAfterWrite() throws Exception {
         PreparedTable prepared = prepareTable(Collections.emptyMap(), 3, 10);
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(), "true");
+        options.putAll(fastPathTableOptions(true));
         options.put("file-index.bloom-filter.columns", "name");
         options.put("file-index.in-manifest-threshold", "1 mb");
         FileStoreTable table = prepared.table.copy(options);
@@ -530,11 +664,7 @@ public class ParquetFastPathCompactRewriterTest {
         if (!fastPathEnabled) {
             return compactWithDvFactory(prepared, false, dvFactory);
         }
-        FileStoreTable table =
-                prepared.table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(),
-                                "true"));
+        FileStoreTable table = prepared.table.copy(fastPathTableOptions(true));
         List<DataFileMeta> fastPath = tryFastPath(prepared, table, metrics, dvFactory);
         if (fastPath != null) {
             return fastPath;
@@ -587,11 +717,7 @@ public class ParquetFastPathCompactRewriterTest {
             java.util.function.Function<String, org.apache.paimon.deletionvectors.DeletionVector>
                     dvFactory)
             throws Exception {
-        FileStoreTable table =
-                prepared.table.copy(
-                        Collections.singletonMap(
-                                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(),
-                                String.valueOf(fastPathEnabled)));
+        FileStoreTable table = prepared.table.copy(fastPathTableOptions(fastPathEnabled));
         BaseAppendFileStoreWrite write =
                 (BaseAppendFileStoreWrite) table.store().newWrite(UUID.randomUUID().toString());
         return write.compactRewrite(prepared.partition, UNAWARE_BUCKET, dvFactory, prepared.files);
@@ -636,6 +762,80 @@ public class ParquetFastPathCompactRewriterTest {
             }
         }
         return rows;
+    }
+
+    private static FileStoreTable tableWithRowGroupThreshold(
+            PreparedTable prepared, long thresholdBytes) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(), "true");
+        options.put(
+                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_MIN_AVG_COMPRESSED_ROW_GROUP_SIZE
+                        .key(),
+                thresholdBytes + " b");
+        return prepared.table.copy(options);
+    }
+
+    private static long averageFileBytes(PreparedTable prepared) {
+        long totalFileBytes = 0L;
+        for (DataFileMeta file : prepared.files) {
+            totalFileBytes += file.fileSize();
+        }
+        return totalFileBytes / prepared.files.size();
+    }
+
+    private static long averageCompressedRowGroupBytes(PreparedTable prepared) throws Exception {
+        DataFilePathFactory pathFactory =
+                prepared.table
+                        .store()
+                        .pathFactory()
+                        .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
+        long compressedBytes = 0L;
+        int rowGroupCount = 0;
+        for (DataFileMeta file : prepared.files) {
+            ParquetRowGroupCopySource source =
+                    ParquetRowGroupCopySource.read(
+                            prepared.table.fileIO(),
+                            pathFactory.toPath(file),
+                            file.fileSize(),
+                            prepared.table.coreOptions().toConfiguration());
+            compressedBytes += source.sumCompressedBlockBytes();
+            rowGroupCount += source.blockCount();
+        }
+        assertThat(rowGroupCount).isGreaterThan(0);
+        return compressedBytes / rowGroupCount;
+    }
+
+    private static Map<String, String> fastPathTableOptions(boolean enabled) {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED.key(),
+                String.valueOf(enabled));
+        if (enabled) {
+            options.put(
+                    CoreOptions.APPEND_COMPACTION_ROW_GROUP_COPY_MIN_AVG_COMPRESSED_ROW_GROUP_SIZE
+                            .key(),
+                    "0 b");
+        }
+        return options;
+    }
+
+    private static void corruptFirstRowGroupDataPage(
+            FileIO fileIO, Path path, long fileSize, Options options) throws Exception {
+        long offset =
+                ParquetUtil.readFooter(fileIO, path, fileSize, options)
+                        .getBlocks()
+                        .get(0)
+                        .getStartingPos();
+        byte[] content = new byte[(int) fileSize];
+        try (SeekableInputStream input = fileIO.newInputStream(path)) {
+            IOUtils.readFully(input, content, 0, content.length);
+        }
+        for (int i = 0; i < 16; i++) {
+            content[(int) offset + i] ^= (byte) 0xFF;
+        }
+        try (PositionOutputStream output = fileIO.newOutputStream(path, true)) {
+            output.write(content);
+        }
     }
 
     private String rowToString(InternalRow row) {

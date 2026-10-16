@@ -130,6 +130,13 @@ reduces compaction cost. The fast path is applied only when all input files are 
 no deletion vectors, no row tracking, no file index or bloom filter, not written with Parquet writer v2, etc.);
 otherwise compaction silently falls back to the traditional rewrite path.
 
+By default, RowGroup copy is used only when the average compressed RowGroup size in the compaction
+batch is at least `append.compaction.row-group-copy.min-average-compressed-row-group-size` (8 MiB).
+Small-file compaction batches are rejected early using manifest file sizes before reading Parquet
+footers. Set the threshold to `0` to disable the size guard. RowGroup copy is also disabled when
+`scan.ignore-corrupt-files` is true, because copying damaged pages can hide healthy inputs in the
+same output file.
+
 ### Row-Level Operations {#row-level-operations}
 
 [Row-level operations](./row-level-operations) explains Spark SQL `DELETE`, `UPDATE`, and `MERGE INTO`, including the
