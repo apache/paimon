@@ -62,11 +62,6 @@ jobs:
           restore-keys: |
             ci-maven-python-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Set up Maven
-        uses: stCarolas/setup-maven@v5
-        with:
-          maven-version: 3.8.8
-
       - name: Install system dependencies
         shell: bash
         run: |
@@ -85,6 +80,22 @@ jobs:
             libclang-dev \
             && apt-get clean \
             && rm -rf /var/lib/apt/lists/*
+
+      - name: Set up Maven
+        shell: bash
+        env:
+          MAVEN_VERSION: '3.8.8'
+        run: |
+          maven_archive="${RUNNER_TEMP}/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          # Central can return transient 404s even for an existing release.
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+            --output "$maven_archive" \
+            "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+            || curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+              --output "$maven_archive" \
+              "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          tar -xzf "$maven_archive" -C "$RUNNER_TEMP"
+          echo "${RUNNER_TEMP}/apache-maven-${MAVEN_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Verify Java and Maven installation
         run: |
