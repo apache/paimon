@@ -366,6 +366,12 @@ and split metadata plus partition, bucket and file-statistics pruning counters.
 Explain collects the complete metadata funnel before LIMIT, so it can decode
 more manifest entries than ordinary planning. It does not read data files.
 
+Fixed-bucket Native planning also handles ORs of equality/IN predicates,
+intersects repeated key constraints, and specializes predicates per partition.
+It follows Java's 1000-candidate combination limit and keeps scans conservative
+when a predicate cannot determine buckets. Masked fields do not drive raw-value
+bucket pruning.
+
 To run both split planning and data-file reading in Rust, enable the independent
 native-read option:
 

@@ -226,8 +226,8 @@ class ReadBuilder:
 
         Cost: ``explain()`` reads manifest list + manifests but never
         opens data files. To produce accurate before/after counters it
-        suppresses the manifest-reader's early bucket filter and forces
-        single-threaded manifest decoding, so it can be measurably
+        suppresses early bucket and sidecar pruning and counts candidates
+        before applying LIMIT, so it can be measurably
         heavier than a regular ``new_scan().plan()`` on tables where the
         early filter usually prunes aggressively (e.g. very wide
         HASH_FIXED tables with a tight predicate).
