@@ -6806,5 +6806,43 @@ class OffsetInputStreamTest(unittest.TestCase):
             os.remove(tmp_path)
 
 
+class BlobFromViewBackwardCompatibilityTest(unittest.TestCase):
+    """Test backward compatibility of Blob.from_view keyword argument."""
+
+    def test_from_view_keyword_argument_backward_compatible(self):
+        """Test that existing keyword-argument calls still work."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_compat"), 1, 42)
+        blob_view = Blob.from_view(view_struct=view_struct)
+
+        self.assertEqual(blob_view.view_struct.identifier.get_full_name(), "default.test_compat")
+        self.assertEqual(blob_view.view_struct.field_id, 1)
+        self.assertEqual(blob_view.view_struct.row_id, 42)
+
+    def test_from_view_positional_argument_still_works(self):
+        """Test that positional argument form still works."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_pos"), 2, 100)
+        blob_view = Blob.from_view(view_struct)
+
+        self.assertEqual(blob_view.view_struct.identifier.get_full_name(), "default.test_pos")
+        self.assertEqual(blob_view.view_struct.field_id, 2)
+        self.assertEqual(blob_view.view_struct.row_id, 100)
+
+    def test_from_view_cannot_mix_keyword_and_positional(self):
+        """Test that mixing keyword and positional is rejected."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_mix"), 3, 200)
+        with self.assertRaises(ValueError) as cm:
+            Blob.from_view(view_struct, view_struct=view_struct)
+        self.assertIn("Cannot provide both", str(cm.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

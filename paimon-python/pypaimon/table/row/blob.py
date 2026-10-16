@@ -734,7 +734,13 @@ class Blob(ABC):
             descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
 
     @staticmethod
-    def from_view(*args) -> 'BlobView':
+    def from_view(*args, view_struct: Optional[BlobViewStruct] = None) -> 'BlobView':
+        # Case 1: Keyword argument form (backward compatible)
+        if view_struct is not None:
+            if len(args) > 0:
+                raise ValueError("Cannot provide both view_struct keyword argument and positional arguments")
+            return BlobView(view_struct)
+        # Case 2: Positional argument forms
         if len(args) == 1 and isinstance(args[0], BlobViewStruct):
             return BlobView(args[0])
         if len(args) == 3:
