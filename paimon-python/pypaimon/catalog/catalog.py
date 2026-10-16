@@ -187,9 +187,7 @@ class Catalog(ABC):
 
     def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
                     from_snapshot: Optional[int] = None, *,
-                    table_uuid: Optional[str] = None,
-                    from_snapshot_uuid: Optional[str] = None,
-                    commit_user: Optional[str] = None) -> None:
+                    table_uuid: Optional[str] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -200,8 +198,6 @@ class Catalog(ABC):
             table_uuid: Expected table or branch UUID from the loaded table view.
                 Omit only when its UUID is unavailable. Implementations must not
                 discard a supplied UUID or reload it by name before rollback.
-            from_snapshot_uuid: Expected latest snapshot UUID.
-            commit_user: Current writer identity; omitted for manual rollback.
 
         Raises:
             TableNotExistException: If the table does not exist.

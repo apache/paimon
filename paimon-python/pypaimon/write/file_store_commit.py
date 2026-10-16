@@ -178,7 +178,7 @@ class FileStoreCommit:
             commit_scanner=self.commit_scanner
         )
 
-        table_rollback = table.catalog_environment.catalog_table_rollback(commit_user=self.commit_user)
+        table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
     def _set_fixed_bucket_commit_check(self, messages):

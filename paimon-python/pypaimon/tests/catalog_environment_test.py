@@ -94,26 +94,6 @@ class CatalogEnvironmentTest(unittest.TestCase):
         catalog.rollback_to.assert_called_once_with(
             identifier, instant, 2, table_uuid="loaded-uuid")
 
-    def test_catalog_table_rollback_keeps_writer_context_separate_from_manual_rollback(self):
-        catalog = mock.Mock()
-        identifier = Identifier.create("db", "table", branch="dev")
-        environment = CatalogEnvironment(
-            identifier=identifier, uuid="loaded-uuid",
-            catalog_loader=mock.Mock(load=mock.Mock(return_value=catalog)),
-            supports_version_management=True)
-        writer_rollback = environment.catalog_table_rollback(commit_user="current-writer")
-        manual_rollback = environment.catalog_table_rollback()
-        instant = mock.sentinel.instant
-
-        writer_rollback.rollback_to(instant, 3, "head-uuid")
-        manual_rollback.rollback_to(instant)
-
-        self.assertEqual(catalog.rollback_to.call_args_list, [
-            mock.call(identifier, instant, 3, table_uuid="loaded-uuid",
-                      from_snapshot_uuid="head-uuid", commit_user="current-writer"),
-            mock.call(identifier, instant, None, table_uuid="loaded-uuid"),
-        ])
-
     def test_snapshot_commit_uses_copied_identity(self):
         main = Identifier.create("db", "table")
         environment = CatalogEnvironment(
