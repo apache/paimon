@@ -380,6 +380,55 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(blob.is_resolved())
         self.assertEqual(blob.view_struct, view_struct)
 
+    def test_blob_view_struct_construct_by_field_name(self):
+        from types import SimpleNamespace
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.schema.data_types import AtomicType, DataField, RowType
+
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(7, "picture", AtomicType("BLOB")),
+        ]
+        row_type = RowType(True, fields)
+        fake_table = SimpleNamespace(
+            identifier=Identifier.from_string("test_db.source_table"),
+            fields=fields,
+        )
+
+        expected = BlobViewStruct("test_db.source_table", 7, 42)
+        self.assertEqual(
+            BlobViewStruct.of("test_db.source_table", row_type, "picture", 42),
+            expected,
+        )
+        self.assertEqual(
+            BlobViewStruct.of(fake_table, "picture", 42),
+            expected,
+        )
+        self.assertEqual(
+            Blob.from_view("test_db.source_table", 7, 42),
+            Blob.from_view(expected),
+        )
+        self.assertEqual(
+            Blob.from_view("test_db.source_table", row_type, "picture", 42),
+            Blob.from_view(expected),
+        )
+        self.assertEqual(
+            Blob.from_view(fake_table, "picture", 42),
+            Blob.from_view(expected),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Cannot find blob field missing in upstream table test_db\.source_table\.",
+        ):
+            BlobViewStruct.of(fake_table, "missing", 42)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Field id in upstream table test_db\.source_table is not a BLOB field\.",
+        ):
+            BlobViewStruct.of(fake_table, "id", 42)
+
     def test_blob_fallback_batch_reader_respects_batch_size(self):
         created_readers = []
 
