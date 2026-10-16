@@ -367,7 +367,7 @@ Explain collects the complete metadata funnel before LIMIT, so it can decode
 more manifest entries than ordinary planning. It does not read data files.
 For programmatic access, `plan, stats = builder.new_scan().scan_with_stats()`
 returns the same counters as `plan.stats()`. Ordinary plans return `None`
-from this getter.
+from this getter. Snapshot metadata is available separately as `plan.snapshot_id`.
 
 Fixed-bucket Native planning also handles ORs of equality/IN predicates,
 intersects repeated key constraints, and specializes predicates per partition.
