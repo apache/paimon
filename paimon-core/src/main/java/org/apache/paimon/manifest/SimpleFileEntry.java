@@ -238,11 +238,19 @@ public class SimpleFileEntry implements FileEntry {
 
     @Override
     public String toString() {
+        return toStringWithPartition(String.valueOf(partition));
+    }
+
+    /**
+     * Formats the entry with the supplied partition representation while retaining its other
+     * diagnostic fields.
+     */
+    public String toStringWithPartition(String partitionString) {
         return "{"
                 + "kind="
                 + kind
                 + ", partition="
-                + partition
+                + partitionString
                 + ", bucket="
                 + bucket
                 + ", totalBuckets="

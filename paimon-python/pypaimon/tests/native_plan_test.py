@@ -191,6 +191,7 @@ class NativePlanTest(unittest.TestCase):
         fake_df.PaimonCatalog = type(
             'PaimonCatalog', (), {'get_table': lambda self, name: None})
         fake_df.Split = type('Split', (), {'serialize': lambda self: b''})
+        fake_df.TableScan = type('TableScan', (), {'with_global_index_result': lambda self, result: self})
         fake_mod = ModuleType('pypaimon_rust')
         fake_mod.datafusion = fake_df
         patcher = patch.dict(
@@ -381,7 +382,7 @@ class NativePlanTest(unittest.TestCase):
             row_ranges=None,
         )
 
-    def test_plan_forwards_global_index_row_ranges(self):
+    def test_plan_forwards_global_index_result(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(native_enabled=True, file_scanner=fs)
         fs.data_evolution = True
@@ -397,7 +398,8 @@ class NativePlanTest(unittest.TestCase):
             predicate=None,
             limit=None,
             projection=None,
-            row_ranges=[(1, 2), (5, 5)],
+            row_ranges=None,
+            global_index_result=fs._global_index_result,
         )
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [split])
@@ -416,12 +418,13 @@ class NativePlanTest(unittest.TestCase):
             predicate=None,
             limit=None,
             projection=None,
-            row_ranges=[],
+            row_ranges=None,
+            global_index_result=fs._global_index_result,
         )
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [])
 
-    def test_scored_global_index_result_uses_native_ranges(self):
+    def test_scored_global_index_result_retains_core_scores(self):
         from pypaimon.globalindex.indexed_split import IndexedSplit
         from pypaimon.read.split import DataSplit
 
@@ -430,10 +433,11 @@ class NativePlanTest(unittest.TestCase):
         fs.data_evolution = True
         bitmap = GlobalIndexResult.from_range(Range(1, 1)).results()
         fs._global_index_result = ScoredGlobalIndexResult.create(bitmap, lambda _: 0.75)
-        split = IndexedSplit(DataSplit([], None, 0), [Range(1, 1)])
+        split = IndexedSplit(DataSplit([], None, 0), [Range(1, 1)], [0.75])
         with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([split], 9)) as np:
             plan = scan.plan()
-        self.assertEqual(np.call_args[1]['row_ranges'], [(1, 1)])
+        self.assertIs(np.call_args[1]['global_index_result'], fs._global_index_result)
+        self.assertIsNone(np.call_args[1]['row_ranges'])
         self.assertEqual(plan.splits()[0].scores(), [0.75])
         self.assertEqual(plan.snapshot_id, 9)
         fs.scan.assert_not_called()

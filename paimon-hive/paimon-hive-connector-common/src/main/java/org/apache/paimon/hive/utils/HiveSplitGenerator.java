@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,6 +64,9 @@ public class HiveSplitGenerator {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveSplitGenerator.class);
 
+    /** Whether the Hive table has partition columns, set by {@code PaimonStorageHandler}. */
+    public static final String HIVE_PARTITIONED = "paimon_internal_hive_partitioned";
+
     public static InputSplit[] generateSplits(
             FileStoreTable table, JobConf jobConf, int numSplits) {
         List<Predicate> predicates = new ArrayList<>();
@@ -81,13 +85,7 @@ public class HiveSplitGenerator {
 
         List<PaimonInputSplit> splits = new ArrayList<>();
         // locations may contain multiple partitions
-        for (String location : locations.split(",")) {
-            if (!location.startsWith(table.location().toString())) {
-                // Hive create dummy file for empty table or partition. If this location doesn't
-                // belong to this table, nothing to do.
-                continue;
-            }
-
+        for (String location : locationsToPlan(table, jobConf, locations)) {
             InnerTableScan scan;
             if (tagToPartField != null) {
                 // the location should be pruned by partition predicate
@@ -128,6 +126,29 @@ public class HiveSplitGenerator {
             packed.forEach(ss -> splits.add(new PaimonInputSplit(location, ss, table)));
         }
         return splits.toArray(new InputSplit[0]);
+    }
+
+    private static List<String> locationsToPlan(
+            FileStoreTable table, JobConf jobConf, String locations) {
+        List<String> belonging = new ArrayList<>();
+        String foreign = null;
+        for (String location : locations.split(",")) {
+            // Hive create dummy file for empty table or partition. If this location doesn't
+            // belong to this table, nothing to do.
+            if (location.startsWith(table.location().toString())) {
+                belonging.add(location);
+            } else if (foreign == null && !location.isEmpty()) {
+                foreign = location;
+            }
+        }
+        // With LOCATION_IN_PROPERTIES, Hive gives the table a location under its own warehouse,
+        // which does not start with the paimon location. If the table has no Hive partitions,
+        // that location stands for the whole table. Hive partitions of such a table all share
+        // it, so they cannot be told apart and are still skipped.
+        if (belonging.isEmpty() && foreign != null && !jobConf.getBoolean(HIVE_PARTITIONED, true)) {
+            return Collections.singletonList(foreign);
+        }
+        return belonging;
     }
 
     private static Optional<Predicate> createPartitionPredicate(
