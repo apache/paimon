@@ -146,10 +146,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     protected RowType readRowType;
     @Nullable private List<Predicate> filters;
     @Nullable private ReadBatchSizer readBatchSizer;
-    // File metadata read while computing the candidate rows of the merged group whose readers are
-    // being created, so that opening its files does not read it again. Only an optimization: a
-    // reader opened outside of the group's creation finds none and reads the metadata again.
-    @Nullable private FileMetadataCache groupMetadataCache;
 
     public DataEvolutionSplitRead(
             FileIO fileIO,
@@ -344,8 +340,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             needMergeFiles,
                                             dataFilePathFactory,
                                             metadataCache);
-                            // Candidates restrict the group selection, not the row ranges of the
-                            // split, which also decide whether a row sidecar is read instead.
+                            // Candidates restrict the group selection, which every file of the
+                            // group reads.
                             if (candidates != null) {
                                 if (candidates.isEmpty()) {
                                     return new EmptyFileRecordReader<>();
@@ -358,20 +354,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     return new EmptyFileRecordReader<>();
                                 }
                             }
-                            // the readers of a group are created right away, see #candidateRanges
-                            groupMetadataCache = metadataCache;
-                            try {
-                                return createUnionReader(
-                                        needMergeFiles,
-                                        partition,
-                                        dataFilePathFactory,
-                                        rowRanges,
-                                        readRowType,
-                                        deletionVector,
-                                        groupSelection);
-                            } finally {
-                                groupMetadataCache = null;
-                            }
+                            return createUnionReader(
+                                    needMergeFiles,
+                                    partition,
+                                    dataFilePathFactory,
+                                    rowRanges,
+                                    readRowType,
+                                    deletionVector,
+                                    groupSelection,
+                                    metadataCache);
                         });
             }
         }
@@ -401,7 +392,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         List<DataEvolutionVectorReadPlanner.ReadRange> vectorRanges =
                 DataEvolutionVectorReadPlanner.plan(
@@ -448,6 +440,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         readRanges,
                                         readRowType,
                                         deletionVector,
+                                        null,
                                         null));
             }
             return ConcatRecordReader.create(suppliers);
@@ -473,7 +466,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 deletionVector,
-                groupSelection);
+                groupSelection,
+                metadataCache);
     }
 
     private RecordReader<InternalRow> createUnionReader(
@@ -484,7 +478,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
 
         long rowCount = fieldsFiles.get(0).rowCount();
@@ -534,7 +529,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     rowRanges,
                     readRowType,
                     deletionVector,
-                    groupSelection);
+                    groupSelection,
+                    metadataCache);
         }
 
         // Build the per-bunch readers from the planned partial read row types.
@@ -578,7 +574,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     rowRanges,
                                     partialReadRowType,
                                     deletionVector,
-                                    groupSelection));
+                                    groupSelection,
+                                    metadataCache));
         }
 
         return nestedFieldEnabled
@@ -597,7 +594,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         DataFileMeta firstFile = bunch.files().get(0);
         FileReadTarget readTarget =
@@ -622,7 +620,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 deletionVector,
-                groupSelection);
+                groupSelection,
+                metadataCache);
     }
 
     private boolean nestedFieldEnabledFor(List<DataFileMeta> files) {
@@ -688,7 +687,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         if (bunch instanceof DataBunch) {
             // for data bunch, directly read the single file
@@ -700,7 +700,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     rowRanges,
                     readRowType,
                     deletionVector,
-                    groupSelection);
+                    groupSelection,
+                    metadataCache);
         } else if (bunch instanceof VectorFileBunch) {
             // for vector bunch, sequential read all data files and concat them
             return sequentialReadFiles(
@@ -762,7 +763,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             dataFilePathFactory.toPath(file),
                                             file.fileSize()),
                                     deletionVector,
-                                    groupSelection));
+                                    groupSelection,
+                                    null));
         }
         return ConcatRecordReader.create(readerSuppliers);
     }
@@ -867,7 +869,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readRowType,
                 readTarget,
                 deletionVector,
-                fileIndexResult);
+                fileIndexResult,
+                null);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -887,6 +890,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 deletionVector,
+                null,
                 null);
     }
 
@@ -898,7 +902,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         return createFileReader(
                 partition,
@@ -908,7 +913,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readRowType,
                 readTarget(file, dataFilePathFactory, rowRanges, groupSelection),
                 deletionVector,
-                groupSelection);
+                groupSelection,
+                metadataCache);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -919,7 +925,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             RowType readRowType,
             FileReadTarget readTarget,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable FileIndexResult fileIndexResult)
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         RoaringBitmap32 selection = file.toFileSelection(rowRanges);
         BitmapIndexResult bitmapIndexResult =
@@ -944,7 +951,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         readTarget.fileSize,
                         selection,
                         readBatchSizer,
-                        groupMetadataCache);
+                        metadataCache);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readRowType,
@@ -1150,9 +1157,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * to the selection shared by all files of the group, see {@link #restrictToCandidates}, so
      * every file reads only these rows, which keeps the readers aligned.
      *
-     * <p>Only a group of normal files sharing one row id range qualifies. Its readers are created
-     * right away by {@link #createUnionReader}, so the file metadata read here is handed to them
-     * through {@link #groupMetadataCache}.
+     * <p>Only a group of normal files sharing one row id range qualifies. The file metadata read
+     * here is cached in {@code metadataCache}, which the caller passes to the readers of the group
+     * so that they do not read it again.
      */
     @Nullable
     private List<Range> candidateRanges(

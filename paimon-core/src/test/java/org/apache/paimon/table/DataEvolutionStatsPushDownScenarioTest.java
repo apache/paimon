@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
@@ -29,6 +30,9 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -60,6 +64,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -334,6 +339,69 @@ public class DataEvolutionStatsPushDownScenarioTest extends TableTestBase {
         assertThat(matched(read, splits, first, m)).isEqualTo(expected(m, first));
         read.withFilter(second);
         assertThat(matched(read, splits, second, m)).isEqualTo(expected(m, second));
+    }
+
+    /** The footer read for the candidate rows is reused when the files of the group are opened. */
+    @Test
+    public void testFooterReadOncePerFile() throws Exception {
+        FooterCountingFileIO fileIO = new FooterCountingFileIO();
+        catalog = new FileSystemCatalog(fileIO, new Path(tempPath.toUri().toString(), "counting"));
+        catalog.createDatabase(database, true);
+        Model m = create("footer", "parquet", false, Collections.emptyMap());
+        writeRange(m, RANGE_ROWS, null, row -> base(row));
+        update(m, 0, Collections.singletonList("a"), (row, col) -> (int) (RANGE_ROWS - row));
+
+        fileIO.footerReads.clear();
+        Result result =
+                read(pushDown(m.table, true), builder(m).lessThan(index(m, "a"), 100), null);
+        assertThat(result.matched).hasSize(99);
+        // the update file computes the candidate rows, then both files of the group are opened
+        assertThat(fileIO.footerReads).hasSize(2);
+        assertThat(fileIO.footerReads.values()).containsOnly(1);
+    }
+
+    /** Counts the footer reads of Parquet files, which seek to the footer length first. */
+    private static class FooterCountingFileIO extends LocalFileIO {
+
+        private final Map<String, Integer> footerReads = new HashMap<>();
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            SeekableInputStream in = super.newInputStream(path);
+            if (!path.getName().endsWith(".parquet")) {
+                return in;
+            }
+            long footerLengthPosition = getFileStatus(path).getLen() - 8;
+            return new SeekableInputStream() {
+                @Override
+                public void seek(long desired) throws IOException {
+                    if (desired == footerLengthPosition) {
+                        footerReads.merge(path.getName(), 1, Integer::sum);
+                    }
+                    in.seek(desired);
+                }
+
+                @Override
+                public long getPos() throws IOException {
+                    return in.getPos();
+                }
+
+                @Override
+                public int read() throws IOException {
+                    return in.read();
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws IOException {
+                    return in.read(b, off, len);
+                }
+
+                @Override
+                public void close() throws IOException {
+                    in.close();
+                }
+            };
+        }
     }
 
     /**
