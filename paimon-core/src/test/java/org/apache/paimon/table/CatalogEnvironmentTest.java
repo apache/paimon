@@ -153,6 +153,23 @@ class CatalogEnvironmentTest {
     }
 
     @Test
+    void testSnapshotLoaderWithoutVersionManagementReturnsNull() {
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        "table-uuid",
+                        () -> {
+                            throw new AssertionError("Catalog should not be loaded");
+                        },
+                        null,
+                        null,
+                        null,
+                        false,
+                        false);
+        assertThat(environment.snapshotLoader()).isNull();
+    }
+
+    @Test
     void testDependencyReadContextForRestCatalog() {
         Identifier root = Identifier.create("db", "root$branch_dev");
         Options options = new Options();
