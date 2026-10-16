@@ -281,6 +281,64 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testHilbertKeepsNegativeAndPositiveDoublesApart() throws Exception {
+        catalog.createDatabase(database, true);
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("x", DataTypes.DOUBLE())
+                        .column("y", DataTypes.DOUBLE())
+                        .option("bucket", "-1")
+                        .option("sink.parallelism", "1")
+                        .build(),
+                true);
+        // written with alternating signs, so a single sign change can only come from the sort
+        double[] values = {-4.5, 4.5, -3.5, 3.5, -2.5, 2.5, -1.5, 1.5};
+        BatchWriteBuilder builder = getTable().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (double x : values) {
+                for (double y : values) {
+                    write.write(GenericRow.of(x, y));
+                }
+            }
+            commit(write.prepareCommit());
+        }
+
+        hilbert(Arrays.asList("x", "y"));
+
+        List<ManifestEntry> files = getTable().store().newScan().plan().files();
+        Assertions.assertThat(files).hasSize(1);
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(files.get(0).partition())
+                        .withBucket(files.get(0).bucket())
+                        .withDataFiles(Collections.singletonList(files.get(0).file()))
+                        .withBucketPath("not used")
+                        .build();
+        List<double[]> rows = new ArrayList<>();
+        getTable()
+                .newReadBuilder()
+                .newRead()
+                .createReader(dataSplit)
+                .forEachRemaining(
+                        row -> rows.add(new double[] {row.getDouble(0), row.getDouble(1)}));
+        Assertions.assertThat(rows).hasSize(64);
+
+        // The curve visits one half of the plane before the other, so along the clustered order
+        // one of the two coordinates changes sign exactly once. A key that ignores the sign puts
+        // x and -x on the same point and interleaves both signs.
+        int[] signChanges = new int[2];
+        for (int i = 1; i < rows.size(); i++) {
+            for (int c = 0; c < 2; c++) {
+                if ((rows.get(i - 1)[c] < 0) != (rows.get(i)[c] < 0)) {
+                    signChanges[c]++;
+                }
+            }
+        }
+        Assertions.assertThat(Math.min(signChanges[0], signChanges[1])).isEqualTo(1);
+    }
+
+    @Test
     public void testTableConf() throws Exception {
         createTable();
         SortCompactAction sortCompactAction =
