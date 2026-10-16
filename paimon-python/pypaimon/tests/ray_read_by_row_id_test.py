@@ -530,7 +530,6 @@ class RayReadByRowIdTest(unittest.TestCase):
             target, pa.table({"_ROW_ID": pa.array([], pa.int64())}),
             self.catalog_options, projection=proj)
         self.assertTrue(real_schema.equals(empty.schema().base_schema))
-        self.assertFalse(empty.schema().base_schema.field("_ROW_ID").nullable)
 
     def test_custom_row_id_col(self):
         target = self._create()

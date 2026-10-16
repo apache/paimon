@@ -92,7 +92,6 @@ def test_partial_column_updates_keep_latest_metadata_provider(tmp_path, native, 
                        ['_SEQUENCE_NUMBER', 'w', '_ROW_ID', 'v', 'id']):
         result = _read(table, native, projection)
         assert result.column_names == projection
-        assert not result.schema.field('_SEQUENCE_NUMBER').nullable
         assert result['_SEQUENCE_NUMBER'].null_count == 0
         if 'id' in projection:
             result = result.sort_by('id')

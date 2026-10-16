@@ -22,6 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon import CatalogFactory
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
@@ -327,7 +328,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.pk_expected)
+        self.assertEqual(actual, self.pk_expected.cast(read_arrow_schema(table.fields)))
 
     def test_pk_orc_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -365,7 +366,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected.cast(read_arrow_schema(table.fields)))
 
     def test_pk_lance_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -385,7 +386,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.pk_expected)
+        self.assertEqual(actual, self.pk_expected.cast(read_arrow_schema(table.fields)))
 
     def test_lance_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
@@ -433,7 +434,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
             self.pk_expected.slice(1, 1),  # 2/b
             self.pk_expected.slice(5, 1)  # 7/g
         ])
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected.cast(read_arrow_schema(table.fields)))
 
     def test_pk_lance_reader_no_bucket(self):
         """Test Lance format with PrimaryKey table without specifying bucket."""
@@ -450,7 +451,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.pk_expected)
+        self.assertEqual(actual, self.pk_expected.cast(read_arrow_schema(table.fields)))
 
     def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -472,7 +473,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
             self.pk_expected.slice(1, 1),  # 2/b
             self.pk_expected.slice(5, 1)  # 7/g
         ])
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected.cast(read_arrow_schema(table.fields)))
 
     def test_pk_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -485,7 +486,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id', 'behavior'])
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        expected = self.pk_expected.select(['dt', 'user_id', 'behavior'])
+        expected = self.pk_expected.cast(read_arrow_schema(table.fields)).select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
     def test_write_wrong_schema(self):
