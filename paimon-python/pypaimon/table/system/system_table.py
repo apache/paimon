@@ -41,6 +41,23 @@ if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from pypaimon.table.system.system_table_scan import SystemTableScan
 
 
+def metadata_local_millis(millis):
+    """Java DateTimeUtils.toLocalDateTime for an epoch-millisecond instant."""
+    from pypaimon.casting.temporal_utils import _local_offset, _signed
+    return _signed(int(millis) + _local_offset(int(millis) // 1000) * 1000, 64)
+
+
+def metadata_snapshot(table):
+    """Use the table's captured view, including an explicitly empty snapshot."""
+    if '_read_snapshot' in vars(table):
+        return table._read_snapshot
+    from pypaimon.common.options.options import Options
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    snapshot = TimeTravelUtil.try_travel_to_snapshot(
+        Options(table.table_schema.options), table.tag_manager(), table.snapshot_manager())
+    return snapshot if snapshot is not None else table.snapshot_manager().get_latest_snapshot()
+
+
 _READ_ONLY_MESSAGE = "System table is read-only"
 
 

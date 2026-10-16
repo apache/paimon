@@ -17,7 +17,6 @@
 
 """End-to-end tests for the ``$files`` system table."""
 
-import json
 import os
 import shutil
 import tempfile
@@ -34,6 +33,20 @@ from pypaimon.table.system.files_table import FilesTable, _row_values
 def _read(table):
     rb = table.new_read_builder()
     return rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+
+def _stats_map(text):
+    # FilesTable exposes Java Map.toString, with sorted names and unquoted cells.
+    assert text.startswith('{') and text.endswith('}')
+    pairs = {}
+    for item in text[1:-1].split(', ') if text != '{}' else []:
+        name, value = item.split('=', 1)
+        try:
+            value = int(value)
+        except ValueError:
+            value = None if value == 'null' else value
+        pairs[name] = value
+    return pairs
 
 
 class FilesTableTest(unittest.TestCase):
@@ -114,10 +127,10 @@ class FilesTableTest(unittest.TestCase):
         arrow_table = _read(self.catalog.get_table("db.t$files"))
         self.assertGreater(arrow_table.num_rows, 0)
 
-        # One row per file; partitions captured as `pt=value` strings.
+        # One row per file; partitions rendered with Java Row to STRING.
         partitions = set(arrow_table.column("partition").to_pylist())
-        self.assertIn("dt=2024-01-01", partitions)
-        self.assertIn("dt=2024-01-02", partitions)
+        self.assertIn("{2024-01-01}", partitions)
+        self.assertIn("{2024-01-02}", partitions)
 
         for path in arrow_table.column("file_path").to_pylist():
             self.assertTrue(path)
@@ -126,17 +139,17 @@ class FilesTableTest(unittest.TestCase):
         for size in arrow_table.column("file_size_in_bytes").to_pylist():
             self.assertGreater(size, 0)
 
-        # Stats columns are JSON dicts keyed by column name.
+        # Stats columns use Java Map.toString keyed by column name.
         for value in arrow_table.column("null_value_counts").to_pylist():
             self.assertIsInstance(value, str)
-            decoded = json.loads(value)
+            decoded = _stats_map(value)
             self.assertIsInstance(decoded, dict)
         for value in arrow_table.column("min_value_stats").to_pylist():
             self.assertIsInstance(value, str)
-            self.assertIsInstance(json.loads(value), dict)
+            self.assertIsInstance(_stats_map(value), dict)
         for value in arrow_table.column("max_value_stats").to_pylist():
             self.assertIsInstance(value, str)
-            self.assertIsInstance(json.loads(value), dict)
+            self.assertIsInstance(_stats_map(value), dict)
 
         # Append-only tables expose empty min_key / max_key.
         for value in arrow_table.column("min_key").to_pylist():
@@ -178,9 +191,9 @@ class FilesTableTest(unittest.TestCase):
 
         arrow_table = _read(self.catalog.get_table("db.stats_t$files"))
         self.assertGreater(arrow_table.num_rows, 0)
-        mins = [json.loads(s) for s in
+        mins = [_stats_map(s) for s in
                 arrow_table.column("min_value_stats").to_pylist()]
-        maxs = [json.loads(s) for s in
+        maxs = [_stats_map(s) for s in
                 arrow_table.column("max_value_stats").to_pylist()]
         # Real per-column values, not an empty {} (the BinaryRow-lacks-values bug).
         self.assertTrue(any(m for m in mins),
@@ -227,17 +240,17 @@ class FilesTableTest(unittest.TestCase):
         # The re-added ``v`` is a different column: the old file has no stats
         # for it and all of its rows are null there.
         self.assertEqual({"id": 1, "v": None},
-                         json.loads(old_file["min_value_stats"]))
+                         _stats_map(old_file["min_value_stats"]))
         self.assertEqual({"id": 1, "v": None},
-                         json.loads(old_file["max_value_stats"]))
+                         _stats_map(old_file["max_value_stats"]))
         self.assertEqual({"id": 0, "v": 1},
-                         json.loads(old_file["null_value_counts"]))
+                         _stats_map(old_file["null_value_counts"]))
         self.assertEqual({"id": 2, "v": 20},
-                         json.loads(new_file["min_value_stats"]))
+                         _stats_map(new_file["min_value_stats"]))
         self.assertEqual({"id": 2, "v": 20},
-                         json.loads(new_file["max_value_stats"]))
+                         _stats_map(new_file["max_value_stats"]))
         self.assertEqual({"id": 0, "v": 0},
-                         json.loads(new_file["null_value_counts"]))
+                         _stats_map(new_file["null_value_counts"]))
 
     def test_stats_decode_errors_are_not_swallowed(self):
         class CorruptRow:

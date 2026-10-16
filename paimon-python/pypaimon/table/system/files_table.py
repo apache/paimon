@@ -17,17 +17,15 @@
 
 """The ``$files`` system table — per-data-file detail of the latest snapshot."""
 
-import json
 from typing import Any, List, Optional
 
 import pyarrow
 
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         RowType)
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_snapshot
 
 
 TABLE_TYPE = RowType(False, [
@@ -64,59 +62,90 @@ _TIMESTAMP_TYPE = pyarrow.timestamp("ms")
 _WRITE_COLS_TYPE = pyarrow.list_(pyarrow.string())
 
 
-def _to_json(obj: Any) -> str:
-    return json.dumps(obj, separators=(',', ':'), ensure_ascii=False,
-                      default=str)
-
-
-def _stringify_path(value: Any) -> str:
+def _render_value(value, data_type=None) -> str:
     if value is None:
-        return ""
-    if isinstance(value, bytes):
-        try:
-            return value.decode("utf-8")
-        except UnicodeDecodeError:
-            return value.hex()
+        return "null"
+    if data_type is not None:
+        from pypaimon.casting.row_to_string import cast_value_to_string
+        from pypaimon.casting.numeric_utils import java_floating_string
+        type_name = str(getattr(data_type, 'type', data_type)).upper()
+        if type_name in ('FLOAT', 'REAL', 'DOUBLE'):
+            return java_floating_string(value, type_name != 'DOUBLE')
+        if type_name in ('BYTES', 'BINARY', 'VARBINARY') or type_name.startswith(('BINARY(', 'VARBINARY(')):
+            from pypaimon.utils.file_store_path_factory import _decode_java_utf8
+            return _decode_java_utf8(value)
+        if 'TIMESTAMP_LTZ' in type_name or 'WITH LOCAL TIME ZONE' in type_name:
+            from pypaimon.casting.temporal_string import temporal_to_string
+            from pypaimon.schema.data_types import PyarrowFieldParser
+            arrow_type = PyarrowFieldParser.from_paimon_type(data_type)
+            return temporal_to_string(pyarrow.array([value], type=arrow_type), data_type)[0].as_py()
+        return cast_value_to_string(value, data_type)
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
     return str(value)
 
 
-def _to_python(value: Any) -> Any:
-    """Render an internal-row cell value into a JSON-safe primitive."""
+def _render_object(value, data_type=None) -> str:
+    # Java InternalRowUtils.get returns integer DATE/TIME and a Timestamp
+    # whose toString is ISO LocalDateTime, including for LTZ key/stats cells.
     if value is None:
-        return None
-    if isinstance(value, bytes):
-        try:
-            return value.decode("utf-8")
-        except UnicodeDecodeError:
-            return value.hex()
-    if hasattr(value, "isoformat"):
-        try:
-            return value.isoformat()
-        except Exception:
-            return str(value)
-    if isinstance(value, (int, float, bool, str, list, dict)):
-        return value
-    return str(value)
+        return 'null'
+    type_name = str(getattr(data_type, 'type', data_type)).upper()
+    if type_name == 'DATE':
+        from datetime import date
+        return str((value - date(1970, 1, 1)).days)
+    if type_name.startswith('TIME') and not type_name.startswith('TIMESTAMP'):
+        return str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000 + value.microsecond // 1000)
+    if type_name.startswith('TIMESTAMP'):
+        from datetime import timezone
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        nanos = value.microsecond * 1000 + getattr(value, 'nanosecond', 0)
+        text = '{:04d}-{:02d}-{:02d}T{:02d}:{:02d}'.format(
+            value.year, value.month, value.day, value.hour, value.minute)
+        if value.second or nanos:
+            text += ':{:02d}'.format(value.second)
+        if nanos:
+            precision = 3 if nanos % 1000000 == 0 else 6 if nanos % 1000 == 0 else 9
+            text += '.' + '{:09d}'.format(nanos)[:precision]
+        return text
+    return _render_value(value, data_type)
 
 
 def _render_key(row) -> Optional[str]:
-    if row is None:
+    if row is None or not len(row):
         return None
-    values = getattr(row, "values", None)
-    if not values:
-        return None
-    return _to_json([_to_python(v) for v in values])
+    fields = getattr(row, 'fields', [])
+    return '[' + ', '.join(_render_object(row.get_field(i), fields[i].type) for i in range(len(row))) + ']'
 
 
 def _render_partition(partition_row) -> Optional[str]:
     if partition_row is None:
         return None
-    fields = getattr(partition_row, "fields", None) or []
-    values = getattr(partition_row, "values", None) or []
-    if not fields:
-        return None
-    return "/".join("{}={}".format(field.name, value)
-                    for field, value in zip(fields, values))
+    fields = getattr(partition_row, 'fields', [])
+    return '{' + ', '.join(_render_value(partition_row.get_field(i), field.type)
+                           for i, field in enumerate(fields)) + '}'
+
+
+def _metadata_file_path(table, entry):
+    if entry.file.external_path is not None:
+        return entry.file.external_path
+    # Display Java's logical bucket path; the IO path may have decoded URI
+    # escapes or dropped file: to reach a literal escaped local directory.
+    bucket = table.path_factory().bucket_path(
+        tuple(entry.partition.values), int(entry.bucket), canonical_partition=True)
+    return bucket.rstrip('/') + '/' + entry.file.file_name
+
+
+def _data_file_format(file_name):
+    parts = file_name.rsplit('.', 2)
+    if len(parts) < 2:
+        raise ValueError('{} is not a legal file name'.format(file_name))
+    if parts[-1].lower() in ('gz', 'bz2', 'deflate', 'snappy', 'lz4', 'zst'):
+        if len(parts) < 3:
+            raise ValueError('{} is not a legal file name'.format(file_name))
+        return parts[-2]
+    return parts[-1]
 
 
 def _row_values(row) -> List[Any]:
@@ -129,23 +158,44 @@ def _stats_fields(stats_row) -> List[str]:
     return [field.name for field in stats_row.fields]
 
 
-def _render_stats_map(values: List[Any], columns: List[str]) -> str:
-    pairs = {}
-    n = min(len(columns), len(values) if values is not None else 0)
-    for i in range(n):
-        pairs[columns[i]] = _to_python(values[i])
-    return _to_json(pairs)
+def _render_stats_map(values: List[Any], columns: List[str], fields=None) -> str:
+    values = values or []
+    pairs = {name: _render_object(values[i] if i < len(values) else None,
+                                  fields[i].type if fields else None)
+             for i, name in enumerate(columns)}
+    return '{' + ', '.join(name + '=' + pairs[name] for name in sorted(pairs)) + '}'
 
 
-def _render_null_counts(null_counts: Optional[List[int]],
-                        columns: List[str]) -> str:
-    pairs = {}
-    if null_counts:
-        n = min(len(columns), len(null_counts))
-        for i in range(n):
-            pairs[columns[i]] = (None if null_counts[i] is None
-                                 else int(null_counts[i]))
-    return _to_json(pairs)
+def _render_null_counts(null_counts: Optional[List[int]], columns: List[str]) -> str:
+    return _render_stats_map(null_counts, columns)
+
+
+def _file_stats(table, meta):
+    from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    file_schema = table.schema_manager.get_schema(meta.schema_id)
+    physical = {field.id: field for field in file_schema.data_file_fields(meta.write_cols)}
+    stats = meta.value_stats
+    names = _stats_fields(stats.min_values)
+    nulls, lower, upper = [], [], []
+    for field in table.fields:
+        source = physical.get(field.id)
+        if source is None:
+            nulls.append(meta.row_count)
+            lower.append(None)
+            upper.append(None)
+            continue
+        index = names.index(source.name) if source.name in names else None
+        nulls.append(stats.null_counts[index] if index is not None and stats.null_counts is not None
+                     and index < len(stats.null_counts) else None)
+        for row, output in ((stats.min_values, lower), (stats.max_values, upper)):
+            value = row.get_field(index) if index is not None and index < len(row) else None
+            if value is not None and source.type != field.type:
+                value = cast_array_for_schema_evolution(
+                    pyarrow.array([value], type=PyarrowFieldParser.from_paimon_type(source.type)),
+                    PyarrowFieldParser.from_paimon_type(field.type), source.type, field.type)[0].as_py()
+            output.append(value)
+    return nulls, lower, upper
 
 
 class FilesTable(SystemTable):
@@ -161,7 +211,7 @@ class FilesTable(SystemTable):
         return ["file_path"]
 
     def _build_arrow_table(self) -> pyarrow.Table:
-        snapshot = self.base_table.snapshot_manager().get_latest_snapshot()
+        snapshot = metadata_snapshot(self.base_table)
         if snapshot is None:
             return self._empty_table()
 
@@ -170,11 +220,6 @@ class FilesTable(SystemTable):
         manifest_file_manager = ManifestFileManager(self.base_table)
         entries = manifest_file_manager.read_entries_parallel(
             manifest_files, drop_stats=False)
-
-        file_format = self.base_table.options.file_format()
-        stats_evolutions = SimpleStatsEvolutions(
-            self._schema_fields, self.base_table.table_schema.id)
-        stats_columns = [field.name for field in stats_evolutions.table_fields]
 
         rows = {
             "partition": [],
@@ -203,9 +248,8 @@ class FilesTable(SystemTable):
             meta = entry.file
             rows["partition"].append(_render_partition(entry.partition))
             rows["bucket"].append(int(entry.bucket))
-            rows["file_path"].append(_stringify_path(
-                meta.file_path or meta.file_name))
-            rows["file_format"].append(file_format)
+            rows["file_path"].append(_metadata_file_path(self.base_table, entry))
+            rows["file_format"].append(_data_file_format(meta.file_name))
             rows["schema_id"].append(int(meta.schema_id))
             rows["level"].append(int(meta.level))
             rows["record_count"].append(int(meta.row_count))
@@ -213,28 +257,22 @@ class FilesTable(SystemTable):
             rows["min_key"].append(_render_key(meta.min_key))
             rows["max_key"].append(_render_key(meta.max_key))
 
-            # Evolve stats to the current schema by field id, so a dropped or
-            # re-added column never inherits another column's stats.
-            value_stats = stats_evolutions.get_or_create(meta.schema_id).evolution(
-                meta.value_stats, meta.row_count,
-                _stats_fields(meta.value_stats.min_values))
-            rows["null_value_counts"].append(
-                _render_null_counts(value_stats.null_counts, stats_columns))
-            rows["min_value_stats"].append(_render_stats_map(
-                _row_values(value_stats.min_values),
-                stats_columns))
-            rows["max_value_stats"].append(_render_stats_map(
-                _row_values(value_stats.max_values),
-                stats_columns))
+            nulls, lower, upper = _file_stats(self.base_table, meta)
+            columns = [field.name for field in self.base_table.fields]
+            rows["null_value_counts"].append(_render_null_counts(nulls, columns))
+            rows["min_value_stats"].append(_render_stats_map(lower, columns, self.base_table.fields))
+            rows["max_value_stats"].append(_render_stats_map(upper, columns, self.base_table.fields))
 
             rows["min_sequence_number"].append(int(meta.min_sequence_number))
             rows["max_sequence_number"].append(int(meta.max_sequence_number))
-            rows["creation_time"].append(meta.creation_time_epoch_millis())
+            rows["creation_time"].append(
+                None if meta.creation_time is None else meta.creation_time.get_millisecond())
             rows["deleteRowCount"].append(
                 None if meta.delete_row_count is None
                 else int(meta.delete_row_count))
             rows["file_source"].append(
-                None if meta.file_source is None else str(meta.file_source))
+                None if meta.file_source is None else
+                {0: "APPEND", 1: "COMPACT"}.get(meta.file_source, str(meta.file_source)))
             rows["first_row_id"].append(
                 None if meta.first_row_id is None
                 else int(meta.first_row_id))
@@ -279,12 +317,6 @@ class FilesTable(SystemTable):
             "write_cols": pyarrow.array(
                 rows["write_cols"], type=_WRITE_COLS_TYPE),
         })
-
-    def _schema_fields(self, schema_id: int) -> List[DataField]:
-        table_schema = self.base_table.table_schema
-        if schema_id == table_schema.id:
-            return table_schema.fields
-        return self.base_table.schema_manager.get_schema(schema_id).fields
 
     @staticmethod
     def _empty_table() -> pyarrow.Table:
