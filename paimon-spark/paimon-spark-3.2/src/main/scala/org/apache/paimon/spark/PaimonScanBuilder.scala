@@ -59,6 +59,8 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
       pushedTopN,
       vectorSearch,
       hybridSearch,
-      fullTextSearch)
+      fullTextSearch,
+      pushedBucketFilters = pushedBucketFilters.toList
+    )
   }
 }

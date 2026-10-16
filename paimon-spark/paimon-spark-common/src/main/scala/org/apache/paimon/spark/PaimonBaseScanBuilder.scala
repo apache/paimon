@@ -23,6 +23,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
 import org.apache.paimon.predicate.FullTextSearch
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.BUCKET_COLUMN
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.types.RowType
 
@@ -51,6 +52,7 @@ abstract class PaimonBaseScanBuilder
 
   protected var pushedPartitionFilters: Array[PartitionPredicate] = Array.empty
   protected var pushedDataFilters: Array[Predicate] = Array.empty
+  protected var pushedBucketFilters: Array[Predicate] = Array.empty
   protected var pushedLimit: Option[Int] = None
   protected var pushedTopN: Option[TopN] = None
   protected var pushedVectorSearch: Option[VectorSearch] = None
@@ -67,6 +69,8 @@ abstract class PaimonBaseScanBuilder
     val pushablePartitionDataFilters = mutable.ArrayBuffer.empty[Predicate]
     val pushableDataFilters = mutable.ArrayBuffer.empty[Predicate]
     val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
+    val bucketFilters = mutable.ArrayBuffer.empty[Predicate]
+    val bucketConverter = SparkV2FilterConverter(PhysicalBucketFilter.rowType)
 
     var newRowType = rowType
     if (
@@ -77,22 +81,42 @@ abstract class PaimonBaseScanBuilder
     }
     val converter = SparkV2FilterConverter(newRowType)
     val partitionPredicateVisitor = new PartitionPredicateVisitor(partitionKeys)
+    val canPushBucketFilters = PhysicalBucketFilter.supports(table)
     predicates.foreach {
       predicate =>
-        converter.convert(predicate) match {
+        val bucketPredicate =
+          if (
+            canPushBucketFilters &&
+            predicate.references().nonEmpty &&
+            predicate.references().forall(_.fieldNames().sameElements(Array(BUCKET_COLUMN)))
+          ) {
+            bucketConverter.convert(predicate)
+          } else {
+            None
+          }
+        bucketPredicate match {
           case Some(paimonPredicate) =>
+            bucketFilters.append(paimonPredicate)
             pushable.append(predicate)
-            if (paimonPredicate.visit(partitionPredicateVisitor)) {
-              pushablePartitionDataFilters.append(paimonPredicate)
-            } else {
-              pushableDataFilters.append(paimonPredicate)
-              postScan.append(predicate)
-            }
-          case None =>
+            // Keep the residual so aggregate and TopN shortcuts cannot bypass bucket filtering.
             postScan.append(predicate)
+          case None =>
+            converter.convert(predicate) match {
+              case Some(paimonPredicate) =>
+                pushable.append(predicate)
+                if (paimonPredicate.visit(partitionPredicateVisitor)) {
+                  pushablePartitionDataFilters.append(paimonPredicate)
+                } else {
+                  pushableDataFilters.append(paimonPredicate)
+                  postScan.append(predicate)
+                }
+              case None =>
+                postScan.append(predicate)
+            }
         }
     }
 
+    this.pushedBucketFilters = bucketFilters.toArray
     if (pushable.nonEmpty) {
       this.pushedSparkPredicates = pushable.toArray
     }
