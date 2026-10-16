@@ -1092,6 +1092,9 @@ class RawFileSplitRead(SplitRead):
         if (self.predicate_for_reader
                 and (self.table.is_primary_key_table
                      or not self._arrow_filter_pushdown_enabled
+                     # Partition values are injected after the physical read;
+                     # their predicates cannot have been evaluated by Parquet.
+                     or predicate_field_names(self.predicate).intersection(self.table.partition_keys)
                      or self.deletion_file_readers
                      or self._physical_row_ranges
                      or any(file.schema_id != self.table.table_schema.id

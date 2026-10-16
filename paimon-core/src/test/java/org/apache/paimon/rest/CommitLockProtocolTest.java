@@ -114,7 +114,7 @@ class CommitLockProtocolTest {
     }
 
     @Test
-    void rollbackWithinLeaseCarriesOwnerAndLegacyPayloadStaysUnchanged() throws Exception {
+    void rollbackCarriesTableUuidWithoutWriterContext() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.start();
             Options options = new Options();
@@ -131,17 +131,18 @@ class CommitLockProtocolTest {
                     };
             Identifier identifier = new Identifier("db", "table", "dev");
             server.enqueue(json("{}"));
-            catalog.rollbackTo(
-                    identifier, "table-id", Instant.snapshot(1L), 2L, "head-uuid", "morax-job");
-            RecordedRequest owned = server.takeRequest(10, TimeUnit.SECONDS);
-            assertThat(owned.getPath()).endsWith("/rollback");
-            RollbackTableRequest request =
-                    RESTApi.fromJson(owned.getBody().readUtf8(), RollbackTableRequest.class);
+            catalog.rollbackTo(identifier, "table-id", Instant.snapshot(1L), 2L);
+            RecordedRequest recorded = server.takeRequest(10, TimeUnit.SECONDS);
+            assertThat(recorded.getPath()).endsWith("/rollback");
+            String body = recorded.getBody().readUtf8();
+            RollbackTableRequest request = RESTApi.fromJson(body, RollbackTableRequest.class);
             assertThat(request.getTableId()).isEqualTo("table-id");
-            assertThat(request.getCommitUser()).isEqualTo("morax-job");
             assertThat(request.getFromSnapshot()).isEqualTo(2L);
+            ObjectNode payload = RESTApi.fromJson(body, ObjectNode.class);
+            assertThat(payload.has("commitUser")).isFalse();
+            assertThat(payload.has("fromSnapshotUuid")).isFalse();
             server.enqueue(json("{}"));
-            catalog.rollbackTo(identifier, null, Instant.snapshot(1L), 2L, null, null);
+            catalog.rollbackTo(identifier, null, Instant.snapshot(1L), 2L);
             ObjectNode legacy =
                     RESTApi.fromJson(
                             server.takeRequest(10, TimeUnit.SECONDS).getBody().readUtf8(),

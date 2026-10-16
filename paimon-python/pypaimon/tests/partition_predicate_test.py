@@ -474,3 +474,25 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(tuple(result[0].partition.values), ('p1', 'us'))
+
+
+class ReadBuilderPartitionFilterTest(unittest.TestCase):
+    def test_public_selector_rejects_non_partition_fields_without_changing_state(self):
+        from types import SimpleNamespace
+        from pypaimon.read.read_builder import ReadBuilder
+
+        builder = ReadBuilder(SimpleNamespace(partition_keys=['dt', 'region']))
+        predicates = PredicateBuilder(TABLE_FIELDS)
+        selector = predicates.equal('region', 'us-east-1')
+        builder.with_partition_filter(selector)
+        for invalid in [predicates.equal('name', 'x'),
+                        predicates.and_predicates([selector, predicates.equal('name', 'x')]),
+                        predicates.or_predicates([selector, predicates.equal('name', 'x')])]:
+            with self.assertRaisesRegex(ValueError, 'only partition keys'):
+                builder.with_partition_filter(invalid)
+            self.assertIs(builder._partition_filter, selector)
+        self.assertIs(builder.with_partition_filter(None), builder)
+        self.assertIsNone(builder._partition_filter)
+        unpartitioned = ReadBuilder(SimpleNamespace(partition_keys=[]))
+        with self.assertRaisesRegex(ValueError, 'partitioned table'):
+            unpartitioned.with_partition_filter(selector)

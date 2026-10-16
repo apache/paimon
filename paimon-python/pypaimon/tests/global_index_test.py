@@ -375,15 +375,26 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         scanner.open_file_cost = 1
         scanner._deletion_files_map = unittest.mock.MagicMock(return_value={})
 
-        with unittest.mock.patch(
-                "pypaimon.read.scanner.file_scanner.DataEvolutionSplitGenerator"
-        ) as split_generator:
-            scanner._create_data_evolution_split_generator()
+        for query_auth in (False, True):
+            with self.subTest(query_auth=query_auth):
+                scanner.table.options = CoreOptions(Options({
+                    "query-auth.enabled": str(query_auth).lower(),
+                }))
+                scanner._eval_global_index.reset_mock()
+                with unittest.mock.patch(
+                        "pypaimon.read.scanner.file_scanner.DataEvolutionSplitGenerator"
+                ) as split_generator:
+                    scanner._create_data_evolution_split_generator()
 
-        self.assertEqual(
-            [Range(1, 1), Range(10, 10 ** 12)],
-            split_generator.call_args[0][4],
-        )
+                self.assertEqual(
+                    None if query_auth else [Range(1, 1), Range(10, 10 ** 12)],
+                    split_generator.call_args[0][4],
+                )
+                if query_auth:
+                    scanner._eval_global_index.assert_not_called()
+                else:
+                    scanner._eval_global_index.assert_called_once_with(
+                        scanner.manifest_scanner.return_value[1])
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
         from pypaimon.read.scanner.file_scanner import FileScanner

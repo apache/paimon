@@ -23,21 +23,48 @@ import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.table.Instant;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class CommitRollbackTest {
 
     @Test
-    void legacyCompactionWithoutUuidCannotBeRolledBackAutomatically() {
+    void legacyCompactionWithoutUuidCanBeRolledBackAutomatically() {
         Snapshot head = mock(Snapshot.class);
         when(head.commitKind()).thenReturn(Snapshot.CommitKind.COMPACT);
+        when(head.id()).thenReturn(6L);
+        TableRollback rollback = mock(TableRollback.class);
+
+        assertThat(new CommitRollback(rollback).tryToRollback(head)).isTrue();
+        verify(rollback)
+                .rollbackTo(
+                        argThat(
+                                instant ->
+                                        instant instanceof Instant.SnapshotInstant
+                                                && ((Instant.SnapshotInstant) instant)
+                                                                .getSnapshotId()
+                                                        == 5L),
+                        eq(6L));
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = Snapshot.CommitKind.class,
+            names = "COMPACT",
+            mode = EnumSource.Mode.EXCLUDE)
+    void nonCompactionCannotBeRolledBackAutomatically(Snapshot.CommitKind kind) {
+        Snapshot head = mock(Snapshot.class);
+        when(head.commitKind()).thenReturn(kind);
         TableRollback rollback = mock(TableRollback.class);
 
         assertThat(new CommitRollback(rollback).tryToRollback(head)).isFalse();
@@ -49,11 +76,10 @@ class CommitRollbackTest {
         Snapshot head = mock(Snapshot.class);
         when(head.commitKind()).thenReturn(Snapshot.CommitKind.COMPACT);
         when(head.id()).thenReturn(6L);
-        when(head.uuid()).thenReturn("head-uuid");
         TableRollback rollback = mock(TableRollback.class);
-        doThrow(new IllegalStateException("Head UUID changed"))
+        doThrow(new IllegalStateException("Latest snapshot changed"))
                 .when(rollback)
-                .rollbackTo(any(Instant.class), eq(6L), eq("head-uuid"));
+                .rollbackTo(any(Instant.class), eq(6L));
 
         assertThat(new CommitRollback(rollback).tryToRollback(head)).isFalse();
     }

@@ -43,7 +43,7 @@ class SnapshotLoaderImplTest {
 
         environment.snapshotLoader().rollback(instant);
 
-        verify(catalog).rollbackTo(identifier, uuid, instant, null, null, null);
+        verify(catalog).rollbackTo(identifier, uuid, instant, null);
     }
 
     @ParameterizedTest
@@ -61,13 +61,7 @@ class SnapshotLoaderImplTest {
         loader.copyWithBranch(branch).rollback(instant);
 
         verify(catalog)
-                .rollbackTo(
-                        new Identifier("db", "table", branch),
-                        "table-uuid",
-                        instant,
-                        null,
-                        null,
-                        null);
+                .rollbackTo(new Identifier("db", "table", branch), "table-uuid", instant, null);
     }
 
     @ParameterizedTest
@@ -82,8 +76,7 @@ class SnapshotLoaderImplTest {
 
         loader.copyWithBranch(target).rollback(instant);
 
-        verify(catalog)
-                .rollbackTo(new Identifier("db", "table", target), null, instant, null, null, null);
+        verify(catalog).rollbackTo(new Identifier("db", "table", target), null, instant, null);
     }
 
     private CatalogEnvironment environment(Catalog catalog, Identifier identifier, String uuid) {
