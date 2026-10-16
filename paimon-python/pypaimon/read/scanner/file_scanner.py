@@ -230,39 +230,15 @@ class FileScanner:
 
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
-        self.predicate = predicate
+        self._user_predicate = predicate
+        self._partition_predicate = partition_predicate
         self._explicit_partition_filter = partition_predicate is not None
-        row_ranges = (
-            _row_ranges_from_predicate(predicate) if predicate else None
-        )
-        if predicate and row_ranges is not None:
-            self.predicate_for_stats = remove_row_id_filter(predicate)
-        else:
-            self.predicate_for_stats = predicate
-        self.predicate_for_stats = exclude_predicate_with_fields(
-            self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES)
-        # Partition columns aren't in data files, so skip them for value-stats pruning.
-        self.predicate_for_stats = exclude_predicate_with_fields(
-            self.predicate_for_stats, set(self.table.partition_keys))
         self.limit = limit
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_list_manager = ManifestListManager(table)
         self.manifest_file_manager = ManifestFileManager(table)
 
-        self.primary_key_predicate = trim_and_transform_predicate(
-            self.predicate, self.table.field_names, self.table.trimmed_primary_keys)
-
-        if partition_predicate is None:
-            self.partition_key_predicate = trim_and_transform_predicate(
-                self.predicate, self.table.field_names, self.table.partition_keys)
-        else:
-            # External predicate may carry full-schema indices and non-partition
-            # leaves; drop non-partition leaves and rebind the rest by name to the
-            # partition-row layout (matches derived path / Java), else IndexError.
-            self.partition_key_predicate = rewrite_predicate_indices(
-                trim_predicate_by_fields(partition_predicate, self.table.partition_keys),
-                self.table.partition_keys_fields)
         options = self.table.options
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
@@ -290,16 +266,30 @@ class FileScanner:
         self.auth_partition_predicate = None
         self.auth_has_non_partition_filter = False
 
-        # Predicate-driven bucket pruning (HASH_FIXED only). Mirrors Java
-        # BucketSelectConverter. Set on demand and reused across all
-        # _filter_manifest_entry calls; the inner _Selector caches the
-        # bucket set per ``total_buckets`` value.
-        self._bucket_selector = self._init_bucket_selector()
+        self._set_predicate(predicate)
 
         self.simple_stats_evolutions = SimpleStatsEvolutions(
             self._schema_fields,
             self.table.table_schema.id
         )
+
+    def _set_predicate(self, predicate):
+        self.predicate = predicate
+        row_ranges = _row_ranges_from_predicate(predicate) if predicate else None
+        self.predicate_for_stats = (
+            remove_row_id_filter(predicate) if row_ranges is not None else predicate)
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES | set(self.table.partition_keys))
+        self.primary_key_predicate = trim_and_transform_predicate(
+            predicate, self.table.field_names, self.table.trimmed_primary_keys)
+        if self._partition_predicate is None:
+            self.partition_key_predicate = trim_and_transform_predicate(
+                predicate, self.table.field_names, self.table.partition_keys)
+        else:
+            self.partition_key_predicate = rewrite_predicate_indices(
+                trim_predicate_by_fields(self._partition_predicate, self.table.partition_keys),
+                self.table.partition_keys_fields)
+        self._bucket_selector = self._init_bucket_selector()
 
     def _schema_fields(self, schema_id: int):
         """Resolve schema fields, short-circuiting current table schema id to avoid
@@ -334,10 +324,13 @@ class FileScanner:
                     raise ValueError(
                         "Primary-key scan requires a GlobalIndexSplitResult, but found %s."
                         % type(self._global_index_result).__name__)
-                return Plan(
-                    list(self._global_index_result.splits),
-                    snapshot_id=self._global_index_result.snapshot_id,
-                )
+                # Java ignores external raw-index results under query auth:
+                # masking can invalidate both their positions and their scores.
+                if not self.table.options.query_auth_enabled:
+                    return Plan(
+                        list(self._global_index_result.splits),
+                        snapshot_id=self._global_index_result.snapshot_id,
+                    )
         # Create appropriate split generator based on table type
         if self.chunk_shuffle is not None:
             self._validate_chunk_shuffle_compat()
@@ -471,7 +464,7 @@ class FileScanner:
         self._scanned_snapshot = snapshot
         self._scanned_snapshot_id = snapshot.id if snapshot else None
 
-        if row_ranges is None:
+        if row_ranges is None and not self.table.options.query_auth_enabled:
             global_index_plan = self._global_index_result \
                 if self._global_index_result is not None \
                 else self._eval_global_index(snapshot)
@@ -727,12 +720,14 @@ class FileScanner:
             raise ValueError("chunk_shuffle cannot combine with global index")
         if self._row_ranges is not None:
             raise ValueError("chunk_shuffle cannot combine with row ranges")
+        if self.auth_has_non_partition_filter:
+            raise ValueError("chunk_shuffle cannot combine with authorization filters evaluated during reading")
         # Only partition predicates are allowed: row-level / column-level
         # predicates would silently shrink each chunk's effective row count,
         # breaking the chunk_size contract DataLoader callers expect.
-        if self.predicate is not None:
+        if self._user_predicate is not None:
             partition_keys = set(self.table.partition_keys or [])
-            non_partition_fields = _get_all_fields(self.predicate) - partition_keys
+            non_partition_fields = _get_all_fields(self._user_predicate) - partition_keys
             if non_partition_fields:
                 raise ValueError(
                     "chunk_shuffle predicate must reference only partition keys; "

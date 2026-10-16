@@ -18,8 +18,10 @@
 """Ray execution of snapshot-pinned, single-vector queries."""
 
 from collections import Counter
+from concurrent.futures import CancelledError
 from contextlib import closing, contextmanager
 import math
+import threading
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
@@ -38,7 +40,8 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 def _execute_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     """Execute the builder of an already snapshot-pinned ``VectorQuery``."""
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    reader = builder.new_vector_search_read()
+    from pypaimon.table.source.native_search_plan import python_search_reader
+    reader = python_search_reader(builder.new_vector_search_read())
     if (type(reader) is not DataEvolutionVectorRead
             or not reader._table.options.data_evolution_enabled()):
         raise ValueError("Ray vector search supports only data-evolution tables.")
@@ -162,7 +165,7 @@ def _prepare_scalar_filter(context, split):
 
 
 @contextmanager
-def _shared_scalar_filters(splits, predicate, remote_args):
+def _shared_scalar_filters(splits, predicate, remote_args, worker=None):
     """Evaluate identical scalar-index inputs once, without fetching masks on the driver."""
     import ray
 
@@ -172,7 +175,7 @@ def _shared_scalar_filters(splits, predicate, remote_args):
     counts = Counter(key(split) for split in splits) if predicate is not None else {}
     shared = {files for files, count in counts.items() if files and count > 1}
     pending = {}
-    remote = ray.remote(_prepare_scalar_filter).options(**remote_args) if shared else None
+    remote = ray.remote(worker or _prepare_scalar_filter).options(**remote_args) if shared else None
 
     def prepare(context_ref, split):
         files = key(split) if shared else None
@@ -215,6 +218,22 @@ def _scores(result):
     return scores
 
 
+_task_state = threading.local()
+
+
+@contextmanager
+def _task_cancellation(event):
+    """Keep hybrid cancellation on driver threads, out of serialized worker state."""
+    previous = getattr(_task_state, "cancelled", None)
+    _task_state.cancelled = event
+    try:
+        if event.is_set():
+            raise CancelledError()
+        yield
+    finally:
+        _task_state.cancelled = previous
+
+
 def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False, prepare_item=None):
     """Bound in-flight work and, optionally, completed results awaiting plan order."""
     import ray
@@ -228,8 +247,11 @@ def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False, 
     pending = {}
     buffered = {}
     next_ordinal = 0
+    cancelled = getattr(_task_state, "cancelled", None)
     try:
         while True:
+            if cancelled is not None and cancelled.is_set():
+                raise CancelledError()
             while len(pending) + len(buffered) < concurrency:
                 item = next(remaining, None)
                 if item is None:
@@ -239,7 +261,10 @@ def _map_tasks(worker, context, items, concurrency, remote_args, ordered=False, 
                 pending[remote.remote(context_ref, *args)] = ordinal
             if not pending:
                 break
-            ready, _ = ray.wait(list(pending), num_returns=1)
+            ready, _ = ray.wait(list(pending), num_returns=1,
+                                **({"timeout": 0.1} if cancelled is not None else {}))
+            if not ready:
+                continue
             ref = ready[0]
             result = ray.get(ref)
             ordinal = pending.pop(ref)

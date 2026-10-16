@@ -109,6 +109,56 @@ def _build(table, kind, column='name', **kwargs):
         return GlobalIndexBuilder(table, column, index_type=kind, **kwargs).build()
 
 
+def _delete(table, ids):
+    builder = table.new_batch_write_builder()
+    _commit(table, builder.new_update().delete_by_row_id(ids))
+
+
+@pytest.mark.parametrize('kind', ['btree', 'bitmap'])
+@pytest.mark.parametrize('deleted', [[0, 2], [0, 1, 2, 3]])
+@pytest.mark.parametrize('native_commit', [False, True])
+def test_deletion_vectors_do_not_change_physical_index_coverage(rest_catalog, kind, deleted, native_commit):
+    catalog, _ = rest_catalog
+    table = _create(catalog, options={'deletion-vectors.enabled': 'true',
+                                      'commit.native.enabled': str(native_commit).lower()})
+    rows = [{'id': i + 1, 'name': 'b' if i % 2 else 'a', 'pt': 0} for i in range(4)]
+    _append(table, rows)
+    _delete(table, deleted)
+    before = table.snapshot_manager().get_latest_snapshot().id
+    messages = _build(table, kind)
+    files = _message_files(messages)
+    assert sum(file.row_count for file in files) == 4
+    assert sorted((file.global_index_meta.row_range_start,
+                   file.global_index_meta.row_range_end) for file in files) == [(0, 1), (2, 3)]
+    classic = GlobalIndexBuilder(table.copy({'write.native.enabled': 'false'}), 'name', index_type=kind).build()
+    assert sum(file.row_count for file in _message_files(classic)) == 4
+    assert table.snapshot_manager().get_latest_snapshot().id == before
+    _commit(table, messages)
+    predicate = table.new_read_builder().new_predicate_builder().equal('name', 'b')
+
+    def assert_readers(expected, source=table):
+        for native in [False, True]:
+            reader = source.copy({'read.native.enabled': str(native).lower(),
+                                  'scan.native-plan.enabled': str(native).lower()})
+            assert _ids(reader, predicate) == expected
+
+    expected = [2, 4] if len(deleted) == 2 else []
+    assert_readers(expected)
+    indexed_snapshot = table.snapshot_manager().get_latest_snapshot().id
+    assert _build(table, kind) == []
+    _append(table, [{'id': 5, 'name': 'b', 'pt': 0}, {'id': 6, 'name': None, 'pt': 0}])
+    messages = _build(table, kind)
+    files = _message_files(messages)
+    assert sum(file.row_count for file in files) == 2
+    assert all(file.global_index_meta.row_range_start == 4 for file in files)
+    # A concurrent deletion changes live rows, not the staged index's source values.
+    _delete(table, [1, 4])
+    _commit(table, messages)
+    assert_readers([4] if len(deleted) == 2 else [])
+    assert_readers(expected, table.copy({'scan.snapshot-id': str(indexed_snapshot)}))
+    assert _build(table, kind) == []
+
+
 @pytest.mark.parametrize('kind', ['btree', 'bitmap'])
 @pytest.mark.parametrize('partitioned', [False, True])
 @pytest.mark.parametrize('native_commit', [False, True])
@@ -353,7 +403,7 @@ def test_java_records_per_file_option_overrides_table_alias(rest_catalog, kind):
     assert _ids(table, table.new_read_builder().new_predicate_builder().equal('name', 'a')) == [1, 5]
 
 
-@pytest.mark.parametrize('options', [{'write.native.enabled': 'false'}, {'data-evolution.enabled': 'false'}])
+@pytest.mark.parametrize('options', [{'write.native.enabled': 'false'}])
 def test_ineligible_tables_choose_python_before_building(rest_catalog, options):
     catalog, _ = rest_catalog
     table = _create(catalog, options=options)

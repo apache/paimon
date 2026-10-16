@@ -1950,29 +1950,25 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             has_nulls=False)
 
         with mock.patch(
-                "pypaimon.globalindex.data_evolution_global_index_scanner."
-                "_exclude_ranges",
-                side_effect=AssertionError("single group must not compute padding")):
+                "pypaimon.globalindex.btree.lazy_filtered_btree_reader."
+                "BTreeIndexReader",
+                _StubBTreeReader):
             with mock.patch(
-                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader."
-                    "BTreeIndexReader",
-                    _StubBTreeReader):
-                with mock.patch(
-                        "pypaimon.globalindex.sorted_file_global_index_reader."
-                        "SortedIndexFileMeta.deserialize",
-                        return_value=wide_meta):
-                    scanner = DataEvolutionGlobalIndexScanner(
-                        fields=table.fields,
-                        file_io=table.file_io,
-                        index_path="/unused",
-                        index_files=[shard_a, shard_b],
-                    )
-                    try:
-                        result = scanner.scan(
-                            Predicate(method="equal", index=0, field="id",
-                                      literals=[7]))
-                    finally:
-                        scanner.close()
+                    "pypaimon.globalindex.sorted_file_global_index_reader."
+                    "SortedIndexFileMeta.deserialize",
+                    return_value=wide_meta):
+                scanner = DataEvolutionGlobalIndexScanner(
+                    fields=table.fields,
+                    file_io=table.file_io,
+                    index_path="/unused",
+                    index_files=[shard_a, shard_b],
+                )
+                try:
+                    result = scanner.scan(
+                        Predicate(method="equal", index=0, field="id",
+                                  literals=[7]))
+                finally:
+                    scanner.close()
 
         self.assertIsNotNone(result)
         hits = sorted(list(result.results()))
@@ -2107,7 +2103,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         self.assertEqual([1], sorted(evaluation.result.results()))
         self.assertEqual([Range(5, 9)], fallback)
 
-    def test_extra_field_groups_are_padded_before_and(self):
+    def test_extra_field_groups_union_matches_without_padding(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
@@ -2117,7 +2113,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        # Mocked non-BTree readers retain coverage of generic extra-field padding.
+        # Mocked non-BTree readers exercise shared extra-field reader grouping.
         short = _entry(None, field_id=0, index_type="bitmap",
                        file_name="a-c.index",
                        row_range_start=0, row_range_end=4).index_file
@@ -2166,12 +2162,12 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 scanner.close()
 
         self.assertIsNotNone(result)
-        # The short group is all-hit padded for rows 5..9 before AND-ing with
-        # the long group. Row 4 is filtered out by the long group, while tail
-        # rows 7 and 8 survive because the short group has not indexed them.
-        self.assertEqual([1, 3, 7, 8], sorted(list(result.results())))
+        # Java unions both groups: row 4 survives from the short group. Rows
+        # 5, 6 and 9 were not returned by either index and must not be added.
+        self.assertEqual([1, 3, 4, 7, 8], sorted(list(result.results())))
+        self.assertTrue(result.is_exact())
 
-    def test_extra_field_groups_pad_missing_coverage_before_and(self):
+    def test_extra_field_groups_do_not_turn_missing_coverage_into_hits(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
@@ -2181,7 +2177,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         b_field = _field(1, "b")
         c_field = _field(2, "c")
 
-        # Reader stubs test padding independently of composite BTree support.
+        # Reader stubs exercise disjoint coverage independently of BTree support.
         a_early = _entry(None, field_id=0, index_type="bitmap",
                          file_name="a-c-early.index",
                          row_range_start=2, row_range_end=3).index_file
@@ -2236,11 +2232,12 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 scanner.close()
 
         self.assertIsNotNone(result)
-        # The first group has not indexed [0,1] and [4,6], so these ranges are
-        # neutral under AND. Its indexed ranges still filter normally.
+        # Coverage gaps in the first group are not matches. Only real hits
+        # from either group participate in the union, as in Java.
         self.assertEqual([1, 2, 5, 7, 8], sorted(list(result.results())))
+        self.assertTrue(result.is_exact())
 
-    def test_extra_field_padding_does_not_convert_none_to_hits(self):
+    def test_extra_field_groups_preserve_unknown_results(self):
         from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,

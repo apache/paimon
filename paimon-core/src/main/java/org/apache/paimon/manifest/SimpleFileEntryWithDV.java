@@ -79,8 +79,8 @@ public class SimpleFileEntryWithDV extends SimpleFileEntry {
     }
 
     @Override
-    public String toString() {
-        return super.toString() + ", {dvFileName=" + dvFileName + '}';
+    public String toStringWithPartition(String partitionString) {
+        return super.toStringWithPartition(partitionString) + ", {dvFileName=" + dvFileName + '}';
     }
 
     /**

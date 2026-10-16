@@ -518,7 +518,7 @@ class GlobalIndexBuilder:
             )
 
     def _validate_generic_index_table(self) -> None:
-        if (self._core_options.deletion_vectors_enabled()
+        if (self._table.options.deletion_vectors_enabled()
                 and not (self._index_type in VINDEX_IDENTIFIERS
                          and self._table.options.data_evolution_enabled())):
             raise ValueError(

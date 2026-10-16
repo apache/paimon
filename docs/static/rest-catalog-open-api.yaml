@@ -598,7 +598,7 @@ paths:
       description: >-
         Validate the table incarnation, branch and expected head atomically with publication.
         Every writer must honor an active commit lease, including writers that do not request
-        one. The authenticated caller and snapshot.commitUser must match the active owner.
+        one. snapshot.commitUser must exactly match the commitUser that owns the active lease.
         Clear the lease only when a new snapshot is successfully published; rejected requests
         and idempotent replays of an existing snapshot must not clear a newer lease.
       requestBody:
@@ -647,7 +647,8 @@ paths:
         Requires the server-side table property rest.commit.lock-enabled=true and the same
         permission as committing snapshots. Clients opt into acquisition separately using
         rest.commit.acquire-lock=true; that client option does not enable the table capability.
-        Ownership is the exact commitUser together with the authenticated caller. Contention
+        Ownership is the exact commitUser: authorized callers that send the same commitUser
+        share the lease, so each logical writer must use a unique commitUser. Contention
         returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
         Renewal never revives an expired lease. Publication retains snapshot CAS validation
         and atomically releases the lease on a new successful commit. A rejected publication
@@ -700,7 +701,7 @@ paths:
             type: string
       description: >-
         Requires the same permission as committing snapshots. Validate the table incarnation,
-        branch, authenticated caller and exact commitUser against the unexpired lease.
+        branch and exact commitUser against the unexpired lease.
         Return acquired=false when ownership is lost or the lease has expired; renewal must
         never acquire a new lease or revive an expired one. Keep leaseMillis fixed within
         the scope. Each successful new snapshot publication ends its lease.

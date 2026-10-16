@@ -1532,6 +1532,59 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: hilbert sort compact on a date column") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, dt DATE)
+                   |TBLPROPERTIES ('bucket'='-1')
+                   |""".stripMargin)
+      spark.sql("INSERT INTO T VALUES (1, DATE '2024-01-03'), (2, DATE '1969-12-31'), (3, null)")
+      spark.sql("INSERT INTO T VALUES (4, DATE '2024-01-01')")
+
+      withSparkSQLConf("spark.sql.ansi.enabled" -> "true") {
+        checkAnswer(
+          spark.sql(
+            "CALL paimon.sys.compact(table => 'T', order_strategy => 'hilbert', order_by => 'dt,id')"),
+          Row(true) :: Nil)
+      }
+      checkAnswer(
+        spark.sql("SELECT * FROM T ORDER BY id"),
+        Row(1, java.sql.Date.valueOf("2024-01-03")) ::
+          Row(2, java.sql.Date.valueOf("1969-12-31")) ::
+          Row(3, null) ::
+          Row(4, java.sql.Date.valueOf("2024-01-01")) :: Nil
+      )
+    }
+  }
+
+  test("Paimon Procedure: hilbert sort compact keeps negative and positive doubles apart") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (x DOUBLE, y DOUBLE)
+                   |TBLPROPERTIES ('bucket'='-1')
+                   |""".stripMargin)
+      val values = Seq(-4.5, -3.5, -2.5, -1.5, 1.5, 2.5, 3.5, 4.5)
+      val points = for (x <- values; y <- values) yield s"($x, $y)"
+      spark.sql(s"INSERT INTO T VALUES ${points.mkString(", ")}")
+
+      checkAnswer(
+        spark.sql(
+          "CALL paimon.sys.compact(table => 'T', order_strategy => 'hilbert', order_by => 'x,y')"),
+        Row(true) :: Nil)
+
+      // The curve visits one half of the plane before the other, so along the clustered order
+      // one of the two coordinates changes sign exactly once. A key that ignores the sign puts
+      // x and -x on the same point and interleaves both signs.
+      val rows = spark.sql("SELECT x, y FROM T").collect()
+      Assertions.assertThat(rows.length).isEqualTo(64)
+      def signChanges(column: Int): Int =
+        rows
+          .sliding(2)
+          .count(pair => (pair(0).getDouble(column) < 0) != (pair(1).getDouble(column) < 0))
+      Assertions.assertThat(math.min(signChanges(0), signChanges(1))).isEqualTo(1)
+    }
+  }
+
   test("Paimon Procedure: incremental clustering with local-sort mode") {
     withTable("T") {
       spark.sql(s"""

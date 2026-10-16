@@ -147,20 +147,24 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
+        from pypaimon.table.source.native_search_plan import native_full_text_scan
         reject_search_under_query_auth(self._table)
         definition = self._primary_key_full_text_definition()
         if definition is not None:
             from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
-            return PrimaryKeyFullTextScan(
+            scan = PrimaryKeyFullTextScan(
                 self._table, definition, partition_filter=self._partition_filter)
-        return DataEvolutionFullTextScan(
+            return native_full_text_scan(self, scan)
+        scan = DataEvolutionFullTextScan(
             self._table,
             self._text_columns(),
             partition_filter=self._partition_filter,
             filter_=self._filter,
         )
+        return native_full_text_scan(self, scan)
 
     def new_full_text_read(self) -> FullTextRead:
+        from pypaimon.table.source.native_search_plan import native_full_text_read
         reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
@@ -178,10 +182,11 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
                     "full-text index search mode; FULL and DETAIL require "
                     "merge-aware logical-row fallback.")
             from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
-            return PrimaryKeyFullTextRead(
+            reader = PrimaryKeyFullTextRead(
                 self._table, self._limit, self._text_columns(), self._query,
                 definition=definition, partition_filter=self._partition_filter)
-        return DataEvolutionFullTextRead(
+            return native_full_text_read(self, reader)
+        reader = DataEvolutionFullTextRead(
             self._table,
             self._limit,
             self._text_columns(),
@@ -189,6 +194,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
             partition_filter=self._partition_filter,
             filter_=self._filter,
         )
+        return native_full_text_read(self, reader)
 
     def _text_columns(self):
         if self._query is None:

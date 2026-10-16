@@ -72,6 +72,31 @@ def _build(table, builder):
     return from_native_commit_messages(table, builder.build())
 
 
+@pytest.mark.parametrize('kind', ['btree', 'bitmap'] + KINDS)
+@pytest.mark.parametrize('evolution, enabled', [(False, True), (True, False), (False, False)])
+def test_native_build_requires_row_tracking_not_read_optimization_options(rest_catalog, kind, evolution, enabled):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'data-evolution.enabled': str(evolution).lower(),
+                             'global-index.enabled': str(enabled).lower()})
+    column = 'id' if kind in ('btree', 'bitmap') else 'name' if kind == 'full-text' else 'embedding'
+    options = ({'sorted-index.records-per-file': 100} if kind in ('btree', 'bitmap') else _options(kind))
+    with patch.object(GlobalIndexBuilder, '_build_sorted_index', side_effect=AssertionError('Python sorted build ran')):
+        with patch.object(GlobalIndexBuilder, '_build_generic_index',
+                          side_effect=AssertionError('Python generic build ran')):
+            messages = GlobalIndexBuilder(table, column, index_type=kind, options=options).build()
+    files = index_tests._message_files(messages)
+    assert sum(file.row_count for file in files) == 32
+    assert {file.index_type for file in files} == {kind}
+    index_tests._commit(table, messages)
+    native = _native_table(table).new_global_index_build_builder().with_index_column(column).with_index_type(kind)
+    assert native.with_options({str(key): str(value) for key, value in options.items()}).build() == []
+    # Build messages remain usable after the caller enables query optimizations.
+    readable = table.copy({'global-index.enabled': 'true', 'read.native.enabled': 'true'})
+    if kind in ('btree', 'bitmap'):
+        predicate = readable.new_read_builder().new_predicate_builder().equal('id', 10)
+        assert index_tests._ids(readable, predicate) == [10]
+
+
 @pytest.mark.parametrize('kind', KINDS)
 @pytest.mark.parametrize('native_commit', [False, True])
 def test_prepare_partition_then_commit_and_query(rest_catalog, kind, native_commit):

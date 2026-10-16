@@ -24,6 +24,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.table_update_by_row_id import _RowIdUpdateFileWriter
@@ -1270,7 +1271,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             schema.field('score'),
             pa.array([0, 1, 99, 3], type=pa.int32()),
         )
-        self.assertTrue(self._read_all(table).equals(expected))
+        self.assertTrue(self._read_all(table).equals(expected.cast(read_arrow_schema(table.fields))))
         files = [file for message in messages for file in message.new_files]
         self.assertEqual(len(files), 1)
         self.assertFalse(pq.read_schema(files[0].file_path).field('score').nullable)

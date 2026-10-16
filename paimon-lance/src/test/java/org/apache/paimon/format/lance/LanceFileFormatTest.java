@@ -103,6 +103,20 @@ public class LanceFileFormatTest {
     }
 
     @Test
+    public void testValidateDataFields_SupportedLocalZonedTimestampType() {
+        LanceFileFormat format =
+                new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType =
+                RowType.of(
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                        DataTypes.ARRAY(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE()));
+        assertDoesNotThrow(() -> format.validateDataFields(rowType));
+    }
+
+    @Test
     public void testValidateDataFields_UnsupportedVariantType() {
         LanceFileFormat format =
                 new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));

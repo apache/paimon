@@ -32,7 +32,6 @@ def try_native_hybrid_search(builder):
         return None
     reject_search_under_query_auth(table)
     if (not table.options.native_read_enabled()
-            or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()
             or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
