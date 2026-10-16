@@ -877,16 +877,11 @@ def distributed_update_apply(
 def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":
     """Result schema: each projected column's type plus int64 ``_ROW_ID``, in
     ``read_cols`` order. Shared by the empty-result paths so they can't drift."""
-    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.casting.schema_evolution import read_arrow_schema
     from pypaimon.table.special_fields import SpecialFields
 
-    rid = SpecialFields.ROW_ID.name
-    full = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    # Keep each field's nullability so an empty result matches a non-empty read.
-    return pa.schema([
-        pa.field(rid, pa.int64(), nullable=False) if col == rid else full.field(col)
-        for col in read_cols
-    ])
+    full = read_arrow_schema(table.table_schema.fields + [SpecialFields.ROW_ID])
+    return pa.schema([full.field(col) for col in read_cols])
 
 
 def distributed_read_by_row_id(

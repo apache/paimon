@@ -1152,6 +1152,34 @@ public abstract class HiveCatalogITCaseBase {
                         "+I[3004, 3a, 34]");
     }
 
+    @Test
+    @LocationInProperties
+    public void testHiveReadLocationInProperties() throws Exception {
+        tEnv.executeSql("CREATE TABLE t (a INT, b STRING)").await();
+        tEnv.executeSql("INSERT INTO t VALUES (1, 'apple'), (2, 'banana')").await();
+        assertThat(hiveShell.executeQuery("SELECT a, b FROM t"))
+                .containsExactlyInAnyOrder("1\tapple", "2\tbanana");
+        assertThat(hiveShell.executeQuery("SELECT b FROM t WHERE a = 2")).containsExactly("banana");
+        assertThat(hiveShell.executeQuery("SELECT count(*) FROM t")).containsExactly("2");
+
+        // partitioned in paimon only, so Hive still sees one location for the whole table
+        tEnv.executeSql("CREATE TABLE pt_t (pt INT, a INT) PARTITIONED BY (pt)").await();
+        tEnv.executeSql("INSERT INTO pt_t VALUES (1, 10), (2, 20)").await();
+        assertThat(hiveShell.executeQuery("SELECT pt, a FROM pt_t"))
+                .containsExactlyInAnyOrder("1\t10", "2\t20");
+        assertThat(hiveShell.executeQuery("SELECT a FROM pt_t WHERE pt = 2")).containsExactly("20");
+
+        // Hive partitions all share the table location here, so they cannot be read yet, but
+        // no partition may be read as another one
+        tEnv.executeSql(
+                        "CREATE TABLE hive_pt_t (pt INT, a INT) PARTITIONED BY (pt) "
+                                + "WITH ('metastore.partitioned-table' = 'true')")
+                .await();
+        tEnv.executeSql("INSERT INTO hive_pt_t VALUES (1, 10), (2, 20)").await();
+        assertThat(hiveShell.executeQuery("SELECT pt, a FROM hive_pt_t"))
+                .isSubsetOf("1\t10", "2\t20");
+    }
+
     private void prepareTestAddPartitionsToMetastore() throws Exception {
         tEnv.executeSql(
                 String.join(

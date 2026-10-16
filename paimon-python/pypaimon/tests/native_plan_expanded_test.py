@@ -184,7 +184,11 @@ def test_scored_de_preserves_score_mapping_and_selection(catalog, native, dv):
             plan, actual = read(table, native, predicate, shard, result=result)
             for split in plan.splits():
                 ids = [i for r in split.row_ranges() for i in range(r.from_, r.to + 1)]
-                assert split.scores() == [scores[i] for i in ids]
+                # Java IndexedSplit stores float[], including when a Native
+                # plan crosses the split wire format back into Python.
+                expected_scores = [pa.scalar(scores[i], type=pa.float32()).as_py()
+                                   if native else scores[i] for i in ids]
+                assert split.scores() == expected_scores
             python_rows = read(table, False, predicate, shard, result=result)[1]
             assert actual == python_rows
             assert all(row['id'] in scores and (not dv or row['id'] != 1) for row in actual)

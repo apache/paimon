@@ -550,6 +550,7 @@ class TestCodexReviewFindings(unittest.TestCase):
         scan = AsyncStreamingTableScan.__new__(AsyncStreamingTableScan)
         scan._query_auth_fn = lambda select: auth
         scan._read_type = fields
+        scan.predicate = None
         scan.table = _FakeTable(fields)
         with self.assertRaises(ValueError) as ctx:
             scan._AsyncStreamingTableScan__auth_query()
@@ -608,6 +609,7 @@ class TestStreamingPlanAuthorization(unittest.TestCase):
         auth = TableQueryAuthResult(None, {"email": _null_mask()})
         scan = AsyncStreamingTableScan.__new__(AsyncStreamingTableScan)
         scan.table = _FakeTable(fields, latest_fields=latest)
+        scan.predicate = None
         scan._read_type = fields
         scan._query_auth_fn = lambda select: auth
         raw = Plan([object()], snapshot_id=7)

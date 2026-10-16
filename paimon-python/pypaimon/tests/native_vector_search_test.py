@@ -203,8 +203,8 @@ def test_java_pk_index_results_are_physical_selections(pk_vector_table, filtered
         result = configure(native).execute_local()
     assert isinstance(result, PrimaryKeyScoredResult)
     assert result.snapshot_id == expected.snapshot_id
-    assert [(p.bucket, p.data_file_name, p.row_position) for p in result.positions] == [
-        (p.bucket, p.data_file_name, p.row_position) for p in expected.positions]
+    assert [(p.partition_bytes, p.bucket, p.data_file_name, p.row_position) for p in result.positions] == [
+        (p.partition_bytes, p.bucket, p.data_file_name, p.row_position) for p in expected.positions]
     assert [p.score for p in result.positions] == pytest.approx([p.score for p in expected.positions])
     rows = _rows(native, result)
     assert sorted(rows.column('id').to_pylist()) == sorted(_rows(classic, expected).column('id').to_pylist())

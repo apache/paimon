@@ -417,40 +417,24 @@ class FileSystemCatalogTest(unittest.TestCase):
         catalog = CatalogFactory.create({"warehouse": self.warehouse})
         catalog.create_database("test_db_cast", False)
 
-        identifier = "test_db_cast.ts_table"
+        identifier = "test_db_cast.time_table"
         schema = Schema(
             fields=[
                 DataField.from_dict({"id": 0, "name": "k", "type": "INT"}),
-                DataField.from_dict({"id": 1, "name": "ts", "type": "TIMESTAMP(3)"}),
+                DataField.from_dict({"id": 1, "name": "t", "type": "TIME(3)"}),
             ],
             partition_keys=[], primary_keys=[], options={}, comment="",
         )
         catalog.create_table(identifier, schema, False)
 
-        # TIMESTAMP -> DECIMAL is logically allowed but has no PyArrow cast
-        # kernel, so the read path could not materialize it. Reject at alter
-        # time (mirrors Java's CastExecutors.resolve(...) != null check) instead
-        # of failing later at read with ArrowNotImplementedError.
-        with self.assertRaises(RuntimeError) as ctx:
+        # TIME precision changes have no executor in either reader backend.
+        with self.assertRaisesRegex(RuntimeError, "no executable cast"):
             catalog.alter_table(
                 identifier,
-                [SchemaChange.update_column_type(
-                    "ts", AtomicType("DECIMAL(10, 0)"))],
+                [SchemaChange.update_column_type("t", AtomicType("TIME(1)"))],
                 False)
-        self.assertIn("no executable cast", str(ctx.exception))
 
-        # INT -> DECIMAL(10, 2) has a PyArrow kernel but the target precision is
-        # too small to hold an int's range at scale 2 (needs >= 12); the read
-        # path would fail with ArrowInvalid, so reject it at alter time too.
-        with self.assertRaises(RuntimeError) as ctx:
-            catalog.alter_table(
-                identifier,
-                [SchemaChange.update_column_type(
-                    "k", AtomicType("DECIMAL(10, 2)"))],
-                False)
-        self.assertIn("no executable cast", str(ctx.exception))
-
-        # A wide-enough DECIMAL is executable and succeeds.
+        # INT -> DECIMAL(12, 2) is executable in both reader backends.
         catalog.alter_table(
             identifier,
             [SchemaChange.update_column_type("k", AtomicType("DECIMAL(12, 2)"))],
