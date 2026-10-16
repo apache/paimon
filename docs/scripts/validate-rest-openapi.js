@@ -431,8 +431,10 @@ function validateManagementOpenApi() {
     'dropTablePolicy',
   ];
   const resourcePaths = [
-    '/v1/{prefix}/labels/{entityType}/{entityName}',
-    '/v1/{prefix}/labels/{entityType}/{entityName}/{key}',
+    '/v1/{prefix}/labels',
+    '/v1/{prefix}/labels/get',
+    '/v1/{prefix}/labels/upsert',
+    '/v1/{prefix}/labels/delete',
     '/v1/{prefix}/permissions',
     '/v1/{prefix}/permissions/grant',
     '/v1/{prefix}/permissions/revoke',
@@ -460,13 +462,21 @@ function validateManagementOpenApi() {
   ['upsertLabel', 'listLabels', 'getLabel', 'deleteLabel'].forEach((operationId) =>
     contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '429', '500', '503']),
   );
-  contract.requireRequiredProperties('UpsertLabelRequest', ['value']);
-  const labelFields = contract.requireProperties('UpsertLabelRequest', ['value']);
+  const labelIdentity = ['entityType', 'entityName', 'key'];
+  ['GetLabelRequest', 'DeleteLabelRequest'].forEach((schemaName) => {
+    contract.requireRequiredProperties(schemaName, labelIdentity);
+    contract.checkSpec(
+      Object.keys(contract.requireProperties(schemaName, labelIdentity)).length === 3,
+      `${schemaName} must contain only the label binding identity`,
+    );
+  });
+  contract.requireRequiredProperties('UpsertLabelRequest', [...labelIdentity, 'value']);
+  const labelFields = contract.requireProperties('UpsertLabelRequest', [...labelIdentity, 'value']);
   contract.checkSpec(
-    Object.keys(labelFields).length === 1 &&
+    Object.keys(labelFields).length === 4 &&
       labelFields.value.type === 'string' &&
       !labelFields.value.minLength,
-    'Label writes must contain only a string value, permitting empty strings but rejecting null',
+    'Label writes must carry the binding identity and a string value, permitting empty strings but rejecting null',
   );
   contract.checkSpec(
     contract.schema('LabelEntityType').type === 'string' && !contract.schema('LabelEntityType').enum,
@@ -481,18 +491,41 @@ function validateManagementOpenApi() {
     labelList.labels.items.$ref === '#/components/schemas/GetLabelResponse',
     'Label listings must return complete bindings',
   );
-  const labelRoot = contract.spec.paths['/v1/{prefix}/labels'];
-  const labelEntity = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}'];
-  const labelKey = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}/{key}'];
+  const labelPaths = Object.keys(contract.spec.paths).filter(
+    (resourcePath) =>
+      resourcePath === '/v1/{prefix}/labels' || resourcePath.startsWith('/v1/{prefix}/labels/'),
+  );
   contract.checkSpec(
-    !labelRoot &&
-      labelEntity.get.operationId === 'listLabels' &&
-      labelKey.get.operationId === 'getLabel' &&
-      labelKey.post.operationId === 'upsertLabel' &&
-      labelKey.delete.operationId === 'deleteLabel' &&
-      !labelKey.patch &&
-      !labelKey.put,
-    'Labels must use POST/GET/DELETE on the single-key path with no collection-level write endpoint',
+    labelPaths.length === 4 &&
+      labelPaths.every((resourcePath) => !resourcePath.slice('/v1/{prefix}'.length).includes('{')),
+    'Label paths must never carry entity names or keys, which gateways may reject or rewrite',
+  );
+  const labelMethods = (resourcePath) =>
+    Object.keys(contract.spec.paths[resourcePath]).filter((method) => HTTP_METHODS.has(method));
+  const labelRoot = contract.spec.paths['/v1/{prefix}/labels'];
+  contract.checkSpec(
+    labelMethods('/v1/{prefix}/labels').join() === 'get' &&
+      labelRoot.get.operationId === 'listLabels' &&
+      [
+        ['get', 'getLabel'],
+        ['upsert', 'upsertLabel'],
+        ['delete', 'deleteLabel'],
+      ].every(([action, operationId]) => {
+        const resourcePath = `/v1/{prefix}/labels/${action}`;
+        return (
+          labelMethods(resourcePath).join() === 'post' &&
+          contract.spec.paths[resourcePath].post.operationId === operationId
+        );
+      }),
+    'Labels must be listed with GET and read, written, or deleted one binding at a time with POST',
+  );
+  const listQuery = labelRoot.get.parameters
+    .map((parameter) => parameter.$ref)
+    .map((ref) => contract.spec.components.parameters[ref.split('/').pop()])
+    .filter((parameter) => parameter.in === 'query' && parameter.required);
+  contract.checkSpec(
+    ['entityType', 'entityName'].every((name) => listQuery.some((parameter) => parameter.name === name)),
+    'Label listings must name the entity with required query parameters',
   );
   ['listPermissions', 'grantPermission', 'revokePermission'].forEach((operationId) =>
     contract.requireResponses(operationId, [

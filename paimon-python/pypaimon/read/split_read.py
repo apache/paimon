@@ -1092,6 +1092,9 @@ class RawFileSplitRead(SplitRead):
         if (self.predicate_for_reader
                 and (self.table.is_primary_key_table
                      or not self._arrow_filter_pushdown_enabled
+                     # Partition values are injected after the physical read;
+                     # their predicates cannot have been evaluated by Parquet.
+                     or predicate_field_names(self.predicate).intersection(self.table.partition_keys)
                      or self.deletion_file_readers
                      or self._physical_row_ranges
                      or any(file.schema_id != self.table.table_schema.id
@@ -1390,7 +1393,8 @@ class DataEvolutionSplitRead(SplitRead):
             outer_flat_read_type: Optional[List[DataField]] = None,
             post_merge_filter=None,
             eager_blob_fields=None,
-            post_filter_after_inline=False):
+            post_filter_after_inline=False,
+            defer_blob_resolution=False):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -1406,6 +1410,7 @@ class DataEvolutionSplitRead(SplitRead):
         self._post_merge_filter = post_merge_filter
         # Apply the auth filter after inline BLOB resolution, so scalar BLOBs still defer.
         self._post_filter_after_inline = post_filter_after_inline
+        self._defer_blob_resolution = defer_blob_resolution
         self._eager_blob_fields = set(eager_blob_fields or [])
         self._deferred_blob_fields = self._deferred_blob_field_names()
 
@@ -1424,11 +1429,18 @@ class DataEvolutionSplitRead(SplitRead):
             if self.limit is not None:
                 reader = LimitedRecordBatchReader(reader, self.limit)
 
+        if not self._defer_blob_resolution:
+            reader = self._resolve_deferred_blobs(reader)
+        return reader
+
+    def _resolve_deferred_blobs(self, reader, excluded_fields=()):
         if self._deferred_blob_fields:
             blob_names = [
                 field.name for field in self.read_fields
-                if field.name in self._deferred_blob_fields
+                if field.name in self._deferred_blob_fields and field.name not in excluded_fields
             ]
+            if not blob_names:
+                return reader
             reader = DeferredBlobResolveReader(
                 reader,
                 self.table.file_io,
@@ -1444,7 +1456,7 @@ class DataEvolutionSplitRead(SplitRead):
             self.read_fields,
             self.predicate_for_reader,
             self.limit,
-            has_post_filter=self._post_merge_filter is not None,
+            has_post_filter=self._post_merge_filter is not None or self._defer_blob_resolution,
         ) - self._eager_blob_fields
 
     def _create_raw_reader(self) -> RecordReader:

@@ -28,6 +28,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.table.system.system_table import metadata_local_millis
 from pypaimon.table.system.branches_table import BranchesTable
 
 
@@ -113,8 +114,8 @@ class BranchesTableTest(unittest.TestCase):
             self.assertIsInstance(ts, datetime.datetime)
             ms = int(ts.replace(
                 tzinfo=datetime.timezone.utc).timestamp() * 1000)
-            self.assertGreaterEqual(ms, before - 5000)
-            self.assertLessEqual(ms, after + 5000)
+            self.assertGreaterEqual(ms, metadata_local_millis(before) - 5000)
+            self.assertLessEqual(ms, metadata_local_millis(after) + 5000)
 
 
 if __name__ == "__main__":

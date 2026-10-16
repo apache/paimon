@@ -23,7 +23,7 @@ import pyarrow
 
 from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_local_millis
 
 
 TABLE_TYPE = RowType(False, [
@@ -59,7 +59,7 @@ class BranchesTable(SystemTable):
             # store cannot return an mtime (some remote object stores
             # via PyArrowFileIO) fall back to epoch 0 so the schema
             # contract holds.
-            create_times.append(0 if ms is None else int(ms))
+            create_times.append(metadata_local_millis(0 if ms is None else ms))
         return pyarrow.table({
             "branch_name": pyarrow.array(names, type=pyarrow.string()),
             "create_time": pyarrow.array(create_times, type=_TIMESTAMP_TYPE),

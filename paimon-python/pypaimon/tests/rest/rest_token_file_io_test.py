@@ -15,13 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import gc
 import os
 import pickle
+import signal
 import tempfile
+import threading
 import time
 import unittest
+import warnings
+import weakref
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
+
+from cachetools import TTLCache
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.rest_token import RESTToken
@@ -31,6 +38,33 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.table.row.blob import BlobDescriptor
+
+_FILE_IO_GET = 'pypaimon.catalog.rest.rest_token_file_io.FileIO.get'
+
+
+class _NonOwningStream:
+    """Like a pyjindo stream: does not keep the FileIO that opened it alive."""
+
+    def __init__(self, file_io):
+        self._file_io = weakref.ref(file_io)
+
+    def read(self):
+        if self._file_io() is None:
+            raise RuntimeError('use-after-free: the FileIO of this stream was released')
+        return b'x'
+
+
+class _FakeFileIO:
+
+    def __init__(self, path, options):
+        self.path = path
+        self.options = options
+
+    def new_input_stream(self, path):
+        return _NonOwningStream(self)
+
+    def exists(self, path):
+        return True
 
 
 class RESTTokenFileIOTest(unittest.TestCase):
@@ -42,12 +76,230 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.warehouse_path = f"file://{self.temp_dir}"
         self.identifier = Identifier.from_string("default.test_table")
         self.catalog_options = Options({})
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
 
     def tearDown(self):
         """Clean up test fixtures."""
         import shutil
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
+
+    @staticmethod
+    def _valid_token(name):
+        return RESTToken({OssOptions.OSS_SECURITY_TOKEN.key(): name},
+                         int(time.time() * 1000) + 7_200_000)
+
+    def _file_io_with_token(self, path, options, token):
+        file_io = RESTTokenFileIO(self.identifier, path, options)
+        file_io.token = token
+        return file_io
+
+    def test_token_refresh_keeps_file_io_of_open_streams(self):
+        table_path = "oss://bucket/db.db/table"
+        file_io = RESTTokenFileIO(self.identifier, table_path, self.catalog_options)
+        self.addCleanup(RESTTokenFileIO._TOKEN_CACHE.pop, 'refresh-test', None)
+        now = [1700000000]
+        issued = []
+
+        def refresh():
+            issued.append(RESTToken(
+                {OssOptions.OSS_SECURITY_TOKEN.key(): "sts-{}".format(len(issued))},
+                (now[0] + 2 * 3600) * 1000))
+            file_io.token = issued[-1]
+
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time',
+                   side_effect=lambda: now[0]), \
+                patch.object(file_io, '_build_cache_key', return_value='refresh-test'), \
+                patch.object(file_io, 'refresh_token', side_effect=refresh), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            stream = file_io.new_input_stream(table_path + "/bucket-0/data.blob")
+            # Less than an hour left: the next call refreshes the token.
+            now[0] += 3600 + 1
+            self.assertTrue(file_io.exists(table_path + "/snapshot/LATEST"))
+            gc.collect()
+
+            self.assertEqual(2, len(issued))
+            self.assertEqual(b'x', stream.read())
+
+    def test_file_io_cache_separates_paths_and_options_with_same_token(self):
+        token = self._valid_token("shared")
+        legacy = Options({OssOptions.OSS_IMPL.key(): "legacy"})
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            bucket_a = self._file_io_with_token(
+                "oss://bucket-a/db.db/t", Options({}), token).file_io()
+            bucket_b = self._file_io_with_token(
+                "oss://bucket-b/db.db/t", Options({}), token).file_io()
+            bucket_a_legacy = self._file_io_with_token(
+                "oss://bucket-a/db.db/t", legacy, token).file_io()
+
+        self.assertEqual("oss://bucket-a/db.db/t", bucket_a.path)
+        self.assertEqual("oss://bucket-b/db.db/t", bucket_b.path)
+        self.assertIsNot(bucket_a, bucket_a_legacy)
+        self.assertEqual("legacy", bucket_a_legacy.options.get(OssOptions.OSS_IMPL))
+
+    def test_same_token_on_other_bucket_keeps_its_own_oss_bucket(self):
+        token = RESTToken({
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+        }, int(time.time() * 1000) + 7_200_000)
+        options = Options({OssOptions.OSS_IMPL.key(): "legacy"})
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            first = self._file_io_with_token("oss://bucket-a/db.db/t", options, token)
+            second = self._file_io_with_token("oss://bucket-b/db.db/t", options, token)
+            self.assertEqual("bucket-a", first.file_io()._oss_bucket)
+            self.assertEqual("bucket-b", second.file_io()._oss_bucket)
+
+    def test_instances_of_one_table_share_file_io(self):
+        token = self._valid_token("shared")
+        table_path = "oss://bucket/db.db/t"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO) as get_io:
+            first = self._file_io_with_token(table_path, Options({"k": "v"}), token)
+            second = self._file_io_with_token(table_path, Options({"k": "v"}), token)
+            restored = pickle.loads(pickle.dumps(first))
+
+            self.assertIs(first.file_io(), second.file_io())
+            self.assertIs(first.file_io(), restored.file_io())
+            self.assertEqual(1, get_io.call_count)
+
+    def test_file_io_cache_expires_idle_entries_only(self):
+        clock = [0]
+        hour = 3600
+        cache = TTLCache(maxsize=RESTTokenFileIO._FILE_IO_CACHE_MAXSIZE,
+                         ttl=RESTTokenFileIO._FILE_IO_CACHE_TTL, timer=lambda: clock[0])
+        with patch.object(RESTTokenFileIO, '_FILE_IO_CACHE', cache), \
+                patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            file_io = self._file_io_with_token(
+                "oss://bucket/db.db/t", self.catalog_options, self._valid_token("first"))
+            first = file_io.file_io()
+            for _ in range(3):
+                clock[0] += 9 * hour
+                self.assertIs(first, file_io.file_io())
+
+            # The previous token's FileIO stays cached until it has been idle for the TTL.
+            file_io.token = self._valid_token("second")
+            second = file_io.file_io()
+            self.assertIsNot(first, second)
+            first_ref = weakref.ref(first)
+            del first
+            clock[0] += 9 * hour
+            file_io.file_io()
+            gc.collect()
+            self.assertIsNotNone(first_ref())
+            clock[0] += 2 * hour
+            self.assertIs(second, file_io.file_io())
+            gc.collect()
+            self.assertIsNone(first_ref())
+
+    def test_concurrent_lookups_create_one_file_io(self):
+        token = self._valid_token("shared")
+        threads_count = 8
+        barrier = threading.Barrier(threads_count)
+        results = []
+
+        def slow_file_io(path, options):
+            time.sleep(0.05)
+            return _FakeFileIO(path, options)
+
+        def lookup(file_io):
+            barrier.wait()
+            results.append(file_io.file_io())
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=slow_file_io) as get_io:
+            instances = [self._file_io_with_token("oss://bucket/db.db/t", Options({}), token)
+                         for _ in range(threads_count)]
+            threads = [threading.Thread(target=lookup, args=(i,)) for i in instances]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(threads_count, len(results))
+        self.assertTrue(all(r is results[0] for r in results))
+        self.assertEqual(1, get_io.call_count)
+
+    @staticmethod
+    def _run_in_forked_child(action):
+        with warnings.catch_warnings():
+            # Python 3.12+ warns about forking with other threads alive, which these tests do on purpose.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            pid = os.fork()
+        if pid == 0:
+            code = 1
+            try:
+                signal.alarm(10)
+                action()
+                code = 0
+            finally:
+                os._exit(code)
+        return os.waitpid(pid, 0)[1]
+
+    def _assert_child_succeeded(self, status):
+        self.assertFalse(os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGALRM,
+                         "the forked child blocked on a lock held by a parent thread")
+        self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
+
+    @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
+    def test_fork_while_another_thread_creates_file_io(self):
+        token = self._valid_token("shared")
+        creating = threading.Event()
+
+        def slow_file_io(path, options):
+            if path.endswith("/slow"):
+                creating.set()
+                time.sleep(0.3)
+            return _FakeFileIO(path, options)
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=slow_file_io) as get_io:
+            other = self._file_io_with_token("oss://bucket/db.db/other", Options({}), token)
+            slow = self._file_io_with_token("oss://bucket/db.db/slow", Options({}), token)
+
+            def in_child():
+                other.file_io()
+                # The fork waited for the creation, so the child finds that FileIO cached.
+                slow.file_io()
+                assert get_io.call_count == 2, get_io.call_count
+
+            creator = threading.Thread(target=slow.file_io)
+            creator.start()
+            self.assertTrue(creating.wait(5))
+            status = self._run_in_forked_child(in_child)
+            creator.join()
+        self._assert_child_succeeded(status)
+
+    @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
+    def test_fork_while_another_thread_refreshes_token(self):
+        table_path = "oss://bucket/db.db/t"
+        refreshing, release = threading.Event(), threading.Event()
+        holders = []
+
+        def refresh(file_io):
+            if threading.current_thread() in holders:
+                refreshing.set()
+                release.wait(10)
+            file_io.token = self._valid_token("refreshed")
+
+        self.addCleanup(RESTTokenFileIO._TOKEN_CACHE.pop, 'fork-test', None)
+        with patch.object(RESTTokenFileIO, '_build_cache_key', return_value='fork-test'), \
+                patch.object(RESTTokenFileIO, 'refresh_token', autospec=True, side_effect=refresh), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            file_io = RESTTokenFileIO(self.identifier, table_path, Options({}))
+            holders.append(threading.Thread(target=file_io.file_io))
+            holders[0].start()
+            self.assertTrue(refreshing.wait(5))
+            # The child uses the object whose locks are held, and another object of that table.
+            status = self._run_in_forked_child(lambda: (
+                file_io.file_io(),
+                RESTTokenFileIO(self.identifier, table_path, Options({})).file_io()))
+            release.set()
+            holders[0].join()
+        self._assert_child_succeeded(status)
 
     def test_existing_valid_token_does_not_refresh_or_read_shared_cache(self):
         file_io = RESTTokenFileIO(self.identifier, self.warehouse_path)
@@ -296,7 +548,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
 
             self.assertIsNone(deserialized_file_io.api_instance)
-            self.assertIsNot(deserialized_file_io.file_io(), original_backend)
+            self.assertIs(deserialized_file_io.file_io(), original_backend)
 
             test_file_path = f"file://{self.temp_dir}/pickle_test.txt"
             test_content = b"pickle test content"

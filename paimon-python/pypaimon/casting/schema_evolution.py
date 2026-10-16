@@ -18,6 +18,7 @@
 """Java cast rules shared by old-file readers."""
 
 import math
+import json
 
 import pyarrow as pa
 
@@ -69,9 +70,16 @@ def _truncate_timestamp(array, target_type, source_paimon_type, target_paimon_ty
         return None
     nanos_per_tick = {'s': 1000000000, 'ms': 1000000, 'us': 1000, 'ns': 1}
     quantum = 10 ** (9 - target_precision)
-    values = [None if value is None else
-              (value * nanos_per_tick[array.type.unit] // quantum * quantum) // nanos_per_tick[target_type.unit]
-              for value in array.cast(pa.int64()).to_pylist()]
+    values = []
+    for value in array.cast(pa.int64()).to_pylist():
+        if value is None:
+            values.append(None)
+            continue
+        nanos = value * nanos_per_tick[array.type.unit] // quantum * quantum
+        millis, remainder = divmod(nanos, 1000000)
+        # Java stores signed-long milliseconds before converting storage units.
+        millis = _narrow_integer(millis, 64)
+        values.append((millis * 1000000 + remainder) // nanos_per_tick[target_type.unit])
     # Flooring a nanosecond boundary can exceed Arrow's int64 storage even
     # though Java's timestamp representation can hold it. Match Native's
     # lenient overflow handling when rebuilding the Arrow result.
@@ -114,6 +122,33 @@ def _integer_to_timestamp(array, target_type):
     return pa.array(values, type=pa.int64()).cast(target_type)
 
 
+def _native_schema_cast(array, target_type, source_paimon_type, target_paimon_type):
+    if source_paimon_type is None or target_paimon_type is None:
+        return None
+    try:
+        from pypaimon_rust.data import cast_array_for_schema_evolution as native_cast
+    except ImportError:
+        return None
+    source = json.dumps(source_paimon_type.to_dict())
+    target = json.dumps(target_paimon_type.to_dict())
+    if isinstance(array, pa.ChunkedArray):
+        chunks = array.chunks or [pa.array([], type=array.type)]
+        # Runtime cast results may be NULL despite a logical NOT NULL child.
+        return pa.chunked_array([native_cast(chunk, source, target) for chunk in chunks])
+    return native_cast(array, source, target)
+
+
+def read_arrow_schema(fields):
+    """Use core runtime nullability while retaining logical write constraints."""
+    try:
+        from pypaimon_rust.data import read_arrow_schema as native_schema
+    except ImportError:
+        from pypaimon.schema.data_types import PyarrowFieldParser
+        return PyarrowFieldParser.from_paimon_schema(fields)
+    schema = native_schema(json.dumps([field.to_dict() for field in fields]))
+    return pa.schema([field.remove_metadata() for field in schema])
+
+
 def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None, target_paimon_type=None):
     """Materialize existing type changes using Java numeric and timestamp casts.
 
@@ -126,6 +161,9 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
     precision overflow after rounding.
     LTZ conversions use the process local zone, including Java gap/overlap rules.
     """
+    native = _native_schema_cast(array, target_type, source_paimon_type, target_paimon_type)
+    if native is not None:
+        return native
     if pa.types.is_string(target_type):
         strings = temporal_to_string(array, source_paimon_type, target_paimon_type)
         if strings is not None:

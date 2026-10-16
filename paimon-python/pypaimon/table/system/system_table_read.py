@@ -145,7 +145,7 @@ class SystemTableRead:
         combined = pyarrow.concat_tables(slices)
         if self.limit is not None and combined.num_rows > self.limit:
             combined = combined.slice(0, self.limit)
-        return combined
+        return combined.cast(PyarrowFieldParser.from_paimon_schema(self.read_type))
 
     def _reject_non_scalar_filter_fields(self, predicate: Predicate) -> None:
         """Reject value comparisons on nested system-table columns.

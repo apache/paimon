@@ -262,7 +262,7 @@ class RESTCommitLockIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void compactionConflictRollsBackWithWriterContextAndReacquires(
+    void compactionConflictRollsBackWithoutWriterContextAndReacquires(
             boolean locking, @TempDir Path directory) throws Exception {
         Schema schema =
                 Schema.newBuilder()
@@ -327,7 +327,6 @@ class RESTCommitLockIntegrationTest {
                                         .isEqualTo(head.get().id());
                                 if (locking) {
                                     assertThat(owner.get()).isNotNull();
-                                    assertThat(requestBody.getCommitUser()).isEqualTo(owner.get());
                                 }
                                 head.set(
                                         snapshots.get(
@@ -424,10 +423,8 @@ class RESTCommitLockIntegrationTest {
                 assertThat(replacement.uuid()).isNotEqualTo(compactHead.uuid());
                 assertThat(replacement.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
                 assertThat(rollback.get().getFromSnapshot()).isEqualTo(6L);
-                assertThat(rollback.get().getFromSnapshotUuid()).isEqualTo(compactHead.uuid());
                 assertThat(((Instant.SnapshotInstant) rollback.get().getInstant()).getSnapshotId())
                         .isEqualTo(5L);
-                assertThat(rollback.get().getCommitUser()).isEqualTo(replacement.commitUser());
                 if (locking) {
                     assertThat(events)
                             .containsSubsequence(

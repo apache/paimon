@@ -109,7 +109,7 @@ class BucketsTableTest(unittest.TestCase):
         self.assertGreater(arrow_table.num_rows, 0)
 
         partitions = arrow_table.column("partition").to_pylist()
-        self.assertTrue(all(p in ("dt=2024-01-01", "dt=2024-01-02")
+        self.assertTrue(all(p in ("{2024-01-01}", "{2024-01-02}")
                             for p in partitions))
 
         for size in arrow_table.column("file_size_in_bytes").to_pylist():

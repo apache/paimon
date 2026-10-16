@@ -27,9 +27,11 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
+from pypaimon.read.push_down_utils import exclude_predicate_with_fields, predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.table.special_fields import SpecialFields
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,8 @@ class TableScan:
             if native is not None:
                 return native
         auth_result = self.__auth_query()
+        if self._query_auth_fn is not None:
+            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         # The native planner bypasses the auth-aware file scanner. Resolve auth
         # before selecting a planning backend.
         if (not native_auth and auth_result is None and self._native_requested()
@@ -81,8 +85,6 @@ class TableScan:
             native = self._try_native_plan()
             if native is not None:
                 return native
-        if auth_result is not None:
-            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan = self.file_scanner.scan()
         return wrap_plan_with_auth(auth_result, plan)
 
@@ -104,7 +106,6 @@ class TableScan:
 
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
-        primary-key global-index results,
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; Rust rejects this schema), unsupported time travel selectors,
         query auth, a missing pypaimon-rust, or a catalog / identifier Rust
@@ -142,12 +143,11 @@ class TableScan:
             database_name = self.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
-        if self.table.options.query_auth_enabled:
-            # The binding currently carries explicit partition selectors as
-            # ordinary filters. Keep them on Python, where masked scan-only
-            # selectors can be rejected as Java requires.
-            if self.partition_predicate is not None:
+        if self.partition_predicate is not None:
+            from pypaimon.read.native_plan import native_method_available
+            if not native_method_available('ReadBuilder', 'with_partition_filter'):
                 return False
+        if self.table.options.query_auth_enabled:
             # The filesystem path has no catalog-issued authorization session.
             loader = getattr(getattr(self.table, 'catalog_environment', None), 'catalog_loader', None)
             from pypaimon.read.native_plan import _catalog_metastore
@@ -166,8 +166,13 @@ class TableScan:
         result = self.file_scanner._global_index_result
         if result is None:
             return True
-        if (self.table.is_primary_key_table
-                or not self.file_scanner.data_evolution):
+        from pypaimon.read.native_plan import native_method_available
+        if not native_method_available('TableScan', 'with_global_index_result'):
+            return False
+        if self.table.is_primary_key_table:
+            from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
+            return isinstance(result, GlobalIndexSplitResult)
+        if not self.file_scanner.data_evolution:
             return False
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         return isinstance(result, GlobalIndexResult)
@@ -176,11 +181,7 @@ class TableScan:
         row_ranges = getattr(self.file_scanner, '_row_ranges', None)
         if row_ranges is not None:
             return [(range_.from_, range_.to) for range_ in row_ranges]
-        result = self.file_scanner._global_index_result
-        if result is None:
-            return None
-        return [(range_.from_, range_.to)
-                for range_ in result.results().to_range_list()]
+        return None
 
     def _try_native_plan(self) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
@@ -219,20 +220,19 @@ class TableScan:
                     extra_options['row_position_slice'] = (
                         fs.start_pos_of_this_subtask, fs.end_pos_of_this_subtask)
             row_ranges = self._native_row_ranges()
-            native_predicate = self.predicate
+            if fs._global_index_result is not None:
+                extra_options['global_index_result'] = fs._global_index_result
             if self.partition_predicate is not None:
-                native_predicate = PredicateBuilder.and_predicates([
-                    predicate for predicate in (
-                        native_predicate,
-                        self.file_scanner.partition_key_predicate,
-                    ) if predicate is not None
-                ])
+                # Explicit partition selectors are scan-only. Keep the ordinary
+                # row predicate separate so core can apply Java's override and
+                # masked-partition validation semantics.
+                extra_options['partition_predicate'] = fs.partition_key_predicate
             # Append positions still precede LIMIT. Rust owns PK shards and
             # source-backed sorted-index refinement before applying LIMIT.
             defer_limit = has_distribution and not self.table.is_primary_key_table
             plan = native_plan(
                 self.table,
-                predicate=native_predicate,
+                predicate=self.predicate,
                 limit=None if defer_limit else self.limit,
                 projection=(
                     [field.name for field in self._read_type]
@@ -242,6 +242,7 @@ class TableScan:
             )
             splits = plan.splits()
             if (self.table.options.merge_engine() == 'first-row'
+                    and (fs._global_index_result is None or self.table.options.query_auth_enabled)
                     and not fs.skip_level0 and not fs.is_streaming
                     and any(file.level == 0 for split in splits for file in split.files)
                     and any(not split.raw_convertible and any(file.level > 0 for file in split.files)
@@ -251,7 +252,9 @@ class TableScan:
                 # physical order need not match the PK merge comparator.
                 return None
             partition_predicate = self.file_scanner.partition_key_predicate
-            if partition_predicate is not None and not any(isinstance(split, QueryAuthSplit) for split in splits):
+            if (partition_predicate is not None and not (
+                    self.table.is_primary_key_table and fs._global_index_result is not None)
+                    and not any(isinstance(split, QueryAuthSplit) for split in splits)):
                 # Authorized user predicates observe masked partition values;
                 # Rust has already applied only the safe raw partition tests.
                 splits = [s for s in splits
@@ -264,15 +267,6 @@ class TableScan:
                 if not (getattr(fs, 'deletion_vectors_enabled', False)
                         and not self.table.is_primary_key_table):
                     splits = fs._apply_push_down_limit(splits)
-            # Attach scores to the row ranges retained by native planning.
-            from pypaimon.globalindex.indexed_split import IndexedSplit, scores_for_ranges
-            from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
-            result = fs._global_index_result
-            if fs._row_ranges is None and isinstance(result, ScoredGlobalIndexResult):
-                splits = [IndexedSplit(
-                    split.data_split(), split.row_ranges(),
-                    scores_for_ranges(result.score_getter(), split.row_ranges()),
-                ) for split in splits]
             return Plan(splits, snapshot_id=plan.snapshot_id)
         except Exception as e:
             _raise_if_native_fork_safety_error(e)
@@ -284,6 +278,8 @@ class TableScan:
     def plan_for_write(self) -> Plan:
         if self.__auth_query() is not None:
             raise TableNoPermissionException(self.table.identifier)
+        if self._query_auth_fn is not None:
+            prune_scanner_by_auth(self.table, self.file_scanner, None)
         # Writer restore/overwrite must see L0 even when batch reads hide it.
         skip_level0 = self.file_scanner.skip_level0
         try:
@@ -310,13 +306,13 @@ class TableScan:
             if native is not None:
                 return native, None
         auth_result = self.__auth_query()
+        if self._query_auth_fn is not None:
+            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         if (not native_auth and auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:
                 return native, None
-        if auth_result is not None:
-            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         plan, stats = self.file_scanner.scan_with_stats()
         return wrap_plan_with_auth(auth_result, plan), stats
 
@@ -610,48 +606,35 @@ def validate_auth_rules(table, auth_result, latest_fields=None):
 def authorize(table, query_auth_fn, read_type, predicate=None, partition_predicate=None):
     if query_auth_fn is None:
         return None
-    requested_type = read_type
-    if read_type:
-        from pypaimon.read.push_down_utils import predicate_field_names
-        selected = {field.name for field in read_type}
-        names = set(selected)
-        for query_filter in (predicate, partition_predicate):
-            if query_filter is not None:
-                names.update(predicate_field_names(query_filter))
-        requested_type = list(read_type) + [
-            field for field in table.fields if field.name in names and field.name not in selected]
-    auth_result = resolve_auth_result(query_auth_fn, requested_type)
+    fields = table.fields
+    if table.options.row_tracking_enabled():
+        fields = SpecialFields.row_type_with_row_tracking(fields)
+    auth_result = resolve_auth_result(query_auth_fn, read_type, predicate, partition_predicate,
+                                      {field.name for field in fields})
     if auth_result is not None:
         validate_auth_rules(table, auth_result)
         if partition_predicate is not None and auth_result.column_masking:
-            from pypaimon.read.push_down_utils import predicate_field_names
             if predicate_field_names(partition_predicate) & set(auth_result.column_masking):
                 raise ValueError("Explicit partition filters cannot reference masked columns")
     return auth_result
 
 
 def prune_scanner_by_auth(table, scanner, auth_result):
-    # Java excludes masked columns from all raw-data pruning. The complete
-    # query predicate is executed after masks have produced visible values.
-    if auth_result.column_masking:
-        from pypaimon.read.push_down_utils import exclude_predicate_with_fields
-        masked = set(auth_result.column_masking)
-        query_predicate = getattr(scanner, 'predicate', None)
-        for name in ('predicate', 'predicate_for_stats', 'primary_key_predicate', 'partition_key_predicate'):
-            setattr(scanner, name, exclude_predicate_with_fields(getattr(scanner, name, None), masked))
-        init_selector = getattr(scanner, '_init_bucket_selector', None)
-        if init_selector is not None:
-            scanner._bucket_selector = init_selector()
-        if query_predicate is not None:
-            scanner.auth_has_non_partition_filter = True
-    if not auth_result.filter:
+    masked = set(auth_result.column_masking or {}) if auth_result is not None else set()
+    predicate = scanner._user_predicate
+    effective = exclude_predicate_with_fields(predicate, masked)
+    if effective != scanner.predicate:
+        scanner._set_predicate(effective)
+    scanner.auth_partition_predicate = None
+    scanner.auth_has_non_partition_filter = bool(
+        predicate is not None and masked & predicate_field_names(predicate))
+    if auth_result is None or not auth_result.filter:
         return
     partition_preds, has_non_partition = __split_auth_filter(table, auth_result)
     if partition_preds:
         combined = PredicateBuilder.and_predicates(partition_preds)
         scanner.auth_partition_predicate = combined
-    if has_non_partition:
-        scanner.auth_has_non_partition_filter = True
+    scanner.auth_has_non_partition_filter |= has_non_partition
 
 
 def __split_auth_filter(table, auth_result):

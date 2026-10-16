@@ -28,6 +28,7 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
+import java.sql.Date;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -140,6 +141,53 @@ public class SparkHilbertUDFTest {
             spark.stop();
             SparkSession.clearActiveSession();
             SparkSession.clearDefaultSession();
+        }
+    }
+
+    @Test
+    void testDateColumnMapsToEpochDay() {
+        for (String ansi : new String[] {"true", "false"}) {
+            SparkSession spark =
+                    SparkSession.builder()
+                            .master("local[1]")
+                            .appName("spark-hilbert-udf-date-test")
+                            .config("spark.ui.enabled", "false")
+                            .config("spark.sql.ansi.enabled", ansi)
+                            .getOrCreate();
+            try {
+                StructType schema =
+                        new StructType(
+                                new StructField[] {
+                                    new StructField("a", DataTypes.DateType, true, Metadata.empty())
+                                });
+                Dataset<Row> df =
+                        spark.createDataFrame(
+                                Arrays.asList(
+                                        RowFactory.create(Date.valueOf("0001-01-01")),
+                                        RowFactory.create(Date.valueOf("1969-12-31")),
+                                        RowFactory.create(Date.valueOf("1970-01-01")),
+                                        RowFactory.create(Date.valueOf("9999-12-31")),
+                                        RowFactory.create((Date) null)),
+                                schema);
+
+                SparkHilbertUDF udf = new SparkHilbertUDF();
+                List<Long> mapped = new ArrayList<>();
+                for (Row row :
+                        df.select(udf.sortedLexicographically(df.col("a"), DataTypes.DateType))
+                                .collectAsList()) {
+                    mapped.add(row.getLong(0));
+                }
+
+                // The same days since epoch the indexer reads from a DATE field. Casting the date
+                // to bigint failed analysis under ANSI and gave null, i.e. the sentinel, otherwise.
+                assertThat(mapped)
+                        .as("ansi=%s", ansi)
+                        .containsExactly(-719162L, -1L, 0L, 2932896L, Long.MAX_VALUE);
+            } finally {
+                spark.stop();
+                SparkSession.clearActiveSession();
+                SparkSession.clearDefaultSession();
+            }
         }
     }
 }

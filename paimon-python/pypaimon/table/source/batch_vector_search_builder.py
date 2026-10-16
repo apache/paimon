@@ -100,6 +100,8 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
                                    BatchVectorSearchBuilder):
     """Implementation for BatchVectorSearchBuilder."""
 
+    _native_batch_search = True
+
     def __init__(self, table):
         super().__init__(table)
         self._query_vectors = None
@@ -126,7 +128,7 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         if not self._query_vectors:
             raise ValueError(
                 "Query vectors must be set via with_query_vectors()")
-        return BatchVectorSearchReadImpl(
+        reader = BatchVectorSearchReadImpl(
             self._table,
             self._limit,
             self._vector_column,
@@ -135,3 +137,5 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
             partition_filter=self._partition_filter,
             options=self._options,
         )
+        from pypaimon.table.source.native_search_plan import native_vector_read
+        return native_vector_read(self, reader, batch=True)

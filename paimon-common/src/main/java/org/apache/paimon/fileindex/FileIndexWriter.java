@@ -18,6 +18,9 @@
 
 package org.apache.paimon.fileindex;
 
+import java.io.IOException;
+import java.io.OutputStream;
+
 /** To write file index. */
 public abstract class FileIndexWriter {
 
@@ -31,7 +34,15 @@ public abstract class FileIndexWriter {
     /** The key object may be reused, if saved in memory, please be sure to manually copy it. */
     public abstract void write(Object key);
 
-    public abstract byte[] serializedBytes();
+    public byte[] serializedBytes() {
+        throw new UnsupportedOperationException(
+                "This file index writer requires streaming output.");
+    }
+
+    /** Writes one payload. Existing byte-array writers can use the default implementation. */
+    public void writeTo(OutputStream output) throws IOException {
+        output.write(serializedBytes());
+    }
 
     public boolean empty() {
         return empty;

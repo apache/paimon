@@ -181,6 +181,24 @@ public class HiveSplitGeneratorTest {
         assertThat(splits).hasSize(1);
     }
 
+    @Test
+    public void testForeignLocation() throws Exception {
+        FileStoreTable table = createPartitionedTableWithTwoPartitions();
+        JobConf jobConf = new JobConf();
+        jobConf.set(FileInputFormat.INPUT_DIR, "/hive/warehouse/somewhere-else");
+
+        // With LOCATION_IN_PROPERTIES, Hive gives the table a location under its own warehouse.
+        // Without Hive partitions it is the location of the whole table.
+        jobConf.setBoolean(HiveSplitGenerator.HIVE_PARTITIONED, false);
+        assertThat(HiveSplitGenerator.generateSplits(table, jobConf, 1)).hasSize(2);
+
+        // All Hive partitions share that location, which names no partition. Planning it would
+        // read every partition once for each Hive partition. Hive decides this, not the
+        // metastore.partitioned-table option, which a session can override.
+        jobConf.setBoolean(HiveSplitGenerator.HIVE_PARTITIONED, true);
+        assertThat(HiveSplitGenerator.generateSplits(table, jobConf, 1)).isEmpty();
+    }
+
     private InputSplit[] generateSplits(FileStoreTable table, String partitionDir) {
         JobConf jobConf = new JobConf();
         jobConf.set(FileInputFormat.INPUT_DIR, tablePath + "/" + partitionDir);

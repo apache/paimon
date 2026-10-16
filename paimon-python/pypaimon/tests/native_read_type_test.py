@@ -396,6 +396,27 @@ def test_whole_parent_and_child_apply_authorization_before_extraction(
             assert sorted(row[1] for row in rows if row[1] is not None) == [20]
 
 
+@pytest.mark.parametrize('native', [False, True])
+def test_map_projection_preserves_masked_key_nullability(tmp_path, native):
+    from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
+    from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+
+    table, _ = _table(tmp_path, 'pk', True)
+    table = table.copy({'read.native.enabled': str(native).lower(), 'query-auth.enabled': 'true'})
+    builder = table.new_read_builder().with_projection(['attrs', "attrs['overflow']", 'id'])
+    auth = TableQueryAuthResult(None, {'id': json.dumps({'name': 'NULL'})})
+    # A logical NOT NULL key becomes nullable after masking. Test the captured
+    # batch schema independently of the core's conservative read nullability.
+    with patch.object(FileSystemCatalog, 'auth_table_query', return_value=auth), \
+            patch('pypaimon.read.table_read.read_arrow_schema', PyarrowFieldParser.from_paimon_schema):
+        splits = builder.new_scan().plan().splits()
+        result = builder.new_read().to_arrow_batch_reader(splits).read_all()
+    assert result.num_rows == 3
+    assert result.schema.field('id').nullable
+    assert result.column('id').to_pylist() == [None] * 3
+    assert sorted(value for value in result.column('attrs_overflow').to_pylist() if value is not None) == [20]
+
+
 def test_clipped_variant_reads_only_selected_paths_for_all_json_kinds(tmp_path):
     table, _ = _table(tmp_path, 'append', False, variant_shredded=True)
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)

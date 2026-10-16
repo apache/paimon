@@ -19,6 +19,7 @@ import io
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
@@ -26,6 +27,7 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
     VindexVectorGlobalIndexReader,
     _build_scores,
+    _search_params,
 )
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
@@ -109,6 +111,16 @@ class _BytesFileIO:
 
 class VindexVectorIndexTest(unittest.TestCase):
 
+    def test_query_widths_match_java_integer_text_and_bounds(self):
+        for key in ('ivf.nprobe', 'diskann.l_search'):
+            for value, expected in (('+12', 12), ('１２', 12), ('٢', 2), ('2147483647', 2147483647), (12, 12)):
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(expected, _search_params(_FakeSearchParams, {key: value}, 4).width)
+            for value in ('2147483648', '-2147483649', ' 2', '2 ', '2.0', '1_0', '𝟙', '+', '', 1.5, True):
+                with self.subTest(key=key, value=value):
+                    with self.assertRaisesRegex(ValueError, 'integer'):
+                        _search_params(_FakeSearchParams, {key: value}, 4)
+
     def test_inner_product_distance_converted_to_higher_is_better_score(self):
         id_to_scores = _build_scores(
             [10, 20, 30],
@@ -130,7 +142,9 @@ class VindexVectorIndexTest(unittest.TestCase):
             DictBasedScoredIndexResult(scores).top_k(2).results().to_list(),
         )
 
-    def test_batch_search_uses_native_batch_api(self):
+    @patch('pypaimon.globalindex.vindex.vindex_vector_global_index_reader._native_reader_type',
+           return_value=None)
+    def test_batch_search_uses_native_batch_api(self, _native_reader):
         old_module = sys.modules.get("paimon_vindex")
         sys.modules["paimon_vindex"] = types.SimpleNamespace(
             SearchParams=_FakeSearchParams,

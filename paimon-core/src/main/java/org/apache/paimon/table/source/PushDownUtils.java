@@ -19,15 +19,21 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import java.util.HashSet;
 import java.util.List;
@@ -81,6 +87,48 @@ public class PushDownUtils {
     }
 
     /** Returns whether every data file in the split has tight stats. */
+    /**
+     * Like {@link #minmaxAvailable(Split, Set)}, and additionally requires every data file of the
+     * split to carry a min and a max for each column, or to hold only nulls in that column. A file
+     * written with {@code stats-mode} {@code counts} for the column is listed in its {@code
+     * valueStatsCols} but has no min and max, and {@link DataSplit#minValue} could not tell it
+     * apart from a column that is null in every row.
+     */
+    public static boolean minmaxAvailable(
+            Split split, Set<String> columns, RowType rowType, SimpleStatsEvolutions evolutions) {
+        if (!minmaxAvailable(split, columns)) {
+            return false;
+        }
+        DataSplit dataSplit = (DataSplit) split;
+        for (String column : columns) {
+            int fieldIndex = rowType.getFieldIndex(column);
+            DataField field = rowType.getField(column);
+            for (DataFileMeta file : dataSplit.dataFiles()) {
+                if (file.rowCount() == 0) {
+                    continue;
+                }
+                SimpleStatsEvolution.Result stats =
+                        evolutions
+                                .getOrCreate(file.schemaId())
+                                .evolution(
+                                        file.valueStats(), file.rowCount(), file.valueStatsCols());
+                Object min = InternalRowUtils.get(stats.minValues(), fieldIndex, field.type());
+                Object max = InternalRowUtils.get(stats.maxValues(), fieldIndex, field.type());
+                if (min != null && max != null) {
+                    continue;
+                }
+                Long nullCount =
+                        (Long)
+                                InternalRowUtils.get(
+                                        stats.nullCounts(), fieldIndex, DataTypes.BIGINT());
+                if (nullCount == null || nullCount != file.rowCount()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public static boolean tightBoundsAvailable(Split split) {
         if (!(split instanceof DataSplit)) {
             return false;

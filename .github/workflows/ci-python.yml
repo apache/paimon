@@ -183,7 +183,7 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            build-essential git curl cmake pkg-config libssl-dev libclang-dev \
+            build-essential git curl cmake pkg-config libssl-dev libclang-dev tzdata \
             && rm -rf /var/lib/apt/lists/*
 
       - name: Install Rust toolchain
@@ -214,6 +214,14 @@ jobs:
           source = json.loads(distribution.read_text('direct_url.json'))
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
+          # Fail before the suite when Rust main lacks the required core bridge.
+          from pypaimon_rust.data import (
+              cast_array_for_schema_evolution,
+              normalize_array_for_write,
+              read_arrow_schema,
+          )
+          from pypaimon_rust.datafusion import ReadBuilder
+          assert callable(getattr(ReadBuilder, 'with_partition_filter', None))
           PY
 
       - name: Run Python tests with native planning, reading, writing, updating and committing
@@ -226,6 +234,22 @@ jobs:
           PYPAIMON_TEST_NATIVE_COMMIT: '1'
         run: |
           bash paimon-python/dev/lint-python.sh -i pytest
+
+      - name: Verify native temporal casts in non-UTC system zones
+        shell: bash
+        env:
+          PYPAIMON_TEST_NATIVE_PLAN: '1'
+          PYPAIMON_TEST_NATIVE_READ: '1'
+          PYPAIMON_TEST_NATIVE_WRITE: '1'
+          PYPAIMON_TEST_NATIVE_COMMIT: '1'
+        run: |
+          for zone in Asia/Shanghai America/New_York; do
+            TZ="$zone" python -m pytest -q \
+              paimon-python/pypaimon/tests/native_cast_completion_test.py \
+              paimon-python/pypaimon/tests/native_temporal_zone_cast_test.py \
+              paimon-python/pypaimon/tests/native_schema_cast_test.py \
+              -k 'TIMESTAMP or temporal'
+          done
 
   torch:
     name: PyTorch / Python 3.10

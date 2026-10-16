@@ -25,27 +25,32 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.casting.schema_evolution import read_arrow_schema
+
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_json_parser import extract_referenced_fields
+from pypaimon.common.predicate_json_parser import (
+    _collect_all_field_refs_from_transform, extract_referenced_fields)
 from pypaimon.data.map_shared_shredding import map_selected_keys_field
 from pypaimon.read.push_down_utils import (
     exclude_predicate_with_fields, predicate_field_names, rewrite_predicate_indices)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.auth_masking_reader import (
     AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
-    RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
+    RecordReaderToBatchAdapter, BatchToRecordReaderAdapter,
+    apply_auth_masking, compile_auth_masking_rules)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.variant_read_type import has_variant_extractions
-from pypaimon.read.read_type import (adapter_output_paths, extract_array, output_schema, reader_adapter)
+from pypaimon.read.read_type import (
+    OutputProjection, adapter_output_paths, extract_array, output_schema, reader_adapter)
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import (
-    DataField, MapType, PyarrowFieldParser, is_blob_file_field, is_map_blob_type)
+    DataField, MapType, is_blob_file_field, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.arrow_utils import zero_column_batch
 
@@ -294,7 +299,7 @@ class TableRead:
             splits: List[Split],
             blob_parallelism: Optional[int] = None,
             parallelism: Optional[int] = None):
-        schema = self._output_arrow_schema()
+        schema = self._output_arrow_schema(splits)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
         effective = self._effective_parallelism(parallelism, len(splits))
@@ -392,7 +397,7 @@ class TableRead:
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         effective = self._effective_parallelism(parallelism, len(splits))
-        schema = self._output_arrow_schema()
+        schema = self._output_arrow_schema(splits)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
 
@@ -462,8 +467,23 @@ class TableRead:
         extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
         return projected if predicate_field_names(self.predicate) & extra_names else adapter
 
-    def _output_arrow_schema(self):
-        return output_schema(PyarrowFieldParser.from_paimon_schema(self.read_type), self.output_projection)
+    def _output_arrow_schema(self, splits=None):
+        schema = read_arrow_schema(self.read_type)
+        masks = set()
+        if splits:
+            for split in splits:
+                if isinstance(split, QueryAuthSplit) and split.auth_result is not None:
+                    masks.update(split.auth_result.column_masking or {})
+        elif self.table.options.query_auth_enabled:
+            # Before a plan or for an empty plan, the grant is unknown. Masks
+            # may null any top-level column, including a declared NOT NULL one.
+            masks.update(schema.names)
+        if masks:
+            schema = pyarrow.schema([
+                field.with_nullable(True) if field.name in masks else field
+                for field in schema
+            ], metadata=schema.metadata)
+        return output_schema(schema, self.output_projection)
 
     @staticmethod
     def _apply_output_projection_to_schema(schema, projection):
@@ -835,7 +855,12 @@ class TableRead:
     def _flatten_native_nested_batch(self, batch, schema):
         _, paths = self._reader_adapter()
         arrays = [extract_array(batch, path) for path in paths]
-        fields = list(PyarrowFieldParser.from_paimon_schema(self._adapter_read_type))
+        fields = list(read_arrow_schema(self._adapter_read_type))
+        # Authorization can mask a NOT NULL field. Keep the captured source
+        # nullability when flattening, including whole-parent/MAP projections.
+        projected = output_schema(batch.schema, OutputProjection([
+            (field.name, path) for field, path in zip(fields, paths)]))
+        fields = [field.with_nullable(field.nullable or projected[i].nullable) for i, field in enumerate(fields)]
         if self.include_row_kind:
             arrays.insert(0, batch.column(ROW_KIND_COLUMN))
             fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
@@ -1143,12 +1168,13 @@ class TableRead:
             yield from self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, schema)
             return
-        physical_schema = PyarrowFieldParser.from_paimon_schema(self._adapter_read_type)
+        physical_schema = read_arrow_schema(self._adapter_read_type)
         if self.include_row_kind:
             physical_schema = self._add_row_kind_to_schema(physical_schema)
         for batch in self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, physical_schema):
-            yield self._project_batch_to_output(batch)
+            yield self._try_to_pad_batch_by_schema(
+                self._project_batch_to_output(batch), schema, allow_type_cast=True)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -1463,7 +1489,8 @@ class TableRead:
                            post_merge_filter=None,
                            eager_blob_fields=None,
                            post_filter_after_inline: bool = False,
-                           predicate=_DEFAULT_PREDICATE) -> SplitRead:
+                           predicate=_DEFAULT_PREDICATE,
+                           defer_blob_resolution: bool = False) -> SplitRead:
         sr = self._build_split_read(
             split,
             read_type,
@@ -1473,6 +1500,7 @@ class TableRead:
             eager_blob_fields,
             post_filter_after_inline,
             predicate,
+            defer_blob_resolution,
         )
         sr._blob_parallelism = blob_parallelism
         sr._parquet_row_group_cache = self._parquet_row_group_cache
@@ -1484,7 +1512,8 @@ class TableRead:
                           post_merge_filter=None,
                           eager_blob_fields=None,
                           post_filter_after_inline: bool = False,
-                          predicate=_DEFAULT_PREDICATE) -> SplitRead:
+                          predicate=_DEFAULT_PREDICATE,
+                          defer_blob_resolution: bool = False) -> SplitRead:
         predicate = self.predicate if predicate is _DEFAULT_PREDICATE else predicate
         effective_limit = (
             self.limit if limit is None else limit
@@ -1579,6 +1608,7 @@ class TableRead:
                 post_merge_filter=post_merge_filter,
                 eager_blob_fields=eager_blob_fields,
                 post_filter_after_inline=post_filter_after_inline,
+                defer_blob_resolution=defer_blob_resolution,
             )
         else:
             inner_read_type = scan_read_type
@@ -1646,13 +1676,18 @@ class TableRead:
             _, paths = self._reader_adapter()
             outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
             arrays = [extract_array(batch, path) for _, path in outputs]
-            fields = list(self._output_arrow_schema())
+            # Project the already masked schema, retaining captured nullability.
+            adapted_projection = OutputProjection([(alias, path) for alias, path in outputs])
+            actual = output_schema(batch.schema, adapted_projection)
+            declared = output_schema(read_arrow_schema(self.read_type), self.output_projection)
+            fields = [field.with_nullable(field.nullable or actual[i].nullable) for i, field in enumerate(declared)]
             if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
                 arrays.insert(0, batch.column(ROW_KIND_COLUMN))
                 fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
             if not arrays:
-                return batch.select([])
-            return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
+                return zero_column_batch(batch.num_rows, batch.schema.metadata)
+            return pyarrow.RecordBatch.from_arrays(
+                arrays, schema=pyarrow.schema(fields, metadata=batch.schema.metadata))
         if not self._needs_output_projection():
             return batch
         output_names = list(self._output_column_names)
@@ -1664,7 +1699,7 @@ class TableRead:
         arrays = [batch.column(name_to_pos[name]) for name in output_names]
         fields = [batch.schema.field(name_to_pos[name]) for name in output_names]
         if not arrays:
-            return batch.select([])
+            return zero_column_batch(batch.num_rows, batch.schema.metadata)
         return pyarrow.RecordBatch.from_arrays(
             arrays, schema=pyarrow.schema(fields))
 
@@ -1800,6 +1835,11 @@ class TableRead:
                 "MAP-key projection with query authorization is not supported")
         table_fields = self.table.fields
         read_fields = self._adapter_read_type
+        masks = auth_result.column_masking or {}
+        masked_fields = set(masks)
+        # Split reads may filter loosely (merged rows, nested leaves), so filter exactly before LIMIT.
+        post_filter = self.predicate
+        filter_read_fields = self._with_predicate_extra_fields(read_fields) if post_filter is not None else read_fields
         from pypaimon.read.table_scan import latest_auth_fields, validate_auth_rules
         # a split can carry rules without having been planned by a validating scan
         snapshot = getattr(self, "_auth_schema", None)
@@ -1808,24 +1848,27 @@ class TableRead:
         latest_fields = validate_auth_rules(self.table, auth_result, snapshot)
         # bind to the latest schema: a generated alias may since have become a real column
         auth_result.validate_read_type(
-            latest_fields, read_fields, self.nested_name_paths, table_fields)
+            latest_fields, filter_read_fields, self.nested_name_paths, table_fields)
 
-        # Query filters can reference masked columns absent from the output.
-        # Include them and their mask dependencies before the final projection.
-        filter_fields = self._predicate_extra_fields
-        needed_fields = read_fields + filter_fields
-        auth_extra_fields = auth_result.get_extra_fields(needed_fields, table_fields)
-        extra_fields = filter_fields + auth_extra_fields
-        effective_read_type = read_fields + extra_fields
+        extra_fields = auth_result.get_extra_fields(filter_read_fields, table_fields)
+        effective_read_type = filter_read_fields + extra_fields
 
         filter_fn = auth_result.extract_row_filter()
-        raw_predicate = exclude_predicate_with_fields(
-            self.predicate, set(auth_result.column_masking or {}))
         effective_limit = self.limit if limit is None else limit
         auth_fields = (
             self._auth_filter_field_names(auth_result, effective_read_type)
             if filter_fn is not None else set()
         )
+        eager_blob_fields = set(auth_fields)
+        if post_filter is not None:
+            # Only inputs of the filter and its masks are read eagerly.
+            filter_names = predicate_field_names(post_filter)
+            filter_masks = compile_auth_masking_rules(
+                {name: rule for name, rule in masks.items() if name in filter_names},
+                effective_read_type)
+            eager_blob_fields.update(filter_names - masked_fields)
+            for transform in filter_masks.values():
+                eager_blob_fields.update(_collect_all_field_refs_from_transform(transform))
         inline_blob_fields = (
             self.table.options.blob_descriptor_fields()
             | self.table.options.blob_view_fields()
@@ -1842,17 +1885,19 @@ class TableRead:
             blob_parallelism=blob_parallelism,
             read_type=effective_read_type,
             limit=limit,
-            push_down_limit=(filter_fn is None or embed_filter) and self.predicate is None,
-            predicate=raw_predicate,
+            push_down_limit=post_filter is None and (filter_fn is None or embed_filter),
             post_merge_filter=filter_fn if embed_filter else None,
-            eager_blob_fields=auth_fields if embed_filter else None,
+            eager_blob_fields=eager_blob_fields,
             post_filter_after_inline=post_filter_after_inline,
+            # push down conjuncts without masked columns
+            predicate=exclude_predicate_with_fields(post_filter, masked_fields),
+            defer_blob_resolution=post_filter is not None,
         )
         reader = split_read.create_reader()
 
         needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):
-            schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
+            schema = read_arrow_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
             if getattr(reader, 'blob_field_indices', None) is None:
                 from pypaimon.read.reader.field_indices import (
@@ -1868,17 +1913,28 @@ class TableRead:
         if filter_fn and not embed_filter:
             reader = AuthFilterReader(reader, filter_fn)
 
+        if post_filter is not None:
+            # Filter on masked values but keep raw rows; masks apply after LIMIT.
+            reader = FilterRecordBatchReader(
+                reader, rewrite_predicate_indices(post_filter, effective_read_type),
+                field_names=[field.name for field in effective_read_type],
+                schema_fields=effective_read_type,
+                filter_view=lambda batch: apply_auth_masking(batch, filter_masks))
+        if effective_limit is not None and (post_filter is not None or (filter_fn and not embed_filter)):
+            reader = LimitedRecordBatchReader(reader, effective_limit)
+
+        if post_filter is not None and isinstance(split_read, DataEvolutionSplitRead):
+            # Fetch only payloads output unmasked or read by a mask.
+            needed = {f.name for f in read_fields} - masked_fields
+            for transform in compile_auth_masking_rules(masks, effective_read_type).values():
+                needed.update(_collect_all_field_refs_from_transform(transform))
+            reader = split_read._resolve_deferred_blobs(
+                reader, {f.name for f in effective_read_type} - needed)
+
         if auth_result.column_masking:
             reader = AuthMaskingReader(reader, auth_result.column_masking, effective_read_type)
 
-        if self.predicate is not None:
-            predicate = rewrite_predicate_indices(self.predicate, effective_read_type)
-            reader = FilterRecordBatchReader(
-                reader, predicate, schema_fields=effective_read_type)
-        if effective_limit is not None:
-            reader = LimitedRecordBatchReader(reader, effective_limit)
-
-        if extra_fields:
+        if len(effective_read_type) > len(read_fields):
             original_columns = [f.name for f in read_fields]
             reader = ColumnProjectReader(reader, original_columns)
 

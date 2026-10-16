@@ -16,9 +16,10 @@
 # under the License.
 
 import logging
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.dataset as ds
 import polars
 
@@ -27,10 +28,56 @@ from pypaimon.read.push_down_utils import predicate_supports_arrow_filter
 from pypaimon.read.reader.iface.record_batch_reader import (
     InternalRowWrapperIterator,
     RecordBatchReader,
+    _polars_arrow_table,
 )
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 logger = logging.getLogger(__name__)
+
+
+def _comparison_fields(predicate):
+    if predicate.method in ('and', 'or'):
+        return set().union(*(_comparison_fields(child) for child in predicate.literals))
+    if predicate.method in ('isNull', 'isNotNull'):
+        # Null checks see the cast values, so they agree with comparisons.
+        return {predicate.field}
+    literals = predicate.literals or []
+    # NOT IN with a NULL literal never matches, so skip the cast.
+    if predicate.method == 'notIn' and any(value is None for value in literals):
+        return set()
+    if (predicate.method in ('equal', 'notEqual', 'lessThan', 'lessOrEqual', 'greaterThan',
+                             'greaterOrEqual', 'in', 'notIn', 'between', 'notBetween',
+                             'startsWith', 'endsWith', 'contains', 'like')
+            and any(value is not None for value in literals)):
+        return {predicate.field}
+    return set()
+
+
+def _try_cast(column, data_type):
+    # Like SQL TRY_CAST: values that do not fit the declared type compare as NULL.
+    try:
+        return column.cast(data_type)
+    except pa.ArrowNotImplementedError:
+        return column  # Arrow cannot convert these types; filter on the masked values
+    except pa.ArrowInvalid:
+        values = column.unique()
+        cast = []
+        for index in range(len(values)):
+            try:
+                cast.append(values.slice(index, 1).cast(data_type))
+            except pa.ArrowInvalid:
+                cast.append(pa.nulls(1, data_type))
+        return pa.concat_arrays(cast).take(pc.index_in(column, value_set=values))
+
+
+def _needs_cast(source, target):
+    # Arrow compares numbers, and times of one kind, directly, and nested columns only take
+    # null checks; casting those could only lose precision or nullness.
+    numeric = (pa.types.is_integer, pa.types.is_floating, pa.types.is_decimal)
+    return not (pa.types.is_nested(target)
+                or any(check(source) for check in numeric) and any(check(target) for check in numeric)
+                or any(check(source) and check(target)
+                       for check in (pa.types.is_timestamp, pa.types.is_date, pa.types.is_time)))
 
 
 class FilterRecordBatchReader(RecordBatchReader):
@@ -46,11 +93,18 @@ class FilterRecordBatchReader(RecordBatchReader):
         predicate: Predicate,
         field_names: Optional[List[str]] = None,
         schema_fields: Optional[List[DataField]] = None,
+        filter_view: Optional[Callable[[pa.RecordBatch], pa.RecordBatch]] = None,
     ):
         self.reader = reader
         self.predicate = predicate
         self.field_names = field_names
         self.schema_fields = schema_fields
+        # The predicate tests this view; rows are taken from the original batch.
+        self._filter_view = filter_view
+        comparison_fields = _comparison_fields(predicate)
+        self._comparison_types = {
+            field.name: PyarrowFieldParser.from_paimon_type(field.type)
+            for field in schema_fields or [] if field.name in comparison_fields}
         self._use_arrow_filter = predicate_supports_arrow_filter(predicate)
         self._adopt_metadata(reader)
 
@@ -68,11 +122,21 @@ class FilterRecordBatchReader(RecordBatchReader):
             continue
 
     def _filter_batch(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
+        view = batch if self._filter_view is None else self._filter_view(batch)
+        filter_batch = self._coerce_comparison_types(view, batch)
         if not self._use_arrow_filter:
-            return self._filter_batch_by_row(batch)
-        expr = self.predicate.to_arrow(batch.schema)
+            return self._filter_batch_by_row(batch, filter_batch)
+        expr = self.predicate.to_arrow(filter_batch.schema)
         if expr is None:
-            return self._filter_batch_by_row(batch)
+            return self._filter_batch_by_row(batch, filter_batch)
+        if filter_batch is not batch:
+            position = '_paimon_filter_position'
+            while position in filter_batch.schema.names:
+                position += '_'
+            data = pa.Table.from_batches([filter_batch]).append_column(
+                position, pa.array(range(batch.num_rows), type=pa.int64()))
+            selected = ds.InMemoryDataset(data).scanner(columns=[position], filter=expr).to_table()
+            return batch.take(selected.column(0).combine_chunks()) if selected.num_rows else None
         result = ds.InMemoryDataset(pa.Table.from_batches([batch])).scanner(
             filter=expr
         ).to_table()
@@ -91,14 +155,30 @@ class FilterRecordBatchReader(RecordBatchReader):
             schema=result.schema,
         )
 
-    def _filter_batch_by_row(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
+    def _coerce_comparison_types(self, view, batch):
+        # Cast columns a mask retyped, for the filter only; the output is unchanged.
+        columns = None
+        for name, data_type in self._comparison_types.items():
+            column = view.column(name)
+            if (column.type != data_type and column.type != batch.column(name).type
+                    and _needs_cast(column.type, data_type)):
+                if columns is None:
+                    columns, fields = list(view.columns), list(view.schema)
+                index = view.schema.get_field_index(name)
+                columns[index] = _try_cast(column, data_type)
+                fields[index] = fields[index].with_type(columns[index].type)
+        if columns is None:
+            return view
+        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields, metadata=view.schema.metadata))
+
+    def _filter_batch_by_row(self, batch: pa.RecordBatch, filter_batch=None) -> Optional[pa.RecordBatch]:
+        filter_batch = batch if filter_batch is None else filter_batch
         # Predicate indices address logical fields. A record-reader adapter
         # may prepend _row_kind, which is metadata rather than an operand.
-        columns = ([field.name for field in self.schema_fields]
-                   if self.schema_fields is not None else
-                   [name for name in batch.schema.names if name != "_row_kind"])
-        logical_batch = batch.select(columns)
-        df = polars.from_arrow(pa.Table.from_batches([logical_batch]))
+        columns = (self.field_names if self.field_names is not None else
+                   [field.name for field in self.schema_fields] if self.schema_fields is not None else
+                   [name for name in filter_batch.schema.names if name != "_row_kind"])
+        df = polars.from_arrow(_polars_arrow_table(filter_batch).select(columns))
         iterator = InternalRowWrapperIterator(
             self._iter_df_rows(df),
             df.width,

@@ -246,17 +246,29 @@ public class SparkInternalRowTest {
 
     @Test
     public void testMapBlobRejectsNullKey() {
-        Map<Object, Object> map = new LinkedHashMap<>();
-        map.put(null, Blob.fromData(new byte[] {1}));
+        Map<Object, Object> blobMap = new LinkedHashMap<>();
+        blobMap.put(null, Blob.fromData(new byte[] {1}));
 
         assertThatThrownBy(
                         () ->
                                 DataConverter.fromPaimon(
-                                        new GenericMap(map),
+                                        new GenericMap(blobMap),
                                         DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()),
                                         false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Spark MAP<X, BLOB> does not support null keys.");
+
+        Map<Object, Object> intMap = new LinkedHashMap<>();
+        intMap.put(null, 1);
+
+        assertThatThrownBy(
+                        () ->
+                                DataConverter.fromPaimon(
+                                        new GenericMap(intMap),
+                                        DataTypes.MAP(DataTypes.INT(), DataTypes.INT()),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Spark map data does not support null keys.");
     }
 
     @Test

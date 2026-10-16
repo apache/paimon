@@ -256,6 +256,20 @@ The stride controls anchor spacing, not the spacing inside a window:
 | `pad` | Keep scheduled anchors and repeat the nearest endpoint for missing positions. |
 | `error` | Fail construction if any scheduled anchor has an incomplete window. |
 
+`anchor_row_ids` optionally selects scheduled anchors by Paimon `_ROW_ID`
+without filtering their readable context. It preserves the original stride
+and group/order sequence; duplicates do not repeat samples. Boundary handling
+then applies to selected anchors only. IDs must come from the same fixed
+snapshot and belong to the context query. The query's filters and limit still
+define context boundaries, so restrict it to complete episodes when their
+original history, future and stride must be preserved. See
+[task-local context and anchor selection](pytorch#task-local-context-and-anchor-selection)
+for a metadata-only selection example and distributed ownership guidance.
+
+The Dataset plans and authorizes all requested columns once, reads only the
+index columns at construction, and reuses the resulting split metadata for
+lazy payload reads across projections and workers.
+
 `pad_values={"action": [0.0, 0.0]}` overrides endpoint repetition for that
 column. Supply values in the same raw representation as a table cell. Padding
 happens before column transforms, so normalization also affects constant padding.

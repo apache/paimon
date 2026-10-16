@@ -107,6 +107,22 @@ final class DLFOpenApiActions {
         {"POST", "/v1/{prefix}/databases/{database}/views/{view}", "AlterView"},
         {"DELETE", "/v1/{prefix}/databases/{database}/views/{view}", "DropView"},
         {"POST", "/v1/{prefix}/views/rename", "RenameView"},
+        {"GET", "/v1/{prefix}/databases/{database}/semantic-views", "ListSemanticViews"},
+        {
+            "GET",
+            "/v1/{prefix}/databases/{database}/semantic-views/{semanticView}",
+            "GetSemanticView"
+        },
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/semantic-views/{semanticView}",
+            "UpsertSemanticView"
+        },
+        {
+            "DELETE",
+            "/v1/{prefix}/databases/{database}/semantic-views/{semanticView}",
+            "DeleteSemanticView"
+        },
         {"GET", "/v1/{prefix}/databases/{database}/functions", "ListFunctions"},
         {"POST", "/v1/{prefix}/databases/{database}/functions", "CreateFunction"},
         {"GET", "/v1/{prefix}/databases/{database}/functions/{function}", "GetFunction"},
@@ -115,6 +131,10 @@ final class DLFOpenApiActions {
         {"GET", "/v1/{prefix}/permissions", "ListPermissionAssignments"},
         {"POST", "/v1/{prefix}/permissions/grant", "GrantPermissionAssignment"},
         {"POST", "/v1/{prefix}/permissions/revoke", "RevokePermissionAssignment"},
+        {"GET", "/v1/{prefix}/labels", "ListLabels"},
+        {"POST", "/v1/{prefix}/labels/get", "GetLabel"},
+        {"POST", "/v1/{prefix}/labels/upsert", "UpsertLabel"},
+        {"POST", "/v1/{prefix}/labels/delete", "DeleteLabel"},
     };
 
     private static final Map<String, List<Operation>> BY_METHOD = index();

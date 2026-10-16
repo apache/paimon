@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
-from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
+from pypaimon.schema.arrow_schema import (
+    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
@@ -72,7 +73,7 @@ class TableWrite:
 
     def write_arrow(self, data, bucket: Optional[int] = None):
         """Write Arrow data, optionally to a bucket assigned upstream."""
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_schema(data)
         if isinstance(data, pa.RecordBatch):
             return self.write_arrow_batch(data, bucket)
         for batch in data.to_batches():
@@ -308,8 +309,7 @@ class TableWrite:
             release()
 
     def _prepare_arrow_data(self, data):
-        self._validate_pyarrow_schema(data.schema)
-        data = normalize_arrow_strings(data)
+        data = self._prepare_arrow_schema(data)
         # Schema-only writers can normalize input without table options.
         table = getattr(self, 'table', None)
         if table is None:
@@ -317,6 +317,18 @@ class TableWrite:
         data = self._normalize_arrow_write_schema(data)
         from pypaimon.write.row_kind import filter_write_batch
         return filter_write_batch(table, data)
+
+    def _prepare_arrow_schema(self, data):
+        data = normalize_arrow_strings(data)
+        target = self.table_pyarrow_schema
+        if data.schema.names != target.names and self.file_store_write.write_cols is not None:
+            target = self._write_cols_pyarrow_schema(self.file_store_write.write_cols)
+        validated = normalize_arrow_write_nullability(data, target)
+        self._validate_pyarrow_schema(validated.schema)
+        # Core checks only visible NOT NULL children. PyArrow's Parquet writer
+        # also rejects hidden NULL children under NULL ROW parents when their
+        # Arrow field is nonnullable, so retain the input's transport metadata.
+        return data
 
     def _normalize_arrow_write_schema(self, data):
         # Compatible input batches may differ in top-level nullability or

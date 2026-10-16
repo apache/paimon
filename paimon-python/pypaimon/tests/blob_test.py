@@ -3508,8 +3508,12 @@ class BlobEndToEndTest(unittest.TestCase):
                              (values[0].to_descriptor().offset, values[0].to_descriptor().length))
             self.assertIsNone(values[1])
             self.assertIs(Blob.PLACE_HOLDER, values[2])
-            with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-                descriptor_reader.read_arrow_batch()
+            descriptor_values = descriptor_reader.read_arrow_batch().column(0).to_pylist()
+            last_descriptor = BlobDescriptor.deserialize(descriptor_values[0])
+            self.assertEqual(path, last_descriptor.uri)
+            self.assertEqual(len(b"last"), last_descriptor.length)
+            self.assertIsNone(descriptor_values[1])
+            self.assertIsNone(descriptor_values[2])
             with self.assertRaises(IndexError):
                 FormatBlobReader(
                     file_io, path, [field.name], [field], None, True,
@@ -4445,8 +4449,9 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertIsNone(next(iterator).values[0])
         self.assertEqual(next(iterator).values[0].to_data(), b"world")
 
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        self.assertEqual(
+            [b"hello", None, None, b"world"],
+            reader.read_arrow_batch().column(0).to_pylist())
         reader.close()
 
     def test_placeholder_blob_read_as_descriptor(self):
@@ -4473,8 +4478,11 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=True
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        values = reader.read_arrow_batch().column(0).to_pylist()
+        self.assertIsNone(values[0])
+        descriptor = BlobDescriptor.deserialize(values[1])
+        self.assertEqual(blob_file_path, descriptor.uri)
+        self.assertEqual(len(b"world"), descriptor.length)
         reader.close()
 
     def test_array_blob_write_read(self):
@@ -4785,8 +4793,9 @@ class BlobEndToEndTest(unittest.TestCase):
         )
         self.assertEqual(next(iterator).values[0][0].to_data(), b"hello")
         self.assertIs(next(iterator).values[0], Blob.ARRAY_PLACE_HOLDER)
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        self.assertEqual(
+            [[b"hello"], None],
+            reader.read_arrow_batch().column(0).to_pylist())
         reader.close()
 
     def test_reject_malformed_array_blob_payloads(self):
@@ -5386,8 +5395,9 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=False,
             row_indices=[1],
         )
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            placeholder_reader.read_arrow_batch()
+        self.assertEqual(
+            [None],
+            placeholder_reader.read_arrow_batch().column(0).to_pylist())
         placeholder_reader.close()
 
     def test_reject_duplicate_map_blob_key_on_write(self):
