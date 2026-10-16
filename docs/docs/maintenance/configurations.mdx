@@ -71,6 +71,8 @@ Options for Jdbc catalog.
 
 Options for ZooKeeper catalog locks.
 
+Ownership is validated before snapshot publication, and detected ownership loss fails the commit. Like JDBC locking, this cannot prevent an in-flight non-atomic storage write from completing after ownership expires. Stronger guarantees require storage-side conditional publication or fencing.
+
 Curator and ZooKeeper are `provided` dependencies of Paimon Core, so Paimon does not bundle them in engine artifacts. Spark 3.4.3's unshaded Curator 2.13.0 and ZooKeeper 3.6.3 classpath is tested with this lock. For engines without that classpath, install unshaded `curator-client`, `curator-framework`, and `curator-recipes` 5.6.0 plus `zookeeper` 3.8.4 on the driver and every worker, and ensure older unshaded versions do not take precedence. Flink's relocated Curator classes do not satisfy these dependencies.
 
 <ConfigTable html={zooKeeperCatalogLockConfigurationHtml} />

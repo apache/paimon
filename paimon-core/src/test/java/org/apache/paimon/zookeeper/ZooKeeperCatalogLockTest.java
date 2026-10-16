@@ -18,16 +18,29 @@
 
 package org.apache.paimon.zookeeper;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.factories.FactoryUtil;
-import org.apache.paimon.jdbc.JdbcCatalogOptions;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.WatcherRemoveCuratorFramework;
+import org.apache.curator.framework.api.DeleteBuilder;
+import org.apache.curator.framework.api.ExistsBuilder;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.test.TestingServer;
 import org.apache.zookeeper.Watcher;
@@ -35,6 +48,7 @@ import org.apache.zookeeper.ZooKeeper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -50,8 +64,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,6 +76,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.AdditionalAnswers.delegatesTo;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 
 /** Tests for {@link ZooKeeperCatalogLock} and {@link ZooKeeperCatalogLockFactory}. */
 class ZooKeeperCatalogLockTest {
@@ -81,7 +102,7 @@ class ZooKeeperCatalogLockTest {
     private static Options options() {
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, "s3://test-bucket/warehouse");
-        options.set(JdbcCatalogOptions.LOCK_TYPE, ZooKeeperCatalogLockFactory.IDENTIFIER);
+        options.set(CatalogOptions.LOCK_TYPE, ZooKeeperCatalogLockFactory.IDENTIFIER);
         options.set(ZooKeeperCatalogLockOptions.QUORUM, zk.getConnectString());
         options.set(ZooKeeperCatalogLockOptions.SESSION_TIMEOUT, Duration.ofSeconds(10));
         options.set(ZooKeeperCatalogLockOptions.LOCK_ACQUIRE_TIMEOUT, Duration.ofSeconds(30));
@@ -112,6 +133,68 @@ class ZooKeeperCatalogLockTest {
         assertNotNull(factory);
         assertTrue(factory instanceof ZooKeeperCatalogLockFactory);
         assertEquals("zookeeper", factory.identifier());
+    }
+
+    @Test
+    void filesystemCatalogCommitUsesConfiguredLock(@TempDir java.nio.file.Path warehouse)
+            throws Exception {
+        Options options = options();
+        options.set(CatalogOptions.WAREHOUSE, warehouse.toUri().toString());
+        options.set(CatalogOptions.LOCK_ENABLED, true);
+        Identifier identifier = Identifier.create("db", "table");
+
+        try (Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options))) {
+            catalog.createDatabase(identifier.getDatabaseName(), false);
+            catalog.createTable(
+                    identifier, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
+            Table table = catalog.getTable(identifier);
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            List<CommitMessage> messages;
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
+                write.write(GenericRow.of(1));
+                messages = write.prepareCommit();
+            }
+
+            Lock blocker =
+                    new ZooKeeperCatalogLockFactory()
+                            .createLock(
+                                    CatalogLockContext.fromOptions(options),
+                                    identifier,
+                                    null,
+                                    "blocker",
+                                    new Options());
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try (Lock ignored = blocker) {
+                AutoCloseable scope = blocker.acquire();
+                try {
+                    CountDownLatch attempted = new CountDownLatch(1);
+                    Future<?> commit =
+                            pool.submit(
+                                    () -> {
+                                        attempted.countDown();
+                                        try (BatchTableCommit tableCommit =
+                                                table.newBatchWriteBuilder().newCommit()) {
+                                            tableCommit.commit(messages);
+                                        }
+                                        return null;
+                                    });
+                    assertTrue(attempted.await(20, TimeUnit.SECONDS));
+                    assertThrows(
+                            TimeoutException.class,
+                            () -> commit.get(500, TimeUnit.MILLISECONDS),
+                            "filesystem table commit bypassed the configured ZooKeeper lock");
+                    scope.close();
+                    scope = null;
+                    commit.get(20, TimeUnit.SECONDS);
+                } finally {
+                    if (scope != null) {
+                        scope.close();
+                    }
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+        }
     }
 
     @Test
@@ -396,6 +479,139 @@ class ZooKeeperCatalogLockTest {
                             || e.getMessage().contains("session_epoch_changed"));
             assertFalse(published.get());
         }
+    }
+
+    @Test
+    void interruptedVerificationStopsPublicationAndPreservesCancellation() throws Exception {
+        try (ZooKeeperCatalogLock clientOwner = newLock(options())) {
+            CuratorFramework client =
+                    mock(CuratorFramework.class, delegatesTo(clientOf(clientOwner)));
+            ZooKeeperCatalogLock raw =
+                    new ZooKeeperCatalogLock(
+                            client,
+                            new AtomicLong(),
+                            () -> {},
+                            "s3://test-bucket/warehouse",
+                            30_000,
+                            Identifier.create("db", "table"));
+            AtomicBoolean published = new AtomicBoolean();
+            try (Lock lock = Lock.reentrant(raw)) {
+                lock.runWithLock(
+                        () -> {
+                            ExistsBuilder interruptedCheck = mock(ExistsBuilder.class);
+                            doAnswer(
+                                            invocation -> {
+                                                Thread.currentThread().interrupt();
+                                                Thread.interrupted();
+                                                throw new InterruptedException(
+                                                        "verification interrupted");
+                                            })
+                                    .when(interruptedCheck)
+                                    .forPath(anyString());
+                            doReturn(interruptedCheck).when(client).checkExists();
+
+                            try {
+                                IllegalStateException failure =
+                                        assertThrows(
+                                                IllegalStateException.class,
+                                                () ->
+                                                        lock.runWithLock(
+                                                                () -> {
+                                                                    published.set(true);
+                                                                    return null;
+                                                                }));
+                                assertTrue(failure.getCause() instanceof InterruptedException);
+                                assertTrue(Thread.currentThread().isInterrupted());
+                            } finally {
+                                Thread.interrupted();
+                            }
+                            return null;
+                        });
+            }
+            assertFalse(published.get());
+        }
+    }
+
+    @Test
+    void interruptedScopeReleasePreservesCancellationAndOperationFailure() throws Exception {
+        Options lockOptions = options();
+        lockOptions.set(ZooKeeperCatalogLockOptions.ROOT_PATH, "paimon/locks-interrupted-release");
+        try (ZooKeeperCatalogLock clientOwner = newLock(lockOptions)) {
+            CuratorFramework realClient = clientOf(clientOwner);
+            WatcherRemoveCuratorFramework watcherClient =
+                    mock(
+                            WatcherRemoveCuratorFramework.class,
+                            delegatesTo(realClient.newWatcherRemoveCuratorFramework()));
+            CuratorFramework client = mock(CuratorFramework.class, delegatesTo(realClient));
+            doReturn(watcherClient).when(client).newWatcherRemoveCuratorFramework();
+            ZooKeeperCatalogLock raw =
+                    new ZooKeeperCatalogLock(
+                            client,
+                            new AtomicLong(),
+                            () -> {},
+                            "s3://test-bucket/warehouse",
+                            30_000,
+                            Identifier.create("db", "release_table"));
+            try (ZooKeeperCatalogLock lock = raw) {
+                AutoCloseable scope = lock.acquire();
+                interruptDeletes(watcherClient);
+                IllegalStateException operationFailure =
+                        new IllegalStateException("operation failed");
+                try {
+                    Lock.release(scope, operationFailure);
+                    assertTrue(Thread.currentThread().isInterrupted());
+                    assertEquals(1, operationFailure.getSuppressed().length);
+                    assertTrue(operationFailure.getSuppressed()[0] instanceof InterruptedException);
+                } finally {
+                    Thread.interrupted();
+                }
+            }
+        }
+    }
+
+    @Test
+    void interruptedClosePreservesCancellation() throws Exception {
+        Options lockOptions = options();
+        lockOptions.set(ZooKeeperCatalogLockOptions.ROOT_PATH, "paimon/locks-interrupted-close");
+        try (ZooKeeperCatalogLock clientOwner = newLock(lockOptions)) {
+            CuratorFramework realClient = clientOf(clientOwner);
+            WatcherRemoveCuratorFramework watcherClient =
+                    mock(
+                            WatcherRemoveCuratorFramework.class,
+                            delegatesTo(realClient.newWatcherRemoveCuratorFramework()));
+            CuratorFramework client = mock(CuratorFramework.class, delegatesTo(realClient));
+            doReturn(watcherClient).when(client).newWatcherRemoveCuratorFramework();
+            ZooKeeperCatalogLock lock =
+                    new ZooKeeperCatalogLock(
+                            client,
+                            new AtomicLong(),
+                            () -> {},
+                            "s3://test-bucket/warehouse",
+                            30_000,
+                            Identifier.create("db", "close_table"));
+            lock.acquire();
+            interruptDeletes(watcherClient);
+            try {
+                lock.close();
+                assertTrue(Thread.currentThread().isInterrupted());
+            } finally {
+                Thread.interrupted();
+            }
+        }
+    }
+
+    private static void interruptDeletes(WatcherRemoveCuratorFramework client) throws Exception {
+        DeleteBuilder delete = mock(DeleteBuilder.class);
+        doReturn(delete).when(delete).guaranteed();
+        doAnswer(
+                        invocation -> {
+                            Thread.currentThread().interrupt();
+                            Thread.interrupted();
+                            throw new InterruptedException("release interrupted");
+                        })
+                .when(delete)
+                .forPath(anyString());
+        doReturn(delete).when(client).delete();
     }
 
     /**
