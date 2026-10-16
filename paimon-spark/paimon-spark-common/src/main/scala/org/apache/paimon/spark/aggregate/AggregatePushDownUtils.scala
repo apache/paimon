@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.aggregate
 
+import org.apache.paimon.stats.SimpleStatsEvolutions
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
 import org.apache.paimon.table.source.PushDownUtils.{minmaxAvailable, tightBoundsAvailable}
@@ -56,7 +57,10 @@ object AggregatePushDownUtils {
             return None
           }
           val splits = generateSplits(readBuilder)
-          if (!splits.forall(minmaxAvailable(_, columns.asJava))) {
+          val evolutions = new SimpleStatsEvolutions(
+            sid => table.schemaManager().schema(sid).fields(),
+            table.schema().id())
+          if (!splits.forall(minmaxAvailable(_, columns.asJava, rowType, evolutions))) {
             return None
           }
           if (!splits.forall(tightBoundsAvailable)) {
