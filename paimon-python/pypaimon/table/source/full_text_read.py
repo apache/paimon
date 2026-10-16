@@ -41,6 +41,8 @@ from pypaimon.table.source.full_text_scan import FullTextScanPlan
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
+_UNSET = object()
+
 
 class FullTextRead(ABC):
     """Full-text read to read index files."""
@@ -111,12 +113,11 @@ class DataEvolutionFullTextRead(FullTextRead):
         table = self._table.copy({'scalar-index.search-mode': 'full'})
         return matching_rows(table, self._filter, candidates, self._partition_filter)
 
-    def _matched_indexed_rows(self, splits, live_rows):
+    def _matched_indexed_rows(self, splits, live_rows, scalar_result=_UNSET):
         if self._filter is None:
             return live_rows
         from pypaimon.common.options.core_options import GlobalIndexSearchMode
         from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
-        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
         from pypaimon.table.source.global_index_row_filter import is_exact
 
@@ -140,23 +141,30 @@ class DataEvolutionFullTextRead(FullTextRead):
         decided = RoaringBitmap64.remove_all(covered, unindexed)
         matched = RoaringBitmap64()
         if not decided.is_empty():
-            scanner = DataEvolutionGlobalIndexScanner.create(self._table, index_files=scalar_files,
-                                                             snapshot=snapshot, partition_filter=self._partition_filter)
-            evaluation = None
-            if scanner is not None:
-                try:
-                    evaluation = scanner.scan_with_coverage(self._filter)
-                finally:
-                    scanner.close()
-            if evaluation is not None:
-                candidates = RoaringBitmap64.and_(evaluation.result.results(), decided)
-                if is_exact(self._filter, evaluation.result):
+            if scalar_result is _UNSET:
+                scalar_result = self._scalar_index_result(scalar_files, snapshot)
+            if scalar_result is not None:
+                candidates = RoaringBitmap64.and_(scalar_result.results(), decided)
+                if is_exact(self._filter, scalar_result):
                     matched = candidates
                 elif self._table.options.global_index_filter_refine_from_data():
                     matched = self._matching_rows(candidates)
             elif mode != GlobalIndexSearchMode.FAST:
                 unindexed = RoaringBitmap64.or_(unindexed, decided)
         return RoaringBitmap64.or_(matched, self._matching_rows(unindexed))
+
+    def _scalar_index_result(self, scalar_files, snapshot):
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+
+        scanner = DataEvolutionGlobalIndexScanner.create(
+            self._table, index_files=scalar_files, snapshot=snapshot, partition_filter=self._partition_filter)
+        if scanner is None:
+            return None
+        try:
+            evaluation = scanner.scan_with_coverage(self._filter)
+            return None if evaluation is None else evaluation.result
+        finally:
+            scanner.close()
 
     def _eval_column_query(
             self,

@@ -165,7 +165,7 @@ def _prepare_scalar_filter(context, split):
 
 
 @contextmanager
-def _shared_scalar_filters(splits, predicate, remote_args):
+def _shared_scalar_filters(splits, predicate, remote_args, worker=None):
     """Evaluate identical scalar-index inputs once, without fetching masks on the driver."""
     import ray
 
@@ -175,7 +175,7 @@ def _shared_scalar_filters(splits, predicate, remote_args):
     counts = Counter(key(split) for split in splits) if predicate is not None else {}
     shared = {files for files, count in counts.items() if files and count > 1}
     pending = {}
-    remote = ray.remote(_prepare_scalar_filter).options(**remote_args) if shared else None
+    remote = ray.remote(worker or _prepare_scalar_filter).options(**remote_args) if shared else None
 
     def prepare(context_ref, split):
         files = key(split) if shared else None
