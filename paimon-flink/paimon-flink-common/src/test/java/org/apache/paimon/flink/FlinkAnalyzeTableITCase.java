@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
@@ -28,6 +29,7 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
@@ -84,6 +86,31 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
 
         ColStats<?> decimalStats = paimonTable("T").statistics().get().colStats().get("amount");
         assertThat(decimalStats).isEqualTo(ColStats.newColStats(1, 0L, null, null, 1L, null, null));
+    }
+
+    @Test
+    public void testAnalyzeTimestampColumn() throws Catalog.TableNotExistException {
+        sql("CREATE TABLE T (id INT, ts TIMESTAMP)");
+        sql(
+                "INSERT INTO T VALUES (1, TIMESTAMP '2023-01-12 20:00:01.123456'), "
+                        + "(2, TIMESTAMP '2023-01-13 08:30:00.999999')");
+
+        sql("ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS");
+
+        // Flink collects whole seconds
+        ColStats<?> tsStats = paimonTable("T").statistics().get().colStats().get("ts");
+        assertThat(tsStats)
+                .isEqualTo(
+                        ColStats.newColStats(
+                                1,
+                                2L,
+                                Timestamp.fromLocalDateTime(
+                                        LocalDateTime.parse("2023-01-12T20:00:01")),
+                                Timestamp.fromLocalDateTime(
+                                        LocalDateTime.parse("2023-01-13T08:30:00")),
+                                0L,
+                                null,
+                                null));
     }
 
     @Test
