@@ -21,12 +21,17 @@ from typing import List, Optional
 
 import pyarrow
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.files_table import _render_value
+from pypaimon.table.system.system_table import (
+    SystemTable, metadata_snapshot, metadata_local_millis, metadata_epoch_millis)
+from pypaimon.table.row.generic_row import GenericRowSerializer
+from pypaimon.utils.file_store_path_factory import _is_null_or_whitespace_only
 
 
 TABLE_TYPE = RowType(False, [
@@ -67,7 +72,7 @@ class PartitionsTable(SystemTable):
         return ["partition"]
 
     def _build_arrow_table(self) -> pyarrow.Table:
-        snapshot = self.base_table.snapshot_manager().get_latest_snapshot()
+        snapshot = metadata_snapshot(self.base_table)
         if snapshot is None:
             return self._empty_table()
 
@@ -80,23 +85,21 @@ class PartitionsTable(SystemTable):
 
         partition_map: dict = {}
         for entry in entries:
-            partition_key = tuple(entry.partition.values)
-            spec_items = tuple(
-                (field.name, str(value))
-                for field, value in zip(
-                    entry.partition.fields, entry.partition.values))
-            spec_key = spec_items
+            partition_key = bytes(GenericRowSerializer.to_bytes(entry.partition))
+            spec_key = partition_key
+            partition_string = _render_partition(
+                entry.partition, self.base_table.options.options.get(CoreOptions.PARTITION_DEFAULT_NAME))
 
             stats = partition_map.get(spec_key)
             if stats is None:
                 stats = {
-                    "spec_items": spec_items,
+                    "partition_string": partition_string,
                     "partition_key": partition_key,
                     "record_count": 0,
                     "file_size_in_bytes": 0,
                     "file_count": 0,
                     "last_update_time": None,
-                    "buckets": set(),
+                    "total_buckets": entry.total_buckets,
                 }
                 partition_map[spec_key] = stats
 
@@ -104,11 +107,11 @@ class PartitionsTable(SystemTable):
             stats["file_size_in_bytes"] += int(entry.file.file_size)
             stats["file_count"] += 1
             if entry.file.creation_time is not None:
-                ct_ms = entry.file.creation_time.get_millisecond()
+                ct_ms = metadata_epoch_millis(entry.file.creation_time.get_millisecond())
                 if (stats["last_update_time"] is None
                         or ct_ms > stats["last_update_time"]):
                     stats["last_update_time"] = ct_ms
-            stats["buckets"].add(int(entry.bucket))
+            stats["total_buckets"] = entry.total_buckets
 
         partition_strings: List[Optional[str]] = []
         record_counts: List[int] = []
@@ -118,13 +121,14 @@ class PartitionsTable(SystemTable):
         total_buckets: List[int] = []
         deleted_counts: List[Optional[int]] = []
 
-        for stats in partition_map.values():
-            partition_strings.append(_render_partition(stats["spec_items"]))
+        for stats in sorted(partition_map.values(), key=lambda stats: stats["partition_string"]):
+            partition_strings.append(stats["partition_string"])
             record_counts.append(stats["record_count"])
             file_sizes.append(stats["file_size_in_bytes"])
             file_counts.append(stats["file_count"])
-            last_update_times.append(stats["last_update_time"])
-            total_buckets.append(len(stats["buckets"]))
+            last_update_times.append(None if stats["last_update_time"] is None
+                                     else metadata_local_millis(stats["last_update_time"]))
+            total_buckets.append(stats["total_buckets"])
             deleted_counts.append(
                 deleted_record_counts.get(stats["partition_key"], 0))
 
@@ -155,12 +159,12 @@ class PartitionsTable(SystemTable):
 
         entries = IndexFileHandler(self.base_table).scan(
             snapshot,
-            lambda entry: entry.index_file.index_type
+            lambda entry: entry.kind == 0 and entry.index_file.index_type
             == IndexManifestFile.DELETION_VECTORS_INDEX,
         )
         result = {}
         for entry in entries:
-            partition_key = tuple(entry.partition.values)
+            partition_key = bytes(GenericRowSerializer.to_bytes(entry.partition))
             if partition_key in result and result[partition_key] is None:
                 continue
 
@@ -197,8 +201,13 @@ class PartitionsTable(SystemTable):
         })
 
 
-def _render_partition(spec_items) -> Optional[str]:
-    """Render a partition spec as ``pt=v/pt2=v2`` or None when empty."""
-    if not spec_items:
-        return None
-    return "/".join("{}={}".format(name, value) for name, value in spec_items)
+def _render_partition(partition, default_name) -> str:
+    """Java PartitionsTable uses typed SQL casts and an unescaped key=value spec."""
+    parts = []
+    for index, field in enumerate(partition.fields):
+        value = partition.get_field(index)
+        text = default_name if value is None else _render_value(value, field.type)
+        if _is_null_or_whitespace_only(text):
+            text = default_name
+        parts.append("{}={}".format(field.name, text))
+    return "/".join(parts)

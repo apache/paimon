@@ -34,9 +34,9 @@ def _table(name='files', enabled=True):
         row_type=lambda: RowType(False, [DataField(0, 'id', AtomicType('INT', nullable=False))]))
 
 
-@pytest.mark.parametrize('reason', ['disabled', 'old-binding', 'custom-io', 'catalog-required'])
+@pytest.mark.parametrize('reason', ['disabled', 'old-binding', 'custom-io', 'unknown-table'])
 def test_unsupported_metadata_reads_do_not_create_native_tables(reason):
-    table = _table('partitions' if reason == 'catalog-required' else 'files', enabled=reason != 'disabled')
+    table = _table('unknown' if reason == 'unknown-table' else 'files', enabled=reason != 'disabled')
     with patch('pypaimon.table.system.native_system_table.native_method_available',
                return_value=reason != 'old-binding'):
         with patch('pypaimon.table.system.native_system_table._rest_catalog_supported',

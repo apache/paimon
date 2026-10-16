@@ -125,7 +125,7 @@ def test_projection_filter_limit_and_pickled_split(source):
     assert builder.new_read().to_arrow(splits).to_pylist() == [{'snapshot_id': 1}, {'snapshot_id': 2}]
 
 
-@pytest.mark.parametrize('name', ['files', 'file_key_ranges', 'buckets', 'manifests', 'table_indexes'])
+@pytest.mark.parametrize('name', ['files', 'file_key_ranges', 'buckets', 'manifests', 'table_indexes', 'partitions'])
 @pytest.mark.parametrize('view', ['first', 'empty', 'tag'])
 def test_captured_metadata_view(source, name, view):
     catalog, table, _ = source
@@ -191,8 +191,7 @@ def test_native_reader_preserves_schema_on_empty_and_rejects_catalog_tables(sour
     assert result.schema.names[16] == 'deleteRowCount'
     assert result.num_rows == 0
     assert [field.name() for field in read.read_type()] == result.schema.names
-    with pytest.raises(Exception, match='requires a catalog|unknown'):
-        native.new_system_read('partitions')
+    assert native.new_system_read('partitions').read().num_rows == 0
     with pytest.raises(Exception, match='requires a catalog|unknown'):
         native.new_system_read('unknown')
 
