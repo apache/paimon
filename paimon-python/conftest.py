@@ -104,9 +104,9 @@ def pytest_configure(config):
 
         original_plan = TableScan._try_native_plan
 
-        def tracked_plan(self):
+        def tracked_plan(self, *args, **kwargs):
             global _native_plan_count
-            plan = original_plan(self)
+            plan = original_plan(self, *args, **kwargs)
             if plan is not None and _force_native_for_test:
                 _native_plan_count += 1
             return plan

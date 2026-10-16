@@ -16,7 +16,7 @@
 # under the License.
 
 from dataclasses import dataclass, field
-from typing import Set, Tuple
+from typing import Optional, Set, Tuple
 
 
 @dataclass
@@ -44,8 +44,24 @@ class ScanStats:
     entries_after_bucket: int = 0
     entries_after_stats: int = 0
 
-    partition_keys_before: Set[Tuple] = field(default_factory=set)
-    partition_keys_after: Set[Tuple] = field(default_factory=set)
+    # Identity sets are Python-scanner bookkeeping. Native returns counters
+    # without transporting partition values back across the language boundary.
+    partition_keys_before: Optional[Set[Tuple]] = field(default_factory=set)
+    partition_keys_after: Optional[Set[Tuple]] = field(default_factory=set)
 
-    buckets_seen: Set[Tuple[Tuple, int]] = field(default_factory=set)
-    buckets_after_pruning: Set[Tuple[Tuple, int]] = field(default_factory=set)
+    buckets_seen: Optional[Set[Tuple[Tuple, int]]] = field(default_factory=set)
+    buckets_after_pruning: Optional[Set[Tuple[Tuple, int]]] = field(default_factory=set)
+    native_planned: bool = False
+
+    @classmethod
+    def from_native(cls, stats):
+        return cls(
+            manifest_files_total=stats.manifest_files_total,
+            manifest_files_after_partition=stats.manifest_files_after_partition,
+            entries_potential_total=stats.entries_potential_total,
+            entries_total=stats.entries_total,
+            entries_after_partition=stats.entries_after_partition,
+            entries_after_bucket=stats.entries_after_bucket,
+            entries_after_stats=stats.entries_after_stats,
+            partition_keys_before=None, partition_keys_after=None,
+            buckets_seen=None, buckets_after_pruning=None, native_planned=True)

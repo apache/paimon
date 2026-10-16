@@ -643,16 +643,18 @@ class NativePlanTest(unittest.TestCase):
                 fs.scan.assert_called_once_with()
 
     def test_scan_with_stats_preserves_native_empty_snapshot(self):
+        from pypaimon.read.scan_stats import ScanStats
         fs = Mock(partition_key_predicate=None)
         scan = _scan(native_enabled=True, file_scanner=fs)
-        native = Plan([], 7)
+        counters = ScanStats(native_planned=True)
+        native = Plan([], 7, _scan_stats=counters)
         with patch('pypaimon.read.native_plan.native_plan', return_value=native) as np:
             plan, stats = scan.scan_with_stats()
         self.assertEqual(plan.snapshot_id, 7)
-        self.assertIsNone(stats)
+        self.assertIs(stats, counters)
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
-            row_ranges=None)
+            row_ranges=None, collect_stats=True)
         fs.scan_with_stats.assert_not_called()
         fs.scan.assert_not_called()
 

@@ -1548,7 +1548,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
     @unittest.skipUnless(native_method_available('Plan', 'snapshot_id'),
                          "pypaimon_rust snapshot metadata API not installed")
-    def test_native_explain_reports_split_metadata_without_pruning_counters(self):
+    def test_native_explain_reports_split_metadata_and_pruning_counters(self):
         self.cat.create_table(
             'default.explain_metadata_t', Schema.from_pyarrow_schema(
                 self.schema, options={'metadata.stats-mode': 'full'}), False)
@@ -1563,13 +1563,16 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(result.snapshot_id, 2)
         self.assertEqual(result.split_count, 1)
         self.assertEqual(result.file_count, 1)
-        self.assertIn('pruning not tracked', str(result))
-        self.assertIsNone(result.file_skipping)
+        self.assertNotIn('pruning not tracked', str(result))
+        self.assertEqual(result.file_skipping.before, 2)
+        self.assertEqual(result.file_skipping.after, 1)
         builder.with_filter(builder.new_predicate_builder().equal('k', 99))
         empty = builder.explain()
         self.assertTrue(empty.native_planned)
         self.assertEqual(empty.snapshot_id, 2)
         self.assertEqual(empty.split_count, 0)
+        self.assertEqual(empty.file_skipping.before, 2)
+        self.assertEqual(empty.file_skipping.after, 0)
 
     def test_empty_table_explain_preserves_native_metadata(self):
         self.cat.create_table(

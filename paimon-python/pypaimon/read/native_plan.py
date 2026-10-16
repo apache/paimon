@@ -453,7 +453,8 @@ def native_plan(
         chunk_shuffle: Optional[Tuple[int, int]] = None,
         shard: Optional[Tuple[int, int]] = None,
         partition_predicate: Optional[Predicate] = None,
-        global_index_result=None) -> Plan:
+        global_index_result=None,
+        collect_stats: bool = False) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -514,6 +515,12 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
+    if collect_stats:
+        from pypaimon.read.scan_stats import ScanStats
+        rust_plan, stats = scan.plan_with_stats()
+        plan = _from_native_plan(table, rust_plan)
+        plan._scan_stats = ScanStats.from_native(stats)
+        return plan
     return _from_native_plan(table, scan.plan())
 
 

@@ -20,6 +20,7 @@ from typing import List, Optional
 
 
 from pypaimon.read.split import Split
+from pypaimon.read.scan_stats import ScanStats
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Plan:
     """Implementation of Plan for native Python reading."""
     _splits: List[Split]
     snapshot_id: Optional[int] = field(default=None)
+    _scan_stats: Optional[ScanStats] = field(default=None, repr=False, compare=False)
 
     def splits(self) -> List[Split]:
         return self._splits

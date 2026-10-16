@@ -482,9 +482,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: Optional[ScanStat
     table_schema = table.table_schema
     bucket_mode_str = _safe_bucket_mode(table)
 
-    # Native plans expose split metadata without Python pruning counters.
-    native_planned = stats is None
-    if native_planned:
+    native_planned = stats is None or stats.native_planned
+    if stats is None:
         partition_pruning = bucket_pruning = file_skipping = None
     else:
         partition_pruning = _partition_pruning(stats, scan)

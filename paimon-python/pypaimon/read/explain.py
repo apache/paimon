@@ -130,8 +130,7 @@ class ExplainResult:
     # Verbose-only
     splits: Optional[List[ExplainSplitInfo]] = None
 
-    # Native (pypaimon_rust) plan; pruning funnel not tracked. Kept last to
-    # preserve positional-arg compatibility.
+    # Whether the same core Native pass produced the plan and pruning counters.
     native_planned: bool = False
 
     def __str__(self) -> str:
@@ -168,7 +167,7 @@ def render_explain(result: ExplainResult) -> str:
 
     out.write("\n")
     if result.native_planned:
-        _line(out, "Planner", "native (pypaimon_rust); pruning not tracked")
+        _line(out, "Planner", "native (pypaimon_rust)")
     _line(out, "Partition pruning",
           result.partition_pruning.format() if result.partition_pruning else "n/a")
     _line(out, "Bucket pruning",

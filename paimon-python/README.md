@@ -362,7 +362,9 @@ print(explanation.native_planned)
 The adapter checks the installed binding's capabilities and falls back to the
 Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
-and split metadata; native pruning counters are not exposed.
+and split metadata plus partition, bucket and file-statistics pruning counters.
+Explain collects the complete metadata funnel before LIMIT, so it can decode
+more manifest entries than ordinary planning. It does not read data files.
 
 To run both split planning and data-file reading in Rust, enable the independent
 native-read option:
