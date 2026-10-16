@@ -40,6 +40,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -310,6 +311,72 @@ public class IcebergRestMetadataCommitterTest {
                         .identity("pt2")
                         .build();
         runPartitionSpecCompatibilityTest(expectedPartitionSpec);
+    }
+
+    @Test
+    public void testPartitionNameClashingWithDummyFieldName() throws Exception {
+        // the dummy schema names its placeholder for field id 1 "f1"
+        runDummyFieldNameClashTest(new String[] {"k", "v", "f1"}, Collections.singletonList("f1"));
+    }
+
+    @Test
+    public void testPartitionNamesClashingWithPrefixedDummyFieldName() throws Exception {
+        runDummyFieldNameClashTest(
+                new String[] {"k", "v", "f1", "_f1"}, Arrays.asList("f1", "_f1"));
+    }
+
+    private void runDummyFieldNameClashTest(String[] fieldNames, List<String> partitionKeys)
+            throws Exception {
+        DataType[] fieldTypes = new DataType[fieldNames.length];
+        Arrays.fill(fieldTypes, DataTypes.STRING());
+        FileStoreTable table =
+                createPaimonTable(
+                        RowType.of(fieldTypes, fieldNames),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        -1,
+                        randomFormat(),
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        List<String> expected = new ArrayList<>();
+        for (int r = 0; r < 2; r++) {
+            for (int i = 0; i < 2; i++) {
+                Object[] values = new Object[fieldNames.length];
+                List<String> strings = new ArrayList<>();
+                for (int c = 0; c < fieldNames.length; c++) {
+                    String value = fieldNames[c] + "-" + r + "-" + i;
+                    values[c] = BinaryString.fromString(value);
+                    strings.add(value);
+                }
+                write.write(GenericRow.of(values));
+                expected.add("Record(" + String.join(", ", strings) + ")");
+            }
+            commit.commit(r, write.prepareCommit(true, r));
+            assertThat(getIcebergResult()).hasSameElementsAs(expected);
+        }
+        write.close();
+        commit.close();
+
+        // partition fields keep their Paimon field ids and no partition evolution happens
+        NestedField[] partitionFields = new NestedField[partitionKeys.size()];
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            DataField field = table.rowType().getField(partitionKeys.get(i));
+            partitionFields[i] =
+                    NestedField.of(
+                            field.id(),
+                            !field.type().isNullable(),
+                            field.name(),
+                            Types.StringType.get());
+        }
+        PartitionSpec.Builder specBuilder = PartitionSpec.builderFor(new Schema(partitionFields));
+        partitionKeys.forEach(specBuilder::identity);
+        PartitionSpec expectedSpec = specBuilder.build();
+        assertThat(expectedSpec.specId()).isEqualTo(0);
+        runPartitionSpecCompatibilityTest(expectedSpec);
     }
 
     private void runCompatibilityTest(
