@@ -33,6 +33,6 @@ class Plan:
     def splits(self) -> List[Split]:
         return self._splits
 
-    def scan_stats(self) -> Optional[ScanStats]:
+    def stats(self) -> Optional[ScanStats]:
         """Counters collected by this plan, or None for ordinary planning."""
         return self._scan_stats

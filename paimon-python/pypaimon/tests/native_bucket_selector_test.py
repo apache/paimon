@@ -52,7 +52,7 @@ def _selected(table, predicate, native, stats=True, partition_filter=None, limit
                                       side_effect=AssertionError('Native read fell back')))
         if stats:
             plan, counters = scan.scan_with_stats()
-            assert plan.scan_stats() is counters
+            assert plan.stats() is counters
         else:
             plan, counters = scan.plan(), None
         rows = reader.new_read().to_arrow(plan.splits()).to_pylist()

@@ -271,7 +271,7 @@ class TableScan:
                 if not (getattr(fs, 'deletion_vectors_enabled', False)
                         and not self.table.is_primary_key_table):
                     splits = fs._apply_push_down_limit(splits)
-            return Plan(splits, snapshot_id=plan.snapshot_id, _scan_stats=plan.scan_stats())
+            return Plan(splits, snapshot_id=plan.snapshot_id, _scan_stats=plan.stats())
         except Exception as e:
             _raise_if_native_fork_safety_error(e)
             # Any native construction/planning/pruning failure -> fall back.
@@ -308,7 +308,7 @@ class TableScan:
         if native_auth:
             native = self._try_native_plan(collect_stats=True)
             if native is not None:
-                return native, native.scan_stats()
+                return native, native.stats()
         auth_result = self.__auth_query()
         if self._query_auth_fn is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
@@ -316,7 +316,7 @@ class TableScan:
                 and self._native_plan_supported()):
             native = self._try_native_plan(collect_stats=True)
             if native is not None:
-                return native, native.scan_stats()
+                return native, native.stats()
         plan, stats = self.file_scanner.scan_with_stats()
         return wrap_plan_with_auth(auth_result, plan), stats
 

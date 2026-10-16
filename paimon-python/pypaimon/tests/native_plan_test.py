@@ -652,7 +652,7 @@ class NativePlanTest(unittest.TestCase):
             plan, stats = scan.scan_with_stats()
         self.assertEqual(plan.snapshot_id, 7)
         self.assertIs(stats, counters)
-        self.assertIs(plan.scan_stats(), counters)
+        self.assertIs(plan.stats(), counters)
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
             row_ranges=None, collect_stats=True)

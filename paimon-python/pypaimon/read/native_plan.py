@@ -521,7 +521,7 @@ def native_plan(
     plan = _from_native_plan(table, rust_plan)
     if collect_stats:
         from pypaimon.read.scan_stats import ScanStats
-        plan._scan_stats = ScanStats.from_native(rust_plan.scan_stats())
+        plan._scan_stats = ScanStats.from_native(rust_plan.stats())
     return plan
 
 

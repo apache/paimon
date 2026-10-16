@@ -173,7 +173,7 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
         stats = ScanStats(entries_after_stats=2)
         plan = Plan([_FakeSplit("s1"), _FakeSplit("s2")], _scan_stats=stats)
         converted = result.convert_plan(plan)
-        self.assertIs(converted.scan_stats(), stats)
+        self.assertIs(converted.stats(), stats)
         self.assertEqual(len(converted.splits()), 2)
         for qs in converted.splits():
             self.assertIsInstance(qs, QueryAuthSplit)
