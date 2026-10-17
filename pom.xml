@@ -88,6 +88,8 @@ under the License.
         <paimon.shade.netty.version>4.1.100.Final</paimon.shade.netty.version>
         <antlr4.version>4.9.3</antlr4.version>
         <hadoop.version>2.8.5</hadoop.version>
+        <curator.version>5.6.0</curator.version>
+        <zookeeper.version>3.8.4</zookeeper.version>
         <scala.binary.version>2.12</scala.binary.version>
         <!-- TODO: Update default Flink to 2.x after Paimon updates default Java to 11 -->
         <paimon-flinkx-common>paimon-flink1-common</paimon-flinkx-common>

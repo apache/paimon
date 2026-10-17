@@ -34,9 +34,12 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
@@ -143,6 +146,20 @@ public class FileSystemCatalog extends AbstractCatalog {
         try (Lock lock = createLock(identifier, null, null, new Options())) {
             return lock.runWithLock(callable);
         }
+    }
+
+    @Override
+    public Optional<CatalogLockFactory> lockFactory() {
+        if (!lockEnabled()) {
+            return Optional.empty();
+        }
+        String type = context.options().get(LOCK_TYPE);
+        return type == null ? defaultLockFactory() : Optional.of(CatalogLockFactory.discover(type));
+    }
+
+    @Override
+    protected boolean lockEnabled() {
+        return context.options().getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
