@@ -109,7 +109,7 @@ class RollbackTableRequest(RESTRequest):
     FIELD_TABLE_ID = "tableId"
 
     instant: Instant = json_field(FIELD_INSTANT)
-    from_snapshot: Optional[int] = json_field(FIELD_FROM_SNAPSHOT)
+    from_snapshot: Optional[int] = optional_json_field(FIELD_FROM_SNAPSHOT, "non_null")
     table_id: Optional[str] = optional_json_field(FIELD_TABLE_ID, "non_null")
 
 
