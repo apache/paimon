@@ -217,11 +217,14 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         if (len(data.column_names) != len(set(data.column_names))
                 or not set(data.column_names) <= set(schema.names)):
             return None
-        # Core normalizes equivalent Arrow layouts before key encoding and
-        # writing. Keep value conversions on the existing Python path.
-        supplied = pa.schema([schema.field(name) for name in data.column_names])
+        # Keys need a shared representation before matching. Core selects
+        # surviving payloads before applying row-ID update or append rules;
+        # validating all payload types here would reject valid matched updates.
+        key_names = list(dict.fromkeys(keys + table.partition_keys))
+        supplied = pa.schema([schema.field(name) for name in key_names])
+        actual_keys = pa.schema([data.schema.field(name) for name in key_names])
         if not arrow_schemas_compatible(
-                data.schema, supplied, check_top_level_nullability=False,
+                actual_keys, supplied, check_top_level_nullability=False,
                 allow_binary_compatibility=True, check_nested_nullability=False):
             return None
     writer = (native_table.new_batch_write_builder()
