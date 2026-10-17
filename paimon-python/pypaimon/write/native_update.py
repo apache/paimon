@@ -21,6 +21,7 @@ import json
 
 import pyarrow as pa
 
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
@@ -212,11 +213,17 @@ def create_native_upsert(table, commit_user, data, keys, columns):
             from pypaimon.write.native_blob_rows import NativeBlobRows
             blob_rows = NativeBlobRows()
         data = _upsert_row_batches(data, fields, schema, table, blob_rows)
-    elif (len(data.column_names) != len(set(data.column_names))
-            or not set(data.column_names) <= set(schema.names)
-            or any(data.schema.field(name).type != schema.field(name).type
-                   for name in data.column_names)):
-        return None
+    else:
+        if (len(data.column_names) != len(set(data.column_names))
+                or not set(data.column_names) <= set(schema.names)):
+            return None
+        # Core normalizes equivalent Arrow layouts before key encoding and
+        # writing. Keep value conversions on the existing Python path.
+        supplied = pa.schema([schema.field(name) for name in data.column_names])
+        if not arrow_schemas_compatible(
+                data.schema, supplied, check_top_level_nullability=False,
+                allow_binary_compatibility=True, check_nested_nullability=False):
+            return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
               .new_update()

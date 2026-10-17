@@ -28,6 +28,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
+from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
 from pypaimon.schema.data_types import (
     DataField,
     PyarrowFieldParser,
@@ -538,7 +539,8 @@ class TableUpdateByRowId:
     def _write_group_streaming(self, partition, first_row_id, data, column_names):
         writer = _RowIdUpdateFileWriter(
             self.table, tuple(partition.values), column_names)
-        batches = self._merged_batches(first_row_id, data, column_names)
+        merged_batches = self._merged_batches(first_row_id, data, column_names)
+        batches = (self._normalize_write_data(batch) for batch in merged_batches)
         try:
             files = writer.write_batches(batches)
             self._assign_update_file_metadata(files, first_row_id, column_names, {})
@@ -551,7 +553,10 @@ class TableUpdateByRowId:
             raise
         finally:
             batches.close()
-            writer.close()
+            try:
+                merged_batches.close()
+            finally:
+                writer.close()
 
     def _merge_update_with_original(
             self,
@@ -660,6 +665,13 @@ class TableUpdateByRowId:
             merged_table = pa.table(merged_columns, schema=merged_schema)
 
         return merged_table, blob_columns
+
+    def _normalize_write_data(self, data):
+        # DE reads relax nested nullability. Restore and validate the declared
+        # write types at the writer boundary, including untouched input batches.
+        write_schema = PyarrowFieldParser.from_paimon_schema(
+            [self.table.field_dict[name] for name in data.column_names])
+        return normalize_arrow_write_nullability(data, write_schema)
 
     @classmethod
     def _merge_chunked_column(
@@ -924,6 +936,7 @@ class TableUpdateByRowId:
         success = False
         try:
             if merged_data is not None:
+                merged_data = self._normalize_write_data(merged_data)
                 file_store_write = FileStoreWrite(self.table, self.commit_user)
                 file_store_write.disable_rolling()
                 file_store_write.write_cols = list(merged_data.column_names)
