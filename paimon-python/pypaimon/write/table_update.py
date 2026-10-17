@@ -533,6 +533,9 @@ class TableUpdate:
                 f"{len(array)} != {row_count}."
             )
         if array.type != data_type:
+            if pa.types.is_struct(array.type) and pa.types.is_struct(data_type):
+                if array.type.names != data_type.names:
+                    raise ValueError("Assignment struct fields must match in order.")
             if isinstance(array, pa.ChunkedArray):
                 array = pa.chunked_array(
                     [chunk.cast(data_type) for chunk in array.chunks],

@@ -24,6 +24,7 @@ import base64
 import hashlib
 import os
 import socketserver
+import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -571,6 +572,13 @@ class CustomS3EndpointTest(unittest.TestCase):
         with mock.patch.object(PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()):
             restored.__setstate__(state)
         self.assertIsNone(restored._s3_delete_client)
+
+    def test_missing_boto3_reports_optional_extra(self):
+        file_io = self._new_file_io()
+        file_io._s3_delete_client = None
+        with mock.patch.dict(sys.modules, {"boto3": None}):
+            with self.assertRaisesRegex(ImportError, r"pypaimon\[s3\]"):
+                file_io._get_s3_delete_client()
 
     def test_jindo_and_native_s3_do_not_use_delete_fallback(self):
         file_io = self._new_file_io()
