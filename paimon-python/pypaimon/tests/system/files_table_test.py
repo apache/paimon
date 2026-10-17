@@ -97,6 +97,20 @@ class FilesTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$files")
         self.assertIsInstance(table, FilesTable)
 
+    def test_file_path_suffix_filter(self):
+        self._create_partitioned_table()
+        self._write_two_partitions()
+        table = self.catalog.get_table("db.t$files")
+        expected = _read(table).column("file_path").to_pylist()
+        self.assertTrue(expected)
+        rb = table.new_read_builder()
+        pb = rb.new_predicate_builder()
+        for suffix, paths in ((".parquet", expected), (".missing", [])):
+            with self.subTest(suffix=suffix):
+                rb.with_filter(pb.endswith("file_path", suffix)).with_projection(["file_path"])
+                result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+                self.assertEqual(result.column("file_path").to_pylist(), paths)
+
     def test_schema_column_layout(self):
         self._create_partitioned_table()
         table = self.catalog.get_table("db.t$files")
