@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import static org.apache.paimon.utils.BinaryRowDataUtil.byteBufferEquals;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * The variant metadata dictionary, decoded lazily on first use.
@@ -32,8 +33,9 @@ import static org.apache.paimon.utils.BinaryRowDataUtil.byteBufferEquals;
  * rows and reparse the dictionary only when the bytes change. A shared instance is a mutable cache
  * slot, not a stable dictionary; do not retain it across calls.
  *
- * <p>{@link #adopt} adopts the current row's metadata; {@link #buffer()} / {@link #get} decode it
- * lazily. A fully typed projection never touches the dictionary, so it pays nothing per row.
+ * <p>{@link #adopt} adopts the current row's metadata; {@link #get} decodes the dictionary lazily
+ * on first use, while {@link #metadataBuffer()} returns the raw bytes without decoding. A fully
+ * typed projection never touches the dictionary, so it pays nothing per row.
  *
  * <p>Not thread safe.
  */
@@ -42,7 +44,7 @@ public class VariantMetadata {
 
     // Current row's metadata bytes; a live reference valid only during the synchronous read.
     private ByteBuffer raw;
-    // Decoded metadata buffer, returned by {@link #buffer()} and read by {@link #get}.
+    // Decoded metadata snapshot, read by {@link #get}.
     private ByteBuffer snapshot;
     // Whether {@link #snapshot} already matches the current {@link #raw}.
     private boolean decoded;
@@ -70,21 +72,24 @@ public class VariantMetadata {
     }
 
     /**
-     * Adopt the current row's metadata bytes. The decode is deferred to {@link #buffer()} / {@link
-     * #get}. Call once per row before any read that may need the dictionary.
+     * Adopt the current row's metadata bytes. The decode is deferred until {@link #get} (or {@link
+     * #dictionarySize}) is first called. Call once per row before any read that may need the
+     * dictionary.
      */
     public void adopt(ByteBuffer raw) {
         this.raw = raw;
         this.decoded = false;
     }
 
-    public ByteBuffer buffer() {
-        ensureDecoded();
-        return snapshot;
+    public ByteBuffer metadataBuffer() {
+        checkState(
+                raw != null,
+                "metadata must be adopted before use; call VariantMetadata.adopt(...) first");
+        return raw;
     }
 
     @VisibleForTesting
-    public boolean isDecoded() {
+    boolean isDecoded() {
         return decoded;
     }
 
@@ -101,7 +106,8 @@ public class VariantMetadata {
         decoded = true;
     }
 
-    public int length() {
+    @VisibleForTesting
+    int dictionarySize() {
         ensureDecoded();
         return dictSize;
     }

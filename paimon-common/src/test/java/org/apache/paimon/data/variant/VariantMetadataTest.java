@@ -44,7 +44,7 @@ public class VariantMetadataTest {
         VariantMetadata metadata = VariantMetadata.empty();
         metadata.adopt(variant.metadataBuffer());
 
-        assertThat(metadata.length()).isEqualTo(2);
+        assertThat(metadata.dictionarySize()).isEqualTo(2);
         assertThat(metadata.get(0)).isEqualTo("a");
         assertThat(metadata.get(1)).isEqualTo("b");
     }
@@ -56,7 +56,7 @@ public class VariantMetadataTest {
         metadata.adopt(variant.metadataBuffer());
         metadata.adopt(variant.metadataBuffer());
 
-        assertThat(metadata.length()).isEqualTo(2);
+        assertThat(metadata.dictionarySize()).isEqualTo(2);
         assertThat(metadata.get(0)).isEqualTo("a");
         assertThat(metadata.get(1)).isEqualTo("b");
     }
@@ -69,7 +69,7 @@ public class VariantMetadataTest {
         metadata.adopt(first.metadataBuffer());
         metadata.adopt(second.metadataBuffer());
 
-        assertThat(metadata.length()).isEqualTo(1);
+        assertThat(metadata.dictionarySize()).isEqualTo(1);
         assertThat(metadata.get(0)).isEqualTo("c");
     }
 
@@ -80,7 +80,7 @@ public class VariantMetadataTest {
         VariantMetadata metadata = VariantMetadata.empty();
         metadata.adopt(variant.metadataBuffer());
 
-        assertThat(metadata.length()).isZero();
+        assertThat(metadata.dictionarySize()).isZero();
     }
 
     @Test
@@ -226,7 +226,23 @@ public class VariantMetadataTest {
         // After the invalid reads, a new valid metadata must still be adopted correctly.
         GenericVariant another = GenericVariant.fromJson("{\"b\":2}");
         metadata.adopt(another.metadataBuffer());
-        assertThat(metadata.length()).isEqualTo(1);
+        assertThat(metadata.dictionarySize()).isEqualTo(1);
         assertThat(metadata.get(0)).isEqualTo("b");
+    }
+
+    @Test
+    void testRawBufferDoesNotDecode() {
+        GenericVariant variant = GenericVariant.fromJson("{\"a\":1,\"b\":\"x\"}");
+        VariantMetadata metadata = VariantMetadata.empty();
+        metadata.adopt(variant.metadataBuffer());
+
+        assertThat(metadata.isDecoded()).isFalse();
+        ByteBuffer raw = metadata.metadataBuffer();
+        assertThat(raw).isEqualTo(variant.metadataBuffer());
+        assertThat(metadata.isDecoded()).isFalse();
+
+        // Decoding still happens lazily through the decoded-key cache.
+        assertThat(metadata.get(0)).isEqualTo("a");
+        assertThat(metadata.isDecoded()).isTrue();
     }
 }

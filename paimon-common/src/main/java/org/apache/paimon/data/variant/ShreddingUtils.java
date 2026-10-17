@@ -192,7 +192,8 @@ public class ShreddingUtils {
                 if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
                     // Add the leftover fields in the variant binary.
                     GenericVariant v =
-                            new GenericVariant(row.getBinaryBuffer(variantIdx), metadata.buffer());
+                            new GenericVariant(
+                                    row.getBinaryBuffer(variantIdx), metadata.metadataBuffer());
                     if (v.getType() != GenericVariantUtil.Type.OBJECT) {
                         throw malformedVariant();
                     }
@@ -214,7 +215,7 @@ public class ShreddingUtils {
         } else if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
             // `typed_value` doesn't exist or is null. Read from `value`.
             builder.appendVariant(
-                    new GenericVariant(row.getBinaryBuffer(variantIdx), metadata.buffer()));
+                    new GenericVariant(row.getBinaryBuffer(variantIdx), metadata.metadataBuffer()));
         } else {
             // This means the variant is missing in a context where it must present, so the input
             // data is invalid.

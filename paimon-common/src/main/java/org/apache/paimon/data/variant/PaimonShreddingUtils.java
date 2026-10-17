@@ -748,7 +748,8 @@ public class PaimonShreddingUtils {
                     return null;
                 }
                 GenericVariant v =
-                        new GenericVariant(binaryBuffer(row, variantIdx), metadata.buffer());
+                        new GenericVariant(
+                                binaryBuffer(row, variantIdx), metadata.metadataBuffer());
                 while (pathIdx < pathLen) {
                     VariantPathSegment rowPath = pathList[pathIdx].rawPath();
                     if (rowPath instanceof ObjectExtraction && v.getType() == OBJECT) {

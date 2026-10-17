@@ -111,7 +111,7 @@ public class BaseVariantReader {
             GenericVariant variant =
                     new GenericVariant(
                             PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
-                            metadata.buffer());
+                            metadata.metadataBuffer());
             return VariantGet.cast(variant, targetType, castArgs);
         } else {
             return readFromTyped(row, metadata);
@@ -247,7 +247,7 @@ public class BaseVariantReader {
                 unshreddedObject =
                         new GenericVariant(
                                 PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
-                                metadata.buffer());
+                                metadata.metadataBuffer());
                 if (unshreddedObject.getType() != Type.OBJECT) {
                     throw malformedVariant();
                 }
@@ -376,7 +376,7 @@ public class BaseVariantReader {
                 unshreddedObject =
                         new GenericVariant(
                                 PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
-                                metadata.buffer());
+                                metadata.metadataBuffer());
                 if (unshreddedObject.getType() != Type.OBJECT) {
                     throw malformedVariant();
                 }
@@ -444,7 +444,7 @@ public class BaseVariantReader {
                 }
                 return new GenericVariant(
                         PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
-                        metadata.buffer());
+                        metadata.metadataBuffer());
             }
             return rebuildVariant(row, metadata);
         }
