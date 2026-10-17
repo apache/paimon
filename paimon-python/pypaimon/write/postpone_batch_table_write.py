@@ -49,6 +49,10 @@ class PostponeFixedBucketWriteBuilder(BatchWriteBuilder):
         self._bucket_plan = bucket_plan
         return self
 
+    def _carry_state_to(self, new_builder) -> None:
+        super()._carry_state_to(new_builder)
+        new_builder._bucket_plan = self._bucket_plan
+
     def new_write(self):
         # Automatic size estimation still belongs to the Python coordinator.
         # Native direct writes accept a resolved plan or Java's explicit default.

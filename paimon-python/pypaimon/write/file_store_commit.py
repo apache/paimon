@@ -19,7 +19,7 @@ import logging
 import random
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.options.core_options import CoreOptions
@@ -50,8 +50,56 @@ from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesPro
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_file_check import check_commit_files
 
 logger = logging.getLogger(__name__)
+
+# How many times the duplicate-commit scan re-reads a window it could not fully
+# inspect before giving up. A snapshot can be unreadable transiently (it is
+# being written, or an eventually-consistent listing has not caught up), and a
+# retry is far cheaper than failing a commit that would have been recognised.
+DEDUP_RESCAN_ATTEMPTS = 3
+DEDUP_RESCAN_WAIT_SECONDS = 0.2
+
+
+class DedupEvidenceMissing(RuntimeError):
+    """The duplicate-commit scan could not establish whether this commit landed.
+
+    Raised instead of committing: a commit that may already be on the table must
+    not be written a second time, and the scan cannot prove it is not there.
+    """
+
+
+class CommitDedup:
+    """Duplicate-commit scan parameters for one committer.
+
+    Passed to :class:`FileStoreCommit` (via ``WriteBuilder.new_commit``) rather
+    than read from table options: the bound describes *this* writer at *this*
+    moment -- the branch's latest snapshot when the write started -- and would be
+    wrong for any other writer inheriting it from the table schema.
+
+    ``base_snapshot_id`` and ``base_file_millis`` are only meaningful together:
+    the id bounds the scan and the mtime proves the id still names the snapshot
+    it named when the bound was taken. A caller with no bound leaves both None.
+
+    Plain class rather than a dataclass, which pypaimon still supports Python
+    3.6 without.
+    """
+
+    __slots__ = ("on_first_attempt", "base_snapshot_id", "base_file_millis")
+
+    def __init__(self, on_first_attempt: bool = False,
+                 base_snapshot_id: Optional[int] = None,
+                 base_file_millis: Optional[int] = None):
+        self.on_first_attempt = on_first_attempt
+        self.base_snapshot_id = base_snapshot_id
+        self.base_file_millis = base_file_millis
+
+    def __repr__(self) -> str:
+        return ("CommitDedup(on_first_attempt=%r, base_snapshot_id=%r, "
+                "base_file_millis=%r)" % (
+                    self.on_first_attempt, self.base_snapshot_id,
+                    self.base_file_millis))
 
 
 def _row_id_check_from_messages(messages: List[CommitMessage]) -> Optional[int]:
@@ -146,13 +194,15 @@ class FileStoreCommit:
     """
 
     def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
-                 commit_callbacks: Optional[List[CommitCallback]] = None):
+                 commit_callbacks: Optional[List[CommitCallback]] = None,
+                 dedup: Optional[CommitDedup] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.snapshot_commit = snapshot_commit
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
+        self.dedup = dedup if dedup is not None else CommitDedup()
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
@@ -164,6 +214,7 @@ class FileStoreCommit:
         self.commit_timeout = table.options.commit_timeout()
         self.commit_min_retry_wait = table.options.commit_min_retry_wait()
         self.commit_max_retry_wait = table.options.commit_max_retry_wait()
+
         self.row_id_conflict_rewrite_max_size = (
             table.options.data_evolution_row_id_conflict_rewrite_max_size()
         )
@@ -431,7 +482,8 @@ class FileStoreCommit:
         start_time_ms = int(time.time() * 1000)
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            if retry_result is not None and self._is_duplicate_commit(
+            self._validate_dedup_anchor(latest_snapshot, retry_result)
+            if self._is_duplicate_commit(
                     retry_result,
                     latest_snapshot,
                     commit_identifier,
@@ -448,6 +500,12 @@ class FileStoreCommit:
             if (not allow_empty_commit and not commit_entries
                     and not index_deletes and not index_adds):
                 break
+
+            if (self.dedup.on_first_attempt
+                    or isinstance(retry_result, CommitFailRetryResult)):
+                check_commit_files(
+                    self.table, commit_entries, changelog_entries or (),
+                    index_adds or ())
 
             result = self._try_commit_once(
                 retry_result=retry_result,
@@ -542,15 +600,8 @@ class FileStoreCommit:
                          commit_result_may_be_uncertain: bool = False,
                          snapshot_properties: Optional[Dict[str, str]] = None
                          ) -> CommitResult:
+        """Prepare and publish an attempt authorized by the commit loop."""
         start_millis = int(time.time() * 1000)
-        if self._is_duplicate_commit(
-                retry_result,
-                latest_snapshot,
-                commit_identifier,
-                commit_kind,
-                notify_callbacks=True):
-            return SuccessResult()
-
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
@@ -708,9 +759,7 @@ class FileStoreCommit:
                     latest_snapshot.watermark if latest_snapshot else None),
                 next_row_id=next_row_id,
                 index_manifest=index_manifest,
-                properties=(
-                    dict(snapshot_properties)
-                    if snapshot_properties else None),
+                properties=self._build_snapshot_properties(snapshot_properties),
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
@@ -823,6 +872,303 @@ class FileStoreCommit:
         return self.manifest_file_manager.rolling_write(
             commit_entries, self.manifest_target_size, base_name)
 
+    def _build_snapshot_properties(
+            self,
+            snapshot_properties: Optional[Dict[str, str]]
+    ) -> Optional[Dict[str, str]]:
+        """Merge commit.metadata.* options into the snapshot's properties.
+
+        Keys under ``commit.metadata.`` are re-prefixed with ``paimon.`` and
+        written into the committed snapshot, so a caller can tag a commit with
+        its own metadata without the table schema knowing about it. The options
+        are read from ``table.options``, which already carries whatever
+        ``WriteBuilder.with_options()`` applied via ``table.copy()``.
+
+        Properties passed explicitly to ``commit()`` are the most specific
+        source and win over anything derived from options.
+        """
+        properties = {}
+        for key, value in self.table.options.options.to_map().items():
+            if key.startswith(CoreOptions.COMMIT_METADATA_PREFIX) and value is not None:
+                properties[CoreOptions.SNAPSHOT_COMMIT_PREFIX + key] = str(value)
+        if snapshot_properties:
+            properties.update(snapshot_properties)
+        return properties or None
+
+    def _dedup_scan_window(self, retry_result, end_id: int) -> Tuple[int, bool]:
+        """Lowest snapshot id our own commit could occupy, and whether the
+        history reaching back that far is still intact.
+
+        The second return value is False when snapshots that could have held our
+        commit are no longer readable, or when the anchor that would prove the
+        window's integrity is gone. The caller must not treat an empty scan of
+        such a window as "not a duplicate".
+        """
+        if isinstance(retry_result, CommitFailRetryResult):
+            # Optimistic-lock retry: the failed attempt already saw a snapshot,
+            # so only snapshots after it can hold our (re-)committed result --
+            # provided that snapshot is still the one this process read. A
+            # numerically equal or higher latest id does not prove that: a
+            # rollback followed by other writers regrowing the id line puts a
+            # *different* snapshot at the observed id. Identity decides, not
+            # ids.
+            observed = retry_result.latest_snapshot
+            if observed is None:
+                return 1, True  # Snapshot.FIRST_SNAPSHOT_ID
+            identity = self._observed_snapshot_identity(observed)
+            if identity == "different":
+                # Unambiguous rollback-and-regrow; also caught by
+                # _validate_dedup_anchor before the scan, kept here so the
+                # window computation can never outrun that check.
+                self._raise_history_regression(observed.id, end_id)
+            if identity == "same":
+                # The very snapshot this process observed moments ago is
+                # still there, so ids above it were handed out normally and
+                # the window above it is intact.
+                return observed.id + 1, True
+            # The observed snapshot is gone: benign expiry and an expired
+            # regrown history look identical, exactly as with a missing
+            # pinned anchor. Scan the window anyway -- finding our commit is
+            # still decisive -- but report the evidence as incomplete so an
+            # empty scan refuses rather than re-publishing.
+            return observed.id + 1, False
+
+        base_id = self.dedup.base_snapshot_id
+        if base_id is None:
+            return 1, True
+        if base_id == 0:
+            # The branch had no snapshot when this write started, so every
+            # snapshot on it is a candidate and none is missing from below.
+            return 1, True
+        if self.dedup.base_file_millis is None:
+            # Bound without the mtime that validates it: cannot tell a normal id
+            # line from a rolled-back one, so scan everything.
+            return 1, base_id <= end_id
+
+        base_millis = self.snapshot_manager.snapshot_file_millis(base_id)
+        if base_millis == self.dedup.base_file_millis:
+            # The bound still names the same file, so ids above it were handed
+            # out normally and our commit, if any, is among them. Expiry trims
+            # the oldest snapshots first, so a surviving base also proves the
+            # window above it was not expired out from under us -- whatever was
+            # dropped below it could never have held this write's commit.
+            return base_id + 1, True
+        if base_millis is None and base_id <= end_id:
+            # The base file is gone while the id line still runs above it. That
+            # is what benign expiry looks like -- but also what a rollback below
+            # the base looks like once other writers regrow the id line and the
+            # *recreated* base file is itself expired: the mtime comparison
+            # above can only catch a recreated file that still exists. The two
+            # histories leave identical on-disk state, and under the rolled-back
+            # one the ids above the base were reused, so our own commit can sit
+            # at a reused id below the window with its files still live. Scan
+            # the window anyway -- finding our commit is still decisive -- but
+            # report the evidence as incomplete, so an empty scan refuses
+            # instead of declaring "not a duplicate" and publishing the same
+            # rows a second time.
+            return base_id + 1, False
+        # Either the file at base_id exists with a different mtime (the id was
+        # reused after the snapshot line was rolled back and re-written from a
+        # lower watermark), or it is gone while the latest id sits below the
+        # base (the line was rolled back past it). Files committed before the
+        # rollback may have been deleted; continuing would risk publishing on
+        # top of deleted files or silently double-committing. Refuse outright
+        # instead of probing further, consistent with Flink's policy (stop
+        # writers before rolling back).
+        self._raise_rollback_detected(base_millis, end_id)
+
+    def _raise_rollback_detected(self, current_millis, end_id: int) -> None:
+        raise RuntimeError(
+            f"Detected snapshot rollback or ID reset on table "
+            f"{self.table.identifier}: the snapshot file at id "
+            f"{self.dedup.base_snapshot_id} has been removed or overwritten "
+            f"(expected mtime {self.dedup.base_file_millis}, got "
+            f"{current_millis}; latest id is {end_id}). Rolling back the "
+            f"table while a write is in progress is unsupported. Stop all "
+            f"writes, roll back the table, then restart the write from a "
+            f"clean state."
+        )
+
+    def _observed_snapshot_identity(self, observed, current=None) -> str:
+        """Whether the snapshot this process once read is still the one on disk.
+
+        Returns ``"same"``, ``"different"`` or ``"missing"``. Identity, not
+        the id, is what survives a rollback: after a rollback other writers
+        regrow the id line, so the same id -- or a higher latest -- can name a
+        completely different history. Compared by the snapshot's durable
+        ``uuid`` when both sides carry one, else by the persisted commit
+        fields and manifest references.
+        """
+        if current is None:
+            try:
+                current = self.snapshot_manager.get_snapshot_by_id(observed.id)
+            except FileNotFoundError:
+                current = None
+        if current is None:
+            return "missing"
+        if observed.uuid is not None and current.uuid is not None:
+            return "same" if current.uuid == observed.uuid else "different"
+        # Legacy snapshots without a uuid: the commit fields alone are not an
+        # identity -- commit_user/identifier/kind can recur on a replay and
+        # time_millis is wall-clock. The manifest list names are generated
+        # per commit and persisted in the snapshot, so two distinct commits
+        # cannot share them; they are the durable content identity.
+        same = (current.commit_user == observed.commit_user
+                and current.commit_identifier == observed.commit_identifier
+                and current.commit_kind == observed.commit_kind
+                and current.time_millis == observed.time_millis
+                and current.base_manifest_list == observed.base_manifest_list
+                and current.delta_manifest_list
+                == observed.delta_manifest_list)
+        return "same" if same else "different"
+
+    def _validate_observed_latest(self, observed, current) -> bool:
+        """Return whether the observation is intact, rejecting changed history.
+
+        Missing metadata is incomplete evidence, not permission to publish.
+        Compare the actual latest observation, never the scan high watermark.
+        A freshly read snapshot at the same id supplies its identity directly.
+        """
+        if observed is None:
+            return True
+        current_id = current.id if current is not None else 0
+        if current_id < observed.id:
+            self._raise_history_regression(observed.id, current_id)
+        identity = self._observed_snapshot_identity(
+            observed, current if current_id == observed.id else None)
+        if identity == "different":
+            self._raise_history_regression(observed.id, current_id)
+        return identity == "same"
+
+    def _raise_history_regression(self, observed_id: int,
+                                  current_id: int) -> None:
+        raise RuntimeError(
+            f"Detected snapshot rollback on table {self.table.identifier}: "
+            f"the snapshot history this commit observed "
+            f"(latest id {observed_id}) is no longer the table's history "
+            f"(latest id {current_id}, and the snapshot at id {observed_id} "
+            f"is not the one previously read). Rolling back the table while "
+            f"a write is in progress is unsupported. Stop all writes, roll "
+            f"back the table, then restart the write from a clean state."
+        )
+
+    def _validate_dedup_anchor(self, latest_snapshot,
+                               retry_result=None) -> None:
+        """Fail the commit when the pinned bound no longer describes the table.
+
+        Runs on every commit attempt, independent of whether a duplicate scan
+        is needed: the scan is legitimately skipped for vouched first
+        attempts, optimistic-lock retries and empty tables, but a bound pinned
+        at id >= 1 proves the table held that snapshot when this write
+        started. A history now empty, shorter than the bound, or with a
+        different file at the bound's id was rolled back or reset underneath
+        the write, and the files its messages reference may be gone --
+        committing would publish a snapshot whose reads fail, or silently
+        double-commit. No scan can make that safe, so refuse outright.
+
+        A retry carries a second boundary: the latest snapshot its failed
+        attempt observed. The history is validated against that snapshot's
+        *identity*, not just its id -- expiry removes the oldest snapshots,
+        never the latest, so the latest id regressing below an observed id is
+        unambiguous rollback; and a latest id back at or above the observed
+        one proves nothing unless the observed snapshot itself is still the
+        one this process read, since a rollback followed by other writers
+        regrowing the id line satisfies every numeric comparison while
+        naming a different history. Checked whatever the bound says,
+        including when no bound was taken at all.
+        """
+        if (retry_result is not None
+                and getattr(retry_result, 'latest_snapshot', None) is not None):
+            self._validate_observed_latest(
+                retry_result.latest_snapshot, latest_snapshot)
+        base_id = self.dedup.base_snapshot_id
+        base_millis = self.dedup.base_file_millis
+        if not base_id or base_millis is None:
+            # No bound, or one taken on an empty branch: any history is
+            # consistent with it.
+            return
+        end_id = latest_snapshot.id if latest_snapshot is not None else 0
+        current_millis = self.snapshot_manager.snapshot_file_millis(base_id)
+        if end_id >= base_id and (current_millis == base_millis
+                                  or current_millis is None):
+            # Same file, or gone under a still-higher id line. The latter is
+            # ambiguous (benign expiry, or a rollback whose recreated anchor
+            # was itself expired); the files this write references are not
+            # provably gone, so the commit may proceed -- replay safety for
+            # the ambiguous case is the dedup scan's job, which treats such a
+            # window as incomplete evidence.
+            return
+        self._raise_rollback_detected(current_millis, end_id)
+
+    def _find_own_commit(
+            self,
+            start_id: int,
+            end_id: int,
+            commit_identifier,
+            commit_kind,
+            notify_callbacks: bool = False) -> Tuple[bool, List[int]]:
+        """Scan [start_id, end_id] for a snapshot this committer already wrote.
+
+        Returns ``(found, unreadable_ids)``. Ids that could not be read are
+        reported rather than skipped, so the caller can tell a window that
+        proves nothing landed from one that simply could not be inspected.
+        """
+        unreadable = []
+        for snapshot_id in range(start_id, end_id + 1):
+            try:
+                snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            except FileNotFoundError:
+                # The file disappeared between the existence check and the read.
+                # Same situation as a missing file, and just as rescannable.
+                # Only this one exception: a permission or parse error is not
+                # something a retry fixes, and must not be read as a hole.
+                snapshot = None
+            if snapshot is None:
+                unreadable.append(snapshot_id)
+                continue
+            if (snapshot.commit_user == self.commit_user and
+                    snapshot.commit_identifier == commit_identifier and
+                    snapshot.commit_kind == commit_kind):
+                logger.info(
+                    f"Commit already completed (snapshot {snapshot_id}), "
+                    f"user: {self.commit_user}, identifier: {commit_identifier}"
+                )
+                if notify_callbacks and self.commit_callbacks:
+                    entries = []
+                    for manifest in self.manifest_list_manager.read_delta(
+                            snapshot):
+                        entries.extend(self.manifest_file_manager.read(
+                            manifest.file_name, drop_stats=False,
+                            file_size=manifest.file_size))
+                    for entry in entries:
+                        file = entry.file
+                        file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
+                            self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
+                    self._notify_commit_callbacks(
+                        snapshot, entries, commit_identifier)
+                return True, []
+        return False, unreadable
+
+    def _latest_snapshot_is_unreadable(self) -> bool:
+        """Whether LATEST names a snapshot whose metadata cannot be read.
+
+        An empty table has no LATEST at all, so this separates "nothing has
+        ever been committed here" -- where there is nothing to dedup against --
+        from "what was committed can no longer be inspected", where reading the
+        table as empty would let a replay commit a second time.
+        """
+        manager = self.snapshot_manager
+        if not manager.file_io.exists(manager.latest_file):
+            return False
+        try:
+            latest_id = int(manager.file_io.read_file_utf8(manager.latest_file).strip())
+        except (ValueError, AttributeError, TypeError, RuntimeError):
+            return True
+        try:
+            return manager.get_snapshot_by_id(latest_id) is None
+        except FileNotFoundError:
+            return True
+
     def _is_duplicate_commit(
             self,
             retry_result,
@@ -830,46 +1176,64 @@ class FileStoreCommit:
             commit_identifier,
             commit_kind,
             notify_callbacks=False) -> bool:
-        if (isinstance(retry_result, CommitFailRetryResult)
-                and latest_snapshot is not None):
-            start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
-            if retry_result.latest_snapshot is not None:
-                start_check_snapshot_id = retry_result.latest_snapshot.id + 1
+        if (not isinstance(retry_result, CommitFailRetryResult)
+                and not self.dedup.on_first_attempt):
+            # First attempt of a fresh commit_user commit: it cannot be a
+            # duplicate, so skip the scan entirely (per-worker/two-phase
+            # default).
+            return False
+        # Otherwise this may be a replay carrying a stable commit_user (e.g. a
+        # Ray committer-actor task retried after the actor died mid-commit), so
+        # scan the window this write could have committed into.
 
-            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 1):
-                snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
-                if snapshot is None:
-                    raise RuntimeError(
-                        "Cannot determine whether commit {} by user {} "
-                        "succeeded because snapshot {} cannot be found."
-                        .format(
-                            commit_identifier,
-                            self.commit_user,
-                            snapshot_id,
-                        )
-                    )
-                if (snapshot.commit_user == self.commit_user and
-                        snapshot.commit_identifier == commit_identifier and
-                        snapshot.commit_kind == commit_kind):
-                    logger.info(
-                        f"Commit already completed (snapshot {snapshot_id}), "
-                        f"user: {self.commit_user}, identifier: {commit_identifier}"
-                    )
-                    if notify_callbacks and self.commit_callbacks:
-                        entries = []
-                        for manifest in self.manifest_list_manager.read_delta(
-                                snapshot):
-                            entries.extend(self.manifest_file_manager.read(
-                                manifest.file_name, drop_stats=False,
-                                file_size=manifest.file_size))
-                        for entry in entries:
-                            file = entry.file
-                            file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
-                                self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
-                        self._notify_commit_callbacks(
-                            snapshot, entries, commit_identifier)
-                    return True
-        return False
+        if latest_snapshot is None:
+            if not self._latest_snapshot_is_unreadable():
+                return False
+            raise DedupEvidenceMissing(
+                f"Cannot determine whether commit_user {self.commit_user} already "
+                f"committed to {self.table.identifier}: LATEST names a snapshot "
+                f"that cannot be read, so the table cannot be treated as empty. "
+                f"Refusing to commit rather than risk writing it a second time."
+            )
+
+        end_id = latest_snapshot.id
+        last_observation = latest_snapshot
+        unreadable = []
+        for attempt in range(DEDUP_RESCAN_ATTEMPTS + 1):
+            if attempt:
+                time.sleep(DEDUP_RESCAN_WAIT_SECONDS)
+                refreshed = self.snapshot_manager.get_latest_snapshot()
+                self._validate_observed_latest(last_observation, refreshed)
+                last_observation = refreshed
+                if refreshed is not None:
+                    end_id = max(end_id, refreshed.id)
+
+            start_id, evidence_complete = self._dedup_scan_window(retry_result, end_id)
+            found, unreadable = self._find_own_commit(
+                start_id, end_id, commit_identifier, commit_kind,
+                notify_callbacks=notify_callbacks)
+            if found:
+                return True
+            if evidence_complete and not unreadable:
+                refreshed = self.snapshot_manager.get_latest_snapshot()
+                self._validate_observed_latest(last_observation, refreshed)
+                latest_intact = self._validate_observed_latest(
+                    latest_snapshot, refreshed)
+                last_observation = refreshed
+                if refreshed is not None:
+                    end_id = max(end_id, refreshed.id)
+                if latest_intact:
+                    return False
+
+        raise DedupEvidenceMissing(
+            f"Cannot determine whether commit_user {self.commit_user} "
+            f"(identifier {commit_identifier}, kind {commit_kind}) already "
+            f"committed to {self.table.identifier}: the snapshots it could "
+            f"occupy are no longer readable"
+            + (f" (unreadable ids: {unreadable[:10]})" if unreadable else
+               " (the history no longer reaches back far enough)")
+            + ". Refusing to commit rather than risk writing it a second time."
+        )
 
     def _notify_commit_callbacks(
             self, snapshot, commit_entries, commit_identifier):

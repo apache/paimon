@@ -351,6 +351,35 @@ conversion before a native mutation starts. A native commit error propagates;
 the adapter neither retries it through Python nor aborts files, since the
 snapshot may already have been published. The option is disabled by default.
 
+# Ray actor recovery
+
+`write_paimon_dataset(..., commit_mode='actor')` publishes append-only task
+results incrementally. Each task has a stable, independent commit identity;
+task completion waits for the committer's acknowledgement. Tasks may finish
+out of order: a larger task index is not a checkpoint high watermark.
+
+Recovery checks the table history and filters already committed tasks before
+checking the files of a task that still needs publication. A confirmed replay
+is acknowledged even if compaction has since removed its original files.
+Otherwise, missing data files, sidecars, changelog files or added index files
+cause recovery to fail instead of publishing references to deleted files.
+Unknown commit outcomes preserve prepared files; recovery failures never abort
+or delete them automatically.
+
+Transiently missing snapshot metadata is retried within a bounded window.
+Missing history is not proof that a task never committed: if no committed
+result can be established and the evidence remains incomplete, recovery fails
+closed. These checks are not atomic protection against concurrent rollback or
+reset. Stop every writer before changing table history, and restart the write
+from a clean state afterwards. Do not replay stale task receipts across that
+operation.
+
+Actor reconstruction and whole-task retries are supported within one write,
+but a new job/write has a new identity. Actor mode does not itself persist a
+cross-job checkpoint protocol or guarantee cross-job exactly-once delivery.
+It does not support primary-key tables, overwrite, or
+`commit.native.enabled=true`.
+
 # Native scan planning
 
 PyPaimon can plan splits with the optional `pypaimon-rust` package. Planning and

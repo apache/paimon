@@ -38,6 +38,7 @@ from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import (
     CommitFailRetryResult,
+    DedupEvidenceMissing,
     FileStoreCommit,
     RollbackRetryResult,
     RewriteResult,
@@ -141,6 +142,7 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
+        self.mock_table.options.options.to_map.return_value = {}
         self.mock_snapshot_commit = Mock()
 
     def _create_file_store_commit(self):
@@ -367,6 +369,7 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
+        self.mock_table.options.options.to_map.return_value = {}
 
         # Mock snapshot commit
         self.mock_snapshot_commit = Mock()
@@ -391,6 +394,45 @@ class TestFileStoreCommit(unittest.TestCase):
                 BinaryRow(row, []), BinaryRow(row, []), []),
             schema_id=0,
         )
+
+    def test_legacy_snapshot_identity_includes_manifest_references(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        """Without uuids, the commit fields alone do not identify a snapshot.
+
+        commit_user/identifier/kind can be reused by a replay and time_millis
+        is wall-clock, so a replaced snapshot can match all four while
+        referencing entirely different manifests. The manifest list names are
+        generated per commit and persisted in the snapshot, so they are the
+        durable content identity the legacy comparison must include.
+        """
+        file_store_commit = self._create_file_store_commit()
+
+        def legacy_snapshot(**overrides):
+            fields = dict(
+                id=3, uuid=None, commit_user='u', commit_identifier=11,
+                commit_kind='APPEND', time_millis=123,
+                base_manifest_list='manifest-list-aaa-0',
+                delta_manifest_list='manifest-list-aaa-1',
+            )
+            fields.update(overrides)
+            return Mock(**fields)
+
+        observed = legacy_snapshot()
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            legacy_snapshot())
+        self.assertEqual(
+            'same',
+            file_store_commit._observed_snapshot_identity(observed))
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            legacy_snapshot(base_manifest_list='manifest-list-bbb-0',
+                            delta_manifest_list='manifest-list-bbb-1'))
+        self.assertEqual(
+            'different',
+            file_store_commit._observed_snapshot_identity(observed),
+            'a snapshot with the same commit fields but different manifest '
+            'references was treated as the one previously read')
 
     def test_conflict_rollback_retry_skips_history_and_rescans_base(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -481,19 +523,35 @@ class TestFileStoreCommit(unittest.TestCase):
 
     def test_commit_fail_retry_missing_snapshot_still_fails_closed(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
+        """Every id the scan would have to inspect is unreadable, so whether
+        this commit already landed cannot be established either way.
+
+        Scanning on is what distinguishes this from a readable hole next to a
+        found commit: here nothing is found and nothing is ruled out, so the
+        only safe answer is to refuse rather than commit a possible duplicate.
+        """
         file_store_commit = self._create_file_store_commit()
         file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = None
+        latest_snapshot = Mock(id=3, uuid='latest-snapshot-uuid')
+        # The rescans re-read LATEST to widen the window; nothing new lands.
+        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
+            latest_snapshot)
 
-        with self.assertRaisesRegex(
-                RuntimeError, "snapshot 1 cannot be found"):
+        with self.assertRaises(DedupEvidenceMissing):
             file_store_commit._is_duplicate_commit(
                 CommitFailRetryResult(None),
-                Mock(id=3),
+                latest_snapshot,
                 11,
                 "APPEND",
             )
 
-        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_called_once_with(1)
+        # The whole window was walked, not abandoned at the first hole.
+        scanned = {
+            call.args[0]
+            for call in file_store_commit.snapshot_manager
+            .get_snapshot_by_id.call_args_list
+        }
+        self.assertEqual(scanned, {1, 2, 3})
 
     def _run_manifest_commit_attempt(self, commit_side_effect=None,
                                      commit_result=None, retry_result=None,

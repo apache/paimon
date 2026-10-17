@@ -804,6 +804,12 @@ class CoreOptions:
         .with_description("Maximum wait time between commit retries (e.g., '1s', '10s').")
     )
 
+    # Keys under this prefix are copied into the committed snapshot's properties
+    # (re-prefixed with SNAPSHOT_COMMIT_PREFIX), letting a caller tag one commit
+    # with its own metadata without the table schema having to know about it.
+    COMMIT_METADATA_PREFIX = "commit.metadata."
+    SNAPSHOT_COMMIT_PREFIX = "paimon."
+
     ROW_TRACKING_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("row-tracking.enabled")
         .boolean_type()

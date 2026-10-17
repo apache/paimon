@@ -18,12 +18,29 @@
 import logging
 from typing import Dict, List, Optional
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_callback import CommitCallback
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.write.file_store_commit import CommitDedup, FileStoreCommit
 
 logger = logging.getLogger(__name__)
+
+
+def native_commit_unsupported_message(table_identifier) -> str:
+    """Why actor mode and native commit cannot be combined.
+
+    Shared by every place that rejects the combination (the Ray datasink and
+    committer actor at initialization, TableCommit as defense in depth), so
+    the user sees the same explanation wherever the rejection fires.
+    """
+    key = CoreOptions.COMMIT_NATIVE_ENABLED.key()
+    return (
+        f"commit_mode='actor' is not supported with {key}=true on table "
+        f"{table_identifier}. The native committer does not implement the "
+        f"duplicate-commit scan that actor mode relies on for replay "
+        f"safety. Disable {key} or use commit_mode='two_phase'."
+    )
 
 
 class TableCommit:
@@ -39,7 +56,8 @@ class TableCommit:
       on every call and may be reused for many commits.
     """
 
-    def __init__(self, table, commit_user: str, static_partition: Optional[dict]):
+    def __init__(self, table, commit_user: str, static_partition: Optional[dict],
+                 *, dedup: Optional[CommitDedup] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -56,7 +74,15 @@ class TableCommit:
         self._native_callbacks_registered = False
         self.file_store_commit = FileStoreCommit(
             snapshot_commit, table, commit_user,
-            commit_callbacks=self._commit_callbacks)
+            commit_callbacks=self._commit_callbacks, dedup=dedup)
+        if (dedup is not None and dedup.on_first_attempt
+                and table.options.native_commit_enabled()):
+            # The native committer has no duplicate-commit scan. A re-issued
+            # actor commit with the same commit_user would publish the same
+            # files a second time, so the combination is unsupported. Fail
+            # early rather than silently allowing data duplication.
+            raise NotImplementedError(
+                native_commit_unsupported_message(table.identifier))
 
     def add_commit_callback(self, callback: CommitCallback) -> None:
         """Register a callback to be invoked after each successful commit."""
@@ -167,8 +193,9 @@ class TableCommit:
 class BatchTableCommit(TableCommit):
     """Batch-mode commit; supports at most one commit per instance."""
 
-    def __init__(self, table, commit_user: str, static_partition: Optional[dict]):
-        super().__init__(table, commit_user, static_partition)
+    def __init__(self, table, commit_user: str, static_partition: Optional[dict],
+                 *, dedup: Optional[CommitDedup] = None):
+        super().__init__(table, commit_user, static_partition, dedup=dedup)
         self.batch_committed = False
 
     def commit(
@@ -205,8 +232,9 @@ class StreamTableCommit(TableCommit):
     :meth:`StreamTableWrite.prepare_commit`.
     """
 
-    def __init__(self, table, commit_user: str):
-        super().__init__(table, commit_user, None)
+    def __init__(self, table, commit_user: str,
+                 *, dedup: Optional[CommitDedup] = None):
+        super().__init__(table, commit_user, None, dedup=dedup)
 
     def commit(
             self,

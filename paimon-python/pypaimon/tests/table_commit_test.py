@@ -253,3 +253,37 @@ class TestTableCommit(unittest.TestCase):
             commit_identifier=42,
             snapshot_properties={"checkpoint": "42"},
         )
+
+    def test_native_commit_raises_when_first_attempt_dedup_requested(self):
+        """actor mode + native commit is unsupported: the native committer
+        has no dedup scan, so a replayed commit would publish the same files
+        twice. Initialising the commit must raise NotImplementedError."""
+        from pypaimon.write.file_store_commit import CommitDedup
+
+        table = Mock()
+        table.identifier = 'default.test_table'
+        table.new_snapshot_commit.return_value = Mock()
+        table.options.native_commit_enabled.return_value = True
+
+        with self.assertRaises(NotImplementedError) as ctx:
+            BatchTableCommit(
+                table, 'stable-user', None,
+                dedup=CommitDedup(on_first_attempt=True))
+
+        self.assertIn('commit.native.enabled', str(ctx.exception))
+        self.assertIn("commit_mode='actor'", str(ctx.exception))
+
+    def test_native_commit_does_not_raise_without_first_attempt_dedup(self):
+        """native commit without actor-mode dedup is fine."""
+        from pypaimon.write.file_store_commit import CommitDedup
+
+        table = Mock()
+        table.identifier = 'default.test_table'
+        table.new_snapshot_commit.return_value = Mock()
+        table.options.native_commit_enabled.return_value = True
+
+        # Neither of these combinations should raise.
+        BatchTableCommit(
+            table, 'stable-user', None,
+            dedup=CommitDedup(on_first_attempt=False))
+        BatchTableCommit(table, 'stable-user', None, dedup=None)

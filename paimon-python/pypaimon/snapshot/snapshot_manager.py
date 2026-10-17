@@ -17,6 +17,7 @@
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
 from pypaimon.common.file_io import FileIO
@@ -27,6 +28,21 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 
 EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 300
+
+# How many times to re-resolve the latest snapshot when the candidate the
+# resolution picked is expired out from under the read that follows it.
+LATEST_SNAPSHOT_RELOCATE_ATTEMPTS = 3
+
+
+class SnapshotNotResolvable(RuntimeError):
+    """The latest snapshot could not be resolved, and the table is not empty.
+
+    Raised instead of returning ``None`` so that callers cannot mistake a
+    populated table for an empty one: an unreadable latest snapshot means
+    "what was committed cannot be inspected", never "nothing was committed".
+    Callers that need to distinguish a transient race from a genuine failure
+    match on this type rather than on the message.
+    """
 
 
 class SnapshotManager:
@@ -98,11 +114,19 @@ class SnapshotManager:
         hint: when it is missing, stale, or unreadable, reconcile with a scan
         of the snapshot files, like the Java SnapshotManager.findLatest.
 
+        Resolving an id and reading that id's file are two steps, and the
+        snapshot resolved can be expired between them -- another writer commits
+        past it and retention drops it. That is a recoverable race, not a
+        failure: the snapshot that replaced it is readable, so the candidate is
+        re-resolved and re-read rather than letting the vanished file reach the
+        caller. Handling it here keeps every caller of this read covered,
+        rather than each one catching the race separately.
+
         If the hint indicates the table has snapshots but none can be resolved
         (e.g. an unreadable LATEST plus a listing that an IO error truncated to
-        empty), fail closed rather than report the table as empty -- callers
-        such as the immutable-option guard must not mistake a populated table
-        for an empty one.
+        empty), fail closed with :class:`SnapshotNotResolvable` rather than
+        report the table as empty -- callers such as the immutable-option guard
+        must not mistake a populated table for an empty one.
 
         Returns:
             The latest snapshot, or None if the table genuinely has none
@@ -110,6 +134,47 @@ class SnapshotManager:
         if not self.file_io.exists(self.snapshot_dir):
             return None
 
+        for attempt in range(LATEST_SNAPSHOT_RELOCATE_ATTEMPTS + 1):
+            latest_snapshot_id, hint_indicates_data, hint_read_error = (
+                self._resolve_latest_snapshot_id())
+
+            if latest_snapshot_id is None:
+                if hint_indicates_data:
+                    raise SnapshotNotResolvable(
+                        f"Snapshot hint under {self.snapshot_dir} indicates existing "
+                        f"snapshots but none could be resolved"
+                        + (f": {hint_read_error}" if hint_read_error else ""))
+                return None
+
+            snapshot_file = self.get_snapshot_path(latest_snapshot_id)
+            try:
+                return JSON.from_json(
+                    self.file_io.read_file_utf8(snapshot_file), Snapshot)
+            except FileNotFoundError:
+                # The resolved candidate was expired between being resolved and
+                # being read. Re-resolve: the snapshot that replaced it is newer
+                # and readable. Only this one exception is a race -- a
+                # permission or parse error is not something re-reading fixes,
+                # and must not be retried as if the file had merely moved.
+                logger.info(
+                    "Snapshot %d under %s was removed while being read "
+                    "(attempt %d); re-resolving the latest snapshot",
+                    latest_snapshot_id, self.snapshot_dir, attempt + 1)
+
+        raise SnapshotNotResolvable(
+            f"Cannot read the latest snapshot under {self.snapshot_dir}: every "
+            f"one of {LATEST_SNAPSHOT_RELOCATE_ATTEMPTS + 1} resolved candidates "
+            f"was expired before it could be read. The table is not empty, so "
+            f"it must not be treated as such.")
+
+    def _resolve_latest_snapshot_id(self):
+        """Pick the id of the latest snapshot, without reading its contents.
+
+        Returns ``(snapshot_id, hint_indicates_data, hint_read_error)``, where
+        a ``snapshot_id`` of None means no id could be resolved;
+        ``hint_indicates_data`` then says whether the table is nonetheless
+        known to hold snapshots, which the caller must not read as empty.
+        """
         hint_id = None
         hint_indicates_data = False
         hint_read_error = None
@@ -121,7 +186,7 @@ class SnapshotManager:
                     hint_id = int(content.strip())
             except IOError as e:
                 # A present-but-unreadable hint most likely guards existing
-                # snapshots; remember the failure so we fail closed below.
+                # snapshots; report the failure so the caller fails closed.
                 hint_indicates_data = True
                 hint_read_error = e
             except ValueError:
@@ -138,16 +203,7 @@ class SnapshotManager:
                 or self.file_io.exists(self.get_snapshot_path(latest_snapshot_id + 1))):
             latest_snapshot_id = self._max_snapshot_id_from_listing()
 
-        if latest_snapshot_id is None:
-            if hint_indicates_data:
-                raise RuntimeError(
-                    f"Snapshot hint under {self.snapshot_dir} indicates existing "
-                    f"snapshots but none could be resolved"
-                    + (f": {hint_read_error}" if hint_read_error else ""))
-            return None
-
-        snapshot_file = self.get_snapshot_path(latest_snapshot_id)
-        return JSON.from_json(self.file_io.read_file_utf8(snapshot_file), Snapshot)
+        return latest_snapshot_id, hint_indicates_data, hint_read_error
 
     def _max_snapshot_id_from_listing(self) -> Optional[int]:
         """Scan the snapshot directory for the largest snapshot-N file id."""
@@ -211,6 +267,28 @@ class SnapshotManager:
     def get_snapshot_path(self, snapshot_id: int) -> str:
         """Get the file path for the given snapshot ID."""
         return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
+
+    def snapshot_file_millis(self, snapshot_id: int) -> Optional[int]:
+        """Filesystem mtime of a snapshot file in epoch millis, None if absent.
+
+        The filesystem's own clock, unlike the ``timeMillis`` recorded inside a
+        snapshot, which is stamped by whichever client committed it: clients
+        disagree, so that field is not monotonic across writers, while every
+        mtime on one table comes from one clock.
+        """
+        try:
+            status = self.file_io.get_file_status(self.get_snapshot_path(snapshot_id))
+        except FileNotFoundError:
+            return None
+        if status is None:
+            return None
+        mtime = getattr(status, 'mtime', None)
+        if mtime is None:
+            return None
+        if isinstance(mtime, datetime):
+            return int(mtime.timestamp() * 1000)
+        # LocalFileIO reports os.stat().st_mtime, i.e. seconds since the epoch.
+        return int(float(mtime) * 1000)
 
     def try_get_earliest_snapshot(
         self, stop_snapshot_id: Optional[int] = None
