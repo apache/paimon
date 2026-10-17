@@ -169,9 +169,15 @@ def _native_upsert_key_type_compatible(source, target):
     source = _dictionary_value_type(source)
     if pa.types.is_null(source):
         return True
-    for family in (pa.types.is_integer, pa.types.is_decimal, pa.types.is_date, pa.types.is_time):
+    for family in (pa.types.is_integer, pa.types.is_floating, pa.types.is_decimal, pa.types.is_date, pa.types.is_time):
         if family(source) and family(target):
             return True
+
+    def binary(data_type):
+        return (pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
+                or pa.types.is_fixed_size_binary(data_type))
+    if binary(source) and binary(target):
+        return True
     if pa.types.is_timestamp(source) and pa.types.is_timestamp(target):
         return (source.tz is None) == (target.tz is None)
     return arrow_schemas_compatible(

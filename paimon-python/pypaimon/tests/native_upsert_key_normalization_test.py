@@ -18,6 +18,10 @@
 """Logical upsert keys must not depend on Arrow widths or dictionaries."""
 
 import datetime
+import mmap
+import os
+import struct
+import sys
 from contextlib import ExitStack
 from decimal import Decimal
 from unittest.mock import patch
@@ -37,6 +41,12 @@ _KEYS = [
     (pa.int16(), pa.uint32(), 1, 2),
     (pa.int32(), pa.int64(), 1, 2),
     (pa.int64(), pa.uint64(), 1, 2),
+    (pa.float32(), pa.float64(), 1.5, -2.25),
+    (pa.float64(), pa.float32(), 1.5, -2.25),
+    (pa.float64(), pa.dictionary(pa.int8(), pa.float32()), 1.5, -2.25),
+    (pa.binary(), pa.large_binary(), b'\xff\0', b'other'),
+    (pa.large_binary(), pa.binary(), b'\xff\0', b'other'),
+    (pa.binary(), pa.dictionary(pa.int8(), pa.large_binary()), b'\xff\0', b'other'),
     (pa.decimal128(10, 2), pa.decimal128(15, 4), Decimal('1.25'), Decimal('-2.50')),
     (pa.date32(), pa.date64(), datetime.date(1969, 12, 31), datetime.date(1970, 1, 2)),
     (pa.time32('ms'), pa.time64('us'), datetime.time(1, 2, 3, 400000), datetime.time(4, 5, 6)),
@@ -128,9 +138,15 @@ def test_upsert_normalizes_match_keys_without_changing_row_identity(
 
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
 @pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
-def test_partition_key_dictionaries_and_integer_widths_share_one_identity(tmp_path, native, stream):
-    table, _ = _table(tmp_path, native, pa.int32(), 1, 2, partitioned=True)
-    source = pa.table({'key': pa.array([1, 2, 1], type=pa.int64()),
+@pytest.mark.parametrize('key_type,input_type,key,other', [
+    (pa.int32(), pa.int64(), 1, 2),
+    (pa.float64(), pa.float32(), 1.5, -2.25),
+    (pa.binary(), pa.large_binary(), b'key', b'other'),
+])
+def test_partition_dictionaries_and_equivalent_key_layouts_share_one_identity(
+        tmp_path, native, stream, key_type, input_type, key, other):
+    table, _ = _table(tmp_path, native, key_type, key, other, partitioned=True)
+    source = pa.table({'key': _array([key, other, key], input_type),
                        'pt': _array(['a', 'b', 'a'], pa.dictionary(pa.int8(), pa.string())),
                        'value': pa.array([1, 7, 42], type=pa.int32())})
     before = next(_rows(table))
@@ -143,6 +159,10 @@ def test_partition_key_dictionaries_and_integer_widths_share_one_identity(tmp_pa
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
 @pytest.mark.parametrize('key_type,input_type,key,other,new_key', [
     (pa.int32(), pa.int64(), 1, 2, 3),
+    (pa.float32(), pa.float64(), 1.5, -2.25, 3.5),
+    (pa.float64(), pa.float32(), 1.5, -2.25, 3.5),
+    (pa.binary(), pa.large_binary(), b'key', b'other', b'new'),
+    (pa.large_binary(), pa.binary(), b'key', b'other', b'new'),
     (pa.decimal128(10, 2), pa.decimal128(15, 4), Decimal('1.00'), Decimal('2.00'), Decimal('3.00')),
     (pa.timestamp('ms'), pa.timestamp('us'), datetime.datetime(2024, 1, 1),
      datetime.datetime(2024, 1, 2), datetime.datetime(2024, 1, 3)),
@@ -161,6 +181,7 @@ def test_new_rows_retain_original_key_write_type_validation(
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
 @pytest.mark.parametrize('key_type,input_type,key,other,invalid', [
     (pa.int8(), pa.int64(), 1, 2, 256),
+    (pa.float32(), pa.float64(), 1.0, 2.0, 1.00000001),
     (pa.int64(), pa.uint64(), 1, 2, 2 ** 63),
     (pa.decimal128(10, 2), pa.decimal128(15, 4), Decimal('1.25'), Decimal('2.50'), Decimal('1.2501')),
     (pa.timestamp('ms'), pa.timestamp('us'), datetime.datetime(2024, 1, 1),
@@ -230,3 +251,22 @@ def test_decimal_zero_and_null_keys_rescale_across_the_full_scale_range(tmp_path
     _upsert(table, source, native, stream)
     for rows in _rows(table):
         assert [row['value'] for row in rows] == [42, 42, 0, 9]
+
+
+@pytest.mark.skipif(os.name != 'posix' or sys.maxsize <= 2 ** 32, reason='Requires 64-bit POSIX mmap')
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+def test_large_binary_key_slice_after_two_gib_matches_visible_bytes(tmp_path, native):
+    table, _ = _table(tmp_path, native, pa.binary(), b'ab', b'other')
+    before = next(_rows(table))
+    start = 2 ** 31 + 17
+    # Reserve address space without allocating or reading a 2 GiB prefix.
+    memory = mmap.mmap(-1, start + 2)
+    memory[start:start + 2] = b'ab'
+    keys = pa.Array.from_buffers(pa.large_binary(), 1, [
+        None, pa.py_buffer(struct.pack('<qq', start, start + 2)), pa.py_buffer(memory)])
+    source = pa.table({'key': keys, 'value': pa.array([42], type=pa.int32())})
+    _upsert(table, source, native, False)
+    for rows in _rows(table):
+        assert [row['value'] for row in rows] == [42, 42, 0, 0]
+        assert [{k: v for k, v in row.items() if k != 'value'} for row in rows] == [
+            {k: v for k, v in row.items() if k != 'value'} for row in before]

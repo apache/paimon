@@ -18,14 +18,16 @@
 """Global index evaluator for filtering data using global indexes."""
 
 import threading
+import struct
 from collections import deque
 from concurrent.futures import Future
 from typing import Callable, Collection, Dict, FrozenSet, List, NamedTuple, Optional
 
-from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
+from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.common.predicate import Predicate
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class GlobalIndexEvaluation(NamedTuple):
@@ -82,6 +84,9 @@ class GlobalIndexEvaluator:
             f.set_result(None)
             return f
 
+        if not self._decimal_literals_supported(field, predicate):
+            return _completed_future(None)
+
         field_id = field.id
         readers = self._index_readers_cache.get(field_id)
         if readers is None:
@@ -120,6 +125,23 @@ class GlobalIndexEvaluator:
             rf.add_done_callback(on_done)
 
         return all_done
+
+    @staticmethod
+    def _decimal_literals_supported(field: DataField, predicate: Predicate) -> bool:
+        if not (isinstance(field.type, AtomicType)
+                and field.type.type.upper().startswith(('DECIMAL', 'NUMERIC'))):
+            return True
+        # Like Native, decline a physical index lookup if conversion would
+        # round a comparison literal. The original predicate must then filter
+        # the data; a rounded bitmap lookup can silently discard matching rows.
+        serializer = create_serializer(field.type)
+        compare = serializer.create_comparator()
+        try:
+            return all(literal is None or compare(
+                serializer.deserialize(serializer.serialize(literal)), literal) == 0
+                for literal in (predicate.literals or []))
+        except (ArithmeticError, ValueError, struct.error):
+            return False
 
     def _combine_reader_results(
         self, reader_futures: List[Future], field_id: int,
