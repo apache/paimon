@@ -66,6 +66,9 @@ public class AvroFileFormat extends FileFormat {
     private static final ConfigOption<Map<String, String>> AVRO_ROW_NAME_MAPPING =
             ConfigOptions.key("avro.row-name-mapping").mapType().defaultValue(new HashMap<>());
 
+    private static final ConfigOption<Map<String, String>> AVRO_METADATA =
+            ConfigOptions.key("avro.metadata").mapType().defaultValue(new HashMap<>());
+
     private final Options options;
     private final int zstdLevel;
     /** Bounds enforced by {@code DataFileWriter#setSyncInterval}. */
@@ -117,6 +120,12 @@ public class AvroFileFormat extends FileFormat {
             // Batch data-file field encodings before writing them to the Avro block buffer.
             writer.setEncoder(
                     outputStream -> EncoderFactory.get().binaryEncoder(outputStream, null));
+        }
+        Map<String, String> metadata = options.get(AVRO_METADATA);
+        if (metadata != null) {
+            for (Map.Entry<String, String> entry : metadata.entrySet()) {
+                writer.setMeta(entry.getKey(), entry.getValue());
+            }
         }
         writer.setCodec(createCodecFactory(compression));
         if (blockSize != null) {
@@ -181,5 +190,14 @@ public class AvroFileFormat extends FileFormat {
                 throws IOException {
             return createBlockWriter(out, rowType, compression, true);
         }
+    }
+
+    /**
+     * Sets Avro file-level metadata key-value pairs on the given options. These metadata are
+     * written into the Avro container file header and are visible to Iceberg-compatible readers
+     * (e.g. Snowflake).
+     */
+    public static void setAvroMetadata(Options options, Map<String, String> metadata) {
+        options.set(AVRO_METADATA, metadata);
     }
 }
