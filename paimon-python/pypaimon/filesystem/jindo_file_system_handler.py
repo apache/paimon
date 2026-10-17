@@ -57,6 +57,42 @@ _CASE_SENSITIVE_JINDO_CONFIG_KEYS = {
 }
 _KNOWN_FILE_SIZE_CACHE_MAX_ENTRIES = 4096
 
+_LOG = logging.getLogger(__name__)
+
+
+class _StreamStats:
+    """Counts open streams of JindoFileSystemHandler, not those PVFS opens through pyjindo.ossfs."""
+
+    # Reentrant: garbage collection may finalize a stream while this thread holds it.
+    _lock = threading.RLock()
+    _pid = os.getpid()
+    open = 0
+    milestone = 256
+
+    @classmethod
+    def _get_lock(cls):
+        # A parent thread may hold the lock across a fork, so a child takes a new one.
+        if cls._pid != os.getpid():
+            cls._lock, cls._pid = threading.RLock(), os.getpid()
+        return cls._lock
+
+    @classmethod
+    def opened(cls):
+        with cls._get_lock():
+            cls.open += 1
+            count = cls.open
+            report = count >= cls.milestone
+            if report:
+                cls.milestone *= 2
+        if report:
+            _LOG.info("%d streams of JindoFileSystemHandler are open; each holds native buffers until closed",
+                      count)
+
+    @classmethod
+    def closed(cls):
+        with cls._get_lock():
+            cls.open -= 1
+
 
 def _jindo_config_value(value) -> str:
     if isinstance(value, bool):
@@ -138,6 +174,7 @@ class JindoInputFile:
         # handler) so evicting the handler's FileIO from a cache cannot free it.
         self._owner = owner
         self._closed = False
+        _StreamStats.opened()
 
     def __del__(self):
         # CPython releases instance attributes in dict layout order, which is
@@ -191,6 +228,7 @@ class JindoInputFile:
             # The native stream is closed: a file object that stays
             # referenced no longer needs to pin the native store.
             self._owner = None
+            _StreamStats.closed()
 
     def __enter__(self):
         return self
@@ -207,6 +245,7 @@ class JindoOutputFile:
         # stream is open.
         self._owner = owner
         self._closed = False
+        _StreamStats.opened()
 
     def __del__(self):
         # See JindoInputFile.__del__: close while ``_owner`` still pins the
@@ -244,6 +283,7 @@ class JindoOutputFile:
             # The native stream is closed: a file object that stays
             # referenced no longer needs to pin the native store.
             self._owner = None
+            _StreamStats.closed()
 
     def __enter__(self):
         return self
