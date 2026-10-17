@@ -103,11 +103,47 @@ Lookup uses memory and local disk caches:
 | `lookup.cache-max-disk-size` | Unlimited | Bound local disk usage |
 | `lookup.cache-max-memory-size` | `256 mb` | Bound in-memory cache usage |
 
-In Flink, `execution.checkpointing.max-concurrent-checkpoints` can also affect throughput when
-checkpoint completion waits for compaction. Tune it with checkpoint duration and resource usage.
-
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
+
+Set `'changelog-producer.event-metadata-fields'` to a comma-separated list of columns to store their
+post-merge values as event metadata fields in changelog records. This is supported only by the
+`lookup` producer; post-merge values may differ from the incoming row if the merge engine
+aggregates. Each field is named `<prefix><column>`, where the prefix is set by
+`'changelog-producer.metadata-field-prefix'` (default `__internal__`). Spark exposes the field as a
+column with that name; Flink SQL must declare a metadata column on the Paimon source with that name
+as the key. For `+I` and `+U`, metadata fields equal the regular columns. For `-U` and `-D`, regular
+columns contain the before-image while metadata fields contain the new event's values, so a sink
+can, for example, use the event timestamp of a retraction for conflict resolution. Changelog files
+written before the option was enabled return `NULL` for these fields.
+
+Because a retraction no longer equals the row emitted earlier, operators that find the row to
+retract by comparing full rows cannot match it and silently keep the old row. Pass these fields
+through unchanged to a sink that applies deletes by primary key, and do not filter or aggregate on
+them. In Flink, a sink primary key that differs from the source primary key adds such an operator
+(`table.exec.sink.upsert-materialize` is `AUTO` by default): keep the keys equal, or set it to
+`NONE` if the sink applies upserts and deletes by its own key. Set
+`table.optimizer.non-deterministic-update.strategy` to `TRY_RESOLVE` to make Flink reject unsafe
+plans.
+
+Columns listed in the option cannot be renamed or dropped, because downstream jobs reference the
+metadata field names. Remove a column from the option first.
+
+```sql
+CREATE TABLE my_table (
+    id INT PRIMARY KEY NOT ENFORCED,
+    data STRING,
+    event_ts BIGINT,
+    source_event_ts BIGINT METADATA FROM '__internal__event_ts' VIRTUAL
+) WITH (
+    'changelog-producer' = 'lookup',
+    'sequence.field' = 'event_ts',
+    'changelog-producer.event-metadata-fields' = 'event_ts'
+);
+
+-- external_sink is keyed on id and takes the event timestamp as a regular input column.
+INSERT INTO external_sink SELECT id, data, source_event_ts AS event_ts FROM my_table;
+```
 
 ## Full Compaction
 
