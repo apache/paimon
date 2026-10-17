@@ -18,14 +18,20 @@
 
 package org.apache.spark.sql.execution.datasources.v2
 
+import org.apache.paimon.spark.util.OptionUtils
+
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, BasePredicate, Expression, Projection, UnsafeProjection}
-import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, BasePredicate, BindReferences, Expression, Projection, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, CodeGenerator, ExprCode, FalseLiteral, GeneratePredicate, JavaCode}
+import org.apache.spark.sql.catalyst.expressions.codegen.Block.BlockHelper
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows._
 import org.apache.spark.sql.catalyst.util.truncatedString
-import org.apache.spark.sql.execution.{SparkPlan, UnaryExecNode}
+import org.apache.spark.sql.execution.{CodegenSupport, SparkPlan, UnaryExecNode}
+import org.apache.spark.sql.types.BooleanType
 import org.roaringbitmap.longlong.Roaring64Bitmap
+
+import scala.collection.mutable
 
 case class MergeRowsExec(
     isSourceRowPresent: Expression,
@@ -36,7 +42,8 @@ case class MergeRowsExec(
     checkCardinality: Boolean,
     output: Seq[Attribute],
     child: SparkPlan)
-  extends UnaryExecNode {
+  extends UnaryExecNode
+  with CodegenSupport {
 
   @transient override lazy val producedAttributes: AttributeSet = {
     AttributeSet(output.filterNot(attr => inputSet.contains(attr)))
@@ -64,6 +71,226 @@ case class MergeRowsExec(
 
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitions(processPartition)
+  }
+
+  override def inputRDDs(): Seq[RDD[InternalRow]] = {
+    child.asInstanceOf[CodegenSupport].inputRDDs()
+  }
+
+  override def needCopyResult: Boolean = {
+    val hasSplitInstruction = (matchedInstructions ++ notMatchedInstructions ++
+      notMatchedBySourceInstructions).exists(_.isInstanceOf[Split])
+    hasSplitInstruction || child.asInstanceOf[CodegenSupport].needCopyResult
+  }
+
+  override def supportCodegen: Boolean = {
+    OptionUtils.mergeCodegenEnabled() &&
+    conf.wholeStageEnabled &&
+    CodeGenerator.isValidParamLength(
+      CodeGenerator.calculateParamLength(child.output.filter(usedInputs.contains)))
+  }
+
+  override protected def doProduce(ctx: CodegenContext): String = {
+    child.asInstanceOf[CodegenSupport].produce(ctx, this)
+  }
+
+  override def doConsume(ctx: CodegenContext, input: Seq[ExprCode], row: ExprCode): String = {
+    val funcName = ctx.freshName("mergeProcessRow")
+    val (args, params, paramExprs) = constructConsumeParameters(ctx, child.output, input)
+    val body = generateInstructionExecutionCode(ctx, paramExprs)
+    val addedFuncName = ctx.addNewFunction(
+      funcName,
+      s"""
+         |private void $funcName(${params.mkString(", ")}) throws java.io.IOException {
+         |  $body
+         |}
+       """.stripMargin
+    )
+
+    s"$addedFuncName(${args.mkString(", ")});"
+  }
+
+  private def generateCardinalityValidationCode(
+      ctx: CodegenContext,
+      rowIdOrdinal: Int,
+      input: Seq[ExprCode]): String = {
+    val bitmapClass = classOf[Roaring64Bitmap]
+    val rowIdBitmap = ctx.addMutableState(
+      bitmapClass.getName,
+      "matchedRowIds",
+      variable => s"$variable = new ${bitmapClass.getName}();")
+    val currentRowId = input(rowIdOrdinal)
+
+    code"""
+          |${currentRowId.code}
+          |if ($rowIdBitmap.contains(${currentRowId.value})) {
+          |  throw new RuntimeException("Should not happens");
+          |}
+          |$rowIdBitmap.add(${currentRowId.value});
+     """.stripMargin.toString
+  }
+
+  private def generateInstructionExecutionCode(
+      ctx: CodegenContext,
+      inputExprs: Seq[ExprCode]): String = {
+    val sourcePresentExpr = generatePredicateCode(ctx, isSourceRowPresent, child.output, inputExprs)
+    val targetPresentExpr = generatePredicateCode(ctx, isTargetRowPresent, child.output, inputExprs)
+    val matchedInstructionsCode = generateInstructionsCode(ctx, matchedInstructions, inputExprs)
+    val notMatchedInstructionsCode =
+      generateInstructionsCode(ctx, notMatchedInstructions, inputExprs)
+    val notMatchedBySourceInstructionsCode =
+      generateInstructionsCode(ctx, notMatchedBySourceInstructions, inputExprs)
+    val cardinalityValidationCode = if (checkCardinality) {
+      val rowIdOrdinal = child.output.indexWhere(attr => conf.resolver(attr.name, ROW_ID))
+      assert(rowIdOrdinal != -1, "Cannot find row ID attr")
+      generateCardinalityValidationCode(ctx, rowIdOrdinal, inputExprs)
+    } else {
+      ""
+    }
+
+    s"""
+       |${sourcePresentExpr.code}
+       |${targetPresentExpr.code}
+       |if (${targetPresentExpr.value} && ${sourcePresentExpr.value}) {
+       |  $cardinalityValidationCode
+       |  $matchedInstructionsCode
+       |} else if (${sourcePresentExpr.value}) {
+       |  $notMatchedInstructionsCode
+       |} else if (${targetPresentExpr.value}) {
+       |  $notMatchedBySourceInstructionsCode
+       |}
+     """.stripMargin
+  }
+
+  private def generateInstructionsCode(
+      ctx: CodegenContext,
+      instructions: Seq[Instruction],
+      inputExprs: Seq[ExprCode]): String = {
+    if (instructions.isEmpty) {
+      ""
+    } else {
+      val instructionCodes =
+        instructions.map(instruction => generateSingleInstructionCode(ctx, instruction, inputExprs))
+      s"""
+         |${instructionCodes.mkString("\n")}
+         |return;
+       """.stripMargin
+    }
+  }
+
+  private def generateSingleInstructionCode(
+      ctx: CodegenContext,
+      instruction: Instruction,
+      inputExprs: Seq[ExprCode]): String = {
+    instruction match {
+      case Keep(condition, outputExprs) =>
+        val projectionExpr = generateProjectionCode(ctx, outputExprs, inputExprs)
+        val predicateExpr = generatePredicateCode(ctx, condition, child.output, inputExprs)
+        s"""
+           |${predicateExpr.code}
+           |if (${predicateExpr.value}) {
+           |  ${consume(ctx, projectionExpr)}
+           |  return;
+           |}
+         """.stripMargin
+
+      case Discard(condition) =>
+        val predicateExpr = generatePredicateCode(ctx, condition, child.output, inputExprs)
+        s"""
+           |${predicateExpr.code}
+           |if (${predicateExpr.value}) {
+           |  return;
+           |}
+         """.stripMargin
+
+      case Split(condition, outputExprs, otherOutputExprs) =>
+        val projectionExpr = generateProjectionCode(ctx, outputExprs, inputExprs)
+        val otherProjectionExpr = generateProjectionCode(ctx, otherOutputExprs, inputExprs)
+        val predicateExpr = generatePredicateCode(ctx, condition, child.output, inputExprs)
+        s"""
+           |${predicateExpr.code}
+           |if (${predicateExpr.value}) {
+           |  ${consume(ctx, projectionExpr)}
+           |  ${consume(ctx, otherProjectionExpr)}
+           |  return;
+           |}
+         """.stripMargin
+
+      case other =>
+        throw new RuntimeException("Unsupported instruction type: " + other.getClass.getSimpleName)
+    }
+  }
+
+  private def withCodegenContext[T](ctx: CodegenContext, inputCurrentVars: Seq[ExprCode])(
+      block: => T): T = {
+    val originalCurrentVars = ctx.currentVars
+    val originalInputRow = ctx.INPUT_ROW
+    try {
+      ctx.currentVars = inputCurrentVars
+      block
+    } finally {
+      ctx.currentVars = originalCurrentVars
+      ctx.INPUT_ROW = originalInputRow
+    }
+  }
+
+  private def generatePredicateCode(
+      ctx: CodegenContext,
+      predicate: Expression,
+      inputAttrs: Seq[Attribute],
+      inputCurrentVars: Seq[ExprCode]): ExprCode = {
+    withCodegenContext(ctx, inputCurrentVars) {
+      val boundPredicate = BindReferences.bindReference(predicate, inputAttrs)
+      val evaluatedPredicate = boundPredicate.genCode(ctx)
+      val predicateVar = ctx.freshName("predicateResult")
+      val code = code"""
+                       |${evaluatedPredicate.code}
+                       |boolean $predicateVar = !${evaluatedPredicate.isNull} &&
+                       |  ${evaluatedPredicate.value};
+                     """.stripMargin
+      ExprCode(code, FalseLiteral, JavaCode.variable(predicateVar, BooleanType))
+    }
+  }
+
+  private def generateProjectionCode(
+      ctx: CodegenContext,
+      outputExprs: Seq[Expression],
+      inputCurrentVars: Seq[ExprCode]): Seq[ExprCode] = {
+    withCodegenContext(ctx, inputCurrentVars) {
+      val boundExprs = outputExprs.map(BindReferences.bindReference(_, child.output))
+      boundExprs.map(_.genCode(ctx))
+    }
+  }
+
+  private def constructConsumeParameters(
+      ctx: CodegenContext,
+      attributes: Seq[Attribute],
+      variables: Seq[ExprCode]): (Seq[String], Seq[String], Seq[ExprCode]) = {
+    val arguments = mutable.ArrayBuffer[String]()
+    val parameters = mutable.ArrayBuffer[String]()
+    val paramVars = mutable.ArrayBuffer(variables: _*)
+
+    variables.zipWithIndex.foreach {
+      case (evaluatedVariable, index) =>
+        if (usedInputs.contains(attributes(index))) {
+          val paramName = ctx.freshName(s"expr_$index")
+          val paramType = CodeGenerator.javaType(attributes(index).dataType)
+          arguments += evaluatedVariable.value.toString
+          parameters += s"$paramType $paramName"
+          val paramIsNull = if (!attributes(index).nullable) {
+            FalseLiteral
+          } else {
+            val isNull = ctx.freshName(s"exprIsNull_$index")
+            arguments += evaluatedVariable.isNull.toString
+            parameters += s"boolean $isNull"
+            JavaCode.isNullVariable(isNull)
+          }
+          paramVars(index) =
+            ExprCode(paramIsNull, JavaCode.variable(paramName, attributes(index).dataType))
+        }
+    }
+
+    (arguments.toSeq, parameters.toSeq, paramVars.toSeq)
   }
 
   private def processPartition(rowIterator: Iterator[InternalRow]): Iterator[InternalRow] = {
