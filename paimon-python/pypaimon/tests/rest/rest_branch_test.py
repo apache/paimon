@@ -84,8 +84,7 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         from pypaimon.api.rest_exception import NoSuchResourceException
 
         error = NoSuchResourceException('OTHER', 'resource', 'unknown resource missing')
-        with patch('pypaimon.catalog.rest.native_catalog._native_catalog', return_value=None), \
-                patch.object(self.rest_catalog.rest_api, 'create_branch', side_effect=error):
+        with patch.object(self.rest_catalog.rest_api, 'create_branch', side_effect=error):
             with self.assertRaises(NoSuchResourceException) as raised:
                 self.rest_catalog.create_branch(self._identifier(), 'new')
         self.assertIs(raised.exception, error)

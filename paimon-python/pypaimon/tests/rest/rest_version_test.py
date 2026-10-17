@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Existing REST version-management behavior through Rust and Python transports."""
+"""REST version management uses the Python client and Java wire semantics."""
 
 import json
 from unittest.mock import patch
@@ -32,9 +32,8 @@ from pypaimon.catalog.catalog_exception import (
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.table.instant import Instant
-from pypaimon.tests import native_rest_branch_test as branch_fixtures
+from pypaimon.tests.rest import rest_branch_transport_test as branch_fixtures
 
-pytestmark = pytest.mark.native_plan
 transport_server = branch_fixtures.transport_server
 _OPERATIONS = ('create_tag', 'get_tag', 'list_tags_paged', 'delete_tag', 'load_snapshot', 'rollback_to')
 _SNAPSHOT = dict(version=3, id=7, schemaId=0, baseManifestList='base', deltaManifestList='delta',
@@ -106,13 +105,15 @@ def invoke(catalog, operation, identifier=Identifier('db /一', 'table', branch=
 
 
 @pytest.mark.parametrize('operation', _OPERATIONS)
-def test_version_operations_use_rust_with_v4_and_public_python_results(version_server, operation):
+def test_version_operations_use_python_with_v4_and_native_options(version_server, operation):
     server = version_server
     catalog = make_catalog(server)
     server.requests.clear()
     server.bodies.clear()
-    with patch.object(catalog.rest_api, operation, side_effect=AssertionError('Python fallback')):
+    with branch_fixtures.python_rest_only(), \
+            patch.object(catalog.rest_api, operation, wraps=getattr(catalog.rest_api, operation)) as execute:
         result = invoke(catalog, operation)
+    execute.assert_called_once()
     assert len(server.requests) == 1
     method, path, headers = server.requests[0]
     assert headers['Authorization'].startswith('ACS4-HMAC-SHA256 ')
@@ -177,7 +178,7 @@ def test_version_errors_keep_public_exception_types(version_server, operation, s
     server.requests.clear()
     server.status, server.error_resource, server.error_name = status, 'TABLE', 'db.table'
     expected = TableNoPermissionException if status == 403 else TableNotExistException
-    with patch.object(catalog.rest_api, operation, side_effect=AssertionError('Python replay')):
+    with branch_fixtures.python_rest_only():
         with pytest.raises(expected):
             invoke(catalog, operation)
     assert len(server.requests) == 1
@@ -201,14 +202,14 @@ def test_missing_tag_and_snapshot_errors_remain_distinct(version_server, operati
 
 
 @pytest.mark.parametrize('operation', ['create_tag', 'delete_tag', 'rollback_to'])
-def test_failure_after_publication_has_no_backend_replay_or_local_cleanup(version_server, operation, tmp_path):
+def test_failure_after_publication_has_no_request_replay_or_local_cleanup(version_server, operation, tmp_path):
     server = version_server
     catalog = make_catalog(server)
     sentinel = tmp_path / 'shared-data.parquet'
     sentinel.write_bytes(b'existing data')
     server.status = 500
     server.requests.clear()
-    with patch.object(catalog.rest_api, operation, side_effect=AssertionError('Python replay')):
+    with branch_fixtures.python_rest_only():
         with pytest.raises(ServiceFailureException):
             invoke(catalog, operation)
     assert len(server.requests) == 1
@@ -258,26 +259,9 @@ def test_unimplemented_version_endpoints_keep_rest_exception_and_never_replay(ve
     catalog = make_catalog(server)
     server.status = 501
     server.requests.clear()
-    with patch.object(catalog.rest_api, operation, side_effect=AssertionError('Python replay')):
+    with branch_fixtures.python_rest_only():
         with pytest.raises(NotImplementedException):
             invoke(catalog, operation)
-    assert len(server.requests) == 1
-
-
-@pytest.mark.parametrize('operation', _OPERATIONS)
-def test_missing_native_operation_is_detected_before_execution(version_server, operation):
-    server = version_server
-    catalog = make_catalog(server)
-
-    class UnavailableCatalog:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError('Unavailable operation must be detected before constructing the catalog')
-
-    server.requests.clear()
-    with patch('pypaimon_rust.datafusion.PaimonCatalog', UnavailableCatalog), \
-            patch.object(catalog.rest_api, operation, wraps=getattr(catalog.rest_api, operation)) as execute:
-        invoke(catalog, operation)
-    execute.assert_called_once()
     assert len(server.requests) == 1
 
 
@@ -302,3 +286,18 @@ def test_resource_types_use_java_case_sensitive_names(version_server, native, op
     server.status, server.error_resource, server.error_name = 404, resource, '7'
     with pytest.raises(TableNotExistException):
         invoke(catalog, operation)
+
+
+@pytest.mark.parametrize('operation', _OPERATIONS)
+def test_invalid_version_resource_paths_send_no_requests(version_server, operation):
+    catalog = make_catalog(version_server)
+    version_server.requests.clear()
+    with branch_fixtures.python_rest_only():
+        for identifier in (Identifier('..', 'table'), Identifier('db', '.')):
+            with pytest.raises(ValueError):
+                invoke(catalog, operation, identifier)
+        if operation in ('get_tag', 'delete_tag'):
+            for name in ('.', '..'):
+                with pytest.raises(ValueError):
+                    getattr(catalog, operation)('db.table', name)
+    assert version_server.requests == []

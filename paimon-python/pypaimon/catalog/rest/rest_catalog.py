@@ -430,8 +430,8 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            from pypaimon.catalog.rest.native_catalog import call_catalog
-            call_catalog(self, 'rollback_to', identifier, instant, from_snapshot, table_uuid=table_uuid)
+            self.rest_api.rollback_to(
+                identifier, instant, from_snapshot, table_uuid=table_uuid)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 raise ValueError(
@@ -459,8 +459,7 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            from pypaimon.catalog.rest.native_catalog import call_catalog
-            return call_catalog(self, 'load_snapshot', identifier)
+            return self.rest_api.load_snapshot(identifier)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 return None
@@ -575,9 +574,7 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            from pypaimon.catalog.rest.native_catalog import call_catalog
-            # Ignore-if-exists remains in the public catalog error handling below.
-            call_catalog(self, 'create_tag', identifier, tag_name, snapshot_id, time_retained)
+            self.rest_api.create_tag(identifier, tag_name, snapshot_id, time_retained)
         except AlreadyExistsException as e:
             if not ignore_if_exists:
                 raise TagAlreadyExistException(tag_name) from e
@@ -596,8 +593,7 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            from pypaimon.catalog.rest.native_catalog import call_catalog
-            return call_catalog(self, 'get_tag', identifier, tag_name)
+            return self.rest_api.get_tag(identifier, tag_name)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise TagNotExistException(tag_name) from e
@@ -612,8 +608,8 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            from pypaimon.catalog.rest.native_catalog import call_catalog
-            return call_catalog(self, 'list_tags_paged', identifier, max_results, page_token, tag_name_prefix)
+            return self.rest_api.list_tags_paged(
+                identifier, max_results, page_token, tag_name_prefix)
         except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
@@ -623,8 +619,7 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            from pypaimon.catalog.rest.native_catalog import call_catalog
-            call_catalog(self, 'delete_tag', identifier, tag_name)
+            self.rest_api.delete_tag(identifier, tag_name)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise TagNotExistException(tag_name) from e
@@ -653,11 +648,10 @@ class RESTCatalog(Catalog):
     # Branch CRUD: mirrors Java RESTCatalog branch handlers.
     def create_branch(self, identifier: Union[str, Identifier], branch_name: str,
                       tag_name: Optional[str] = None) -> None:
-        from pypaimon.catalog.rest.native_catalog import call_catalog
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            call_catalog(self, 'create_branch', identifier, branch_name, tag_name)
+            self.rest_api.create_branch(identifier, branch_name, tag_name)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise TagNotExistException(tag_name) from e
@@ -672,11 +666,10 @@ class RESTCatalog(Catalog):
             raise IllegalArgumentError(str(e)) from e
 
     def drop_branch(self, identifier: Union[str, Identifier], branch_name: str) -> None:
-        from pypaimon.catalog.rest.native_catalog import call_catalog
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            call_catalog(self, 'drop_branch', identifier, branch_name)
+            self.rest_api.drop_branch(identifier, branch_name)
         except NoSuchResourceException as e:
             raise BranchNotExistException(branch_name) from e
         except ForbiddenException as e:
@@ -687,22 +680,20 @@ class RESTCatalog(Catalog):
         raise NotImplementedError('REST branch rename is not supported, matching Java RESTCatalog.')
 
     def fast_forward(self, identifier: Union[str, Identifier], branch_name: str) -> None:
-        from pypaimon.catalog.rest.native_catalog import call_catalog
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            call_catalog(self, 'fast_forward', identifier, branch_name)
+            self.rest_api.fast_forward(identifier, branch_name)
         except NoSuchResourceException as e:
             raise BranchNotExistException(branch_name) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
     def list_branches(self, identifier: Union[str, Identifier]) -> List[str]:
-        from pypaimon.catalog.rest.native_catalog import call_catalog
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            return call_catalog(self, 'list_branches', identifier)
+            return self.rest_api.list_branches(identifier)
         except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
