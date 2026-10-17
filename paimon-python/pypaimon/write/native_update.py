@@ -169,7 +169,13 @@ def _native_upsert_key_type_compatible(source, target):
     source = _dictionary_value_type(source)
     if pa.types.is_null(source):
         return True
-    for family in (pa.types.is_integer, pa.types.is_floating, pa.types.is_decimal, pa.types.is_date, pa.types.is_time):
+
+    def numeric(data_type):
+        return (pa.types.is_integer(data_type) or pa.types.is_floating(data_type)
+                or pa.types.is_decimal(data_type))
+    if numeric(source) and numeric(target):
+        return True
+    for family in (pa.types.is_date, pa.types.is_time):
         if family(source) and family(target):
             return True
 

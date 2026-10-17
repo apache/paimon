@@ -62,6 +62,32 @@ _KEYS = [
     (pa.binary(), pa.dictionary(pa.int8(), pa.binary()), b'key', b'other'),
 ]
 
+_NUMERIC_KEYS = [
+    (pa.int32(), pa.float64(), 1, 1.0, 2),
+    (pa.int64(), pa.float64(), 2 ** 53 + 2, float(2 ** 53 + 2), 2 ** 53 + 4),
+    (pa.float32(), pa.int64(), 1.0, 1, 2.0),
+    (pa.float64(), pa.int64(), float(2 ** 53 + 2), 2 ** 53 + 2, float(2 ** 53 + 4)),
+    (pa.decimal128(10, 2), pa.int64(), Decimal('1.00'), 1, Decimal('2.00')),
+    (pa.int32(), pa.decimal128(15, 4), 1, Decimal('1.0000'), 2),
+    (pa.decimal128(10, 2), pa.float64(), Decimal('1.50'), 1.5, Decimal('2.25')),
+    (pa.float64(), pa.decimal128(10, 2), 1.5, Decimal('1.50'), 2.25),
+    (pa.decimal128(38, 38), pa.float64(), Decimal('0'), 0.0, Decimal('1E-38')),
+    (pa.float32(), pa.decimal256(40, 4), 1.5, Decimal('1.5000'), 2.25),
+    (pa.int64(), pa.dictionary(pa.int8(), pa.float64()), 1, 1.0, 2),
+    (pa.float64(), pa.dictionary(pa.int8(), pa.decimal128(10, 2)), 1.5, Decimal('1.50'), 2.25),
+    (pa.float64(), pa.decimal256(76, 55), 0.1, Decimal.from_float(0.1), 0.25),
+    (pa.float64(), pa.decimal256(76, 70), 2.0 ** -70, Decimal.from_float(2.0 ** -70), 2.0 ** -69),
+    (pa.float64(), pa.decimal256(76, -20), 1e20, Decimal('1E+20'), 2e20),
+    (pa.float32(), pa.uint32(), float(2 ** 24 + 2), 2 ** 24 + 2, float(2 ** 24 + 4)),
+    (pa.float64(), pa.uint64(), float(2 ** 64 - 2048), 2 ** 64 - 2048, 1.0),
+    (pa.decimal128(38, 38), pa.int64(), Decimal('0'), 0, Decimal('1E-38')),
+]
+
+for _width in (32, 64):
+    _factory = getattr(pa, 'decimal{}'.format(_width), None)
+    if _factory is not None:
+        _NUMERIC_KEYS.append((pa.float64(), _factory(9, 2), 1.5, Decimal('1.50'), 2.25))
+
 
 def _array(values, data_type):
     if pa.types.is_dictionary(data_type):
@@ -134,6 +160,89 @@ def test_upsert_normalizes_match_keys_without_changing_row_identity(
         assert [row['value'] for row in rows] == [42, 42, 0, 9]
         assert [{k: v for k, v in row.items() if k != 'value'} for row in rows] == [
             {k: v for k, v in row.items() if k != 'value'} for row in before]
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('key_type,input_type,key,input_key,other', _NUMERIC_KEYS)
+def test_numeric_keys_match_by_exact_value_across_arrow_types(
+        tmp_path, native, stream, key_type, input_type, key, input_key, other):
+    table, _ = _table(tmp_path, native, key_type, key, other)
+    before = next(_rows(table))
+    chunks = [pa.table({'key': _array([value], input_type), 'value': pa.array([number], type=pa.int32())})
+              for value, number in [(input_key, 1), (None, 9), (input_key, 42)]]
+    _upsert(table, pa.concat_tables(chunks), native, stream)
+    for rows in _rows(table):
+        assert [row['value'] for row in rows] == [42, 42, 0, 9]
+        assert [{k: v for k, v in row.items() if k != 'value'} for row in rows] == [
+            {k: v for k, v in row.items() if k != 'value'} for row in before]
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('key_type,input_type,key,invalid,other', [
+    (pa.int32(), pa.float64(), 1, 1.00000001, 2),
+    (pa.int64(), pa.float64(), 2 ** 63 - 1, float(2 ** 63), 2),
+    (pa.float64(), pa.int64(), float(2 ** 53), 2 ** 53 + 1, 2.0),
+    (pa.decimal128(10, 2), pa.float64(), Decimal('0.10'), 0.1, Decimal('0.20')),
+    (pa.float64(), pa.decimal128(10, 2), 0.1, Decimal('0.10'), 0.2),
+])
+def test_numeric_key_conversion_cannot_round_into_an_existing_row(
+        tmp_path, native, key_type, input_type, key, invalid, other):
+    table, _ = _table(tmp_path, native, key_type, key, other)
+    before = next(_rows(table))
+    source = pa.table({'key': _array([invalid], input_type), 'value': pa.array([42], type=pa.int32())})
+    with pytest.raises((ValueError, TypeError, NotImplementedError)):
+        _upsert(table, source, native, False)
+    for rows in _rows(table):
+        assert rows == before
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('key_type,input_type,key,input_key,other', _NUMERIC_KEYS[:8])
+def test_mixed_numeric_upsert_validates_original_unmatched_rows_before_updates(
+        tmp_path, native, key_type, input_type, key, input_key, other):
+    table, _ = _table(tmp_path, native, key_type, key, other)
+    before = next(_rows(table))
+    source = pa.table({'key': _array([input_key, input_key + 4], input_type),
+                       'value': pa.array([42, 99], type=pa.int32())})
+    with pytest.raises((ValueError, TypeError, NotImplementedError)):
+        _upsert(table, source, native, False)
+    for rows in _rows(table):
+        assert rows == before
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('key_type,input_type,key,input_key,other', _NUMERIC_KEYS[:3] + _NUMERIC_KEYS[4:8])
+def test_full_row_numeric_upsert_preserves_row_identity_and_payload_casts(
+        tmp_path, native, stream, key_type, input_type, key, input_key, other):
+    table, _ = _table(tmp_path, native, key_type, key, other)
+    before = next(_rows(table))
+    source = pa.table({'key': _array([input_key], input_type), 'pt': ['updated'],
+                       'value': pa.array([42], type=pa.int32()), 'keep': pa.array([99], type=pa.int32())})
+    _upsert(table, source, native, stream, columns=None)
+    for rows in _rows(table):
+        by_id = {row['_ROW_ID']: row for row in rows}
+        for original in before:
+            expected = dict(original)
+            if original['key'] == key:
+                expected.update(pt='updated', value=42, keep=99)
+            assert by_id[original['_ROW_ID']] == expected
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+def test_exact_match_does_not_relax_updated_key_assignment_range(tmp_path, native):
+    key = float(2 ** 53 + 2)
+    table, _ = _table(tmp_path, native, pa.float64(), key, float(2 ** 53 + 4))
+    before = next(_rows(table))
+    source = pa.table({'key': pa.array([2 ** 53 + 2], type=pa.int64()), 'pt': ['updated'],
+                       'value': pa.array([42], type=pa.int32()), 'keep': pa.array([99], type=pa.int32())})
+    # Matching only needs an exact numeric identity. Updating the key payload
+    # still uses the ordinary integer-to-double assignment range (<= 2^53).
+    with pytest.raises((ValueError, TypeError, NotImplementedError)):
+        _upsert(table, source, native, False, columns=None)
+    for rows in _rows(table):
+        assert rows == before
 
 
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])

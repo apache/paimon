@@ -170,3 +170,34 @@ def test_decimal_predicates_select_the_same_rows_for_updates_and_deletes(tmp_pat
         (i + 10 if operation == 'callable' else 42) if i in (1, 2, 3) else 0)} for i in ids]
     for read_native in [False, True]:
         assert _read(table, None, read_native, read_native, ('id', 'amount', 'value')) == expected
+
+
+@pytest.mark.parametrize('engine', ['deduplicate', 'partial-update'])
+@pytest.mark.parametrize('native_plan,native_read', [(False, False), (True, False), (False, True), (True, True)])
+def test_decimal_filter_observes_merged_primary_key_values(tmp_path, engine, native_plan, native_read):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('amount', pa.decimal128(10, 2)), ('value', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, primary_keys=['id'], options={
+        'bucket': '1', 'merge-engine': engine, 'write.native.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    batches = [
+        pa.table({'id': range(6), 'amount': _VALUES, 'value': [0] * 6}, schema=schema),
+        # Filtering either file before merging can resurrect id=3's obsolete
+        # value or discard id=4's new value on the other side of 1.235.
+        pa.table({'id': [3, 4], 'amount': [Decimal('1.24'), Decimal('1.23')], 'value': [42, 43]}, schema=schema),
+    ]
+    for batch in batches:
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(batch)
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+    for method, literals, expected in _PREDICATES:
+        expected = sorted(4 if i == 3 else 3 if i == 4 else i for i in expected)
+        rows = _read(table, _predicate(method, literals), native_plan, native_read, ('id', 'value'))
+        assert rows == [{'id': i, 'value': 42 if i == 3 else 43 if i == 4 else 0} for i in expected]
