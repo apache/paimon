@@ -19,6 +19,9 @@
 
 import logging
 
+import requests
+from requests.structures import CaseInsensitiveDict
+
 from pypaimon.api.api_response import ErrorResponse
 from pypaimon.api.auth import RESTAuthFunction
 from pypaimon.api.auth.bearer import BearTokenAuthProvider
@@ -29,6 +32,25 @@ from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.common.options.core_options import CoreOptions
 
 logger = logging.getLogger(__name__)
+
+
+def _native_headers(api):
+    session = api.client.session
+    if (type(session) is not requests.Session or session.cookies or session.auth is not None
+            or session.cert is not None or session.verify is not True or session.proxies or session.params):
+        # Keep cookie selection/expiry and custom transport credentials in their
+        # owning Session. Rebuilding a client cannot preserve those semantics.
+        return None
+    headers = CaseInsensitiveDict(session.headers)
+    # Let each HTTP transport advertise only the codecs it can decode and manage
+    # its own connections. An explicitly customized transport header stays Python.
+    for name in ('Accept-Encoding', 'Connection'):
+        if (headers.get(name) != requests.utils.default_headers().get(name)
+                or any(key.lower() == name.lower() for key in api.rest_auth_function.init_header)):
+            return None
+        headers.pop(name, None)
+    headers.update(api.rest_auth_function.init_header)
+    return {key: value for key, value in headers.items() if value is not None}
 
 
 def _native_catalog(catalog, operation):
@@ -49,6 +71,9 @@ def _native_catalog(catalog, operation):
             or type(api.rest_auth_function) is not RESTAuthFunction
             or type(api.rest_auth_function.auth_provider) not in (BearTokenAuthProvider, DLFAuthProvider)):
         return None
+    headers = _native_headers(api)
+    if headers is None:
+        return None
     try:
         from pypaimon_rust.datafusion import CatalogError, PaimonCatalog
     except ImportError:
@@ -58,9 +83,7 @@ def _native_catalog(catalog, operation):
                 if not RESTApi._is_auth_option(key) and not key.startswith(RESTApi.HEADER_PREFIX)}
     resolved.update(api._auth_options)
     resolved['uri'] = api.client.uri
-    resolved['header.User-Agent'] = api.client.session.headers['User-Agent']
-    resolved.update({RESTApi.HEADER_PREFIX + key: value
-                     for key, value in api.rest_auth_function.init_header.items()})
+    resolved.update({RESTApi.HEADER_PREFIX + key: value for key, value in headers.items()})
     resolved = {str(key): _option_value_to_string(value)
                 for key, value in resolved.items() if value is not None}
     resolved['metastore'] = 'rest'

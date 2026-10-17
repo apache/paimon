@@ -151,6 +151,12 @@ request headers, and preserves the public Python exception types. Custom clients
 authentication providers or error handlers use Python. Once a Native operation
 starts, failures propagate without replaying the request through Python.
 
+OpenAPI V4 (`dlf.signing-algorithm=openapi-v4`) is signed in Rust core, including
+the action header. Session headers are merged case-insensitively, preserving an
+explicit User-Agent. Sessions with Cookie, custom authentication or TLS settings
+use Python to retain their transport state. Native listing retries HTTP 429/503;
+mutations are sent once and accept successful responses without a JSON body.
+
 As in Java, creation without a tag produces an empty branch; creation from a tag
 uses its snapshot. REST branch renaming is unsupported. Dropping branch metadata
 does not remove data files shared with another branch or tag.

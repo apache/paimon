@@ -18,13 +18,22 @@
 """REST branch operations retain PyPaimon's contracts when Rust executes them."""
 
 from contextlib import ExitStack, contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import threading
 from unittest.mock import patch
+from urllib.parse import parse_qsl, urlsplit
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
+from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.api.api_response import ErrorResponse
+from pypaimon.api.auth.dlf_signer import DLFOpenApiV4Signer
+from pypaimon.api.token_loader import DLFToken
+from pypaimon.api.typedef import RESTAuthParameter
 from pypaimon.api.rest_exception import (
     NoSuchResourceException, NotImplementedException, RESTException, ServiceFailureException,
 )
@@ -38,6 +47,163 @@ from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 pytestmark = pytest.mark.native_plan
 _OPERATIONS = ('create_branch', 'drop_branch', 'fast_forward', 'list_branches')
+
+
+@pytest.fixture
+def transport_server():
+    class Handler(BaseHTTPRequestHandler):
+        def operation(self):
+            size = int(self.headers.get('Content-Length', 0))
+            data = self.rfile.read(size).decode() if size else None
+            self.server.requests.append((self.command, self.path, self.headers))
+            status = 200
+            if self.path.startswith('/v1/config'):
+                body = json.dumps({'defaults': {'prefix': 'test'}})
+            elif self.server.require_cookie and self.headers.get('Cookie') != 'sessionid=accepted':
+                status, body = 403, json.dumps({'message': 'missing cookie'})
+            elif self.server.require_v4 and not self.headers.get('Authorization', '').startswith('ACS4-HMAC-SHA256 '):
+                status, body = 403, json.dumps({'message': 'wrong signature algorithm'})
+            elif self.server.temporary_status and self.server.branch_requests == 0:
+                status = self.server.temporary_status
+                body = json.dumps({'message': 'temporary failure'})
+                self.server.branch_requests += 1
+            else:
+                body = json.dumps({'branches': ['dev']}) if self.command == 'GET' else 'OK'
+            if self.server.require_v4:
+                signed_headers = {key.lower(): value for key, value in self.headers.items()
+                                  if key.lower().startswith('x-acs-') or key.lower() in ('host', 'content-type')}
+                url = urlsplit(self.path)
+                expected = DLFOpenApiV4Signer('cn-hangzhou').authorization(
+                    RESTAuthParameter(self.command, url.path, data, dict(parse_qsl(url.query))),
+                    DLFToken('test-key', 'test-secret', 'test-sts', None),
+                    self.headers['Host'], signed_headers)
+                if self.headers.get('Authorization') != expected:
+                    status, body = 403, json.dumps({'message': 'signature mismatch'})
+            output = body.encode()
+            self.send_response(status)
+            self.send_header('Content-Length', str(len(output)))
+            if self.path.startswith('/v1/config') and self.server.require_cookie:
+                self.send_header('Set-Cookie', 'sessionid=accepted; Path=/')
+            self.end_headers()
+            self.wfile.write(output)
+
+        do_GET = do_POST = do_DELETE = operation
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(('localhost', 0), Handler)
+    server.requests = []
+    server.require_cookie = server.require_v4 = False
+    server.temporary_status = server.branch_requests = 0
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def transport_catalog(server, **extra):
+    options = {
+        'metastore': 'rest', 'uri': 'http://localhost:%d' % server.server_port, 'warehouse': 'w',
+        'token.provider': 'bear', 'token': 'test-token',
+        'read.native.enabled': 'true', 'write.native.enabled': 'true',
+    }
+    options.update(extra)
+    return RESTCatalog(CatalogContext.create_from_options(options))
+
+
+@pytest.mark.parametrize('operation', _OPERATIONS)
+def test_openapi_v4_uses_native_signer(transport_server, operation):
+    server = transport_server
+    server.require_v4 = True
+    catalog = transport_catalog(server, **{
+        'token.provider': 'dlf', 'dlf.region': 'cn-hangzhou', 'dlf.signing-algorithm': 'openapi-v4',
+        'dlf.access-key-id': 'test-key', 'dlf.access-key-secret': 'test-secret',
+        'dlf.security-token': 'test-sts',
+    })
+    catalog.rest_api.client.session.headers.update({
+        'HOST': 'stale.example', 'X-ACS-DATE': 'stale', 'authorization': 'stale',
+    })
+    if operation in ('create_branch', 'fast_forward'):
+        catalog.rest_api.client.session.headers['Content-Type'] = 'text/plain'
+    server.requests.clear()
+    args = () if operation == 'list_branches' else ('dev 一/?#',)
+    if operation == 'create_branch':
+        args += ('源 一',)
+    with native_only(catalog):
+        result = getattr(catalog, operation)(Identifier('db 一/space', 'table ?$branch_dev'), *args)
+    assert result == (['dev'] if operation == 'list_branches' else None)
+    assert len(server.requests) == 1
+    headers = server.requests[0][2]
+    assert headers['Authorization'].startswith('ACS4-HMAC-SHA256 ')
+    for name in ('Authorization', 'Host', 'x-acs-date'):
+        assert len(headers.get_all(name)) == 1
+    if operation in ('create_branch', 'fast_forward'):
+        assert headers.get_all('Content-Type') == ['application/json']
+    assert headers['x-acs-security-token'] == 'test-sts'
+    assert headers['x-acs-action'] == {
+        'create_branch': 'CreateBranch', 'drop_branch': 'DropBranch',
+        'fast_forward': 'FastForwardBranch', 'list_branches': 'ListBranches',
+    }[operation]
+
+
+@pytest.mark.parametrize('operation', _OPERATIONS)
+def test_config_cookie_keeps_existing_session(transport_server, operation):
+    from pypaimon_rust.datafusion import PaimonCatalog
+
+    server = transport_server
+    server.require_cookie = True
+    catalog = transport_catalog(server)
+    server.requests.clear()
+    args = () if operation == 'list_branches' else ('dev',)
+    with patch('pypaimon_rust.datafusion.PaimonCatalog', wraps=PaimonCatalog) as construct:
+        result = getattr(catalog, operation)('db.t', *args)
+    construct.assert_not_called()
+    assert result == (['dev'] if operation == 'list_branches' else None)
+    assert len(server.requests) == 1
+    assert server.requests[0][2]['Cookie'] == 'sessionid=accepted'
+
+
+@pytest.mark.parametrize('agent_header', ['User-Agent', 'user-agent', 'USER-AGENT'])
+def test_native_preserves_session_headers_and_one_explicit_user_agent(transport_server, agent_header):
+    catalog = transport_catalog(transport_server, **{'header.' + agent_header: 'explicit-agent'})
+    catalog.rest_api.client.session.headers['X-Tenant'] = 'tenant-a'
+    catalog.rest_api.client.session.headers['authorization'] = 'Bearer stale'
+    catalog.rest_api.client.session.headers['x-priority'] = 'session'
+    catalog.rest_api.rest_auth_function.init_header['X-Priority'] = 'request'
+    transport_server.requests.clear()
+    with native_only(catalog):
+        assert catalog.list_branches('db.t') == ['dev']
+    assert len(transport_server.requests) == 1
+    headers = transport_server.requests[0][2]
+    assert headers['X-Tenant'] == 'tenant-a'
+    assert headers.get_all('X-Priority') == ['request']
+    assert headers.get_all('User-Agent') == ['explicit-agent']
+    assert headers.get_all('Authorization') == ['Bearer test-token']
+
+
+@pytest.mark.parametrize('operation', ['create_branch', 'drop_branch', 'fast_forward'])
+def test_native_mutations_accept_plain_text_success(transport_server, operation):
+    catalog = transport_catalog(transport_server)
+    transport_server.requests.clear()
+    with native_only(catalog):
+        assert getattr(catalog, operation)('db.t', 'dev') is None
+    assert len(transport_server.requests) == 1
+
+
+@pytest.mark.parametrize('status', [429, 503])
+def test_native_branch_listing_retries_temporary_status(transport_server, status):
+    catalog = transport_catalog(transport_server)
+    transport_server.requests.clear()
+    transport_server.temporary_status = status
+    with native_only(catalog):
+        assert catalog.list_branches('db.t') == ['dev']
+    assert len(transport_server.requests) == 2
+    assert all(request[0] == 'GET' for request in transport_server.requests)
 
 
 @pytest.fixture
