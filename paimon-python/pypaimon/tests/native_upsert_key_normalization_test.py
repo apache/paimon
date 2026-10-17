@@ -379,3 +379,24 @@ def test_large_binary_key_slice_after_two_gib_matches_visible_bytes(tmp_path, na
         assert [row['value'] for row in rows] == [42, 42, 0, 0]
         assert [{k: v for k, v in row.items() if k != 'value'} for row in rows] == [
             {k: v for k, v in row.items() if k != 'value'} for row in before]
+
+
+@pytest.mark.skipif(os.name != 'posix' or sys.maxsize <= 2 ** 32, reason='Requires 64-bit POSIX mmap')
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('mixed', [False, True], ids=['all_null', 'mixed'])
+def test_binary_match_keys_ignore_storage_owned_by_null_values(tmp_path, native, mixed):
+    table, _ = _table(tmp_path, native, pa.binary(), b'ab', b'other')
+    before = next(_rows(table))
+    start = 2 ** 31 + 17
+    memory = mmap.mmap(-1, start + 2)
+    memory[start:start + 2] = b'ab'
+    offsets = [0, start, start + 2] if mixed else [0, start]
+    keys = pa.Array.from_buffers(pa.large_binary(), len(offsets) - 1, [
+        pa.py_buffer(b'\x02'), pa.array(offsets, type=pa.int64()).buffers()[1], pa.py_buffer(memory)],
+        null_count=1)
+    source = pa.table({'key': keys, 'value': pa.array([9, 42] if mixed else [9], type=pa.int32())})
+    _upsert(table, source, native, False)
+    for rows in _rows(table):
+        assert [row['value'] for row in rows] == ([42, 42, 0, 9] if mixed else [0, 0, 0, 9])
+        assert [{k: v for k, v in row.items() if k != 'value'} for row in rows] == [
+            {k: v for k, v in row.items() if k != 'value'} for row in before]
