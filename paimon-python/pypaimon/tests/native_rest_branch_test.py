@@ -26,6 +26,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 import pyarrow as pa
 import pytest
+import requests
 
 from pypaimon import Schema
 from pypaimon.catalog.catalog_context import CatalogContext
@@ -63,19 +64,24 @@ def transport_server():
                 status, body = 403, json.dumps({'message': 'missing cookie'})
             elif self.server.require_v4 and not self.headers.get('Authorization', '').startswith('ACS4-HMAC-SHA256 '):
                 status, body = 403, json.dumps({'message': 'wrong signature algorithm'})
+            elif (self.server.cookie_on_retry and self.server.branch_requests
+                  and self.headers.get('Cookie') != 'sessionid=accepted'):
+                status, body = 403, json.dumps({'message': 'missing retry cookie'})
             elif self.server.temporary_status and self.server.branch_requests == 0:
                 status = self.server.temporary_status
                 body = json.dumps({'message': 'temporary failure'})
                 self.server.branch_requests += 1
             else:
                 body = json.dumps({'branches': ['dev']}) if self.command == 'GET' else 'OK'
+                if self.server.branch_status:
+                    status, body = self.server.branch_status, json.dumps({'message': 'branch failed'})
             if self.server.require_v4:
                 signed_headers = {key.lower(): value for key, value in self.headers.items()
                                   if key.lower().startswith('x-acs-') or key.lower() in ('host', 'content-type')}
                 url = urlsplit(self.path)
                 expected = DLFOpenApiV4Signer('cn-hangzhou').authorization(
                     RESTAuthParameter(self.command, url.path, data, dict(parse_qsl(url.query))),
-                    DLFToken('test-key', 'test-secret', 'test-sts', None),
+                    self.server.expected_token,
                     self.headers['Host'], signed_headers)
                 if self.headers.get('Authorization') != expected:
                     status, body = 403, json.dumps({'message': 'signature mismatch'})
@@ -84,6 +90,11 @@ def transport_server():
             self.send_header('Content-Length', str(len(output)))
             if self.path.startswith('/v1/config') and self.server.require_cookie:
                 self.send_header('Set-Cookie', 'sessionid=accepted; Path=/')
+            elif (not self.path.startswith('/v1/config') and self.server.branch_response_cookie
+                  and (not self.server.cookie_only_on_temporary or status in (429, 503))):
+                self.send_header('Set-Cookie', self.server.branch_response_cookie)
+            if status in (429, 503) and self.server.retry_after:
+                self.send_header('Retry-After', self.server.retry_after)
             self.end_headers()
             self.wfile.write(output)
 
@@ -96,6 +107,12 @@ def transport_server():
     server.requests = []
     server.require_cookie = server.require_v4 = False
     server.temporary_status = server.branch_requests = 0
+    server.branch_response_cookie = None
+    server.branch_status = 0
+    server.cookie_on_retry = False
+    server.cookie_only_on_temporary = False
+    server.retry_after = None
+    server.expected_token = DLFToken('test-key', 'test-secret', 'test-sts', None)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     try:
@@ -166,6 +183,174 @@ def test_config_cookie_keeps_existing_session(transport_server, operation):
     assert result == (['dev'] if operation == 'list_branches' else None)
     assert len(server.requests) == 1
     assert server.requests[0][2]['Cookie'] == 'sessionid=accepted'
+
+
+@pytest.mark.parametrize('operation', _OPERATIONS)
+def test_native_dlf_reuses_cached_credentials(transport_server, tmp_path, operation):
+    server = transport_server
+    server.require_v4 = True
+    token_file = tmp_path / 'credentials.json'
+    token_file.write_text(json.dumps({
+        'AccessKeyId': 'test-key', 'AccessKeySecret': 'test-secret',
+        'SecurityToken': 'test-sts', 'Expiration': '2099-01-01T00:00:00Z',
+    }))
+    catalog = transport_catalog(server, **{
+        'token.provider': 'dlf', 'dlf.region': 'cn-hangzhou', 'dlf.signing-algorithm': 'openapi-v4',
+        'dlf.token-loader': 'local_file', 'dlf.token-path': str(token_file),
+    })
+    provider = catalog.rest_api.rest_auth_function.auth_provider
+    assert provider.token is not None  # /config has loaded a valid cached STS.
+    token_file.unlink()
+    server.requests.clear()
+    args = () if operation == 'list_branches' else ('dev',)
+    with patch.object(provider.token_loader, 'load_token', side_effect=AssertionError('unnecessary refresh')), \
+            native_only(catalog):
+        result = getattr(catalog, operation)('db.t', *args)
+    assert result == (['dev'] if operation == 'list_branches' else None)
+    assert len(server.requests) == 1
+    assert server.requests[0][2]['x-acs-security-token'] == 'test-sts'
+
+
+def test_native_dlf_refreshes_through_owning_provider(transport_server, tmp_path):
+    server = transport_server
+    server.require_v4 = True
+    token_file = tmp_path / 'credentials.json'
+
+    def write_token(sts):
+        token_file.write_text(json.dumps({
+            'AccessKeyId': 'test-key', 'AccessKeySecret': 'test-secret',
+            'SecurityToken': sts, 'Expiration': '2099-01-01T00:00:00Z',
+        }))
+
+    write_token('test-sts')
+    catalog = transport_catalog(server, **{
+        'token.provider': 'dlf', 'dlf.region': 'cn-hangzhou', 'dlf.signing-algorithm': 'openapi-v4',
+        'dlf.token-loader': 'local_file', 'dlf.token-path': str(token_file),
+    })
+    provider = catalog.rest_api.rest_auth_function.auth_provider
+    provider.token.expiration_at_millis = 0
+    write_token('refreshed-sts')
+    server.expected_token = DLFToken('test-key', 'test-secret', 'refreshed-sts', None)
+    server.requests.clear()
+    with patch.object(provider.signer, 'authorization', side_effect=AssertionError('Python signing')), \
+            patch.object(provider.token_loader, 'load_token', wraps=provider.token_loader.load_token) as load, \
+            native_only(catalog):
+        assert catalog.list_branches('db.t') == ['dev']
+        token_file.unlink()
+        assert catalog.list_branches('db.t') == ['dev']
+    assert load.call_count == 1
+    assert len(server.requests) == 2
+    assert all(request[2]['x-acs-security-token'] == 'refreshed-sts' for request in server.requests)
+
+
+@pytest.mark.parametrize('customization', ['hook', 'adapter', 'trust_env', 'timeout', 'ca_bundle'])
+def test_custom_session_keeps_owning_transport(transport_server, monkeypatch, customization):
+    from pypaimon_rust.datafusion import PaimonCatalog
+
+    catalog = transport_catalog(transport_server)
+    client = catalog.rest_api.client
+    called = []
+
+    def hook(response, **kwargs):
+        called.append('hook')
+
+    class Adapter(requests.adapters.HTTPAdapter):
+        def send(self, request, **kwargs):
+            called.append('adapter')
+            return super().send(request, **kwargs)
+
+    if customization == 'hook':
+        client.session.hooks['response'].append(hook)
+    elif customization == 'adapter':
+        client.session.mount('http://', Adapter())
+    elif customization == 'trust_env':
+        client.session.trust_env = False
+    elif customization == 'timeout':
+        client._timeout = (12, 34)
+    else:
+        monkeypatch.setenv('REQUESTS_CA_BUNDLE', '/custom/ca.pem')
+    with patch('pypaimon_rust.datafusion.PaimonCatalog', wraps=PaimonCatalog) as construct:
+        assert catalog.list_branches('db.t') == ['dev']
+    construct.assert_not_called()
+    assert called == ([customization] if customization in ('hook', 'adapter') else [])
+
+
+@pytest.mark.parametrize('operation', _OPERATIONS)
+@pytest.mark.parametrize('status', [200, 500])
+def test_native_response_cookies_rejoin_owning_session(transport_server, operation, status):
+    from pypaimon_rust.datafusion import PaimonCatalog
+
+    server = transport_server
+    catalog = transport_catalog(server)
+    server.requests.clear()
+    server.branch_response_cookie = 'sessionid=accepted; Path=/v1/test/databases/'
+    server.branch_status = status
+    args = () if operation == 'list_branches' else ('dev',)
+    with native_only(catalog):
+        if status == 500:
+            with pytest.raises(ServiceFailureException):
+                getattr(catalog, operation)('db.t', *args)
+        else:
+            getattr(catalog, operation)('db.t', *args)
+    assert len(server.requests) == 1
+    assert catalog.rest_api.client.session.cookies.get('sessionid') == 'accepted'
+    server.branch_status = 0
+    server.require_cookie = True
+    # The response's resource-path cookie stays in the original Session for
+    # subsequent branch calls and other REST APIs, even after a failed mutation.
+    with patch('pypaimon_rust.datafusion.PaimonCatalog', wraps=PaimonCatalog) as construct:
+        assert catalog.list_branches('db.t') == ['dev']
+    construct.assert_not_called()
+    assert server.requests[-1][2]['Cookie'] == 'sessionid=accepted'
+
+
+def test_native_retry_uses_response_cookie_and_returns_it_to_session(transport_server):
+    server = transport_server
+    catalog = transport_catalog(server)
+    server.requests.clear()
+    server.temporary_status = 503
+    server.branch_response_cookie = 'sessionid=accepted; Path=/v1/test/databases/'
+    server.cookie_on_retry = True
+    with native_only(catalog):
+        assert catalog.list_branches('db.t') == ['dev']
+    assert [request[2].get('Cookie') for request in server.requests] == [None, 'sessionid=accepted']
+    assert catalog.rest_api.client.session.cookies.get('sessionid') == 'accepted'
+
+
+def test_cookie_expiring_during_native_retry_is_not_reactivated(transport_server):
+    server = transport_server
+    catalog = transport_catalog(server)
+    server.requests.clear()
+    server.temporary_status, server.retry_after = 503, '2'
+    server.branch_response_cookie = 'sessionid=accepted; Max-Age=1; Path=/v1/test/databases/'
+    server.cookie_only_on_temporary = True
+    with native_only(catalog):
+        assert catalog.list_branches('db.t') == ['dev']
+        assert not catalog.rest_api.client.session.cookies
+        assert catalog.list_branches('db.t') == ['dev']
+    assert [request[2].get('Cookie') for request in server.requests] == [None, None, None]
+
+
+@pytest.mark.parametrize('attribute,now,expected', [
+    ('Max-Age=120', 1700000030, 1700000120),
+    ('mAx-AgE=120', 1700000030, 1700000120),
+    ('Max-Age=20; Expires=Thu, 01 Jan 2099 00:00:00 GMT', 1700000030, None),
+    ('Max-Age=0', 1699999970, None),
+    ('Max-Age=invalid', 1700000030, None),
+    ('Expires=Tue, 14 Nov 2023 23:13:20 GMT', 1700000030, 1700003600),
+])
+def test_cookie_handoff_preserves_expiry_and_parser_rules(attribute, now, expected):
+    from pypaimon.catalog.rest.native_branch import _restore_response_cookies
+
+    session = requests.Session()
+    updates = [('https://catalog.example/v1/branches', ['sid=accepted; Path=/v1/; ' + attribute], 1700000000)]
+    with patch('pypaimon.catalog.rest.native_branch.time.time', return_value=now):
+        _restore_response_cookies(session, updates)
+    if expected is None:
+        assert not session.cookies
+    else:
+        cookie, = session.cookies
+        assert cookie.expires == expected
 
 
 @pytest.mark.parametrize('agent_header', ['User-Agent', 'user-agent', 'USER-AGENT'])
@@ -297,7 +482,7 @@ def test_native_catalog_constructor_uses_resolved_configuration(catalog):
     options = construct.call_args.args[0]
     assert options['prefix'] == 'native-test'
     assert options['metastore'] == 'rest'
-    assert construct.call_args.kwargs == {'config_required': False}
+    assert construct.call_args.kwargs == {'config_required': False, '_capture_response_cookies': True}
 
 
 def test_preparation_failure_can_use_python_before_mutation(tmp_path, catalog):
@@ -423,6 +608,9 @@ def test_native_errors_are_translated_without_python_retry(catalog, code, except
 
     class Native:
         calls = 0
+
+        def _take_response_cookies(self):
+            return []
 
         def create_branch(self, *args):
             self.calls += 1

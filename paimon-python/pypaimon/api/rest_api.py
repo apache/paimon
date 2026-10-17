@@ -101,10 +101,6 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(uri, user_agent.rest_user_agent(options))
         auth_provider = AuthProviderFactory.create_auth_provider(options)
-        # Java retains the provider created before config merging. Preserve its
-        # input when delegating an operation to a separately constructed client.
-        self._auth_options = {key: value for key, value in options.to_map().items()
-                              if self._is_auth_option(key)}
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
         if config_required:

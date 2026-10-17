@@ -18,6 +18,10 @@
 """Transport REST branch operations and structured errors to/from Rust core."""
 
 import logging
+import os
+import re
+import time
+from email.message import Message
 
 import requests
 from requests.structures import CaseInsensitiveDict
@@ -37,7 +41,12 @@ logger = logging.getLogger(__name__)
 def _native_headers(api):
     session = api.client.session
     if (type(session) is not requests.Session or session.cookies or session.auth is not None
-            or session.cert is not None or session.verify is not True or session.proxies or session.params):
+            or session.cert is not None or session.verify is not True or session.proxies or session.params
+            or not session.trust_env or any(session.hooks.values())
+            or set(session.adapters) != {'http://', 'https://'}
+            or any(type(adapter) is not requests.adapters.HTTPAdapter for adapter in session.adapters.values())
+            or api.client._timeout != (180, 180)
+            or os.environ.get('REQUESTS_CA_BUNDLE') or os.environ.get('CURL_CA_BUNDLE')):
         # Keep cookie selection/expiry and custom transport credentials in their
         # owning Session. Rebuilding a client cannot preserve those semantics.
         return None
@@ -81,20 +90,56 @@ def _native_catalog(catalog, operation):
     from pypaimon.read.native_plan import _option_value_to_string, _raise_if_native_fork_safety_error
     resolved = {key: value for key, value in api.options.to_map().items()
                 if not RESTApi._is_auth_option(key) and not key.startswith(RESTApi.HEADER_PREFIX)}
-    resolved.update(api._auth_options)
     resolved['uri'] = api.client.uri
     resolved.update({RESTApi.HEADER_PREFIX + key: value for key, value in headers.items()})
     resolved = {str(key): _option_value_to_string(value)
                 for key, value in resolved.items() if value is not None}
     resolved['metastore'] = 'rest'
     try:
+        provider = api.rest_auth_function.auth_provider
+        if type(provider) is DLFAuthProvider:
+            # The owning provider retains Java's STS cache/refresh policy. Pass
+            # its current credentials for this call; Rust still signs the request.
+            token = provider.get_token()
+            resolved.update({
+                'token.provider': 'dlf', 'dlf.region': provider.region,
+                'dlf.signing-algorithm': provider.signing_algorithm,
+                'dlf.access-key-id': token.access_key_id,
+                'dlf.access-key-secret': token.access_key_secret,
+            })
+            if token.security_token is not None:
+                resolved['dlf.security-token'] = token.security_token
+        else:
+            resolved.update({'token.provider': 'bear', 'token': provider.token})
         # Reuse the resolved configuration, as RESTCatalogLoader does. Keep no
         # opaque native state on the Python catalog across pickle or process fork.
-        return PaimonCatalog(resolved, config_required=False), CatalogError
+        return PaimonCatalog(resolved, config_required=False, _capture_response_cookies=True), CatalogError
     except Exception as error:
         _raise_if_native_fork_safety_error(error)
         logger.debug('Native branch preparation failed: %s', error)
         return None
+
+
+def _restore_response_cookies(session, updates):
+    for url, cookies, received_at in updates:
+        request = requests.cookies.MockRequest(requests.Request('GET', url).prepare())
+        for value in cookies:
+            # Max-Age is relative to receipt, not the end of GET retries or
+            # response-body reads. Keep invalid attributes for CookieJar to
+            # reject using its usual parser.
+            elapsed = int(time.time()) - received_at
+
+            def adjust_max_age(match):
+                try:
+                    age = int(match[2])
+                    return match[1] + str(age - elapsed if age > 0 else age)
+                except ValueError:
+                    return match[0]
+
+            headers = Message()
+            headers.add_header('Set-Cookie', re.sub(
+                r'(;\s*max-age\s*=\s*)([^;]*)', adjust_max_age, value, flags=re.IGNORECASE))
+            session.cookies.extract_cookies(requests.cookies.MockResponse(headers), request)
 
 
 def call_branch(catalog, operation, identifier, *args):
@@ -116,3 +161,7 @@ def call_branch(catalog, operation, identifier, *args):
         DefaultErrorHandler.get_instance().accept(ErrorResponse(
             resource_type=error.resource_type, resource_name=error.resource_name,
             message=error.message, code=error.code), HttpClient.DEFAULT_REQUEST_ID)
+    finally:
+        # A response may establish or revoke a resource-path session even when
+        # its status/body fails. Retain it without replaying the operation.
+        _restore_response_cookies(catalog.rest_api.client.session, native._take_response_cookies())
