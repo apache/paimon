@@ -263,6 +263,44 @@ jobs:
               -k 'TIMESTAMP or temporal'
           done
 
+  # Released bindings lack Rust main features, so only native planning is forced here.
+  rust-release-plan:
+    name: Native CI / pypaimon-rust ${{ matrix.pypaimon-rust }}
+    timeout-minutes: 90
+    runs-on: ubuntu-latest
+    container: "python:3.11-slim"
+    strategy:
+      fail-fast: false
+      matrix:
+        pypaimon-rust: [ '0.4.0' ]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            build-essential git curl cmake pkg-config libssl-dev libclang-dev tzdata \
+            && rm -rf /var/lib/apt/lists/*
+
+      - name: Install Python test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ./paimon-python --group ./paimon-python/pyproject.toml:dev \
+            'pypaimon-rust==${{ matrix.pypaimon-rust }}'
+          python -m pip check
+          python -c "from importlib.metadata import version; print('pypaimon-rust', version('pypaimon-rust'))"
+
+      - name: Run Python tests with native planning
+        shell: bash
+        env:
+          PYPAIMON_TEST_NATIVE_PLAN: '1'
+          # Tests marked native_plan need Rust main.
+          PYTEST_ADDOPTS: "-m 'not native_plan'"
+        run: |
+          bash paimon-python/dev/lint-python.sh -i pytest
+
   torch:
     name: PyTorch / Python 3.10
     timeout-minutes: 60
