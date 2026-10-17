@@ -880,9 +880,19 @@ def _decompose_field_bytes(
     if schema.scalar_arrow_type is not None:
         try:
             py_val = GenericVariant(field_bytes, metadata).to_python()
+            # JSON null must have residual bytes: two null columns mean absent.
+            if py_val is None:
+                return {'value': field_bytes, 'typed_value': None}
+            arrow_type = schema.scalar_arrow_type
+            typed_val = pa.scalar(py_val, type=arrow_type).as_py()
+            # Arrow accepts lossy casts (e.g. double to integer). Only shred
+            # when rebuilding the physical value preserves the Variant encoding,
+            # including its type; Python equality alone conflates True, 1 and 1.0.
+            if _encode_scalar_to_value_bytes(typed_val, arrow_type) != field_bytes:
+                return {'value': field_bytes, 'typed_value': None}
         except Exception:
             return {'value': field_bytes, 'typed_value': None}
-        return {'value': None, 'typed_value': py_val}
+        return {'value': None, 'typed_value': typed_val}
 
     if schema.object_fields is not None:
         if not field_bytes or (field_bytes[0] & 0x3) != _OBJECT:
