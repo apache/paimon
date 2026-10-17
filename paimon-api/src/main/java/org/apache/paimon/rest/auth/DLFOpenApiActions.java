@@ -44,14 +44,32 @@ final class DLFOpenApiActions {
         {"GET", "/v1/{prefix}/databases/{database}/tables", "ListTables"},
         {"POST", "/v1/{prefix}/databases/{database}/tables", "CreateTable"},
         {"GET", "/v1/{prefix}/databases/{database}/table-details", "ListTableDetails"},
+        {"GET", "/v1/{prefix}/tables", "ListTablesGlobally"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}", "GetTable"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}", "AlterTable"},
         {"DELETE", "/v1/{prefix}/databases/{database}/tables/{table}", "DropTable"},
+        {"GET", "/v1/{prefix}/tables/id/{tableId}", "GetTableById"},
         {"POST", "/v1/{prefix}/tables/rename", "RenameTable"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/auth", "AuthTableQuery"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit", "CommitTable"},
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock",
+            "AcquireCommitLock"
+        },
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew",
+            "RenewCommitLock"
+        },
+        {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/replace", "ReplaceTable"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/token", "GetTableToken"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/rollback", "RollbackToSnapshot"},
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/tables/{table}/rollback-schema",
+            "RollbackSchema"
+        },
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/snapshot", "GetTableSnapshot"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/snapshots", "ListSnapshots"},
         {
@@ -59,6 +77,8 @@ final class DLFOpenApiActions {
             "/v1/{prefix}/databases/{database}/tables/{table}/snapshots/{version}",
             "GetVersionSnapshot"
         },
+        {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/schemas", "ListSchemas"},
+        {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/schemas/{version}", "GetSchema"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/partitions", "ListPartitions"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/partitions", "CreatePartitions"},
         {
@@ -97,12 +117,19 @@ final class DLFOpenApiActions {
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/tags", "CreateTag"},
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}", "GetTag"},
         {"DELETE", "/v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}", "DropTag"},
+        {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/consumers", "ListConsumers"},
+        {
+            "POST",
+            "/v1/{prefix}/databases/{database}/tables/{table}/consumers/reset",
+            "ResetConsumer"
+        },
         {"GET", "/v1/{prefix}/databases/{database}/tables/{table}/policies", "ListPolicies"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/policies", "CreatePolicy"},
         {"POST", "/v1/{prefix}/databases/{database}/tables/{table}/policies/drop", "DropPolicy"},
         {"GET", "/v1/{prefix}/databases/{database}/views", "ListViews"},
         {"POST", "/v1/{prefix}/databases/{database}/views", "CreateView"},
         {"GET", "/v1/{prefix}/databases/{database}/view-details", "ListViewDetails"},
+        {"GET", "/v1/{prefix}/views", "ListViewsGlobally"},
         {"GET", "/v1/{prefix}/databases/{database}/views/{view}", "GetView"},
         {"POST", "/v1/{prefix}/databases/{database}/views/{view}", "AlterView"},
         {"DELETE", "/v1/{prefix}/databases/{database}/views/{view}", "DropView"},
@@ -125,6 +152,8 @@ final class DLFOpenApiActions {
         },
         {"GET", "/v1/{prefix}/databases/{database}/functions", "ListFunctions"},
         {"POST", "/v1/{prefix}/databases/{database}/functions", "CreateFunction"},
+        {"GET", "/v1/{prefix}/databases/{database}/function-details", "ListFunctionDetails"},
+        {"GET", "/v1/{prefix}/functions", "ListFunctionsGlobally"},
         {"GET", "/v1/{prefix}/databases/{database}/functions/{function}", "GetFunction"},
         {"POST", "/v1/{prefix}/databases/{database}/functions/{function}", "AlterFunction"},
         {"DELETE", "/v1/{prefix}/databases/{database}/functions/{function}", "DropFunction"},
