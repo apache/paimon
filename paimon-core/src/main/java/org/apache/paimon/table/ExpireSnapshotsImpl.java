@@ -53,6 +53,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -75,6 +76,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     private ExpireConfig expireConfig;
     private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
+    @Nullable private volatile Runnable afterTagCollection;
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
@@ -102,6 +104,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     @VisibleForTesting
     public void setCurrentTimeMillis(Supplier<Long> currentTimeMillis) {
         this.currentTimeMillis = currentTimeMillis;
+    }
+
+    /** Test hook invoked under the tag coordination lock, after tagged snapshots are collected. */
+    @VisibleForTesting
+    public void setAfterTagCollection(@Nullable Runnable afterTagCollection) {
+        this.afterTagCollection = afterTagCollection;
     }
 
     @Override
@@ -209,6 +217,21 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (snapshotsIncludingEnd.isEmpty()) {
             return 0;
         }
+
+        // Tag creation uses the same table-and-branch lock. Hold it from tag collection through
+        // snapshot deletion so a tag cannot be committed against files this run then deletes.
+        ReentrantLock coordinationLock = tagManager.coordinationLock();
+        coordinationLock.lock();
+        try {
+            return expireSnapshotsUnderLock(snapshotsIncludingEnd, endExclusiveId, startTime);
+        } finally {
+            coordinationLock.unlock();
+        }
+    }
+
+    private int expireSnapshotsUnderLock(
+            List<Snapshot> snapshotsIncludingEnd, long endExclusiveId, long startTime)
+            throws ExecutionException, InterruptedException {
         List<Snapshot> snapshotsExcludingEnd =
                 snapshotsIncludingEnd.stream()
                         .filter(s -> s.id() != endExclusiveId)
@@ -217,6 +240,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // tags to create data file skipper
         List<Snapshot> taggedSnapshots = collectTaggedSnapshots();
+        Runnable collectedTags = afterTagCollection;
+        if (collectedTags != null) {
+            collectedTags.run();
+        }
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
